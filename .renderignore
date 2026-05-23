@@ -1,0 +1,27 @@
+# Cache - Render má persistent disk /data
+cache/
+
+# Lokálne dáta - budu na Render Disk
+presets.json
+trade_journal.json
+predictive_signals_log.json
+predictive_weights_log.json
+
+# Windows launcher
+start.bat
+SETUP_PORTABLE.bat
+START.bat
+STOP.bat
+
+# Backup súbory
+*.bak
+*.backup
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Portátny Python
+python/
+portable/

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: trading-dashboard
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python trading_backend.py
+    envVars:
+      - key: RENDER
+        value: "1"
+      - key: DATA_DIR
+        value: /data
+      - key: ETORO_API_KEY_1
+        sync: false
+      - key: ETORO_USER_KEY_1
+        sync: false
+      - key: ETORO_API_KEY_2
+        sync: false
+      - key: ETORO_USER_KEY_2
+        sync: false
+      - key: DASH_USER
+        sync: false
+      - key: DASH_PASS
+        sync: false
+
+disks:
+  - name: trading-data
+    mountPath: /data
+    sizeGB: 1
