@@ -2999,7 +2999,7 @@ def health():
 @app.get("/")
 def root():
     from fastapi.responses import FileResponse
-    return FileResponse(BASE_DIR / "trading_dashboard.html")
+    return FileResponse(Path(__file__).parent / "trading_dashboard.html")
 
 if __name__ == "__main__":
     import base64, secrets as _secrets
