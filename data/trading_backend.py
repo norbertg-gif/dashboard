@@ -51,6 +51,9 @@ from sklearn.calibration import CalibratedClassifierCV
 BASE_DIR = Path(__file__).parent
 app = FastAPI(title="Trading Dashboard API")
 
+# ── Public API token (pre Claude / externý prístup bez Basic Auth) ────────────
+PUBLIC_API_TOKEN = os.getenv("PUBLIC_API_TOKEN", "marvin2026")
+
 # ══ PREDICTIVE CHART — functions ══════════════════════════════
 # ── Indicators ────────────────────────────────────────────────────────────────
 
@@ -593,6 +596,9 @@ class _BasicAuth(BaseHTTPMiddleware):
     _pass = os.getenv("DASH_PASS", "")
 
     async def dispatch(self, request, call_next):
+        # Verejné endpointy — preskočiť Basic Auth (chránené vlastným tokenom)
+        if request.url.path.startswith("/api/public/"):
+            return await call_next(request)
         if not self._user:          # Auth vypnutá ak DASH_USER nie je nastavený
             return await call_next(request)
         auth = request.headers.get("Authorization", "")
@@ -608,6 +614,87 @@ class _BasicAuth(BaseHTTPMiddleware):
                    headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
 
 app.add_middleware(_BasicAuth)
+
+# ── PUBLIC ENDPOINT — pre Claude / externý prístup ────────────────────────────
+@app.get("/api/public/portfolio")
+def get_public_portfolio(token: str = Query(...), account: str = Query("1")):
+    """
+    Verejný endpoint chránený tokenom (nie Basic Auth).
+    Vráti aktuálne pozície + summary pre daný účet.
+    Použitie: GET /api/public/portfolio?token=<PUBLIC_API_TOKEN>&account=1
+    """
+    if not _secrets.compare_digest(token, PUBLIC_API_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    # 1. RAM cache — najrýchlejší
+    cached = _positions_cache.get(account)
+    if cached:
+        return {
+            "positions": cached["data"],
+            "summary":   cached["summary"],
+            "timestamp": cached["ts"],
+            "source":    "ram_cache",
+        }
+
+    # 2. Disk cache fallback
+    from pathlib import Path as _P
+    port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{account}"
+    stale = cache_read(port_cache_path)
+    if stale:
+        positions_raw = stale.get("clientPortfolio", {}).get("positions", [])
+        return {
+            "positions": positions_raw,
+            "summary":   stale.get("clientPortfolio", {}).get("credit", {}),
+            "timestamp": None,
+            "source":    "disk_cache",
+        }
+
+    # 3. Živé načítanie z eToro proxy
+    try:
+        instruments = load_instruments()
+        resp = fetch_with_retry(
+            f"{ETORO_PROXY}/pnl/real?account={account}",
+            timeout=ETORO_PROXY_TIMEOUT, retries=2
+        )
+        data = resp.json()
+        cache_write(port_cache_path, data)
+
+        positions_raw = data.get("clientPortfolio", {}).get("positions", [])
+        result = []
+        for pos in positions_raw:
+            inst_id = pos.get("instrumentID")
+            inst = instruments.get(inst_id)
+            if not inst or inst["typeID"] not in ALLOWED_INSTRUMENT_TYPES:
+                continue
+            symbol_yf = etoro_symbol_to_yf(inst["symbol"])
+            pnl_data = pos.get("unrealizedPnL", {})
+            result.append({
+                "symbol":      symbol_yf,
+                "name":        inst["name"],
+                "openDate":    pos.get("openDateTime", "")[:10],
+                "openRate":    pos.get("openRate"),
+                "currentRate": pnl_data.get("closeRate"),
+                "pnl":         pnl_data.get("pnL"),
+                "amount":      pos.get("amount"),
+                "units":       pos.get("units"),
+            })
+        result.sort(key=lambda x: (x["symbol"], x["openDate"]))
+
+        port = data.get("clientPortfolio", {})
+        summary = {
+            "equity":           port.get("equity"),
+            "available":        port.get("availableToTrade"),
+            "total_positions":  len(result),
+            "currency":         port.get("currency", "USD"),
+        }
+        return {
+            "positions": result,
+            "summary":   summary,
+            "timestamp": _time_module.time(),
+            "source":    "live",
+        }
+    except Exception as e:
+        raise HTTPException(502, f"Portfolio nedostupné: {e}")
 
 PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets.json")
 JOURNAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.json")
@@ -3034,6 +3121,9 @@ if __name__ == "__main__":
         _ep.start_proxy_thread()
     except Exception as e:
         print(f"  WARN: eToro proxy thread zlyhalo: {e}")
+
+    if os.getenv("RENDER") and (not os.getenv("DASH_USER") or not os.getenv("DASH_PASS")):
+        raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"
