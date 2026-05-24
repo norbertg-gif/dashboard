@@ -24,7 +24,6 @@ ACCOUNTS = {"1": ACCOUNT1, "2": ACCOUNT2}
 BASE = "https://public-api.etoro.com/api/v1"
 PORT = 8765
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
 ALLOWED_ORIGIN = os.getenv("APP_ORIGIN", "https://dashboard-yvb5.onrender.com").rstrip("/")
 
 ROUTES = {
@@ -33,11 +32,13 @@ ROUTES = {
     "/instruments": "https://api.etorostatic.com/sapi/instrumentsmetadata/V1.1/instruments",
 }
 
+
 def get_account(query_string: str):
     for p in query_string.split("&"):
         if p.startswith("account="):
             return ACCOUNTS.get(p.split("=", 1)[1], ACCOUNT1)
     return ACCOUNT1
+
 
 def make_headers(account):
     return {
@@ -49,6 +50,7 @@ def make_headers(account):
         "Origin": "https://www.etoro.com",
         "Referer": "https://www.etoro.com/",
     }
+
 
 class ProxyHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -163,8 +165,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_cors()
         self.end_headers()
 
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
 
 def start_proxy_thread():
     server = ThreadingHTTPServer(("127.0.0.1", PORT), ProxyHandler)
@@ -172,6 +176,7 @@ def start_proxy_thread():
     t.start()
     print(f"  eToro proxy thread started on port {PORT}")
     return server
+
 
 if __name__ == "__main__":
     print(f"eToro proxy bezi na http://localhost:{PORT}")
