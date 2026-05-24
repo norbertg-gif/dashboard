@@ -3035,6 +3035,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"  WARN: eToro proxy thread zlyhalo: {e}")
 
+    if os.getenv("RENDER") and (not os.getenv("DASH_USER") or not os.getenv("DASH_PASS")):
+        raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
+
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"
     print(f"  Basic Auth: {'zapnutá' if os.getenv('DASH_USER') else 'vypnutá'}")
