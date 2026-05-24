@@ -49,31 +49,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
 
 BASE_DIR = Path(__file__).parent
-
-# Persistentné dáta — na Render v /data (Render Disk), lokálne vedľa skriptu
-_data_dir_env = os.getenv("DATA_DIR", "")
-if _data_dir_env:
-    _DATA_DIR = Path(_data_dir_env)
-    try:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        print(f"  WARN: {_DATA_DIR} nie je dostupný, používam {BASE_DIR}")
-        _DATA_DIR = BASE_DIR
-else:
-    _DATA_DIR = BASE_DIR
-
-WEIGHTS_LOG  = _DATA_DIR / "predictive_weights_log.json"
-SIGNALS_LOG  = _DATA_DIR / "predictive_signals_log.json"
-PRESETS_FILE = str(_DATA_DIR / "presets.json")
-JOURNAL_FILE = str(_DATA_DIR / "trade_journal.json")
-
-# Inicializuj prázdne súbory ak neexistujú
-for _f, _default in [
-    (PRESETS_FILE, "{}"),
-    (JOURNAL_FILE, "{}"),
-]:
-    if not Path(_f).exists():
-        Path(_f).write_text(_default, encoding="utf-8")
 app = FastAPI(title="Trading Dashboard API")
 
 # ══ PREDICTIVE CHART — functions ══════════════════════════════
@@ -608,6 +583,34 @@ def df_to_candles(df):
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# ── Basic Auth — registruje sa pri štarte, env vars sú dostupné ──────────────
+import base64 as _b64, secrets as _secrets
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as _SR
+
+class _BasicAuth(BaseHTTPMiddleware):
+    _user = os.getenv("DASH_USER", "")
+    _pass = os.getenv("DASH_PASS", "")
+
+    async def dispatch(self, request, call_next):
+        if not self._user:          # Auth vypnutá ak DASH_USER nie je nastavený
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                u, p = _b64.b64decode(auth[6:]).decode().split(":", 1)
+                if (_secrets.compare_digest(u, self._user) and
+                        _secrets.compare_digest(p, self._pass)):
+                    return await call_next(request)
+            except Exception:
+                pass
+        return _SR(status_code=401,
+                   headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
+
+app.add_middleware(_BasicAuth)
+
+PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets.json")
+JOURNAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.json")
 DAILY_INTERVALS = {"1d", "5d", "1wk", "1mo", "3mo"}
 YF_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -3022,35 +3025,9 @@ def health():
 @app.get("/")
 def root():
     from fastapi.responses import FileResponse
-    return FileResponse(Path(__file__).parent / "trading_dashboard.html")
+    return FileResponse(BASE_DIR / "trading_dashboard.html")
 
 if __name__ == "__main__":
-    import base64, secrets as _secrets
-
-    # ── HTTP Basic Auth ───────────────────────────────────────────────────────
-    _DASH_USER = os.getenv("DASH_USER", "")
-    _DASH_PASS = os.getenv("DASH_PASS", "")
-    if _DASH_USER and _DASH_PASS:
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import Response as _SR
-        class _Auth(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                auth = request.headers.get("Authorization", "")
-                if auth.startswith("Basic "):
-                    try:
-                        u, p = base64.b64decode(auth[6:]).decode().split(":", 1)
-                        if (_secrets.compare_digest(u, _DASH_USER) and
-                                _secrets.compare_digest(p, _DASH_PASS)):
-                            return await call_next(request)
-                    except Exception:
-                        pass
-                return _SR(status_code=401,
-                           headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
-        app.add_middleware(_Auth)
-        print("  Basic Auth: zapnutá")
-    else:
-        print("  Basic Auth: vypnutá")
-
     # ── eToro proxy ako background thread ─────────────────────────────────────
     try:
         import etoro_proxy as _ep
@@ -3058,8 +3035,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"  WARN: eToro proxy thread zlyhalo: {e}")
 
-    # ── Uvicorn ───────────────────────────────────────────────────────────────
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"
+    print(f"  Basic Auth: {'zapnutá' if os.getenv('DASH_USER') else 'vypnutá'}")
     print(f"Trading Dashboard — http://{_HOST}:{_PORT}")
     uvicorn.run(app, host=_HOST, port=_PORT, reload=False)
