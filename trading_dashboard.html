@@ -848,6 +848,39 @@ body.light-mode #main-portfolio.port-acct2 {
 #predictiveTab .opp-pill.warn { color:#f59e0b; border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.1); }
 #predictiveTab .opp-pill.bad { color:#ef5350; border-color:rgba(239,83,80,.35); background:rgba(239,83,80,.1); }
 #predictiveTab .opp-empty { color:var(--muted); font-size:12px; line-height:1.45; }
+#predictiveTab .opp-score-wrap { margin-left:auto; display:flex; align-items:baseline; gap:5px; }
+#predictiveTab .opp-score-label { font-size:9px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
+#predictiveTab .opp-reasons { display:flex; flex-direction:column; gap:4px; margin-top:7px; padding-top:7px; border-top:1px solid var(--border); }
+#predictiveTab .opp-reason { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); line-height:1.25; }
+#predictiveTab .opp-reason.good { color:#26a69a; }
+#predictiveTab .opp-reason.warn { color:#f59e0b; }
+#predictiveTab .opp-reason.bad { color:#ef5350; }
+#predictiveTab .opp-reason-dot { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:.85; flex:0 0 auto; }
+#predictiveTab .sig-history-list { display:flex; flex-direction:column; gap:5px; }
+#predictiveTab .sig-history-row {
+  display:grid;
+  grid-template-columns: 72px 42px 1fr 58px;
+  align-items:center;
+  gap:6px;
+  padding:5px 6px;
+  border:1px solid var(--border);
+  border-left-width:3px;
+  border-radius:6px;
+  background:rgba(255,255,255,0.025);
+  font-size:11px;
+}
+#predictiveTab .sig-history-row.good { border-left-color:#26a69a; }
+#predictiveTab .sig-history-row.bad { border-left-color:#ef5350; }
+#predictiveTab .sig-history-row.flat { border-left-color:#8b949e; }
+#predictiveTab .sig-history-row.pending { border-left-color:#f59e0b; }
+#predictiveTab .sig-history-date { color:var(--muted); }
+#predictiveTab .sig-history-score { font-weight:700; font-family:var(--font-mono); }
+#predictiveTab .sig-history-price { color:var(--text); font-family:var(--font-mono); }
+#predictiveTab .sig-history-result { justify-self:end; font-weight:700; font-family:var(--font-mono); }
+#predictiveTab .sig-history-row.good .sig-history-result { color:#26a69a; }
+#predictiveTab .sig-history-row.bad .sig-history-result { color:#ef5350; }
+#predictiveTab .sig-history-row.flat .sig-history-result { color:#8b949e; }
+#predictiveTab .sig-history-row.pending .sig-history-result { color:#f59e0b; }
 
 #predictiveTab .error-msg {
     color: var(--bear);
@@ -7282,38 +7315,56 @@ function renderDailySidebar(data) {
   const wb    = data.weekly_bias || {};
   const score = data.today_score || 0;
   const sigs  = data.daily_buy_signals || [];
+  const daily = data.daily_candles || [];
+  const latestClose = daily.length ? Number(daily[daily.length - 1].close) : null;
   const lastSig = sigs.length ? sigs[sigs.length - 1] : null;
   const biasColor  = wb.bullish ? '#26a69a' : '#ef5350';
   const biasText   = wb.bullish ? '▲ BULLISH' : '▼ BEARISH/NEUTRÁLNY';
   const scoreColor = score >= 3 ? '#26a69a' : score === 2 ? '#f59e0b' : 'var(--muted)';
   const scoreLabel = score >= 3 ? 'Silný signál' : score === 2 ? 'Mierny signál' : 'Žiadny signál';
+  const signalOutcome = (s) => {
+    const entry = Number(s.close);
+    if (!Number.isFinite(entry) || !Number.isFinite(latestClose) || !entry) {
+      return { cls:'pending', label:'pending', pct:'--' };
+    }
+    const pct = ((latestClose - entry) / entry) * 100;
+    const cls = pct > 1.5 ? 'good' : pct < -1.5 ? 'bad' : 'flat';
+    const label = cls === 'good' ? 'win' : cls === 'bad' ? 'loss' : 'flat';
+    return { cls, label, pct:(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' };
+  };
 
   panel.innerHTML =
     '<div class="card-title">Daily buy signál</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Weekly trend bias — composite > 5%, cena nad Kumo, EMA10 > EMA20.">Weekly bias <span class="tt-icon">ⓘ</span></span>' +
+    '<div class="pred-row"><span class="tt key" data-tip="Weekly trend bias - composite > 5%, cena nad Kumo, EMA10 > EMA20.">Weekly bias <span class="tt-icon">ⓘ</span></span>' +
       '<span class="val" style="color:' + biasColor + '">' + biasText + '</span></div>' +
     '<div style="padding:2px 0 6px 0;font-size:10px;color:var(--muted);">' +
       'Composite: ' + (wb.composite || 0) + '% | Nad Kumo: ' + (wb.above_kumo ? '✓' : '✗') + ' | EMA bull: ' + (wb.ema_bull ? '✓' : '✗') +
     '</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Skóre 0–3: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2× priemer.">Dnešné skóre <span class="tt-icon">ⓘ</span></span>' +
-      '<span class="val" style="color:' + scoreColor + '">' + score + '/3 — ' + scoreLabel + '</span></div>' +
+    '<div class="pred-row"><span class="tt key" data-tip="Skóre 0-3: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer.">Dnešné skóre <span class="tt-icon">ⓘ</span></span>' +
+      '<span class="val" style="color:' + scoreColor + '">' + score + '/3 - ' + scoreLabel + '</span></div>' +
     (lastSig ? '<div class="pred-row"><span class="key">Posledný signál</span>' +
       '<span class="val">' + new Date(lastSig.time * 1000).toLocaleDateString("sk-SK") + ' (' + lastSig.score + '/3)</span></div>' : '') +
-    (!wb.bullish ? '<div style="margin-top:8px;padding:6px 8px;background:rgba(239,83,80,0.08);border-radius:4px;font-size:11px;color:#ef5350;">⚠ Weekly trend nie je bullish — nové signály nie sú aktívne.</div>' : '') +
+    (!wb.bullish ? '<div style="margin-top:8px;padding:6px 8px;background:rgba(239,83,80,0.08);border-radius:4px;font-size:11px;color:#ef5350;">Weekly trend nie je bullish - nové signály nie sú aktívne.</div>' : '') +
     '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">' +
-      '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">História signálov</div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;">História signálov</div>' +
+        '<div style="font-size:10px;color:var(--muted);">voči aktuálnej cene</div>' +
+      '</div>' +
+      '<div class="sig-history-list">' +
       (sigs.slice().reverse().slice(0, 8).map(s => {
         const d   = new Date(s.time * 1000).toLocaleDateString("sk-SK");
         const col = s.score === 3 ? "#26a69a" : "#f59e0b";
-        return '<div class="pred-row" style="font-size:11px;">' +
-          '<span style="color:var(--muted)">' + d + '</span>' +
-          '<span style="color:' + col + ';font-weight:600;margin:0 8px">' + s.score + '/3</span>' +
-          '<span style="color:var(--text)">' + s.close + '</span>' +
+        const out = signalOutcome(s);
+        return '<div class="sig-history-row ' + out.cls + '">' +
+          '<span class="sig-history-date">' + d + '</span>' +
+          '<span class="sig-history-score" style="color:' + col + '">' + s.score + '/3</span>' +
+          '<span class="sig-history-price">' + s.close + '</span>' +
+          '<span class="sig-history-result">' + out.label + ' ' + out.pct + '</span>' +
         '</div>';
       }).join('') || '<span style="color:var(--muted);font-size:11px;">Žiadne historické signály</span>') +
+      '</div>' +
     '</div>';
 }
-
 function getOpportunitySymbols() {
   const syms = new Set();
   try {
@@ -7359,10 +7410,29 @@ function scoreOpportunity(row) {
   return score;
 }
 
+function opportunityReasons(row, pos, days) {
+  const sig = row.recent_signal;
+  const reasons = [];
+  reasons.push({ cls: row.weekly_bullish ? 'good' : 'bad', text: row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup' });
+  if (sig) {
+    reasons.push({ cls: sig.score === 3 ? 'good' : 'warn', text: 'Najnovší signál ' + sig.score + '/3 z ' + sig.date });
+  } else {
+    reasons.push({ cls: 'warn', text: 'Bez nového signálu za ' + days + ' dní' });
+  }
+  reasons.push({ cls: (row.signal_count || 0) >= 2 ? 'good' : 'warn', text: (row.signal_count || 0) + ' historických signálov v okne' });
+  if (pos) {
+    reasons.push({ cls: pos.pnl >= 0 ? 'good' : 'bad', text: pos.count + 'x v eToro, P/L ' + (pos.pnl >= 0 ? '+' : '') + '$' + pos.pnl.toFixed(0) });
+  } else {
+    reasons.push({ cls: 'warn', text: 'Nie je otvorené v eToro portfóliu' });
+  }
+  return reasons.slice(0, 4);
+}
+
 function renderOpportunities(rows, days) {
   const el = document.getElementById('opportunitiesInfo');
   if (!el) return;
   const clean = (rows || []).filter(r => !r.error);
+  const errorCount = (rows || []).length - clean.length;
   const ranked = clean
     .map(r => ({...r, _score: scoreOpportunity(r), _pos: opportunityPositionInfo(r.ticker)}))
     .sort((a, b) => b._score - a._score || a.ticker.localeCompare(b.ticker))
@@ -7383,21 +7453,24 @@ function renderOpportunities(rows, days) {
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
     const sigTxt = sig ? `${sig.score}/3 ${sig.date}` : `bez signálu ${days}d`;
     const posTxt = pos ? `${pos.count}x eToro ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(0)}` : 'mimo portf.';
+    const reasons = opportunityReasons(r, pos, days).map(reason =>
+      `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${reason.text}</span>`
+    ).join('');
     return `<div class="opp-item" onclick="pc_selectTicker('${r.ticker}')">
       <div class="opp-top">
         <span class="opp-sym">${r.ticker}</span>
-        <span style="color:var(--muted);font-size:11px;">${r.last_close || '—'}</span>
-        <span class="opp-score">${r._score}</span>
+        <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
+        <span class="opp-score-wrap"><span class="opp-score-label">score</span><span class="opp-score">${r._score}</span></span>
       </div>
       <div class="opp-meta">
         <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
         <span class="opp-pill ${sigCls}">${sigTxt}</span>
         <span class="opp-pill ${posCls}">${posTxt}</span>
       </div>
+      <div class="opp-reasons">${reasons}</div>
     </div>`;
-  }).join('');
+  }).join('') + `<div class="opp-empty" style="font-size:10px;padding-top:2px;">Zobrazené top ${ranked.length} z ${clean.length} tickerov${errorCount ? `, ${errorCount} s chybou dát` : ''}.</div>`;
 }
-
 async function refreshOpportunities(force = false) {
   const el = document.getElementById('opportunitiesInfo');
   if (!el || pc_oppLoading) return;
