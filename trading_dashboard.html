@@ -3022,6 +3022,10 @@ function getFilteredPositions(s) {
         g.openRate = totalUnits > 0
           ? g._trades.reduce((s, t) => s + (t.openRate || 0) * (t.units || 0), 0) / totalUnits
           : g._trades.reduce((s, t) => s + (t.openRate || 0), 0) / g._trades.length;
+        const currentRates = g._trades.map(t => Number(t.currentRate)).filter(Number.isFinite);
+        g.currentRate = currentRates.length
+          ? currentRates.reduce((s, v) => s + v, 0) / currentRates.length
+          : g.currentRate;
       }
     }
     rows = Object.values(groups);
