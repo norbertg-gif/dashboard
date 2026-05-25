@@ -3350,7 +3350,7 @@ function portToggleColDrop(pid) {
   const drop = document.createElement('div');
   drop.className = 'port-cols-dropdown';
   drop.id = 'port-cols-drop-' + pid;
-  drop.style.cssText = `top:${rect.bottom+4}px;right:${Math.max(8, window.innerWidth-rect.right)}px;`;
+  drop.style.cssText = `display:block;top:${rect.bottom+4}px;right:${Math.max(8, window.innerWidth-rect.right)}px;`;
   drop.innerHTML = `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:700;">VIDITEĽNÉ STĹPCE</div>` +
     s.colOrder.map(k => {
       const col = PORT_COLS.find(c => c.key === k); if (!col) return '';
