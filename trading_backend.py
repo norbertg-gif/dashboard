@@ -1316,9 +1316,16 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
         # Typ: 1=Forex, 5=Stocks, 6=ETF, 10=Crypto, 4=Commodities, 2=Indices
         type_map = {1:"Forex", 2:"Index", 4:"Commodity", 5:"Stock", 6:"ETF", 10:"Crypto"}
         asset_type = type_map.get(asset_class, "Other")
-        pnl = (pos.get("unrealizedPnL") or {}).get("pnL") if isinstance(pos.get("unrealizedPnL"), dict) else pos.get("pnL") or 0
+        unrealized = pos.get("unrealizedPnL") if isinstance(pos.get("unrealizedPnL"), dict) else {}
+        pnl = unrealized.get("pnL") if unrealized else pos.get("pnL") or 0
         pnl = pnl or 0
         amount = pos.get("amount") or 0
+        current_rate = (
+            pos.get("currentRate")
+            or pos.get("closeRate")
+            or unrealized.get("closeRate")
+            or unrealized.get("currentRate")
+        )
         result.append({
             "positionId":   pos.get("positionID"),
             "instrumentId": iid,
@@ -1330,7 +1337,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "amount":       round(amount, 2),
             "units":        pos.get("units"),
             "openRate":     pos.get("openRate"),
-            "currentRate":  pos.get("currentRate"),
+            "currentRate":  current_rate,
             "dailyPnl":     round(pos.get("dailyPnL") or 0, 2),
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
