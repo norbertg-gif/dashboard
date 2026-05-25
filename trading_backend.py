@@ -1320,12 +1320,25 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
         pnl = unrealized.get("pnL") if unrealized else pos.get("pnL") or 0
         pnl = pnl or 0
         amount = pos.get("amount") or 0
-        current_rate = (
+        raw_current_rate = (
             pos.get("currentRate")
             or pos.get("closeRate")
             or unrealized.get("closeRate")
             or unrealized.get("currentRate")
         )
+        current_rate = raw_current_rate if (isinstance(raw_current_rate, (int, float)) and raw_current_rate > 0) else None
+        if current_rate is None:
+            # Fallback: odhad z openRate + PnL + units (BUY/SELL)
+            try:
+                open_rate = float(pos.get("openRate") or 0)
+                units = float(pos.get("units") or 0)
+                if open_rate > 0 and units > 0 and pnl is not None:
+                    delta = float(pnl) / units
+                    current_rate = open_rate + delta if pos.get("isBuy", True) else open_rate - delta
+                    if current_rate <= 0:
+                        current_rate = None
+            except Exception:
+                current_rate = None
         result.append({
             "positionId":   pos.get("positionID"),
             "instrumentId": iid,
