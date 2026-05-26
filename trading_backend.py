@@ -51,6 +51,9 @@ from sklearn.calibration import CalibratedClassifierCV
 BASE_DIR = Path(__file__).parent
 app = FastAPI(title="Trading Dashboard API")
 
+# ── Public API token (pre Claude / externý prístup bez Basic Auth) ────────────
+PUBLIC_API_TOKEN = os.getenv("PUBLIC_API_TOKEN", "marvin2026")
+
 # ══ PREDICTIVE CHART — functions ══════════════════════════════
 # ── Indicators ────────────────────────────────────────────────────────────────
 
@@ -582,6 +585,116 @@ def df_to_candles(df):
 # ══ END PREDICTIVE CHART functions ══════════════════════════
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ── Basic Auth — registruje sa pri štarte, env vars sú dostupné ──────────────
+import base64 as _b64, secrets as _secrets
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as _SR
+
+class _BasicAuth(BaseHTTPMiddleware):
+    _user = os.getenv("DASH_USER", "")
+    _pass = os.getenv("DASH_PASS", "")
+
+    async def dispatch(self, request, call_next):
+        # Verejné endpointy — preskočiť Basic Auth (chránené vlastným tokenom)
+        if request.url.path.startswith("/api/public/"):
+            return await call_next(request)
+        if not self._user:          # Auth vypnutá ak DASH_USER nie je nastavený
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                u, p = _b64.b64decode(auth[6:]).decode().split(":", 1)
+                if (_secrets.compare_digest(u, self._user) and
+                        _secrets.compare_digest(p, self._pass)):
+                    return await call_next(request)
+            except Exception:
+                pass
+        return _SR(status_code=401,
+                   headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
+
+app.add_middleware(_BasicAuth)
+
+# ── PUBLIC ENDPOINT — pre Claude / externý prístup ────────────────────────────
+@app.get("/api/public/portfolio")
+def get_public_portfolio(token: str = Query(...), account: str = Query("1")):
+    """
+    Verejný endpoint chránený tokenom (nie Basic Auth).
+    Vráti aktuálne pozície + summary pre daný účet.
+    Použitie: GET /api/public/portfolio?token=<PUBLIC_API_TOKEN>&account=1
+    """
+    if not _secrets.compare_digest(token, PUBLIC_API_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    # 1. RAM cache — najrýchlejší
+    cached = _positions_cache.get(account)
+    if cached:
+        return {
+            "positions": cached["data"],
+            "summary":   cached["summary"],
+            "timestamp": cached["ts"],
+            "source":    "ram_cache",
+        }
+
+    # 2. Disk cache fallback
+    from pathlib import Path as _P
+    port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{account}"
+    stale = cache_read(port_cache_path)
+    if stale:
+        positions_raw = stale.get("clientPortfolio", {}).get("positions", [])
+        return {
+            "positions": positions_raw,
+            "summary":   stale.get("clientPortfolio", {}).get("credit", {}),
+            "timestamp": None,
+            "source":    "disk_cache",
+        }
+
+    # 3. Živé načítanie z eToro proxy
+    try:
+        instruments = load_instruments()
+        resp = fetch_with_retry(
+            f"{ETORO_PROXY}/pnl/real?account={account}",
+            timeout=ETORO_PROXY_TIMEOUT, retries=2
+        )
+        data = resp.json()
+        cache_write(port_cache_path, data)
+
+        positions_raw = data.get("clientPortfolio", {}).get("positions", [])
+        result = []
+        for pos in positions_raw:
+            inst_id = pos.get("instrumentID")
+            inst = instruments.get(inst_id)
+            if not inst or inst["typeID"] not in ALLOWED_INSTRUMENT_TYPES:
+                continue
+            symbol_yf = etoro_symbol_to_yf(inst["symbol"])
+            pnl_data = pos.get("unrealizedPnL", {})
+            result.append({
+                "symbol":      symbol_yf,
+                "name":        inst["name"],
+                "openDate":    pos.get("openDateTime", "")[:10],
+                "openRate":    pos.get("openRate"),
+                "currentRate": pnl_data.get("closeRate"),
+                "pnl":         pnl_data.get("pnL"),
+                "amount":      pos.get("amount"),
+                "units":       pos.get("units"),
+            })
+        result.sort(key=lambda x: (x["symbol"], x["openDate"]))
+
+        port = data.get("clientPortfolio", {})
+        summary = {
+            "equity":           port.get("equity"),
+            "available":        port.get("availableToTrade"),
+            "total_positions":  len(result),
+            "currency":         port.get("currency", "USD"),
+        }
+        return {
+            "positions": result,
+            "summary":   summary,
+            "timestamp": _time_module.time(),
+            "source":    "live",
+        }
+    except Exception as e:
+        raise HTTPException(502, f"Portfolio nedostupné: {e}")
 
 PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets.json")
 JOURNAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.json")
@@ -1203,9 +1316,29 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
         # Typ: 1=Forex, 5=Stocks, 6=ETF, 10=Crypto, 4=Commodities, 2=Indices
         type_map = {1:"Forex", 2:"Index", 4:"Commodity", 5:"Stock", 6:"ETF", 10:"Crypto"}
         asset_type = type_map.get(asset_class, "Other")
-        pnl = (pos.get("unrealizedPnL") or {}).get("pnL") if isinstance(pos.get("unrealizedPnL"), dict) else pos.get("pnL") or 0
+        unrealized = pos.get("unrealizedPnL") if isinstance(pos.get("unrealizedPnL"), dict) else {}
+        pnl = unrealized.get("pnL") if unrealized else pos.get("pnL") or 0
         pnl = pnl or 0
         amount = pos.get("amount") or 0
+        raw_current_rate = (
+            pos.get("currentRate")
+            or pos.get("closeRate")
+            or unrealized.get("closeRate")
+            or unrealized.get("currentRate")
+        )
+        current_rate = raw_current_rate if (isinstance(raw_current_rate, (int, float)) and raw_current_rate > 0) else None
+        if current_rate is None:
+            # Fallback: odhad z openRate + PnL + units (BUY/SELL)
+            try:
+                open_rate = float(pos.get("openRate") or 0)
+                units = float(pos.get("units") or 0)
+                if open_rate > 0 and units > 0 and pnl is not None:
+                    delta = float(pnl) / units
+                    current_rate = open_rate + delta if pos.get("isBuy", True) else open_rate - delta
+                    if current_rate <= 0:
+                        current_rate = None
+            except Exception:
+                current_rate = None
         result.append({
             "positionId":   pos.get("positionID"),
             "instrumentId": iid,
@@ -1217,7 +1350,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "amount":       round(amount, 2),
             "units":        pos.get("units"),
             "openRate":     pos.get("openRate"),
-            "currentRate":  pos.get("currentRate"),
+            "currentRate":  current_rate,
             "dailyPnl":     round((pos.get("unrealizedPnL") or {}).get("dailyPnL") or pos.get("dailyPnL") or 0, 2),
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
@@ -3002,6 +3135,18 @@ def root():
     return FileResponse(BASE_DIR / "trading_dashboard.html")
 
 if __name__ == "__main__":
-    print(f"Trading Dashboard — http://127.0.0.1:8766")
-    print(f"Presety: {PRESETS_FILE}")
-    uvicorn.run(app, host="127.0.0.1", port=8766, reload=False)
+    # ── eToro proxy ako background thread ─────────────────────────────────────
+    try:
+        import etoro_proxy as _ep
+        _ep.start_proxy_thread()
+    except Exception as e:
+        print(f"  WARN: eToro proxy thread zlyhalo: {e}")
+
+    if os.getenv("RENDER") and (not os.getenv("DASH_USER") or not os.getenv("DASH_PASS")):
+        raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
+
+    _PORT = int(os.getenv("PORT", 8766))
+    _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"
+    print(f"  Basic Auth: {'zapnutá' if os.getenv('DASH_USER') else 'vypnutá'}")
+    print(f"Trading Dashboard — http://{_HOST}:{_PORT}")
+    uvicorn.run(app, host=_HOST, port=_PORT, reload=False)
