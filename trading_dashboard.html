@@ -3667,7 +3667,10 @@ function wsSubscribeAll() {
 function onLivePriceUpdate(instrumentId) {
   const price = wsLivePrices[instrumentId];
   if (!price) return;
-  const livePrice = price.last || price.bid;
+  const livePrice = [price.last, price.bid, price.ask]
+    .map(Number)
+    .find(v => Number.isFinite(v) && v > 0);
+  if (!Number.isFinite(livePrice)) return;
 
   // 1. Watchlist sidebar
   let changed = false;
@@ -7357,21 +7360,31 @@ function renderDailySidebar(data) {
       '</div>' +
     '</div>';
 }
+function isStockAsset(item) {
+  if (!item || typeof item === 'string') return true;
+  const raw = String(item.type || item.assetType || item.quoteType || item.instrumentType || '').trim().toLowerCase();
+  if (!raw) return true;
+  return raw === 'stock' || raw === 'stocks' || raw === 'equity';
+}
+
 function getOpportunitySymbols() {
   const syms = new Set();
   try {
     (watchlist || []).forEach(w => {
+      if (!isStockAsset(w)) return;
       const sym = (typeof w === 'string' ? w : w.symbol || '').trim().toUpperCase();
       if (sym) syms.add(sym);
     });
   } catch(e) {}
   try {
     (etoroPositions || []).forEach(p => {
+      if (!isStockAsset(p)) return;
       const sym = (p.symbol || '').trim().toUpperCase();
       if (sym) syms.add(sym);
     });
     ['1','2'].forEach(acct => {
       (etoroPositionsAll[acct] || []).forEach(p => {
+        if (!isStockAsset(p)) return;
         const sym = (p.symbol || '').trim().toUpperCase();
         if (sym) syms.add(sym);
       });
@@ -7384,7 +7397,7 @@ function opportunityPositionInfo(symbol) {
   const positions = [
     ...(etoroPositionsAll['1'] || []),
     ...(etoroPositionsAll['2'] || []),
-  ].filter(p => p.symbol === symbol);
+  ].filter(p => p.symbol === symbol && isStockAsset(p));
   if (!positions.length) return null;
   return {
     count: positions.length,
