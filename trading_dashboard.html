@@ -4075,8 +4075,25 @@ function applyTheme() {
   document.body.classList.toggle('light-mode', isLightMode);
   const btn = document.getElementById('theme-toggle-btn');
   if (btn) btn.textContent = isLightMode ? '☀️' : '🌙';
-  // Aktualizuj tint lebo light mode má iné gradienty
   applyAccountTint(activeAccount || '1');
+  // Preaplikuj farby na všetky existujúce LWC grafy
+  applyThemeToAllCharts();
+}
+
+function applyThemeToAllCharts() {
+  // Panel grafy (registry)
+  for (const r of Object.values(registry)) {
+    if (r.mainChart) applyChartTheme(r.mainChart);
+    if (r.rsiChart)  applyChartTheme(r.rsiChart);
+    if (r.adxChart)  applyChartTheme(r.adxChart);
+    if (r.macdChart) applyChartTheme(r.macdChart);
+  }
+  // Predictive tab grafy
+  if (window.pc_realChartInst) applyChartTheme(window.pc_realChartInst);
+  if (window.pc_predChartInst) applyChartTheme(window.pc_predChartInst);
+  if (window.pc_dailyChartInst) applyChartTheme(window.pc_dailyChartInst);
+  if (window.pc_dailyMainInst)  applyChartTheme(window.pc_dailyMainInst);
+  if (window.pc_subChartInst)   applyChartTheme(window.pc_subChartInst);
 }
 
 function toggleTheme() {
@@ -4586,15 +4603,38 @@ function getActiveIndicators(pid) {
 }
 
 // ── CHART FACTORY ─────────────────────────────────────────────────────────────
+function getChartTheme() {
+  if (isLightMode) return {
+    bg:'#f8fafc', text:'#334155', grid:'#e2e8f0',
+    border:'#cbd5e1', crosshair:'#64748b55', crosshairLbl:'#f1f5f9',
+  };
+  return {
+    bg:'#070a0f', text:'#445566', grid:'#0f1520',
+    border:'#1c2535', crosshair:'#4a9eff55', crosshairLbl:'#0f1520',
+  };
+}
+
 function makeChart(container, height, opts={}) {
+  const t = getChartTheme();
   return LightweightCharts.createChart(container, {
     width:container.clientWidth, height,
-    layout:{ background:{type:'solid',color:'#070a0f'}, textColor:'#445566' },
-    grid:{ vertLines:{color:'#0f1520'}, horzLines:{color:'#0f1520'} },
-    crosshair:{ mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:'#4a9eff55',labelBackgroundColor:'#0f1520'}, horzLine:{color:'#4a9eff55',labelBackgroundColor:'#0f1520'} },
-    rightPriceScale:{ borderColor:'#1c2535' },
-    timeScale:{ borderColor:'#1c2535', timeVisible:true, secondsVisible:false, visible:opts.timeVisible!==false },
+    layout:{ background:{type:'solid',color:t.bg}, textColor:t.text },
+    grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
+    crosshair:{ mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
+    rightPriceScale:{ borderColor:t.border },
+    timeScale:{ borderColor:t.border, timeVisible:true, secondsVisible:false, visible:opts.timeVisible!==false },
     handleScroll:true, handleScale:true,
+  });
+}
+
+function applyChartTheme(chart) {
+  const t = getChartTheme();
+  chart.applyOptions({
+    layout:{ background:{type:'solid',color:t.bg}, textColor:t.text },
+    grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
+    crosshair:{ vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
+    rightPriceScale:{ borderColor:t.border },
+    timeScale:{ borderColor:t.border },
   });
 }
 
@@ -6022,18 +6062,24 @@ let pc__kumoAreaSeries = [];
 let pc_subChartInst = null;
 let pc_currentSubpanel = 'none';
 
-const pc_CHART_OPTS = {
-  layout: { background: { color: '#0f1117' }, textColor: '#64748b' },
-  grid: { vertLines: { color: '#1e2535' }, horzLines: { color: '#1e2535' } },
-  crosshair: { mode: 1 },
-  rightPriceScale: { borderColor: '#2a3145' },
-  timeScale: { borderColor: '#2a3145', timeVisible: false },
-};
+function getPcChartOpts() {
+  const t = (typeof getChartTheme === 'function') ? getChartTheme() : {
+    bg:'#0f1117', text:'#64748b', grid:'#1e2535', border:'#2a3145',
+    crosshair:'#64748b55', crosshairLbl:'#0f1117',
+  };
+  return {
+    layout: { background: { color: t.bg }, textColor: t.text },
+    grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+    crosshair: { mode: 1 },
+    rightPriceScale: { borderColor: t.border },
+    timeScale: { borderColor: t.border, timeVisible: false },
+  };
+}
 
 function pc_makeChart(containerId) {
   const el = document.getElementById(containerId);
   const chart = LightweightCharts.createChart(el, {
-    ...pc_CHART_OPTS,
+    ...getPcChartOpts(),
     width: el.offsetWidth,
     height: el.offsetHeight,
   });
@@ -6091,11 +6137,11 @@ function initCharts() {
     if (pc_dailyChartInst) { pc_dailyChartInst.remove(); pc_dailyChartInst = null; }
     pc_dailySeries = null;
     pc_dailyChartInst = LightweightCharts.createChart(dailyEl, {
-      ...pc_CHART_OPTS,
+      ...getPcChartOpts(),
       width: dailyEl.offsetWidth,
       height: dailyEl.offsetHeight,
-      timeScale: { borderColor: '#2a3145', timeVisible: false, rightOffset: 1 },
-      rightPriceScale: { borderColor: '#2a3145', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { borderColor: getChartTheme().border, timeVisible: false, rightOffset: 1 },
+      rightPriceScale: { borderColor: getChartTheme().border, scaleMargins: { top: 0.1, bottom: 0.1 } },
       crosshair: { mode: 0 },
       handleScroll: true,
       handleScale: { mouseWheel: true, pinch: true },
@@ -6808,8 +6854,8 @@ function attachKumoPlugin(chart, saData, sbData) {
     });
     // Bottom area: same range but fill with bg color to "cut out" below min
     const botSeries = chart.addAreaSeries({
-      topColor: '#0f1117',
-      bottomColor: '#0f1117',
+      topColor: getChartTheme().bg,
+      bottomColor: getChartTheme().bg,
       lineColor: 'rgba(0,0,0,0)',
       lineWidth: 0,
       priceLineVisible: false,
@@ -6889,11 +6935,12 @@ function buildSubpanel(type, ind, candles) {
   const label = document.getElementById('subpanelLabel');
   const el = document.getElementById('subpanelChart');
 
+  const _t = getChartTheme();
   const opts = {
-    ...pc_CHART_OPTS,
+    ...getPcChartOpts(),
     width: el.offsetWidth, height: el.offsetHeight,
-    rightPriceScale: { borderColor: '#2a3145', scaleMargins: { top: 0.1, bottom: 0.1 } },
-    timeScale: { borderColor: '#2a3145', timeVisible: false },
+    rightPriceScale: { borderColor: _t.border, scaleMargins: { top: 0.1, bottom: 0.1 } },
+    timeScale: { borderColor: _t.border, timeVisible: false },
   };
   pc_subChartInst = LightweightCharts.createChart(el, opts);
   new ResizeObserver(() => {
