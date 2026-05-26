@@ -1864,6 +1864,7 @@ function fmtSbPrice(p) {
 
 // ── SPARKLINES ────────────────────────────────────────────────────────────────
 const sparkCache = {};  // symbol → float[]
+const sparkMissing = new Set();
 
 function drawSparkSvg(prices, isUp, w = 38, h = 15) {
   if (!prices || prices.length < 2) return `<svg width="${w}" height="${h}" style="display:block;"></svg>`;
@@ -1882,10 +1883,13 @@ function drawSparkSvg(prices, isUp, w = 38, h = 15) {
 }
 
 async function fetchSpark(symbol) {
-  if (sparkCache[symbol]) return;
+  if (sparkCache[symbol] || sparkMissing.has(symbol)) return;
   try {
     const r = await fetch(`${API}/api/ohlcv?symbol=${encodeURIComponent(symbol)}&period=1mo&interval=1d`);
-    if (!r.ok) return;
+    if (!r.ok) {
+      sparkMissing.add(symbol);
+      return;
+    }
     const {data} = await r.json();
     if (data?.length >= 2) {
       sparkCache[symbol] = data.map(d => d.close);
@@ -1895,8 +1899,12 @@ async function fetchSpark(symbol) {
       document.querySelectorAll(`[data-spark="${symbol}"]`).forEach(el => {
         el.innerHTML = drawSparkSvg(prices, isUp, 38, 15);
       });
+    } else {
+      sparkMissing.add(symbol);
     }
-  } catch(e) {}
+  } catch(e) {
+    sparkMissing.add(symbol);
+  }
 }
 
 function renderSidebar() {
@@ -1976,7 +1984,7 @@ function renderSidebar() {
 
   // Pre symboly bez sparkline dát spusti async fetch
   watchlist.forEach(item => {
-    if (!sparkCache[item.symbol]) fetchSpark(item.symbol);
+    if (!sparkCache[item.symbol] && !sparkMissing.has(item.symbol)) fetchSpark(item.symbol);
   });
 }
 
@@ -2325,10 +2333,11 @@ function renderEtoroList() {
     const inPanel  = panelSyms.has(sym);
     const count    = positions.length;
     const sparkSvg = drawSparkSvg(sparkCache[sym], inProfit);
-    if (!sparkCache[sym]) fetchSpark(sym).then(() => {
+    if (!sparkCache[sym] && !sparkMissing.has(sym)) fetchSpark(sym).then(() => {
       const el = document.querySelector(`[data-spark="${sym}"]`);
       if (el) {
         const p = sparkCache[sym];
+        if (!p || p.length < 2) return;
         el.innerHTML = drawSparkSvg(p, p[p.length-1] >= p[0], 38, 15);
       }
     });
