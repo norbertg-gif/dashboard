@@ -2822,6 +2822,85 @@ function sortRisk(scope, key) {
   renderRiskView(false);
 }
 
+
+// ── ETORO GAIN CACHE ─────────────────────────────────────────────────────────
+const _gainCache = {};      // { '1': { monthly, yearly, daily, loaded, ts } }
+const _GAIN_TTL = 3600000;  // 1 hodina
+
+async function loadGainData(account) {
+  const cached = _gainCache[account];
+  if (cached && (Date.now() - cached.ts) < _GAIN_TTL) return cached;
+  try {
+    const [gainResp, dailyResp] = await Promise.all([
+      fetch(`${API}/api/etoro/gain?account=${account}`),
+      fetch(`${API}/api/etoro/daily-gain?account=${account}&type=Daily`),
+    ]);
+    const gain  = gainResp.ok  ? await gainResp.json()  : null;
+    const daily = dailyResp.ok ? await dailyResp.json() : null;
+    _gainCache[account] = {
+      monthly: gain?.monthly || [],
+      yearly:  gain?.yearly  || [],
+      daily:   Array.isArray(daily) ? daily : [],
+      ts: Date.now(),
+    };
+    return _gainCache[account];
+  } catch(e) {
+    console.warn('loadGainData error:', e);
+    return null;
+  }
+}
+
+function renderGainPanel(containerId, account) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '<span style="color:var(--muted2);font-size:11px;">Načítavam výkonnosť…</span>';
+  loadGainData(account).then(data => {
+    if (!data || (!data.monthly.length && !data.daily.length)) {
+      el.innerHTML = '<span style="color:var(--muted2);font-size:11px;">Výkonnosť nedostupná</span>';
+      return;
+    }
+    // Dnešný + posledných 7 dní gain
+    const daily = data.daily;
+    const today = daily.length ? daily[daily.length-1] : null;
+    const week  = daily.length >= 7 ? daily[daily.length-7] : null;
+    const ytd   = data.yearly.length ? data.yearly[data.yearly.length-1] : null;
+
+    const fmtG = g => {
+      const n = Number(g || 0);
+      const col = n >= 0 ? 'var(--up)' : 'var(--down)';
+      return `<span style="color:${col};font-weight:700;">${n>=0?'+':''}${n.toFixed(2)}%</span>`;
+    };
+
+    // Mini mesačný bar chart (posledných 12 mesiacov)
+    const months = data.monthly.slice(-12);
+    const maxAbs = Math.max(...months.map(m => Math.abs(m.gain || 0)), 0.01);
+    const bars = months.map(m => {
+      const g = Number(m.gain || 0);
+      const h = Math.round(Math.abs(g) / maxAbs * 28);
+      const col = g >= 0 ? 'var(--up)' : 'var(--down)';
+      const mo = new Date(m.timestamp).toLocaleDateString('sk', {month:'short'});
+      return `<div title="${mo}: ${g>=0?'+':''}${g.toFixed(2)}%" style="display:flex;flex-direction:column;align-items:center;gap:1px;cursor:default;">
+        <div style="width:10px;height:${h}px;background:${col};border-radius:2px;min-height:2px;"></div>
+        <span style="font-size:8px;color:var(--muted2);writing-mode:vertical-rl;transform:rotate(180deg);line-height:1;">${mo}</span>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+        <div style="display:flex;gap:14px;align-items:center;">
+          ${today ? `<div class="port-sum-item"><div class="port-sum-label">Dnes</div><div class="port-sum-val">${fmtG(today.gain)}</div></div>` : ''}
+          ${week  ? `<div class="port-sum-item"><div class="port-sum-label">7 dní</div><div class="port-sum-val">${fmtG(week.gain)}</div></div>` : ''}
+          ${ytd   ? `<div class="port-sum-item"><div class="port-sum-label">YTD</div><div class="port-sum-val">${fmtG(ytd.gain)}</div></div>` : ''}
+        </div>
+        ${months.length ? `
+        <div>
+          <div class="port-sum-label" style="margin-bottom:4px;">Mesačný výnos (12M)</div>
+          <div style="display:flex;align-items:flex-end;gap:2px;height:42px;">${bars}</div>
+        </div>` : ''}
+      </div>`;
+  });
+}
+
 async function renderPortMainView() {
   const cont = document.getElementById('portfolio-view');
   if (!cont) return;
@@ -3163,6 +3242,10 @@ function renderPortPanel(pid) {
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
   </div>`;
+
+  // Výkonnostný panel (gain)
+  html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
+  setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
