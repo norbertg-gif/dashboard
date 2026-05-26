@@ -3187,7 +3187,13 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "port": 8766, "presets_file": PRESETS_FILE}
+    return {
+        "status": "ok",
+        "port": 8766,
+        "presets_file": PRESETS_FILE,
+        "data_dir": os.getenv("DATA_DIR"),
+        "render": bool(os.getenv("RENDER")),
+    }
 
 @app.get("/")
 def root():
