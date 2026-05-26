@@ -44,6 +44,15 @@ function applyTagToPanel(id, tag) {
 
 // instrumentId cache: symbol -> id (immutable)
 const instrumentIdCache = {};
+function cacheInstrumentId(sym, instrumentId) {
+  const cleanSym = (sym || '').trim().toUpperCase();
+  const iid = Number(instrumentId);
+  if (cleanSym && Number.isFinite(iid) && iid > 0) instrumentIdCache[cleanSym] = iid;
+}
+function symbolForInstrumentId(instrumentId) {
+  const iid = Number(instrumentId);
+  return Object.entries(instrumentIdCache).find(([, id]) => Number(id) === iid)?.[0] || null;
+}
 const _logoMap = {};
 async function loadLogoMap() {
   try { const r = await fetch(`${API}/api/logo-map`); if (r.ok) Object.assign(_logoMap, await r.json()); } catch(e) {}
@@ -67,12 +76,13 @@ function getLogoWrapper(sym, size, dotColor) {
 }
 
 async function getInstrumentId(sym) {
+  sym = (sym || '').trim().toUpperCase();
   if (instrumentIdCache[sym]) return instrumentIdCache[sym];
   try {
     const r = await fetch(`${API}/api/etoro/instrument-id?symbol=${encodeURIComponent(sym)}&account=${activeAccount||'1'}`);
     if (r.ok) {
       const d = await r.json();
-      if (d.instrumentId) { instrumentIdCache[sym] = d.instrumentId; return d.instrumentId; }
+      if (d.instrumentId) { cacheInstrumentId(sym, d.instrumentId); return d.instrumentId; }
     }
   } catch(e) {}
   return null;
@@ -913,6 +923,7 @@ async function loadPortData(pid) {
     const r = await fetch(`${API}/api/etoro/portfolio?account=${s.account}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     s.data = await r.json();
+    rememberLiveInstruments(s.data.positions);
   } catch(e) {
     s.data = { error: e.message };
   }
@@ -1455,6 +1466,54 @@ function wsSubscribeAll() {
   }));
 }
 
+function rememberLiveInstruments(rows) {
+  (rows || []).forEach(row => {
+    if (!row) return;
+    cacheInstrumentId(row.symbol, row.instrumentId);
+    const iid = instrumentIdCache[(row.symbol || '').trim().toUpperCase()];
+    if (iid) wsSubscribe(iid);
+  });
+}
+
+function updatePositionRowsWithLive(rows, sym, livePrice) {
+  let touched = false;
+  for (const pos of (rows || [])) {
+    if ((pos.symbol || '').toUpperCase() !== sym) continue;
+    pos.currentRate = livePrice;
+    if (pos.openRate && pos.units) {
+      const direction = pos.isBuy === false ? -1 : 1;
+      pos.pnl = (livePrice - pos.openRate) * pos.units * direction;
+      pos.pnlPct = pos.amount ? pos.pnl / pos.amount * 100 : 0;
+    }
+    touched = true;
+  }
+  return touched;
+}
+
+function applyPredictiveLivePrice(sym, livePrice) {
+  const activeSym = (document.getElementById('tickerInput')?.value || '').trim().toUpperCase();
+  if (!activeSym || activeSym !== sym || !pc_lastData) return;
+  const daily = pc_lastData.daily_candles;
+  if (Array.isArray(daily) && daily.length) {
+    const last = daily[daily.length - 1];
+    last.high = Math.max(Number(last.high) || livePrice, livePrice);
+    last.low = Math.min(Number(last.low) || livePrice, livePrice);
+    last.close = livePrice;
+    try { pc_dailySeries?.update(last); } catch(e) {}
+    try { pc_dailyMainSeries?.update(last); } catch(e) {}
+  }
+  const weekly = pc_lastData.candles;
+  if (Array.isArray(weekly) && weekly.length) {
+    const last = weekly[weekly.length - 1];
+    last.high = Math.max(Number(last.high) || livePrice, livePrice);
+    last.low = Math.min(Number(last.low) || livePrice, livePrice);
+    last.close = livePrice;
+    try { pc_realSeries?.update(last); } catch(e) {}
+  }
+  const status = document.getElementById('statusMsg');
+  if (status) status.textContent = `✓ ${sym} · live ${fmtPrice(livePrice)} · ${new Date().toLocaleTimeString('sk')}`;
+}
+
 function onLivePriceUpdate(instrumentId) {
   const price = wsLivePrices[instrumentId];
   if (!price) return;
@@ -1462,11 +1521,12 @@ function onLivePriceUpdate(instrumentId) {
     .map(Number)
     .find(v => Number.isFinite(v) && v > 0);
   if (!Number.isFinite(livePrice)) return;
+  const sym = symbolForInstrumentId(instrumentId);
 
   // 1. Watchlist sidebar
   let changed = false;
   for (const item of watchlist) {
-    if (item.instrumentId === instrumentId) {
+    if (Number(item.instrumentId) === Number(instrumentId)) {
       const prevPrice = item.price;
       item.price = livePrice;
       if (prevPrice) item.chg = (item.price - prevPrice) / prevPrice * 100;
@@ -1478,21 +1538,16 @@ function onLivePriceUpdate(instrumentId) {
   // 2. Ceny tab
   if (activeMainTab === 'rates') updateRatesCells();
 
+  if (sym && updatePositionRowsWithLive(etoroPositions, sym, livePrice) && activeMainTab === 'etoro') {
+    renderEtoroList();
+  }
+
   // 3. Portfólio tab — aktualizuj currentRate, pnl, pnlPct bunky
-  if (activeMainTab === 'portfolio') {
-    const sym = Object.entries(instrumentIdCache).find(([s, id]) => id === instrumentId)?.[0];
-    if (sym && portState['main']?.data?.positions) {
-      const positions = portState['main'].data.positions.filter(p => p.symbol === sym);
-      for (const pos of positions) {
-        pos.currentRate = livePrice;
-        if (pos.openRate && pos.units) {
-          pos.pnl = (livePrice - pos.openRate) * pos.units;
-          pos.pnlPct = pos.amount ? pos.pnl / pos.amount * 100 : 0;
-        }
-      }
-      // Aktualizuj DOM bunky bez re-renderu
-      const pid = 'main';
-      const rows = getFilteredPositions(portState[pid]);
+  if (sym) {
+    for (const [pid, state] of Object.entries(portState)) {
+      if (!state?.data?.positions) continue;
+      updatePositionRowsWithLive(state.data.positions, sym, livePrice);
+      const rows = getFilteredPositions(state);
       for (const row of rows) {
         if (row.symbol !== sym) continue;
         const rateEl = document.getElementById(`pc-${pid}-${sym}-currentRate`);
@@ -1503,6 +1558,7 @@ function onLivePriceUpdate(instrumentId) {
         if (pctEl)  pctEl.innerHTML  = fmtPortVal(row.pnlPct, 'pct');
       }
     }
+    applyPredictiveLivePrice(sym, livePrice);
   }
 
   // 4. Grafy — aktualizuj poslednú sviečku live cenou
@@ -1510,7 +1566,7 @@ function onLivePriceUpdate(instrumentId) {
     const panelSym = document.getElementById(pid)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
     if (!panelSym) continue;
     const panelIid = instrumentIdCache[panelSym];
-    if (panelIid !== instrumentId) continue;
+    if (Number(panelIid) !== Number(instrumentId)) continue;
     // Aktualizuj p-price badge
     const priceEl = document.getElementById(pid)?.querySelector('.p-price');
     if (priceEl) priceEl.textContent = fmtPrice(livePrice);
@@ -1558,7 +1614,7 @@ async function loadEtoroWatchlistId() {
     // Načítaj instrumentId pre položky vo watchliste
     for (const wlItem of wl?.items || []) {
       if (wlItem.symbol && wlItem.instrumentId) {
-        instrumentIdCache[wlItem.symbol.toUpperCase()] = wlItem.instrumentId;
+        cacheInstrumentId(wlItem.symbol, wlItem.instrumentId);
       }
     }
   } catch(e) { console.warn('loadEtoroWatchlistId:', e); }
@@ -1748,10 +1804,17 @@ function loadWatchlist() {
 }
 function saveWatchlist() { localStorage.setItem('td_watchlist', JSON.stringify(watchlist)); }
 
-function addToWatchlist(symbol) {
+function addToWatchlist(symbol, name = null, instrumentId = null) {
   symbol = symbol.toUpperCase().trim();
   if (!symbol || watchlist.find(w => w.symbol === symbol)) return;
-  watchlist.push({symbol, price:null, chg:null});
+  const item = {symbol, price:null, chg:null};
+  if (name) item.name = name;
+  if (instrumentId) {
+    item.instrumentId = instrumentId;
+    cacheInstrumentId(symbol, instrumentId);
+    wsSubscribe(instrumentId);
+  }
+  watchlist.push(item);
   saveWatchlist();
   renderSidebar();
   fetchWatchlistPrice(symbol);
@@ -1780,7 +1843,7 @@ async function fetchWatchlistPrice(symbol) {
       // Ulož instrumentId ak vráti backend
       if (ohlcv.instrumentId && !item.instrumentId) {
         item.instrumentId = ohlcv.instrumentId;
-        instrumentIdCache[symbol] = ohlcv.instrumentId;
+        cacheInstrumentId(symbol, ohlcv.instrumentId);
         // Subscribe na WS live ceny
         wsSubscribe(ohlcv.instrumentId);
       }
@@ -1817,7 +1880,7 @@ async function refreshWatchlistPrices() {
           if (live != null) item.price = live;
           if (rate.instrumentId) {
             item.instrumentId = rate.instrumentId;
-            instrumentIdCache[item.symbol] = rate.instrumentId;
+            cacheInstrumentId(item.symbol, rate.instrumentId);
           }
           updated.add(item.symbol);
         }
@@ -2259,6 +2322,7 @@ async function loadEtoroPositions(forceRefresh = false) {
         renderAccountTabs();   // aktualizuj tab s hodnotou
       }
     }
+    rememberLiveInstruments(etoroPositions);
     etoroLoaded = true;
     renderEtoroList();
   } catch(e) {
@@ -2533,7 +2597,7 @@ function renderDropdown(items, loading) {
 function selectTicker(i) {
   const it = ddResults[i]; if (!it || !ddTarget) return;
   ddTarget.value = it.symbol;
-  if (it.instrumentId) instrumentIdCache[it.symbol] = it.instrumentId;
+  cacheInstrumentId(it.symbol, it.instrumentId);
   closeDropdown();
   ddHovered = false;
   const pid = ddTarget.closest('.panel')?.id;
@@ -3617,18 +3681,25 @@ async function loadChart(id, opts = {}) {
 
     // ── Skontroluj batch cache (naplnený z loadAll) ──
     const batchKey = `${sym}|${period}|${interval}|${haParam}`;
-    let name, data;
+    let name, data, instrumentId;
     if (opts.refresh !== 1 && _ohlcvBatchCache.has(batchKey)) {
       const cached = _ohlcvBatchCache.get(batchKey);
       _ohlcvBatchCache.delete(batchKey);   // jednorázové použitie
       name = cached.name || sym;
       data = cached.data;
+      instrumentId = cached.instrumentId;
     } else {
       const refreshParam = opts.refresh === 1 ? 1 : 0;
       const url = `${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=${period}&interval=${interval}&indicators=${allInds}&ha=${haParam}&account=${acct}&refresh=${refreshParam}`;
       const resp = await fetch(url, { signal: r.abortController.signal });
       if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail); }
-      ({ name, data } = await resp.json());
+      ({ name, data, instrumentId } = await resp.json());
+    }
+    if (instrumentId) {
+      cacheInstrumentId(sym, instrumentId);
+      wsSubscribe(instrumentId);
+    } else {
+      wsSubscribeSymbol(sym);
     }
     if (loadSeq !== r.loadSeq) return;
     if (!data?.length) throw new Error('Žiadne dáta');
@@ -4003,7 +4074,7 @@ Sheet: ${sheetName}`);
     await loadEtoroWatchlistId();
     // Subscribe existujúce watchlist tickery na WS
     for (const item of watchlist) {
-      if (item.instrumentId) instrumentIdCache[item.symbol] = item.instrumentId;
+      cacheInstrumentId(item.symbol, item.instrumentId);
     }
     initWebSocket();
     // Subscribe na WS po krátkej pauze (WS potrebuje čas na connect)
@@ -4070,6 +4141,7 @@ let pc_dailyChartInst = null;
 let pc_dailySeries = null;
 // Daily main chart
 let pc_dailyMainInst = null;
+let pc_dailyMainSeries = null;
 let pc_currentView = 'weekly';
 let pc_oppLoading = false;
 let pc_oppLoadedAt = 0;
@@ -5064,7 +5136,7 @@ function switchView(view) {
 function renderDailyMain(data) {
   if (!data.daily_candles || !data.daily_candles.length) return;
   const el = document.getElementById('dailyMainChart');
-  if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; }
+  if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; pc_dailyMainSeries = null; }
   pc_dailyMainInst = LightweightCharts.createChart(el, {
     ...pc_CHART_OPTS, width: el.offsetWidth, height: el.offsetHeight,
   });
@@ -5077,6 +5149,7 @@ function renderDailyMain(data) {
     borderUpColor: '#26a69a', borderDownColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
   });
+  pc_dailyMainSeries = cs;
   cs.setData(data.daily_candles);
 
   const ind = data.daily_indicators || {};
@@ -5390,6 +5463,7 @@ async function loadData(reoptimize = false) {
     }
     const data = await res.json();
     pc_lastData = data;
+    wsSubscribeSymbol(ticker);
     renderCharts(data);
     pc_renderSidebar(data);
     status.textContent = `✓ ${ticker} · ${data.candles.length} weekly sviečok`;
