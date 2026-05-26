@@ -20,7 +20,7 @@ set DASH_PASS=
 pip show fastapi >nul 2>&1 || pip install fastapi uvicorn yfinance pandas numpy requests scipy scikit-learn starlette
 
 echo Spustam Trading Dashboard (backend + proxy v jednom procese)...
-start "Trading Dashboard" cmd /k "python trading_backend.py"
+start "Trading Dashboard" cmd /k "python backend\trading_backend.py"
 
 timeout /t 3 /nobreak >nul
 
