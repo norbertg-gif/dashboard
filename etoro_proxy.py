@@ -7,6 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.request, urllib.error, urllib.parse
 import json, uuid
+import threading
 
 # === ÚČET 1 ===
 ACCOUNT1 = {
@@ -171,6 +172,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True   # child thready zaniknú s main procesom
 
+_server = None
+_server_thread = None
+
+def start_proxy_thread():
+    """Spusti eToro proxy v background threade pre Render/backend proces."""
+    global _server, _server_thread
+    if _server_thread and _server_thread.is_alive():
+        return
+    _server = ThreadingHTTPServer(("localhost", PORT), ProxyHandler)
+    _server_thread = threading.Thread(target=_server.serve_forever, name="etoro-proxy", daemon=True)
+    _server_thread.start()
+    print(f"eToro proxy bezi na http://localhost:{PORT}")
 if __name__ == "__main__":
     print(f"eToro proxy bezi na http://localhost:{PORT}")
     for k, v in ACCOUNTS.items():
