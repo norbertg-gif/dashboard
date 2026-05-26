@@ -3349,7 +3349,9 @@ function renderPortPanel(pid) {
             ${etoroTradeBtnHtml(sym)}
           </div></td>`;
         } else {
-          html += `<td class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(row[col.key], col.fmt)}</td>`;
+          const liveCols = ['currentRate','pnl','pnlPct'];
+          const cellId = liveCols.includes(col.key) ? `id="pc-${pid}-${sym}-${col.key}"` : '';
+          html += `<td ${cellId} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(row[col.key], col.fmt)}</td>`;
         }
       }
       html += `</tr>`;
@@ -3663,21 +3665,77 @@ function wsSubscribeAll() {
 }
 
 function onLivePriceUpdate(instrumentId) {
-  // Nájdi watchlist položky s týmto instrumentId a aktualizuj cenu
   const price = wsLivePrices[instrumentId];
   if (!price) return;
+  const livePrice = price.last || price.bid;
+
+  // 1. Watchlist sidebar
   let changed = false;
   for (const item of watchlist) {
     if (item.instrumentId === instrumentId) {
       const prevPrice = item.price;
-      item.price = price.last || price.bid;
+      item.price = livePrice;
       if (prevPrice) item.chg = (item.price - prevPrice) / prevPrice * 100;
       changed = true;
     }
   }
   if (changed) { saveWatchlist(); renderSidebar(); }
-  // Ak je otvorený Ceny tab, aktualizuj bunku priamo
+
+  // 2. Ceny tab
   if (activeMainTab === 'rates') updateRatesCells();
+
+  // 3. Portfólio tab — aktualizuj currentRate, pnl, pnlPct bunky
+  if (activeMainTab === 'portfolio') {
+    const sym = Object.entries(instrumentIdCache).find(([s, id]) => id === instrumentId)?.[0];
+    if (sym && portState['main']?.data?.positions) {
+      const positions = portState['main'].data.positions.filter(p => p.symbol === sym);
+      for (const pos of positions) {
+        pos.currentRate = livePrice;
+        if (pos.openRate && pos.units) {
+          pos.pnl = (livePrice - pos.openRate) * pos.units;
+          pos.pnlPct = pos.amount ? pos.pnl / pos.amount * 100 : 0;
+        }
+      }
+      // Aktualizuj DOM bunky bez re-renderu
+      const pid = 'main';
+      const rows = getFilteredPositions(portState[pid]);
+      for (const row of rows) {
+        if (row.symbol !== sym) continue;
+        const rateEl = document.getElementById(`pc-${pid}-${sym}-currentRate`);
+        const pnlEl  = document.getElementById(`pc-${pid}-${sym}-pnl`);
+        const pctEl  = document.getElementById(`pc-${pid}-${sym}-pnlPct`);
+        if (rateEl) rateEl.innerHTML = fmtPortVal(livePrice, 'price');
+        if (pnlEl)  pnlEl.innerHTML  = fmtPortVal(row.pnl,  'pnl');
+        if (pctEl)  pctEl.innerHTML  = fmtPortVal(row.pnlPct, 'pct');
+      }
+    }
+  }
+
+  // 4. Grafy — aktualizuj poslednú sviečku live cenou
+  for (const [pid, r] of Object.entries(registry)) {
+    const panelSym = document.getElementById(pid)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+    if (!panelSym) continue;
+    const panelIid = instrumentIdCache[panelSym];
+    if (panelIid !== instrumentId) continue;
+    // Aktualizuj p-price badge
+    const priceEl = document.getElementById(pid)?.querySelector('.p-price');
+    if (priceEl) priceEl.textContent = fmtPrice(livePrice);
+    // Aktualizuj poslednú sviečku
+    if (r.candleSeries && r._chartData?.length) {
+      const last = r._chartData[r._chartData.length - 1];
+      if (last) {
+        try {
+          r.candleSeries.update({
+            time:  last.time,
+            open:  last.open,
+            high:  Math.max(last.high, livePrice),
+            low:   Math.min(last.low,  livePrice),
+            close: livePrice,
+          });
+        } catch(e) {}
+      }
+    }
+  }
 }
 
 // Pridaj ticker do WS subscribe pri pridaní do watchlistu
@@ -5770,6 +5828,7 @@ async function loadChart(id, opts = {}) {
 
     const candleData = data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close}));
     const volumeData = data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?'#00c99a22':'#ff456022'}));
+    r._chartData = candleData;  // uložiť pre live WS update
     r.candleSeries.setData(candleData);
     r.volSeries.setData(volumeData);
     if (candleData.length) r.candleSeries.update(candleData[candleData.length - 1]);
