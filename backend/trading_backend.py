@@ -51,6 +51,8 @@ from sklearn.calibration import CalibratedClassifierCV
 BASE_DIR = Path(__file__).resolve().parent
 APP_ROOT = BASE_DIR.parent if BASE_DIR.name == "backend" else BASE_DIR
 FRONTEND_DIR = APP_ROOT / "frontend"
+DATA_ROOT = Path(os.getenv("DATA_DIR", str(APP_ROOT))).resolve()
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Trading Dashboard API")
 
 # ── Public API token (pre Claude / externý prístup bez Basic Auth) ────────────
@@ -152,8 +154,8 @@ def add_indicators(df):
 
 # ── ML confidence model ──────────────────────────────────────────────────────
 
-WEIGHTS_LOG     = APP_ROOT / "predictive_weights_log.json"
-SIGNALS_LOG     = APP_ROOT / "predictive_signals_log.json"
+WEIGHTS_LOG     = DATA_ROOT / "predictive_weights_log.json"
+SIGNALS_LOG     = DATA_ROOT / "predictive_signals_log.json"
 DEFAULT_WEIGHTS = {"ema": 0.20, "rsi": 0.10, "macd": 0.20, "vol": 0.15, "ichi": 0.25, "stoch": 0.10}
 
 
@@ -698,8 +700,8 @@ def get_public_portfolio(token: str = Query(...), account: str = Query("1")):
     except Exception as e:
         raise HTTPException(502, f"Portfolio nedostupné: {e}")
 
-PRESETS_FILE = str(APP_ROOT / "presets.json")
-JOURNAL_FILE = str(APP_ROOT / "trade_journal.json")
+PRESETS_FILE = str(DATA_ROOT / "presets.json")
+JOURNAL_FILE = str(DATA_ROOT / "trade_journal.json")
 DAILY_INTERVALS = {"1d", "5d", "1wk", "1mo", "3mo"}
 YF_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -915,7 +917,7 @@ import time, json as _json, threading, gzip as _gzip, hashlib as _hashlib
 from pathlib import Path as _Path
 
 # ── DISK CACHE ────────────────────────────────────────────────────────────────
-CACHE_DIR = _Path(APP_ROOT) / "cache"
+CACHE_DIR = _Path(DATA_ROOT) / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 (CACHE_DIR / "ohlcv").mkdir(exist_ok=True)
 (CACHE_DIR / "portfolio").mkdir(exist_ok=True)
