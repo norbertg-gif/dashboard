@@ -1134,6 +1134,48 @@ def etoro_accounts():
     except Exception as e:
         return []
 
+# eToro username mapping — hardcoded (user-info endpoints vyžadujú username, nie CID)
+ETORO_USERNAMES = {"1": "DD1973", "2": "nelka39"}
+
+@app.get("/api/etoro/gain")
+def get_etoro_gain(account: str = Query("1")):
+    """Mesacna a rocna vykonnost uctu v % — /user-info/people/{username}/gain"""
+    username = ETORO_USERNAMES.get(account)
+    if not username:
+        raise HTTPException(400, f"Nezname ucet: {account}")
+    try:
+        resp = fetch_with_retry(
+            f"{ETORO_PROXY}/etoro/user-info/people/{username}/gain?account={account}",
+            timeout=10, retries=2
+        )
+        return resp.json()
+    except Exception as e:
+        raise HTTPException(502, f"eToro gain zlyhalo: {e}")
+
+@app.get("/api/etoro/daily-gain")
+def get_etoro_daily_gain(
+    account: str = Query("1"),
+    minDate: str = Query(""),
+    maxDate: str = Query(""),
+    gain_type: str = Query("Daily", alias="type"),
+):
+    """Denny alebo suhrnny % gain za obdobie — /user-info/people/{username}/daily-gain"""
+    username = ETORO_USERNAMES.get(account)
+    if not username:
+        raise HTTPException(400, f"Nezname ucet: {account}")
+    if not minDate:
+        minDate = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
+    if not maxDate:
+        maxDate = datetime.now(timezone.utc).date().isoformat()
+    try:
+        url = (f"{ETORO_PROXY}/etoro/user-info/people/{username}/daily-gain"
+               f"?minDate={requests.utils.quote(minDate)}&maxDate={requests.utils.quote(maxDate)}"
+               f"&type={gain_type}&account={account}")
+        resp = fetch_with_retry(url, timeout=10, retries=2)
+        return resp.json()
+    except Exception as e:
+        raise HTTPException(502, f"eToro daily-gain zlyhalo: {e}")
+
 @app.get("/api/etoro/watchlists")
 def get_etoro_watchlists(account: str = Query("1")):
     try:
@@ -1351,7 +1393,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "units":        pos.get("units"),
             "openRate":     pos.get("openRate"),
             "currentRate":  current_rate,
-            "dailyPnl":     round((pos.get("unrealizedPnL") or {}).get("dailyPnL") or pos.get("dailyPnL") or 0, 2),
+            "dailyPnl":     round(pos.get("dailyPnL") or 0, 2),
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
             "fees":         round(pos.get("totalFees") or pos.get("fees") or 0, 2),
