@@ -860,6 +860,19 @@ YAHOO_PERIOD_TO_COUNT = {
     ("2y",  "4h"):   1000,
 }
 
+AUTO_INTERVAL_TO_COUNT = {
+    "1m":   390,
+    "5m":   1000,
+    "15m":  1000,
+    "30m":  1000,
+    "1h":   1000,
+    "4h":   1000,
+    "12h":  1000,
+    "1d":   1000,
+    "1wk":  1000,
+    "1mo":  1000,
+}
+
 # ── ETORO INSTRUMENT SEARCH ──────────────────────────────────────────────────
 
 # ── TICKER SEARCH ─────────────────────────────────────────────────────────────
@@ -2130,13 +2143,14 @@ def get_ohlcv(
     etoro_interval = YAHOO_TO_ETORO_INTERVAL.get(interval, "OneDay")
 
     # 4h a 12h resampling
-    use_resample = interval in ("4h", "12h")
-    fetch_interval = "OneHour" if use_resample else etoro_interval
+    use_resample = interval in ("15m", "4h", "12h")
+    fetch_interval = "FiveMinutes" if interval == "15m" else ("OneHour" if use_resample else etoro_interval)
 
     # Počet sviečok
-    candles_count = YAHOO_PERIOD_TO_COUNT.get((period, interval), 252)
+    candles_count = AUTO_INTERVAL_TO_COUNT.get(interval, 252) if period == "auto" else YAHOO_PERIOD_TO_COUNT.get((period, interval), 252)
     if use_resample:
-        candles_count = min(candles_count * (4 if interval == "4h" else 12), 1000)
+        mult = {"15m": 3, "4h": 4, "12h": 12}.get(interval, 1)
+        candles_count = min(candles_count * mult, 1000)
 
     # ── INKREMENTÁLNY OHLCV CACHE ────────────────────────────────────────────
     # Kľúč bez candles_count — cache je per symbol+interval, nie per count
@@ -2234,7 +2248,7 @@ def get_ohlcv(
 
     # Resample 4h/12h
     if use_resample:
-        rule = "4h" if interval == "4h" else "12h"
+        rule = {"15m": "15min", "4h": "4h", "12h": "12h"}.get(interval, interval)
         df = resample_ohlcv(df, rule)
         if df.empty:
             raise HTTPException(404, "Resample vrátil prázdny DataFrame")
