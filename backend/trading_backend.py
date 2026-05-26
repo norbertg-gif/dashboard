@@ -673,6 +673,7 @@ def get_public_portfolio(token: str = Query(...), account: str = Query("1")):
             symbol_yf = etoro_symbol_to_yf(inst["symbol"])
             pnl_data = pos.get("unrealizedPnL", {})
             result.append({
+                "instrumentId": inst_id,
                 "symbol":      symbol_yf,
                 "name":        inst["name"],
                 "openDate":    pos.get("openDateTime", "")[:10],
@@ -1087,6 +1088,7 @@ def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
         pnl_data = pos.get("unrealizedPnL", {})
 
         result.append({
+            "instrumentId": inst_id,
             "symbol":      symbol_yf,
             "name":        inst["name"],
             "openDate":    pos.get("openDateTime", "")[:10],   # YYYY-MM-DD
