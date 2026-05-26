@@ -1,22 +1,12 @@
 const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8766' : '';
-const PERIODS = ['1d','5d','1mo','3mo','6mo','1y','2y','5y','max'];
-const INTERVAL_MAP = {
-  '1d':  ['1m','5m','15m','30m','1h','4h'],
-  '5d':  ['15m','30m','1h','4h','12h'],
-  '1mo': ['1h','4h','12h','1d'],
-  '3mo': ['4h','12h','1d','1wk'],
-  '6mo': ['4h','12h','1d','1wk'],
-  '1y':  ['12h','1d','1wk'],
-  '2y':  ['1d','1wk','1mo'],
-  '5y':  ['1d','1wk','1mo'],
-  'max': ['1d','1wk','1mo'],
-};
+const PERIODS = ['auto'];
+const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
 const DEFAULTS = [
-  {symbol:'AAPL',period:'6mo',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'MSFT',period:'6mo',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'NVDA',period:'6mo',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'TSLA',period:'6mo',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
+  {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
+  {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
+  {symbol:'NVDA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
+  {symbol:'TSLA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
 ];
 const DEFAULT_WATCHLIST = ['AAPL','MSFT','NVDA','TSLA','GOOGL','AMZN','SPY','QQQ'];
 
@@ -1281,7 +1271,7 @@ function portRowClick(pid, sym) {
     setActivePanel(chartPanel.id);
   } else {
     // Vytvor nový panel
-    const cfg = {symbol: sym, period:'1y', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
+    const cfg = {symbol: sym, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
     const newId = createPanel(cfg);
     setActivePanel(newId);
     loadChart(newId);
@@ -2041,7 +2031,7 @@ function onSbTickerClick(symbol) {
     loadChart(chartPanelId);
   } else {
     // Žiadny aktívny panel — vytvor nový
-    const cfg = {symbol, period:'6mo', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
+    const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
     const newId = createPanel(cfg);
     setActivePanel(newId);
     loadChart(newId);
@@ -2422,11 +2412,14 @@ function onSbKeydown(e) {
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-const getIntervals = p => INTERVAL_MAP[p] || ['1d'];
+const getIntervals = () => ALL_INTERVALS;
 const fmtPrice = p => p >= 10000 ? p.toFixed(0) : p >= 100 ? p.toFixed(2) : p >= 1 ? p.toFixed(4) : p.toFixed(6);
 const delay = ms => new Promise(r => setTimeout(r, ms));
-const periodOpts = sel => PERIODS.map(p => `<option value="${p}"${p===sel?' selected':''}>${p}</option>`).join('');
-const intervalOpts = (period, sel) => getIntervals(period).map(i => `<option value="${i}"${i===sel?' selected':''}>${i}</option>`).join('');
+const periodOpts = () => '<option value="auto" selected>auto</option>';
+const intervalOpts = (_period, sel) => {
+  const selected = ALL_INTERVALS.includes(sel) ? sel : '1d';
+  return ALL_INTERVALS.map(i => `<option value="${i}"${i===selected?' selected':''}>${i}</option>`).join('');
+};
 
 // ── PRESETS ───────────────────────────────────────────────────────────────────
 async function fetchPresets() {
@@ -2837,7 +2830,8 @@ function createPanel(cfg) {
 
 function onPeriodChange(id, period) {
   const iSel = document.getElementById(id).querySelector('.interval-sel');
-  iSel.innerHTML = getIntervals(period).map(i => `<option value="${i}">${i}</option>`).join('');
+  const keep = ALL_INTERVALS.includes(iSel.value) ? iSel.value : '1d';
+  iSel.innerHTML = intervalOpts(period, keep);
 }
 
 // ── CLOUD CANVAS ─────────────────────────────────────────────────────────────
