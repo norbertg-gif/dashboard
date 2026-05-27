@@ -785,6 +785,7 @@ async function renderPortMainView() {
   if (!portState[pid]) {
     let saved = {};
     try { const d = localStorage.getItem(`td_port_${pid}`); if (d) saved = JSON.parse(d); } catch(e) {}
+    const cols = normalizePortColumns(saved);
     portState[pid] = {
       account:    saved.account    || activeAccount || '1',
       filter:     saved.filter     || 'all',
@@ -792,18 +793,21 @@ async function renderPortMainView() {
       sortCol:    saved.sortCol    || 'pnl',
       sortDir:    saved.sortDir    ?? -1,
       data:       null, loading:   false,
-      colOrder:   saved.colOrder   || PORT_COLS.map(c => c.key),
-      colVisible: saved.colVisible
-        ? Object.fromEntries(PORT_COLS.map(c => [c.key, c.key in saved.colVisible ? saved.colVisible[c.key] : c.def]))
-        : Object.fromEntries(PORT_COLS.map(c => [c.key, c.def])),
+      colOrder:   cols.colOrder,
+      colVisible: cols.colVisible,
+      colWidths:  cols.colWidths,
       showColDrop: false, mirrorOpen: saved.mirrorOpen ?? false,
       _symFilter:  saved._symFilter || null,
     };
   }
 
   // Aplikuj cols z presets (override všetko ostatné)
-  if (colCfg?.colOrder)   portState[pid].colOrder   = colCfg.colOrder;
-  if (colCfg?.colVisible) portState[pid].colVisible = colCfg.colVisible;
+  if (colCfg?.colOrder || colCfg?.colVisible || colCfg?.colWidths) {
+    const cols = normalizePortColumns(colCfg);
+    portState[pid].colOrder = cols.colOrder;
+    portState[pid].colVisible = cols.colVisible;
+    portState[pid].colWidths = cols.colWidths;
+  }
 
   // Aplikuj tint podľa aktuálneho účtu v portfóliu
   const portEl = document.getElementById('main-portfolio');
@@ -844,6 +848,24 @@ const PORT_COLS = [
   { key:'positionId',  label:'Position ID',  def:false, fmt:'id'     },
 ];
 
+function normalizePortColumns(saved = {}) {
+  const known = new Set(PORT_COLS.map(c => c.key));
+  const savedOrder = Array.isArray(saved.colOrder) ? saved.colOrder.filter(k => known.has(k)) : [];
+  const missing = PORT_COLS.map(c => c.key).filter(k => !savedOrder.includes(k));
+  const colOrder = [...savedOrder, ...missing];
+  const savedVisible = saved.colVisible || {};
+  const colVisible = Object.fromEntries(PORT_COLS.map(c => [
+    c.key,
+    c.key in savedVisible ? savedVisible[c.key] : c.def
+  ]));
+  const savedWidths = saved.colWidths || {};
+  const colWidths = Object.fromEntries(PORT_COLS.map(c => {
+    const w = Number(savedWidths[c.key]);
+    return [c.key, Number.isFinite(w) && w >= 50 ? Math.min(520, w) : null];
+  }));
+  return { colOrder, colVisible, colWidths };
+}
+
 // Per-panel portfolio state
 const portState = {};
 
@@ -851,6 +873,7 @@ function getPortState(pid) {
   if (!portState[pid]) {
     let saved = {};
     try { const d = localStorage.getItem(`td_port_${pid}`); if (d) saved = JSON.parse(d); } catch(e) {}
+    const cols = normalizePortColumns(saved);
     portState[pid] = {
       account:    saved.account    || '1',
       filter:     saved.filter     || 'all',
@@ -858,11 +881,10 @@ function getPortState(pid) {
       sortCol:    saved.sortCol    || 'pnl',
       sortDir:    saved.sortDir    ?? -1,
       data:       null, loading:   false,
-      colOrder:   saved.colOrder   || PORT_COLS.map(c => c.key),
-      colVisible: saved.colVisible
+      colOrder:   cols.colOrder,
+      colVisible: cols.colVisible,
         // Merge: zachovaj uložené + doplň chýbajúce kľúče defaultmi
-        ? Object.fromEntries(PORT_COLS.map(c => [c.key, c.key in saved.colVisible ? saved.colVisible[c.key] : c.def]))
-        : Object.fromEntries(PORT_COLS.map(c => [c.key, c.def])),
+      colWidths:  cols.colWidths,
       showColDrop: false, mirrorOpen: saved.mirrorOpen ?? false,
       _symFilter:  saved._symFilter || null,
     };
@@ -875,7 +897,7 @@ function savePortState(pid) {
   localStorage.setItem(`td_port_${pid}`, JSON.stringify({
     account: s.account, filter: s.filter, view: s.view,
     sortCol: s.sortCol, sortDir: s.sortDir,
-    colOrder: s.colOrder, colVisible: s.colVisible,
+    colOrder: s.colOrder, colVisible: s.colVisible, colWidths: s.colWidths,
     _symFilter: s._symFilter || null,
   }));
   // Automaticky ulož nastavenie stĺpcov
@@ -887,7 +909,7 @@ async function savePortColConfig(s) {
     await fetch(`${API}/api/presets/__port_cols__`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ colOrder: s.colOrder, colVisible: s.colVisible })
+      body: JSON.stringify({ colOrder: s.colOrder, colVisible: s.colVisible, colWidths: s.colWidths })
     });
   } catch(e) {}
 }
@@ -910,8 +932,12 @@ function loadPortStateFromStorage(pid) {
     if (d.view)       s.view       = d.view;
     if (d.sortCol)    s.sortCol    = d.sortCol;
     if (d.sortDir)    s.sortDir    = d.sortDir;
-    if (d.colOrder)   s.colOrder   = d.colOrder;
-    if (d.colVisible) s.colVisible = d.colVisible;
+    if (d.colOrder || d.colVisible || d.colWidths) {
+      const cols = normalizePortColumns(d);
+      s.colOrder = cols.colOrder;
+      s.colVisible = cols.colVisible;
+      s.colWidths = cols.colWidths;
+    }
   } catch(e) {}
 }
 
@@ -957,6 +983,11 @@ function getVisibleCols(s) {
   return s.colOrder
     .map(k => PORT_COLS.find(c => c.key === k))
     .filter(c => c && s.colVisible[c.key]);
+}
+
+function portColStyle(s, key) {
+  const w = Number(s.colWidths?.[key]);
+  return Number.isFinite(w) && w >= 50 ? ` style="width:${w}px;min-width:${w}px;max-width:${w}px;"` : '';
 }
 
 function getFilteredPositions(s) {
@@ -1124,16 +1155,18 @@ function renderPortPanel(pid) {
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
-    html += `<div class="port-table-wrap"><table class="port-table"><thead><tr>`;
+    html += `<div class="port-table-wrap"><table class="port-table" style="table-layout:fixed;"><colgroup>`;
+    for (const col of cols) html += `<col data-col="${col.key}"${portColStyle(s, col.key)}>`;
+    html += `</colgroup><thead><tr>`;
     for (const col of cols) {
       const sortCls = s.sortCol === col.key ? (s.sortDir === -1 ? ' sort-desc' : ' sort-asc') : '';
-      html += `<th class="${sortCls}" draggable="true"
+      html += `<th class="${sortCls}" data-col="${col.key}" draggable="true"${portColStyle(s, col.key)}
         onclick="portSort('${pid}','${col.key}')"
         ondragstart="portDragStart(event,'${pid}','${col.key}')"
         ondragover="portDragOver(event,'${pid}','${col.key}')"
         ondrop="portDrop(event,'${pid}','${col.key}')"
         ondragleave="portDragLeave(event)"
-        >${col.label}</th>`;
+        ><span class="port-th-label">${col.label}</span><span class="port-col-resizer" style="float:right;width:8px;height:18px;cursor:col-resize;opacity:.55;" onclick="event.stopPropagation()" onmousedown="portResizeStart(event,'${pid}','${col.key}')">⋮</span></th>`;
     }
     html += `</tr></thead><tbody>`;
     for (const row of rows) {
@@ -1319,6 +1352,39 @@ function portDrop(e, pid, targetKey) {
   portDragKey = null;
 }
 
+let portResizeState = null;
+function portResizeStart(e, pid, key) {
+  e.preventDefault();
+  e.stopPropagation();
+  const th = e.target.closest('th');
+  if (!th) return;
+  portResizeState = { pid, key, startX: e.clientX, startW: th.getBoundingClientRect().width };
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  document.addEventListener('mousemove', portResizeMove);
+  document.addEventListener('mouseup', portResizeEnd);
+}
+function portResizeMove(e) {
+  if (!portResizeState) return;
+  const s = getPortState(portResizeState.pid);
+  const w = Math.max(50, Math.min(520, Math.round(portResizeState.startW + e.clientX - portResizeState.startX)));
+  s.colWidths[portResizeState.key] = w;
+  const root = document.getElementById('port-inner-' + portResizeState.pid);
+  root?.querySelectorAll(`[data-col="${portResizeState.key}"]`).forEach(el => {
+    el.style.width = w + 'px';
+    el.style.minWidth = w + 'px';
+    el.style.maxWidth = w + 'px';
+  });
+}
+function portResizeEnd() {
+  if (portResizeState) savePortState(portResizeState.pid);
+  portResizeState = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  document.removeEventListener('mousemove', portResizeMove);
+  document.removeEventListener('mouseup', portResizeEnd);
+}
+
 // Konfigurácia stĺpcov
 function portCloseColDrop(pid) {
   const drop = document.getElementById('port-cols-drop-' + pid);
@@ -1344,14 +1410,15 @@ function portToggleColDrop(pid) {
   const drop = document.createElement('div');
   drop.className = 'port-cols-dropdown';
   drop.id = 'port-cols-drop-' + pid;
-  drop.style.cssText = `display:block;top:${rect.bottom+4}px;right:${Math.max(8, window.innerWidth-rect.right)}px;`;
+  drop.style.cssText = `display:flex;flex-direction:column;gap:6px;top:${rect.bottom+4}px;right:${Math.max(8, window.innerWidth-rect.right)}px;min-width:230px;max-width:min(320px,calc(100vw - 16px));max-height:min(520px,calc(100vh - ${Math.ceil(rect.bottom + 16)}px));overflow:auto;padding:10px;`;
   drop.innerHTML = `<div style="font-family:var(--font-ui);font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:700;">VIDITEĽNÉ STĹPCE</div>` +
     s.colOrder.map(k => {
       const col = PORT_COLS.find(c => c.key === k); if (!col) return '';
-      return `<label class="port-col-item">
+      return `<label class="port-col-item" style="display:flex;align-items:center;gap:7px;white-space:nowrap;">
         <span class="port-col-drag-handle">⠿</span>
         <input type="checkbox" ${s.colVisible[k]?'checked':''} onchange="portToggleCol('${pid}','${k}',this.checked)">
-        <span>${col.label}</span>
+        <span style="flex:1;">${col.label}</span>
+        <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2);">${s.colWidths?.[k] || 'auto'}</span>
       </label>`;
     }).join('');
   document.body.appendChild(drop);
