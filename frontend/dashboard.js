@@ -1480,11 +1480,6 @@ function updatePositionRowsWithLive(rows, sym, livePrice) {
   for (const pos of (rows || [])) {
     if ((pos.symbol || '').toUpperCase() !== sym) continue;
     pos.currentRate = livePrice;
-    if (pos.openRate && pos.units) {
-      const direction = pos.isBuy === false ? -1 : 1;
-      pos.pnl = (livePrice - pos.openRate) * pos.units * direction;
-      pos.pnlPct = pos.amount ? pos.pnl / pos.amount * 100 : 0;
-    }
     touched = true;
   }
   return touched;
@@ -1538,9 +1533,7 @@ function onLivePriceUpdate(instrumentId) {
   // 2. Ceny tab
   if (activeMainTab === 'rates') updateRatesCells();
 
-  if (sym && updatePositionRowsWithLive(etoroPositions, sym, livePrice) && activeMainTab === 'etoro') {
-    renderEtoroList();
-  }
+  if (sym) updatePositionRowsWithLive(etoroPositions, sym, livePrice);
 
   // 3. Portfólio tab — aktualizuj currentRate, pnl, pnlPct bunky
   if (sym) {
@@ -1551,11 +1544,7 @@ function onLivePriceUpdate(instrumentId) {
       for (const row of rows) {
         if (row.symbol !== sym) continue;
         const rateEl = document.getElementById(`pc-${pid}-${sym}-currentRate`);
-        const pnlEl  = document.getElementById(`pc-${pid}-${sym}-pnl`);
-        const pctEl  = document.getElementById(`pc-${pid}-${sym}-pnlPct`);
         if (rateEl) rateEl.innerHTML = fmtPortVal(livePrice, 'price');
-        if (pnlEl)  pnlEl.innerHTML  = fmtPortVal(row.pnl,  'pnl');
-        if (pctEl)  pctEl.innerHTML  = fmtPortVal(row.pnlPct, 'pct');
       }
     }
     applyPredictiveLivePrice(sym, livePrice);
