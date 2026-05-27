@@ -826,6 +826,7 @@ async function renderPortMainView() {
 
 const PORT_COLS = [
   { key:'symbol',      label:'Ticker',       def:true,  fmt:'sym'    },
+  { key:'trade',       label:'Trade',        def:true,  fmt:'trade'  },
   { key:'type',        label:'Typ',          def:true,  fmt:'type'   },
   { key:'isBuy',       label:'Smer',         def:true,  fmt:'dir'    },
   { key:'openDateTime',label:'Otvorené',     def:true,  fmt:'date'   },
@@ -1148,8 +1149,9 @@ function renderPortPanel(pid) {
               <span class="port-sym">${sym}${count}</span>
               <span class="port-name">${row.name||''}</span>
             </div>
-            ${etoroTradeBtnHtml(sym)}
           </div></td>`;
+        } else if (col.key === 'trade') {
+          html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
         } else {
           const liveCols = ['currentRate','pnl','pnlPct'];
           const cellId = liveCols.includes(col.key) ? `id="pc-${pid}-${sym}-${col.key}"` : '';
@@ -1173,6 +1175,8 @@ function renderPortPanel(pid) {
       for (const col of cols) {
         if (col.key === 'symbol') {
           html += `<td style="font-family:var(--font-ui);font-size:10px;font-weight:700;color:var(--muted2);letter-spacing:.5px;padding:7px 8px;">SPOLU (${rows.length})</td>`;
+        } else if (col.key === 'trade') {
+          html += `<td></td>`;
         } else if (col.key === 'amount') {
           html += `<td class="r" style="font-weight:700;">$${totalInvested.toFixed(2)}</td>`;
         } else if (col.key === 'pnl') {
