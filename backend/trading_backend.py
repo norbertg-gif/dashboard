@@ -2026,10 +2026,30 @@ def _tail_adds_new_candle(cached: dict, new_data: dict, interval: str) -> bool:
 
 def _tail_refresh_count(interval: str) -> int:
     if interval in ("OneMinute", "FiveMinutes", "ThirtyMinutes"):
-        return 8
+        return 3
     if interval in ("OneHour", "FourHours"):
-        return 6
+        return 3
     return 3
+
+
+def _tail_refresh_ttl(interval: str) -> int:
+    if interval == "OneMinute":
+        return 30
+    if interval in ("FiveMinutes", "ThirtyMinutes"):
+        return 90
+    if interval in ("OneHour", "FourHours"):
+        return 180
+    return 300
+
+
+def _full_fetch_count(interval: str) -> int:
+    if interval == "OneMinute":
+        return 390
+    if interval in ("FiveMinutes", "ThirtyMinutes"):
+        return 500
+    if interval in ("OneHour", "FourHours"):
+        return 750
+    return 1000
 
 
 # ── CANDLESTICK PATTERN DETECTION ────────────────────────────────────────────
@@ -2181,20 +2201,24 @@ def get_ohlcv(
                 last_cached_date = _last_candle_key(cached_candles, fetch_interval)
                 today = _latest_expected_candle_date(fetch_interval)
                 cache_age = cache_age_seconds(ohlcv_cache_path)
-                fetch_new_count = _days_missing(last_cached_date, today, fetch_interval)
-                tail_count = max(_tail_refresh_count(fetch_interval), min(fetch_new_count + 3, 50) if fetch_new_count > 0 else 0)
-                url_tail = f"{ETORO_PROXY}/etoro/market-data/instruments/{iid}/history/candles/asc/{fetch_interval}/{tail_count}?account={account}"
-                try:
-                    resp_tail = fetch_with_retry(url_tail, timeout=6, retries=1)
-                    tail_raw = resp_tail.json()
-                    raw = _merge_ohlcv_tail(cached_raw, tail_raw, fetch_interval)
-                    if _tail_adds_new_candle(cached_raw, tail_raw, fetch_interval):
-                        cache_write(ohlcv_cache_path, raw)
-                    tail_n = len(_flatten_ohlcv(tail_raw))
-                    print(f"  OHLCV cache+tail: {sym} {fetch_interval} ({cached_count} cached, tail {tail_n}, age={int(cache_age)}s)")
-                except Exception as e:
+                if cache_age < _tail_refresh_ttl(fetch_interval):
                     raw = cached_raw
-                    print(f"  OHLCV tail fallback: {sym} {fetch_interval}: {e}")
+                    print(f"  OHLCV fresh cache: {sym} {fetch_interval} ({cached_count} cached, age={int(cache_age)}s)")
+                else:
+                    fetch_new_count = _days_missing(last_cached_date, today, fetch_interval)
+                    tail_count = max(_tail_refresh_count(fetch_interval), min(fetch_new_count + 3, 50) if fetch_new_count > 0 else 0)
+                    url_tail = f"{ETORO_PROXY}/etoro/market-data/instruments/{iid}/history/candles/asc/{fetch_interval}/{tail_count}?account={account}"
+                    try:
+                        resp_tail = fetch_with_retry(url_tail, timeout=6, retries=1)
+                        tail_raw = resp_tail.json()
+                        raw = _merge_ohlcv_tail(cached_raw, tail_raw, fetch_interval)
+                        if _tail_adds_new_candle(cached_raw, tail_raw, fetch_interval):
+                            cache_write(ohlcv_cache_path, raw)
+                        tail_n = len(_flatten_ohlcv(tail_raw))
+                        print(f"  OHLCV cache+tail: {sym} {fetch_interval} ({cached_count} cached, tail {tail_n}, age={int(cache_age)}s)")
+                    except Exception as e:
+                        raw = cached_raw
+                        print(f"  OHLCV tail fallback: {sym} {fetch_interval}: {e}")
 
     if raw is None:
         iid = iid or get_instrument_id(sym, account)
@@ -2202,7 +2226,7 @@ def get_ohlcv(
             raise HTTPException(404, f"Instrument '{sym}' nenájdený na eToro")
         # Prvé načítanie — fetchni vždy maximum (1000) pre daný interval
         # Takto máme plnú históriu lokálne pre akúkoľvek periódu
-        FULL_FETCH_COUNT = 1000
+        FULL_FETCH_COUNT = _full_fetch_count(fetch_interval)
         url = f"{ETORO_PROXY}/etoro/market-data/instruments/{iid}/history/candles/asc/{fetch_interval}/{FULL_FETCH_COUNT}?account={account}"
         try:
             resp = fetch_with_retry(url, timeout=20, retries=2)
