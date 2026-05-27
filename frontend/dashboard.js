@@ -950,6 +950,7 @@ async function loadPortData(pid) {
     const r = await fetch(`${API}/api/etoro/portfolio?account=${s.account}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     s.data = await r.json();
+    preparePortfolioSnapshot(s.data);
     rememberLiveInstruments(s.data.positions);
   } catch(e) {
     s.data = { error: e.message };
@@ -976,6 +977,74 @@ function fmtPortVal(val, fmt) {
     case 'lev':   return `x${n}`;
     case 'id':    return `<span style="color:var(--muted);font-size:9px;">${val}</span>`;
     default:      return String(val);
+  }
+}
+
+function preparePortfolioSnapshot(data) {
+  if (!data || data.error) return;
+  const sum = data.summary || {};
+  sum._snapshotTotalPnl = Number(sum.total_pnl || 0);
+  sum._snapshotEquity = Number(sum.equity || 0);
+  sum._liveTotalPnl = sum._snapshotTotalPnl;
+  sum._liveEquity = sum._snapshotEquity;
+  (data.positions || []).forEach(pos => {
+    pos._snapshotPnl = Number(pos.pnl || 0);
+    pos._snapshotCurrentRate = Number(pos.currentRate || 0);
+    pos._livePnl = pos._snapshotPnl;
+  });
+}
+
+function estimatePositionLivePnl(pos, livePrice) {
+  const snapshotPnl = Number(pos._snapshotPnl ?? pos.pnl ?? 0);
+  const snapshotRate = Number(pos._snapshotCurrentRate || pos.currentRate || 0);
+  const units = Number(pos.units || 0);
+  if (!Number.isFinite(livePrice) || livePrice <= 0 || !snapshotRate || !units) return snapshotPnl;
+  const direction = pos.isBuy === false ? -1 : 1;
+  return snapshotPnl + (livePrice - snapshotRate) * units * direction;
+}
+
+function recalcPortfolioLiveSummary(data) {
+  if (!data?.positions || !data.summary) return;
+  const sum = data.summary;
+  const snapshotTotal = Number(sum._snapshotTotalPnl ?? sum.total_pnl ?? 0);
+  const snapshotEquity = Number(sum._snapshotEquity ?? sum.equity ?? 0);
+  const liveTotal = data.positions.reduce((acc, pos) => acc + Number(pos._livePnl ?? pos.pnl ?? 0), 0);
+  const snapshotRows = data.positions.reduce((acc, pos) => acc + Number(pos._snapshotPnl ?? pos.pnl ?? 0), 0);
+  const liveDelta = liveTotal - snapshotRows;
+  sum._liveTotalPnl = snapshotTotal + liveDelta;
+  sum._liveEquity = snapshotEquity + liveDelta;
+}
+
+function updatePortfolioSummaryDom(pid, data) {
+  const sum = data?.summary;
+  if (!sum) return;
+  const pnl = Number(sum._liveTotalPnl ?? sum.total_pnl ?? 0);
+  const eq = Number(sum._liveEquity ?? sum.equity ?? 0);
+  const pnlEl = document.getElementById(`port-sum-${pid}-pnl`);
+  const eqEl = document.getElementById(`port-sum-${pid}-equity`);
+  if (pnlEl) {
+    pnlEl.className = `port-sum-val ${pnl >= 0 ? 'port-pos' : 'port-neg'}`;
+    pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+  }
+  if (eqEl) eqEl.textContent = `$${eq.toFixed(2)}`;
+}
+
+function updatePortfolioTickerRowsDom(pid, state, sym) {
+  const rows = getFilteredPositions(state);
+  for (const row of rows) {
+    if (row.symbol !== sym) continue;
+    const livePnl = Number(row._livePnl ?? row.pnl ?? 0);
+    const livePct = Number(row._livePnlPct ?? (row.amount ? livePnl / row.amount * 100 : row.pnlPct ?? 0));
+    document.querySelectorAll(`[data-port-cell="${pid}-${sym}-currentRate"]`).forEach(el => {
+      el.innerHTML = fmtPortVal(row.currentRate, 'price');
+    });
+    document.querySelectorAll(`[data-port-cell="${pid}-${sym}-pnl"]`).forEach(el => {
+      el.innerHTML = fmtPortVal(livePnl, 'pnl');
+    });
+    document.querySelectorAll(`[data-port-cell="${pid}-${sym}-pnlPct"]`).forEach(el => {
+      el.innerHTML = fmtPortVal(livePct, 'pct');
+    });
+    break;
   }
 }
 
@@ -1013,6 +1082,7 @@ function getFilteredPositions(s) {
         ...r,
         amount:   r.amount   || 0,
         pnl:      r.pnl      || 0,
+        _livePnl: r._livePnl ?? r.pnl ?? 0,
         dailyPnl: r.dailyPnl || 0,
         fees:     r.fees     || 0,
         _count: 1, _trades: [r]
@@ -1021,12 +1091,14 @@ function getFilteredPositions(s) {
         const g = groups[r.symbol];
         g.amount    += (r.amount   || 0);
         g.pnl       += (r.pnl      || 0);
+        g._livePnl  += (r._livePnl ?? r.pnl ?? 0);
         g.dailyPnl  += (r.dailyPnl || 0);
         g.fees      += (r.fees     || 0);
         g.units     = (g.units || 0) + (r.units || 0);
         g._count    += 1;
         g._trades.push(r);
         g.pnlPct = g.amount ? g.pnl / g.amount * 100 : 0;
+        if (g._livePnl != null) g._livePnlPct = g.amount ? g._livePnl / g.amount * 100 : 0;
         // Vážený priemer vstupnej ceny (weighted by units)
         const totalUnits = g._trades.reduce((s, t) => s + (t.units || 0), 0);
         g.openRate = totalUnits > 0
@@ -1143,8 +1215,8 @@ function renderPortPanel(pid) {
   html += `<div class="port-summary">
     <div class="port-sum-item"><div class="port-sum-label">Cash</div><div class="port-sum-val" style="color:var(--green);">$${(sum.cash||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Invested</div><div class="port-sum-val">$${(sum.invested||0).toFixed(2)}</div></div>
-    <div class="port-sum-item"><div class="port-sum-label">P/L</div><div class="port-sum-val ${(sum.total_pnl||0)>=0?'port-pos':'port-neg'}">${(sum.total_pnl||0)>=0?'+':''}$${(sum.total_pnl||0).toFixed(2)}</div></div>
-    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div class="port-sum-val" style="color:var(--blue);">$${(sum.equity||0).toFixed(2)}</div></div>
+    <div class="port-sum-item"><div class="port-sum-label">P/L</div><div id="port-sum-${pid}-pnl" class="port-sum-val ${(sum._liveTotalPnl??sum.total_pnl||0)>=0?'port-pos':'port-neg'}">${(sum._liveTotalPnl??sum.total_pnl||0)>=0?'+':''}$${(sum._liveTotalPnl??sum.total_pnl||0).toFixed(2)}</div></div>
+    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${(sum._liveEquity??sum.equity||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
   </div>`;
@@ -1187,8 +1259,13 @@ function renderPortPanel(pid) {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
         } else {
           const liveCols = ['currentRate','pnl','pnlPct'];
-          const cellId = liveCols.includes(col.key) ? `id="pc-${pid}-${sym}-${col.key}"` : '';
-          html += `<td ${cellId} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(row[col.key], col.fmt)}</td>`;
+          const liveAttr = liveCols.includes(col.key) ? `data-port-cell="${pid}-${sym}-${col.key}"` : '';
+          const val = col.key === 'pnl'
+            ? (row._livePnl ?? row.pnl)
+            : col.key === 'pnlPct'
+              ? (row._livePnlPct ?? row.pnlPct)
+              : row[col.key];
+          html += `<td ${liveAttr} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(val, col.fmt)}</td>`;
         }
       }
       html += `</tr>`;
@@ -1551,6 +1628,7 @@ function updatePositionRowsWithLive(rows, sym, livePrice) {
   for (const pos of (rows || [])) {
     if ((pos.symbol || '').toUpperCase() !== sym) continue;
     pos.currentRate = livePrice;
+    pos._livePnl = estimatePositionLivePnl(pos, livePrice);
     touched = true;
   }
   return touched;
@@ -1611,12 +1689,9 @@ function onLivePriceUpdate(instrumentId) {
     for (const [pid, state] of Object.entries(portState)) {
       if (!state?.data?.positions) continue;
       updatePositionRowsWithLive(state.data.positions, sym, livePrice);
-      const rows = getFilteredPositions(state);
-      for (const row of rows) {
-        if (row.symbol !== sym) continue;
-        const rateEl = document.getElementById(`pc-${pid}-${sym}-currentRate`);
-        if (rateEl) rateEl.innerHTML = fmtPortVal(livePrice, 'price');
-      }
+      recalcPortfolioLiveSummary(state.data);
+      updatePortfolioSummaryDom(pid, state.data);
+      updatePortfolioTickerRowsDom(pid, state, sym);
     }
     applyPredictiveLivePrice(sym, livePrice);
   }
