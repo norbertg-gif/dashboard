@@ -5417,6 +5417,7 @@ function opportunityPositionInfo(symbol) {
 }
 
 function scoreOpportunity(row) {
+  if (Number.isFinite(Number(row.setup_score))) return Number(row.setup_score);
   let score = 0;
   if (row.weekly_bullish) score += 35;
   if (row.recent_signal) score += row.recent_signal.score === 3 ? 35 : 24;
@@ -5429,6 +5430,9 @@ function scoreOpportunity(row) {
 function opportunityReasons(row, pos, days) {
   const sig = row.recent_signal;
   const reasons = [];
+  (row.positive_factors || []).slice(0, 3).forEach(text => reasons.push({ cls: 'good', text }));
+  (row.risk_flags || []).slice(0, 2).forEach(text => reasons.push({ cls: 'warn', text }));
+  if (reasons.length >= 4) return reasons.slice(0, 4);
   reasons.push({ cls: row.weekly_bullish ? 'good' : 'bad', text: row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup' });
   if (sig) {
     reasons.push({ cls: sig.score === 3 ? 'good' : 'warn', text: 'Najnovší signál ' + sig.score + '/3 z ' + sig.date });
@@ -5469,6 +5473,9 @@ function renderOpportunities(rows, days) {
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
     const sigTxt = sig ? `${sig.score}/3 ${sig.date}` : `bez signálu ${days}d`;
     const posTxt = pos ? `${pos.count}x eToro ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(0)}` : 'mimo portf.';
+    const grade = r.setup_grade || (r._score >= 78 ? 'A' : r._score >= 62 ? 'B' : r._score >= 45 ? 'Watch' : 'Risky');
+    const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
+    const metrics = r.metrics ? `RSI ${r.metrics.rsi ?? '-'} | ATR ${r.metrics.atr_pct ?? '-'}%` : '';
     const reasons = opportunityReasons(r, pos, days).map(reason =>
       `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${reason.text}</span>`
     ).join('');
@@ -5479,10 +5486,12 @@ function renderOpportunities(rows, days) {
         <span class="opp-score-wrap"><span class="opp-score-label">score</span><span class="opp-score">${r._score}</span></span>
       </div>
       <div class="opp-meta">
+        <span class="opp-pill ${gradeCls}">${grade}</span>
         <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
         <span class="opp-pill ${sigCls}">${sigTxt}</span>
         <span class="opp-pill ${posCls}">${posTxt}</span>
       </div>
+      ${metrics ? `<div style="font-family:var(--font-mono);font-size:10px;color:var(--muted2);padding:2px 0 0;">${metrics}</div>` : ''}
       <div class="opp-reasons">${reasons}</div>
     </div>`;
   }).join('') + `<div class="opp-empty" style="font-size:10px;padding-top:2px;">Zobrazené top ${ranked.length} z ${clean.length} tickerov${errorCount ? `, ${errorCount} s chybou dát` : ''}.</div>`;
