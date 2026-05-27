@@ -3014,6 +3014,115 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
 
 
 
+def _finite_float(value, default=None):
+    try:
+        v = float(value)
+        if math.isnan(v) or math.isinf(v):
+            return default
+        return v
+    except Exception:
+        return default
+
+
+def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | None, signal_count: int) -> dict:
+    """Lightweight ranking layer for Opportunities. It is a decision aid, not a trade instruction."""
+    last = df_d.iloc[-1]
+    close = _finite_float(last.get("Close"), 0) or 0
+    ema20 = _finite_float(last.get("ema20"), close) or close
+    kijun = _finite_float(last.get("ichi_kijun"), close) or close
+    rsi = _finite_float(last.get("rsi"), 50) or 50
+    atr = _finite_float(last.get("atr"), 0) or 0
+    vol_ratio = _finite_float(last.get("vol_ratio"), 1) or 1
+    macd_hist = _finite_float(last.get("macd_hist"), 0) or 0
+    adx = _finite_float(last.get("adx"), 0) or 0
+
+    score = 0
+    positive = []
+    risk = []
+
+    if weekly_bullish:
+        score += 24
+        positive.append("weekly trend podporuje long")
+    else:
+        risk.append("weekly trend este nepotvrdzuje")
+
+    if recent_signal:
+        sig_score = int(recent_signal.get("score") or 0)
+        score += 28 if sig_score >= 3 else 20
+        positive.append(f"novy signal {sig_score}/3")
+    else:
+        risk.append("bez cerstveho daily signalu")
+
+    if signal_count >= 3:
+        score += 10
+        positive.append("opakovane historicke signaly")
+    elif signal_count >= 1:
+        score += 5
+
+    if close > ema20:
+        score += 10
+        positive.append("cena nad EMA20")
+    else:
+        risk.append("cena pod EMA20")
+
+    dist_ema = abs(close - ema20) / close * 100 if close else 0
+    if dist_ema <= 6:
+        score += 8
+        positive.append("nie je daleko od EMA20")
+    elif dist_ema > 12:
+        score -= 8
+        risk.append("cena je uz natiahnuta od EMA20")
+
+    support_dist = min(abs(close - ema20), abs(close - kijun)) / close * 100 if close else 0
+    if support_dist <= 3:
+        score += 8
+        positive.append("blizko EMA/Kijun zony")
+
+    if 38 <= rsi <= 62:
+        score += 8
+        positive.append("RSI v rozumnom pasme")
+    elif rsi > 72:
+        score -= 10
+        risk.append("RSI prehriate")
+    elif rsi < 32:
+        score -= 4
+        risk.append("RSI velmi slabe")
+
+    atr_pct = atr / close * 100 if close else 0
+    if atr_pct <= 4:
+        score += 6
+    elif atr_pct > 8:
+        score -= 8
+        risk.append("vysoka volatilita")
+
+    if vol_ratio >= 1.2:
+        score += 5
+        positive.append("objem nad priemerom")
+
+    if macd_hist > 0:
+        score += 5
+        positive.append("MACD momentum pozitivne")
+
+    if adx >= 20:
+        score += 4
+        positive.append("trend ma silu")
+
+    score = int(max(0, min(100, round(score))))
+    grade = "A" if score >= 78 else "B" if score >= 62 else "Watch" if score >= 45 else "Risky"
+    return {
+        "setup_score": score,
+        "setup_grade": grade,
+        "positive_factors": positive[:5],
+        "risk_flags": risk[:5],
+        "metrics": {
+            "rsi": round(rsi, 1),
+            "atr_pct": round(atr_pct, 2),
+            "dist_ema20_pct": round(dist_ema, 2),
+            "vol_ratio": round(vol_ratio, 2),
+        },
+    }
+
+
 @app.get("/api/checklist")
 def run_checklist(tickers: str = "", days: int = 10):
     """Scan list of tickers for recent buy signals. Fetches live data for each."""
@@ -3102,12 +3211,14 @@ def run_checklist(tickers: str = "", days: int = 10):
             if ticker_slog:
                 slog[ticker] = ticker_slog
 
+            setup = build_setup_assessment(df_d, weekly_bullish, recent_signal, len(all_signals))
             results.append({
                 "ticker":         ticker,
                 "weekly_bullish": weekly_bullish,
                 "recent_signal":  recent_signal,
                 "signal_count":   len(all_signals),
                 "last_close":     round(float(df_d.iloc[-1]["Close"]), 2),
+                **setup,
                 "error":          None,
             })
         except Exception as e:
