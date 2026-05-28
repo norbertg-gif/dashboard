@@ -8,19 +8,20 @@ from socketserver import ThreadingMixIn
 import urllib.request, urllib.error, urllib.parse
 import json, uuid
 import threading
+import os
 
 # === ÚČET 1 ===
 ACCOUNT1 = {
-    "name":     "Marvin",
-    "api_key":  "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf",
-    "user_key": "eyJjaSI6IjYwY2FiYjBiLTU1OTctNDQ4NS04ZjYzLTdlOWUwNTZlMGJiOCIsImVhbiI6IlVucmVnaXN0ZXJlZEFwcGxpY2F0aW9uIiwiZWsiOiJKdW9zVlRhVnMxUGxGSXVEQS45d0c4Zld3WHhaOEVUYmFnZTdOcWlUN3RTN1FBbnNsejZuWXN0emRUb1dzRWo3YWJCSW1RR1g3STBHd1VWZjlLWi5NNUVSNlkwQzNIWjltR3F5ME90Njh2WV8ifQ__",
+    "name":     os.getenv("ETORO_ACCOUNT_NAME_1", "Account 1"),
+    "api_key":  os.getenv("ETORO_API_KEY_1", ""),
+    "user_key": os.getenv("ETORO_USER_KEY_1", ""),
 }
 
 # === ÚČET 2 ===
 ACCOUNT2 = {
-    "name":     "Nelka",
-    "api_key":  "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf",
-    "user_key": "eyJjaSI6IjYwY2FiYjBiLTU1OTctNDQ4NS04ZjYzLTdlOWUwNTZlMGJiOCIsImVhbiI6IlVucmVnaXN0ZXJlZEFwcGxpY2F0aW9uIiwiZWsiOiI5M29yZGJBT1VVRnpBN050cHJjbVJHcHhqQmRSYUVuTGtNQVpnWVJHem5LbnVDZUs5R21BSGpMSXBWQUhhbXcxSzJQd3BMYURiMllyVTJXUWFHSkE1Z2lud2o3N2RpUVlweWd6Li1XTUhiWV8ifQ__",
+    "name":     os.getenv("ETORO_ACCOUNT_NAME_2", "Account 2"),
+    "api_key":  os.getenv("ETORO_API_KEY_2", ""),
+    "user_key": os.getenv("ETORO_USER_KEY_2", ""),
 }
 
 ACCOUNTS = {"1": ACCOUNT1, "2": ACCOUNT2}
@@ -37,10 +38,12 @@ ROUTES = {
 def get_account(query_string):
     for p in query_string.split("&"):
         if p.startswith("account="):
-            return ACCOUNTS.get(p.split("=",1)[1], ACCOUNT1)
-    return ACCOUNT1
+            return ACCOUNTS.get(p.split("=",1)[1], ACCOUNTS["1"])
+    return ACCOUNTS["1"]
 
 def make_headers(account):
+    if not account.get("api_key") or not account.get("user_key"):
+        raise RuntimeError("Missing eToro API credentials in environment variables")
     return {
         "x-api-key":    account["api_key"],
         "x-user-key":   account["user_key"],
@@ -187,7 +190,7 @@ def start_proxy_thread():
 if __name__ == "__main__":
     print(f"eToro proxy bezi na http://localhost:{PORT}")
     for k, v in ACCOUNTS.items():
-        ok = v['api_key'] != 'VLOZ_API_KEY_UCET1' and v['api_key'] != 'VLOZ_API_KEY_UCET2'
+        ok = bool(v.get("api_key") and v.get("user_key"))
         print(f"  Ucet {k}: {v['name']} - {'OK' if ok else 'KLUCE CHYBAJU'}")
     print("Stlac Ctrl+C pre zastavenie.\n")
     try:
