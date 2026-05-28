@@ -2692,7 +2692,9 @@ function getCurrentConfig() {
         symbol: symEl.value.trim().toUpperCase(),
         period: 'auto',
         interval: p.querySelector('.interval-sel')?.value || '1d',
-        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}
+        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+        view: r?.viewRange || null,
+        chartHeight: p.querySelector('.p-chart')?.offsetHeight || null,
       };
     }).filter(Boolean);
   } catch(e) { console.error('getCurrentConfig error:', e); return []; }
@@ -2911,6 +2913,12 @@ function ensureMacdChart(id, r) {
 function createPanel(cfg) {
   const id = 'pnl' + (++panelSeq);
   const inds = cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false};
+  const initialViewRange = cfg.view && Number.isFinite(Number(cfg.view.from)) && Number.isFinite(Number(cfg.view.to))
+    ? { from: Number(cfg.view.from), to: Number(cfg.view.to) }
+    : null;
+  const initialChartHeight = Number.isFinite(Number(cfg.chartHeight))
+    ? Math.min(600, Math.max(120, Number(cfg.chartHeight)))
+    : null;
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = id;
   panel.innerHTML = `
@@ -2965,7 +2973,8 @@ function createPanel(cfg) {
   document.getElementById('grid').appendChild(panel);
 
   const mainCont  = document.getElementById('chart-' + id);
-  const mainChart = makeChart(mainCont, 240);
+  if (initialChartHeight) mainCont.style.height = initialChartHeight + 'px';
+  const mainChart = makeChart(mainCont, initialChartHeight || 240);
   const candleSeries = mainChart.addCandlestickSeries({ upColor:'#00c99a', downColor:'#ff4560', borderVisible:false, wickUpColor:'#00c99a', wickDownColor:'#ff4560' });
   const volSeries    = mainChart.addHistogramSeries({ color:'#00c99a22', priceFormat:{type:'volume'}, priceScaleId:'vol' });
   mainChart.priceScale('vol').applyOptions({ scaleMargins:{top:0.85,bottom:0} });
@@ -2996,9 +3005,22 @@ function createPanel(cfg) {
     adxChart:null, adxLine:null, diPLine:null, diMLine:null, adxThr:null,
     macdChart:null, macdLine:null, macdSignal:null, macdHist:null,
     syncFrom, overlaySeries:{}, indicators:{...inds}, ro,
+    viewRange: initialViewRange,
+    suppressViewSave: false,
+    viewSaveTimer: null,
     lastWizardData: null, avgPriceLine: null, entryPriceLines: [], etoroPct: null,
     abortController: null, loadSeq: 0,
   };
+
+  mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    const reg = registry[id];
+    if (!reg || reg.suppressViewSave || !range) return;
+    const from = Number(range.from), to = Number(range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+    reg.viewRange = { from, to };
+    clearTimeout(reg.viewSaveTimer);
+    reg.viewSaveTimer = setTimeout(saveLayout, 350);
+  });
 
   // Aplikuj tag
   const symTag = (cfg.symbol || '').toUpperCase();
@@ -3029,7 +3051,7 @@ function createPanel(cfg) {
       function onUp() {
         document.body.style.cursor = ''; document.body.style.userSelect = '';
         const h = document.getElementById('chart-' + id)?.offsetHeight;
-        if (h) localStorage.setItem('td_ch_' + id, h);
+        if (h) saveLayout();
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
       }
@@ -3790,6 +3812,10 @@ async function loadChart(id, opts = {}) {
 
   const r = registry[id];
   if (!r) return;
+  const chartKey = `${sym}|${period}|${interval}`;
+  if (r.loadedChartKey && r.loadedChartKey !== chartKey) {
+    r.viewRange = null;
+  }
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
   const loadSeq = ++r.loadSeq;
@@ -3845,7 +3871,22 @@ async function loadChart(id, opts = {}) {
     r.volSeries.setData(volumeData);
     if (candleData.length) r.candleSeries.update(candleData[candleData.length - 1]);
     if (volumeData.length) r.volSeries.update(volumeData[volumeData.length - 1]);
-    r.mainChart.timeScale().fitContent();
+    const restoredView = r.viewRange && Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
+      ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
+      : null;
+    if (restoredView) {
+      try {
+        r.suppressViewSave = true;
+        r.mainChart.timeScale().setVisibleLogicalRange(restoredView);
+      } catch(e) {
+        r.mainChart.timeScale().fitContent();
+      } finally {
+        setTimeout(() => { if (registry[id]) registry[id].suppressViewSave = false; }, 0);
+      }
+    } else {
+      r.mainChart.timeScale().fitContent();
+    }
+    r.loadedChartKey = chartKey;
     applyOverlays(id, data, r);
     r.etoroPct = null;
     if (r.indicators.ha) {
@@ -3969,6 +4010,7 @@ function removePortPanel(pid) {
 function removePanel(id) {
   const r = registry[id];
   if (r) {
+    clearTimeout(r.viewSaveTimer);
     r.ro.disconnect();
     r.mainChart.remove();
     if (r.rsiChart)  r.rsiChart.remove();
