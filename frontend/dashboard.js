@@ -2632,8 +2632,7 @@ function onSbKeydown(e) {
 const getIntervals = () => ALL_INTERVALS;
 const fmtPrice = p => p >= 10000 ? p.toFixed(0) : p >= 100 ? p.toFixed(2) : p >= 1 ? p.toFixed(4) : p.toFixed(6);
 const delay = ms => new Promise(r => setTimeout(r, ms));
-const periodOpts = () => '<option value="auto" selected>auto</option>';
-const intervalOpts = (_period, sel) => {
+const intervalOpts = (sel) => {
   const selected = ALL_INTERVALS.includes(sel) ? sel : '1d';
   return ALL_INTERVALS.map(i => `<option value="${i}"${i===selected?' selected':''}>${i}</option>`).join('');
 };
@@ -2691,7 +2690,7 @@ function getCurrentConfig() {
       const r = registry[p.id];
       return {
         symbol: symEl.value.trim().toUpperCase(),
-        period: p.querySelector('.period-sel')?.value || '1y',
+        period: 'auto',
         interval: p.querySelector('.interval-sel')?.value || '1d',
         indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}
       };
@@ -2920,10 +2919,7 @@ function createPanel(cfg) {
              oninput="onSymInput(event)"
              onkeydown="onSymKeydown(event,'${id}')"
              onfocus="setActivePanel('${id}');if(this.value.length>1){ddTarget=this;doSearch(this.value);}">
-      <select class="p-sel period-sel" onchange="onPeriodChange('${id}',this.value)">
-        ${periodOpts(cfg.period)}
-      </select>
-      <select class="p-sel interval-sel">${intervalOpts(cfg.period, cfg.interval)}</select>
+      <select class="p-sel interval-sel">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
       <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
       <a id="trade-btn-${id}" href="#" target="_blank" rel="noopener"
@@ -3043,12 +3039,6 @@ function createPanel(cfg) {
   }
 
   return id;
-}
-
-function onPeriodChange(id, period) {
-  const iSel = document.getElementById(id).querySelector('.interval-sel');
-  const keep = ALL_INTERVALS.includes(iSel.value) ? iSel.value : '1d';
-  iSel.innerHTML = intervalOpts(period, keep);
 }
 
 // ── CLOUD CANVAS ─────────────────────────────────────────────────────────────
@@ -3794,7 +3784,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
 async function loadChart(id, opts = {}) {
   const panel = document.getElementById(id); if (!panel) return;
   const sym      = panel.querySelector('.p-sym').value.trim().toUpperCase();
-  const period   = panel.querySelector('.period-sel').value;
+  const period   = 'auto';
   const interval = panel.querySelector('.interval-sel').value;
   if (!sym) return;
 
@@ -4025,7 +4015,7 @@ async function loadAll() {
   // Zostav batch požiadavky
   const requests = panels.map(panel => {
     const sym      = panel.querySelector('.p-sym').value.trim().toUpperCase();
-    const period   = panel.querySelector('.period-sel').value;
+    const period   = 'auto';
     const interval = panel.querySelector('.interval-sel').value;
     const r        = registry[panel.id];
     const indParam = r ? getActiveIndicators(panel.id) : '';
