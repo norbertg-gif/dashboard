@@ -56,7 +56,7 @@ DATA_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Trading Dashboard API")
 
 # ── Public API token (pre Claude / externý prístup bez Basic Auth) ────────────
-PUBLIC_API_TOKEN = os.getenv("PUBLIC_API_TOKEN", "marvin2026")
+PUBLIC_API_TOKEN = os.getenv("PUBLIC_API_TOKEN", "")
 
 # ══ PREDICTIVE CHART — functions ══════════════════════════════
 # ── Indicators ────────────────────────────────────────────────────────────────
@@ -627,7 +627,7 @@ def get_public_portfolio(token: str = Query(...), account: str = Query("1")):
     Vráti aktuálne pozície + summary pre daný účet.
     Použitie: GET /api/public/portfolio?token=<PUBLIC_API_TOKEN>&account=1
     """
-    if not _secrets.compare_digest(token, PUBLIC_API_TOKEN):
+    if not PUBLIC_API_TOKEN or not _secrets.compare_digest(token, PUBLIC_API_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid token")
 
     # 1. RAM cache — najrýchlejší
