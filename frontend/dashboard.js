@@ -1030,6 +1030,12 @@ function updatePortfolioSummaryDom(pid, data) {
 }
 
 function updatePortfolioTickerRowsDom(pid, state, sym) {
+  if (state.view !== 'ticker') {
+    document.querySelectorAll(`[data-port-cell="${pid}-${sym}-currentRate"]`).forEach(el => {
+      el.innerHTML = fmtPortVal(state.data?.positions?.find(p => p.symbol === sym)?.currentRate, 'price');
+    });
+    return;
+  }
   const rows = getFilteredPositions(state);
   for (const row of rows) {
     if (row.symbol !== sym) continue;
@@ -1262,9 +1268,10 @@ function renderPortPanel(pid) {
         } else {
           const liveCols = ['currentRate','pnl','pnlPct'];
           const liveAttr = liveCols.includes(col.key) ? `data-port-cell="${pid}-${sym}-${col.key}"` : '';
-          const val = col.key === 'pnl'
+          const useLiveEstimate = s.view === 'ticker';
+          const val = useLiveEstimate && col.key === 'pnl'
             ? (row._livePnl ?? row.pnl)
-            : col.key === 'pnlPct'
+            : useLiveEstimate && col.key === 'pnlPct'
               ? (row._livePnlPct ?? row.pnlPct)
               : row[col.key];
           html += `<td ${liveAttr} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(val, col.fmt)}</td>`;
