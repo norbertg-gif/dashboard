@@ -121,6 +121,7 @@ function switchMainTab(tab) {
         wlRender();
         loadData();
         refreshOpportunities();
+        loadNasdaqScannerResults();
       };
       setTimeout(() => tryInit(20), 200);
     } else {
@@ -4464,6 +4465,8 @@ let pc_dailyMainSeries = null;
 let pc_currentView = 'weekly';
 let pc_oppLoading = false;
 let pc_oppLoadedAt = 0;
+let pc_scannerPollTimer = null;
+let pc_scannerLoading = false;
 
 // Overlay series refs
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
@@ -5808,6 +5811,121 @@ async function refreshOpportunities(force = false) {
 }
 
 // ── Watchlist
+function scannerStatusLine(state, cache) {
+  if (state && state.running) {
+    const progress = Number(state.progress || 0);
+    const total = Number(state.total || 0);
+    const pct = total ? Math.round(progress / total * 100) : 0;
+    const cur = state.current ? ` · ${state.current}` : '';
+    return `Scan bezi: ${progress}/${total} (${pct}%)${cur}`;
+  }
+  if (cache && cache.generated_at) {
+    const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
+    return `Posledny scan: ${dt} · ${cache.matches || 0}/${cache.total || 0} signalov`;
+  }
+  return 'Zatial nie je spusteny ziaden Nasdaq scan.';
+}
+
+function renderNasdaqScanner(payload) {
+  const el = document.getElementById('nasdaqScannerInfo');
+  if (!el) return;
+  const state = payload?.state || {};
+  const cache = payload?.cache || {};
+  const rows = Array.isArray(cache.results) ? cache.results : [];
+  const status = scannerStatusLine(state, cache);
+
+  if (state.error) {
+    el.className = 'error-msg';
+    el.textContent = 'Scanner chyba: ' + state.error;
+    return;
+  }
+
+  if (state.running && !rows.length) {
+    el.className = 'opp-empty';
+    el.innerHTML = `<span class="cl-spinner"></span>${escHtml(status)}`;
+    return;
+  }
+
+  if (!rows.length) {
+    el.className = 'opp-empty';
+    el.innerHTML = `${escHtml(status)}<div class="scanner-hint">Klikni Scan pre Nasdaq 100.</div>`;
+    return;
+  }
+
+  const ranked = rows.slice(0, 12);
+  el.className = 'opp-list scanner-list';
+  el.innerHTML = `<div class="scanner-status">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>` + ranked.map(r => {
+    const sig = r.recent_signal || {};
+    const score = Number(r.setup_score || 0);
+    const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
+    const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
+    const biasCls = r.weekly_bullish ? 'good' : 'bad';
+    const sigCls = Number(sig.score || 0) >= 3 ? 'good' : 'warn';
+    const metrics = r.metrics ? `RSI ${r.metrics.rsi ?? '-'} | ATR ${r.metrics.atr_pct ?? '-'}%` : '';
+    const reasons = [
+      ...(r.positive_factors || []).slice(0, 2).map(text => ({cls: 'good', text})),
+      ...(r.risk_flags || []).slice(0, 2).map(text => ({cls: 'warn', text})),
+    ].slice(0, 4).map(reason =>
+      `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${escHtml(reason.text)}</span>`
+    ).join('');
+    return `<div class="opp-item scanner-item" onclick="pc_selectTicker('${escHtml(r.ticker)}')">
+      <div class="opp-top">
+        <span class="opp-sym">${escHtml(r.ticker)}</span>
+        <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
+        <span class="opp-score-wrap"><span class="opp-score-label">score</span><span class="opp-score">${score}</span></span>
+      </div>
+      <div class="opp-meta">
+        <span class="opp-pill ${gradeCls}">${escHtml(grade)}</span>
+        <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
+        <span class="opp-pill ${sigCls}">${sig.score || '-'}/3 ${escHtml(sig.date || '')}</span>
+        <span class="opp-pill">Nasdaq 100</span>
+      </div>
+      ${metrics ? `<div style="font-family:var(--font-mono);font-size:10px;color:var(--muted2);padding:2px 0 0;">${metrics}</div>` : ''}
+      <div class="opp-reasons">${reasons}</div>
+    </div>`;
+  }).join('') + `<div class="opp-empty scanner-hint">Zobrazene top ${ranked.length} z ${rows.length} signalov.</div>`;
+}
+
+async function loadNasdaqScannerResults() {
+  const el = document.getElementById('nasdaqScannerInfo');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/scanner/nasdaq/results');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderNasdaqScanner(data);
+    if (data?.state?.running) scheduleNasdaqScannerPoll();
+  } catch(e) {
+    el.className = 'error-msg';
+    el.textContent = 'Scanner chyba: ' + e.message;
+  }
+}
+
+function scheduleNasdaqScannerPoll() {
+  if (pc_scannerPollTimer) clearTimeout(pc_scannerPollTimer);
+  pc_scannerPollTimer = setTimeout(loadNasdaqScannerResults, 2500);
+}
+
+async function runNasdaqScanner() {
+  const el = document.getElementById('nasdaqScannerInfo');
+  if (!el || pc_scannerLoading) return;
+  pc_scannerLoading = true;
+  el.className = 'opp-empty';
+  el.innerHTML = '<span class="cl-spinner"></span>Spustam Nasdaq scanner...';
+  try {
+    const res = await fetch('/api/scanner/nasdaq/run?days=3', { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderNasdaqScanner(data);
+    scheduleNasdaqScannerPoll();
+  } catch(e) {
+    el.className = 'error-msg';
+    el.textContent = 'Scanner chyba: ' + e.message;
+  } finally {
+    pc_scannerLoading = false;
+  }
+}
+
 const WL_KEY = 'td_watchlist'; // shared with dashboard
 const WL_DEFAULT = [];
 
@@ -6135,6 +6253,8 @@ window.openChecklist = openChecklist;
 window.closeChecklist = closeChecklist;
 window.runChecklist = runChecklist;
 window.refreshOpportunities = refreshOpportunities;
+window.runNasdaqScanner = runNasdaqScanner;
+window.loadNasdaqScannerResults = loadNasdaqScannerResults;
 window.importChecklistCSV = importChecklistCSV;
 window.addToChecklist = addToChecklist;
 window.removeFromChecklist = removeFromChecklist;
