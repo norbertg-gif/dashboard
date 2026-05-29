@@ -1261,6 +1261,70 @@ select.sel:focus {
 .risk-flag.danger { color: var(--down); border-color: var(--down); background: var(--down-soft); }
 .risk-flag.warn { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-soft); }
 .risk-flag.good { color: var(--up); border-color: var(--up); background: var(--up-soft); }
+.risk-heatmap-wrap {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.risk-heatmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.risk-heatmap-legend {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.risk-heatmap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 260px;
+  align-content: stretch;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+.risk-tile {
+  min-height: 72px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+  transition: transform .12s ease, border-color .12s ease, filter .12s ease;
+}
+.risk-tile:hover {
+  border-color: var(--accent);
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.risk-tile-symbol {
+  font-family: var(--font-ui);
+  font-size: clamp(15px, 2vw, 30px);
+  font-weight: 800;
+  line-height: 1;
+}
+.risk-tile-daily {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+.risk-tile-weight {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  opacity: .85;
+  margin-top: 3px;
+}
 
 /* ── ALERTS TOASTS ── */
 .alert-toast-container {
