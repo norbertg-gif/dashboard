@@ -3231,6 +3231,215 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
     }
 
 
+NASDAQ100_TICKERS = [
+    "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "AMAT", "AMD", "AMGN",
+    "AMZN", "ANSS", "APP", "ARM", "ASML", "AVGO", "AXON", "AZN", "BIIB", "BKNG",
+    "BKR", "CCEP", "CDNS", "CDW", "CEG", "CHTR", "CMCSA", "COST", "CPRT", "CRWD",
+    "CSCO", "CSGP", "CSX", "CTAS", "CTSH", "DASH", "DDOG", "DXCM", "EA", "EXC",
+    "FANG", "FAST", "FTNT", "GEHC", "GFS", "GILD", "GOOG", "GOOGL", "HON", "IDXX",
+    "INTC", "INTU", "ISRG", "KDP", "KHC", "KLAC", "LIN", "LRCX", "LULU", "MAR",
+    "MCHP", "MDLZ", "MELI", "META", "MNST", "MRVL", "MSFT", "MSTR", "MU", "NFLX",
+    "NVDA", "NXPI", "ODFL", "ON", "ORLY", "PANW", "PAYX", "PCAR", "PDD", "PEP",
+    "PLTR", "PYPL", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SNPS", "TEAM", "TMUS",
+    "TSLA", "TTD", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS",
+]
+
+SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
+_scanner_lock = threading.Lock()
+_scanner_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "progress": 0,
+    "total": 0,
+    "current": None,
+    "error": None,
+}
+
+
+def load_scanner_cache():
+    if SCANNER_CACHE_FILE.exists():
+        try:
+            return json.loads(SCANNER_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_scanner_cache(data):
+    SCANNER_CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
+    raw_d = yf.download(ticker, period="6mo", interval="1d", auto_adjust=True, progress=False)
+    if isinstance(raw_d.columns, pd.MultiIndex):
+        raw_d.columns = raw_d.columns.get_level_values(0)
+    raw_d = raw_d.dropna(subset=["Open", "High", "Low", "Close"])
+    if len(raw_d) < 20:
+        return {"ticker": ticker, "error": "Nedostatok dat"}
+
+    df_d = add_indicators(raw_d)
+
+    raw_w = yf.download(ticker, period="1y", interval="1wk", auto_adjust=True, progress=False)
+    if isinstance(raw_w.columns, pd.MultiIndex):
+        raw_w.columns = raw_w.columns.get_level_values(0)
+    raw_w = raw_w.dropna(subset=["Open", "High", "Low", "Close"])
+    weekly_bullish = False
+    if len(raw_w) >= 30:
+        df_w = add_indicators(raw_w)
+        last_w = df_w.iloc[-1]
+        lc_w = float(last_w["Close"])
+        pred_w = predict_next_candle(df_w)
+        w_comp = pred_w["composite"]
+        w_above_kumo = lc_w > max(
+            float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w,
+            float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w,
+        )
+        w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
+        weekly_bullish = w_comp > 0.05 and w_above_kumo and w_ema_bull
+
+    today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
+    cutoff = today_date - pd.Timedelta(days=days)
+    ticker_slog = slog.get(ticker, {})
+    recent_signal = None
+    all_signals = []
+
+    df_score = df_d.reset_index()
+    for i in range(5, len(df_score)):
+        row = df_score.iloc[i]
+        row_date = pd.Timestamp(row.iloc[0])
+        if row_date.tzinfo:
+            row_date = row_date.tz_localize(None)
+        if row_date.date() >= today_date.date():
+            continue
+
+        date_key = str(row_date.date())
+        close = float(row["Close"])
+        open_ = float(row["Open"])
+        ema20 = float(row["ema20"])
+        kijun = float(row["ichi_kijun"]) if not math.isnan(float(row["ichi_kijun"])) else close
+        rsi = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
+        vol = float(row["Volume"])
+        vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
+
+        tol = 0.005
+        c1 = abs(close - ema20) / close < tol or abs(close - kijun) / close < tol
+        c2 = rsi < 45
+        c3 = close > open_ and vol > vol_ma * 1.2
+        sc = sum([c1, c2, c3])
+
+        if sc >= 2:
+            if date_key not in ticker_slog:
+                ticker_slog[date_key] = {
+                    "score": sc,
+                    "close": round(close, 2),
+                    "details": {
+                        "ema_kijun_touch": bool(c1),
+                        "rsi_pullback": bool(c2),
+                        "bull_volume": bool(c3),
+                    },
+                }
+            sig = {"date": date_key, "score": sc, "close": round(close, 2)}
+            all_signals.append(sig)
+            if row_date.date() >= cutoff.date():
+                if recent_signal is None or date_key > recent_signal["date"]:
+                    recent_signal = sig
+
+    if ticker_slog:
+        slog[ticker] = ticker_slog
+
+    setup = build_setup_assessment(df_d, weekly_bullish, recent_signal, len(all_signals))
+    return {
+        "ticker": ticker,
+        "weekly_bullish": weekly_bullish,
+        "recent_signal": recent_signal,
+        "signal_count": len(all_signals),
+        "last_close": round(float(df_d.iloc[-1]["Close"]), 2),
+        **setup,
+        "error": None,
+    }
+
+
+def _run_nasdaq_scanner(days: int):
+    started = datetime.now(timezone.utc).isoformat()
+    results, errors = [], []
+    slog = load_signals_log()
+    tickers = NASDAQ100_TICKERS[:]
+
+    with _scanner_lock:
+        _scanner_state.update({
+            "running": True,
+            "started_at": started,
+            "finished_at": None,
+            "progress": 0,
+            "total": len(tickers),
+            "current": None,
+            "error": None,
+        })
+
+    try:
+        for idx, ticker in enumerate(tickers, start=1):
+            with _scanner_lock:
+                _scanner_state.update({"progress": idx - 1, "current": ticker})
+            try:
+                row = _scan_buy_signal_for_ticker(ticker, days, slog)
+                if row.get("error"):
+                    errors.append(row)
+                elif row.get("recent_signal"):
+                    results.append(row)
+            except Exception as e:
+                errors.append({"ticker": ticker, "error": str(e)[:80]})
+            with _scanner_lock:
+                _scanner_state.update({"progress": idx, "current": ticker})
+
+        save_signals_log(slog)
+        results.sort(key=lambda r: (r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
+        payload = {
+            "universe": "nasdaq100",
+            "days": days,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total": len(tickers),
+            "matches": len(results),
+            "errors": len(errors),
+            "results": results,
+        }
+        save_scanner_cache(payload)
+        with _scanner_lock:
+            _scanner_state.update({
+                "running": False,
+                "finished_at": payload["generated_at"],
+                "progress": len(tickers),
+                "current": None,
+                "error": None,
+            })
+    except Exception as e:
+        with _scanner_lock:
+            _scanner_state.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "current": None,
+                "error": str(e)[:120],
+            })
+
+
+@app.post("/api/scanner/nasdaq/run")
+def start_nasdaq_scanner(days: int = Query(3, ge=1, le=10)):
+    with _scanner_lock:
+        if _scanner_state.get("running"):
+            return {"status": "running", "state": dict(_scanner_state), "cache": load_scanner_cache()}
+        _scanner_state.update({"running": True, "progress": 0, "total": len(NASDAQ100_TICKERS), "current": None, "error": None})
+    t = threading.Thread(target=_run_nasdaq_scanner, args=(days,), daemon=True)
+    t.start()
+    return {"status": "started", "state": dict(_scanner_state), "cache": load_scanner_cache()}
+
+
+@app.get("/api/scanner/nasdaq/results")
+def get_nasdaq_scanner_results():
+    with _scanner_lock:
+        state = dict(_scanner_state)
+    return {"state": state, "cache": load_scanner_cache()}
+
+
 @app.get("/api/checklist")
 def run_checklist(tickers: str = "", days: int = 10):
     """Scan list of tickers for recent buy signals. Fetches live data for each."""
