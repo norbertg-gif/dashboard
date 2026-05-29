@@ -21,6 +21,8 @@ services:
         sync: false
       - key: DASH_PASS
         sync: false
+      - key: PUBLIC_API_TOKEN
+        sync: false
 
 disks:
   - name: trading-data
