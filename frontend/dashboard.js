@@ -654,6 +654,7 @@ async function renderRiskView(force = false) {
   const s = riskData.summary || {};
   const byType = [...(riskData.byType || [])].sort((a, b) => compareBySort(a, b, riskTypeSort));
   const topPositions = [...(riskData.topPositions || [])].sort((a, b) => compareBySort(a, b, riskPositionSort));
+  const heatmapRows = [...(riskData.topPositions || [])].sort((a, b) => (b.weightPct || 0) - (a.weightPct || 0));
   el.innerHTML = `<div class="tool-panel">
     <div class="tool-toolbar"><div class="tool-title">Risk analytics</div><button class="btn primary" onclick="renderRiskView(true)">Refresh</button></div>
     <div class="tool-kpis">
@@ -665,6 +666,7 @@ async function renderRiskView(force = false) {
     <div style="padding:10px;border-bottom:1px solid var(--border);">
       ${(riskData.riskFlags || []).map(f => `<span class="risk-flag ${escHtml(f.level)}"><b>${escHtml(f.symbol)}</b> ${escHtml(f.message)}</span>`).join('') || '<span style="color:var(--muted);">Bez vyraznych flagov.</span>'}
     </div>
+    ${renderRiskHeatmap(heatmapRows)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px;">
       <div><div class="tool-title" style="margin:0 0 8px;">Podla typu</div><table class="tool-table"><thead><tr>
         <th onclick="sortRisk('type','type')" style="cursor:pointer;">Typ${sortMarker(riskTypeSort, 'type')}</th>
@@ -682,6 +684,45 @@ async function renderRiskView(force = false) {
       </tr></thead><tbody>
         ${topPositions.map(x => `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;"><td><span class="port-sym">${escHtml(x.symbol)}</span></td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
       </tbody></table></div>
+    </div>
+  </div>`;
+}
+
+function riskHeatColor(pct) {
+  const v = Math.max(-3, Math.min(3, Number(pct) || 0));
+  if (v > 0) {
+    const a = 0.25 + Math.min(0.65, v / 3 * 0.65);
+    return `rgba(0, 201, 154, ${a.toFixed(2)})`;
+  }
+  if (v < 0) {
+    const a = 0.25 + Math.min(0.65, Math.abs(v) / 3 * 0.65);
+    return `rgba(255, 69, 96, ${a.toFixed(2)})`;
+  }
+  return 'rgba(100,116,139,0.45)';
+}
+
+function renderRiskHeatmap(rows) {
+  const clean = rows.filter(r => Number(r.weightPct || 0) > 0).slice(0, 30);
+  if (!clean.length) return '';
+  return `<div class="risk-heatmap-wrap">
+    <div class="risk-heatmap-head">
+      <div class="tool-title" style="margin:0;">Portfolio heatmap</div>
+      <div class="risk-heatmap-legend">velkost = % equity · farba = daily P/L</div>
+    </div>
+    <div class="risk-heatmap">
+      ${clean.map(r => {
+        const w = Number(r.weightPct || 0);
+        const daily = Number(r.dailyPct || 0);
+        const basis = Math.max(90, Math.min(360, 55 + w * 11));
+        const grow = Math.max(1, Math.min(18, w));
+        return `<button class="risk-tile" onclick="onSbTickerClick('${escHtml(r.symbol)}')"
+          style="flex:${grow} 1 ${basis}px;background:${riskHeatColor(daily)};"
+          title="${escHtml(r.name || r.symbol)} · ${w.toFixed(1)}% equity · daily ${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%">
+          <span class="risk-tile-symbol">${escHtml(r.symbol)}</span>
+          <span class="risk-tile-daily">${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
+          <span class="risk-tile-weight">${w.toFixed(1)}% equity</span>
+        </button>`;
+      }).join('')}
     </div>
   </div>`;
 }
@@ -4398,6 +4439,7 @@ let pc_oppLoadedAt = 0;
 // Overlay series refs
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
+let pc_fibLines = [];
 let pc__kumoAreaSeries = [];
 // Subpanel
 let pc_subChartInst = null;
@@ -5252,10 +5294,59 @@ function clearOverlays() {
   removeKumoCanvas();
   pc__kumoAreaSeries.forEach(s => { try { pc_realChartInst.removeSeries(s); } catch(e) {} });
   pc__kumoAreaSeries = [];
+  clearFibLines();
   [pc_oEma10, pc_oEma20, pc_oTenkan, pc_oKijun, pc_oKumoA, pc_oKumoB].forEach(s => {
     if (s) { try { pc_realChartInst.removeSeries(s); } catch(e) {} }
   });
   pc_oEma10 = pc_oEma20 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
+}
+
+function clearFibLines() {
+  for (const item of pc_fibLines) {
+    try { item.series.removePriceLine(item.line); } catch(e) {}
+  }
+  pc_fibLines = [];
+}
+
+function addFibPriceLine(series, price, label, color) {
+  if (!series || !Number.isFinite(price)) return;
+  const line = series.createPriceLine({
+    price,
+    color,
+    lineWidth: 1,
+    lineStyle: 2,
+    axisLabelVisible: true,
+    title: label,
+  });
+  pc_fibLines.push({ series, line });
+}
+
+function drawAutoFibonacci(series, candles, prefix = 'Fib') {
+  if (!series || !Array.isArray(candles) || candles.length < 10) return;
+  const slice = candles.slice(-90);
+  let hi = { price: -Infinity, idx: -1 };
+  let lo = { price: Infinity, idx: -1 };
+  slice.forEach((c, idx) => {
+    const high = Number(c.high), low = Number(c.low);
+    if (Number.isFinite(high) && high > hi.price) hi = { price: high, idx };
+    if (Number.isFinite(low) && low < lo.price) lo = { price: low, idx };
+  });
+  if (!Number.isFinite(hi.price) || !Number.isFinite(lo.price) || hi.price <= lo.price) return;
+  const upMove = lo.idx <= hi.idx;
+  const range = hi.price - lo.price;
+  const levels = [
+    ['0', upMove ? hi.price : lo.price],
+    ['23.6', upMove ? hi.price - range * 0.236 : lo.price + range * 0.236],
+    ['38.2', upMove ? hi.price - range * 0.382 : lo.price + range * 0.382],
+    ['50', upMove ? hi.price - range * 0.5 : lo.price + range * 0.5],
+    ['61.8', upMove ? hi.price - range * 0.618 : lo.price + range * 0.618],
+    ['78.6', upMove ? hi.price - range * 0.786 : lo.price + range * 0.786],
+    ['100', upMove ? lo.price : hi.price],
+  ];
+  levels.forEach(([name, price]) => {
+    const key = name === '50' || name === '61.8' ? '#22d3ee' : '#64748b';
+    addFibPriceLine(series, price, `${prefix} ${name}%`, key);
+  });
 }
 
 function pc_applyOverlays() {
@@ -5287,6 +5378,12 @@ function pc_applyOverlays() {
     pc_oKumoB.setData(ind.ichi_sb);
     // Draw filled cloud via custom canvas plugin on pc_realChartInst
     attachKumoPlugin(pc_realChartInst, ind.ichi_sa, ind.ichi_sb);
+  }
+  if (document.getElementById('chk_fib')?.checked) {
+    drawAutoFibonacci(pc_realSeries, pc_lastData.candles || [], 'Fib W');
+    if (pc_currentView === 'daily' && pc_dailyMainSeries) {
+      drawAutoFibonacci(pc_dailyMainSeries, pc_lastData.daily_candles || [], 'Fib D');
+    }
   }
 }
 
@@ -5458,6 +5555,9 @@ function renderDailyMain(data) {
     cs.setMarkers(markers);
   }
 
+  if (document.getElementById('chk_fib')?.checked) {
+    drawAutoFibonacci(pc_dailyMainSeries, data.daily_candles || [], 'Fib D');
+  }
   pc_dailyMainInst.timeScale().fitContent();
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
