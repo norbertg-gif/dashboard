@@ -658,12 +658,12 @@ def _public_token_from_headers(
     x_api_token: str | None,
     query_token: str | None,
 ) -> str:
-    if authorization and authorization.lower().startswith("bearer "):
-        return authorization[7:].strip()
+    if query_token:
+        return query_token.strip()
     if x_api_token:
         return x_api_token.strip()
-    if PUBLIC_ALLOW_QUERY_TOKEN and query_token:
-        return query_token.strip()
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
     return ""
 
 # ── PUBLIC ENDPOINT — pre Claude / externý prístup ────────────────────────────
@@ -672,13 +672,13 @@ def get_public_portfolio(
     request: Request,
     account: str = Query("1"),
     authorization: str | None = Header(None),
-    x_api_token: str | None = Header(None),
+    x_api_token: str | None = Header(None, alias="X-API-Token"),
     token: str | None = Query(None),
 ):
     """
     Verejný endpoint chránený tokenom (nie Basic Auth).
     Vráti aktuálne pozície + summary pre daný účet.
-    Pouzitie: Authorization: Bearer <PUBLIC_API_TOKEN> alebo X-API-Token.
+    Pouzitie: ?token=<PUBLIC_API_TOKEN>, X-API-Token alebo Authorization: Bearer.
     """
     _check_public_rate_limit(request)
     provided_token = _public_token_from_headers(authorization, x_api_token, token)
