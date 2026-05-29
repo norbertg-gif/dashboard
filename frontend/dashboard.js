@@ -5422,10 +5422,10 @@ function renderDailyMain(data) {
   const el = document.getElementById('dailyMainChart');
   if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; pc_dailyMainSeries = null; }
   pc_dailyMainInst = LightweightCharts.createChart(el, {
-    ...pc_CHART_OPTS, width: el.offsetWidth, height: el.offsetHeight,
+    ...getPcChartOpts(), width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight),
   });
   new ResizeObserver(() => {
-    if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: el.offsetWidth, height: el.offsetHeight });
+    if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
   }).observe(el);
 
   const cs = pc_dailyMainInst.addCandlestickSeries({
@@ -5459,6 +5459,11 @@ function renderDailyMain(data) {
   }
 
   pc_dailyMainInst.timeScale().fitContent();
+  requestAnimationFrame(() => {
+    if (!pc_dailyMainInst) return;
+    pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
+    pc_dailyMainInst.timeScale().fitContent();
+  });
   renderDailySidebar(data);
 }
 
@@ -5804,6 +5809,11 @@ function exportSnapshot() {
   const resizer = document.getElementById('dailyResizer');
   const col     = document.getElementById('dailyCol');
   if (!resizer || !col) return;
+  const widthKey = 'td_predictive_daily_col_width';
+  const savedWidth = Number(localStorage.getItem(widthKey));
+  if (Number.isFinite(savedWidth) && savedWidth > 0) {
+    col.style.width = Math.max(120, Math.min(600, savedWidth)) + 'px';
+  }
   let startX, startW;
   resizer.addEventListener('mousedown', e => {
     startX = e.clientX;
@@ -5811,11 +5821,13 @@ function exportSnapshot() {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     function onMove(e) {
-      const w = Math.max(80, Math.min(600, startW + e.clientX - startX));
+      const w = Math.max(120, Math.min(600, startW + e.clientX - startX));
       col.style.width = w + 'px';
       if (pc_dailyChartInst) pc_dailyChartInst.applyOptions({ width: document.getElementById('dailyChart').offsetWidth });
+      if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: Math.max(1, document.getElementById('dailyMainChart').offsetWidth) });
     }
     function onUp() {
+      localStorage.setItem(widthKey, String(col.offsetWidth));
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
