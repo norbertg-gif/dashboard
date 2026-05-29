@@ -4557,6 +4557,7 @@ let pc_scannerLoading = false;
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc_fibLines = [];
+const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib';
 let pc__kumoAreaSeries = [];
 // Subpanel
 let pc_subChartInst = null;
@@ -5438,6 +5439,100 @@ function addFibPriceLine(series, price, label, color) {
   pc_fibLines.push({ series, line });
 }
 
+function currentFibKey() {
+  const ticker = (document.getElementById('tickerInput')?.value || 'AAPL').trim().toUpperCase();
+  return `${ticker}:${pc_currentView || 'weekly'}`;
+}
+
+function loadManualFibStore() {
+  try { return JSON.parse(localStorage.getItem(PC_FIB_MANUAL_KEY) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+
+function saveManualFibStore(store) {
+  try { localStorage.setItem(PC_FIB_MANUAL_KEY, JSON.stringify(store)); } catch(e) {}
+}
+
+function getManualFibAnchors() {
+  const store = loadManualFibStore();
+  const row = store[currentFibKey()];
+  if (!row) return null;
+  const low = Number(row.low), high = Number(row.high);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) return null;
+  return { low: Math.min(low, high), high: Math.max(low, high), direction: high >= low ? 'up' : 'down' };
+}
+
+function setManualFibInputs(anchors = null) {
+  const lowEl = document.getElementById('fibLowInput');
+  const highEl = document.getElementById('fibHighInput');
+  if (!lowEl || !highEl) return;
+  const a = anchors || getManualFibAnchors();
+  lowEl.value = a ? Number(a.low).toFixed(2) : '';
+  highEl.value = a ? Number(a.high).toFixed(2) : '';
+}
+
+function drawFibLevels(series, low, high, prefix = 'Fib', direction = 'up') {
+  if (!series || !Number.isFinite(low) || !Number.isFinite(high) || high <= low) return;
+  const range = high - low;
+  const upMove = direction !== 'down';
+  const retrace = [
+    ['0', upMove ? high : low],
+    ['23.6', upMove ? high - range * 0.236 : low + range * 0.236],
+    ['38.2', upMove ? high - range * 0.382 : low + range * 0.382],
+    ['50', upMove ? high - range * 0.5 : low + range * 0.5],
+    ['61.8', upMove ? high - range * 0.618 : low + range * 0.618],
+    ['78.6', upMove ? high - range * 0.786 : low + range * 0.786],
+    ['100', upMove ? low : high],
+  ];
+  const extensions = [
+    ['127.2', upMove ? high + range * 0.272 : low - range * 0.272],
+    ['161.8', upMove ? high + range * 0.618 : low - range * 0.618],
+    ['200', upMove ? high + range : low - range],
+    ['261.8', upMove ? high + range * 1.618 : low - range * 1.618],
+  ];
+  retrace.forEach(([name, price]) => {
+    const color = name === '50' || name === '61.8' ? '#22d3ee' : '#64748b';
+    addFibPriceLine(series, price, `${prefix} R ${name}%`, color);
+  });
+  extensions.forEach(([name, price]) => {
+    addFibPriceLine(series, price, `${prefix} X ${name}%`, '#f59e0b');
+  });
+}
+
+function drawManualFibForCurrentView() {
+  const anchors = getManualFibAnchors();
+  setManualFibInputs(anchors);
+  if (!document.getElementById('chk_fib')?.checked || !anchors) return;
+  if (pc_currentView === 'daily' && pc_dailyMainSeries) {
+    drawFibLevels(pc_dailyMainSeries, anchors.low, anchors.high, 'Fib D', anchors.direction);
+  } else if (pc_realSeries) {
+    drawFibLevels(pc_realSeries, anchors.low, anchors.high, 'Fib W', anchors.direction);
+  }
+}
+
+function drawManualFibFromInputs() {
+  const low = Number(document.getElementById('fibLowInput')?.value);
+  const high = Number(document.getElementById('fibHighInput')?.value);
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
+    alert('Zadaj platny Swing low a Swing high.');
+    return;
+  }
+  const store = loadManualFibStore();
+  store[currentFibKey()] = { low: Math.min(low, high), high: Math.max(low, high), savedAt: Date.now() };
+  saveManualFibStore(store);
+  const chk = document.getElementById('chk_fib');
+  if (chk) chk.checked = true;
+  pc_applyOverlays();
+}
+
+function clearManualFib() {
+  const store = loadManualFibStore();
+  delete store[currentFibKey()];
+  saveManualFibStore(store);
+  setManualFibInputs(null);
+  pc_applyOverlays();
+}
+
 function pcFormatFibDate(time) {
   try {
     const d = typeof time === 'number' ? new Date(time * 1000) : new Date(time);
@@ -5594,10 +5689,7 @@ function pc_applyOverlays() {
     attachKumoPlugin(pc_realChartInst, ind.ichi_sa, ind.ichi_sb);
   }
   if (document.getElementById('chk_fib')?.checked) {
-    drawAutoFibonacci(pc_realSeries, pc_lastData.candles || [], 'Fib W');
-    if (pc_currentView === 'daily' && pc_dailyMainSeries) {
-      drawAutoFibonacci(pc_dailyMainSeries, pc_lastData.daily_candles || [], 'Fib D');
-    }
+    drawManualFibForCurrentView();
   }
 }
 
@@ -5726,6 +5818,8 @@ function switchView(view) {
   const dsp = document.getElementById('dailySignalPanel');
   if (dsp) dsp.style.display = view === 'daily' ? '' : 'none';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
+  setManualFibInputs();
+  pc_applyOverlays();
 }
 
 function renderDailyMain(data) {
@@ -5769,9 +5863,7 @@ function renderDailyMain(data) {
     cs.setMarkers(markers);
   }
 
-  if (document.getElementById('chk_fib')?.checked) {
-    drawAutoFibonacci(pc_dailyMainSeries, data.daily_candles || [], 'Fib D');
-  }
+  if (document.getElementById('chk_fib')?.checked) drawManualFibForCurrentView();
   pc_dailyMainInst.timeScale().fitContent();
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
@@ -6202,6 +6294,8 @@ async function loadData(reoptimize = false) {
     pc_lastData = data;
     wsSubscribeSymbol(ticker);
     renderCharts(data);
+    setManualFibInputs();
+    pc_applyOverlays();
     pc_renderSidebar(data);
     status.textContent = `✓ ${ticker} · ${data.candles.length} weekly sviečok`;
     document.getElementById('btBadge').style.display = pc_showBacktest ? '' : 'none';
@@ -6414,6 +6508,8 @@ function loadTickerFromChecklist(ticker) {
 
 // Expose predictive functions globally for HTML onclick
 window.pc_applyOverlays = pc_applyOverlays;
+window.drawManualFibFromInputs = drawManualFibFromInputs;
+window.clearManualFib = clearManualFib;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;
 window.pc_renderSidebar = pc_renderSidebar;
