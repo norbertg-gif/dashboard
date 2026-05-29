@@ -1759,13 +1759,56 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-family: var(--font-mono);
   padding: 2px 0 8px;
 }
-#predictiveTab .scanner-list {
-  max-height: 420px;
-  overflow: auto;
-  padding-right: 2px;
+#predictiveTab .scanner-list-simple {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-#predictiveTab .scanner-item {
-  border-left: 2px solid var(--accent);
+#predictiveTab .scanner-copy-box {
+  width: 100%;
+  min-height: 125px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 8px;
+  white-space: pre;
+}
+#predictiveTab .scanner-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 280px;
+  overflow: auto;
+}
+#predictiveTab .scanner-row {
+  display: grid;
+  grid-template-columns: 50px 38px 44px 78px 42px 58px minmax(110px, 1fr);
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: left;
+  padding: 4px 5px;
+  cursor: pointer;
+}
+#predictiveTab .scanner-row:hover {
+  border-color: var(--accent);
+  background: var(--bg-card);
+  color: var(--text);
+}
+#predictiveTab .scanner-ticker {
+  color: var(--text);
+  font-weight: 800;
 }
 
 #predictiveTab .sig-history-row {
