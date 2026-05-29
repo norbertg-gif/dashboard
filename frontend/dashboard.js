@@ -2288,6 +2288,7 @@ function onSbTickerClick(symbol) {
   if (activeMainTab === 'predictive') {
     const input = document.getElementById('tickerInput');
     if (input) input.value = symbol;
+    if (typeof rememberPredictiveTicker === 'function') rememberPredictiveTicker(symbol);
     if (typeof pc_closeDropdown === 'function') pc_closeDropdown();
     if (typeof loadData === 'function') loadData();
     return;
@@ -5935,6 +5936,7 @@ async function runChecklist() {
 function loadTickerFromChecklist(ticker) {
   closeChecklist();
   document.getElementById('tickerInput').value = ticker;
+  rememberPredictiveTicker(ticker);
   loadData();
 }
 
@@ -5965,6 +5967,7 @@ window.importChecklistCSV = importChecklistCSV;
 window.addToChecklist = addToChecklist;
 window.removeFromChecklist = removeFromChecklist;
 window.loadTickerFromChecklist = loadTickerFromChecklist;
+restorePredictiveTicker();
 // init
 // initCharts(); // deferred until tab switch
 // wlRender() called on tab switch
