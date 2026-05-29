@@ -237,6 +237,14 @@
       <div id="opportunitiesInfo" class="opp-empty">Radar sa načíta z watchlistu a eToro pozícií.</div>
     </div>
 
+    <div class="card" id="nasdaqScannerCard">
+      <div class="opp-toolbar">
+        <div class="card-title">Nasdaq scanner</div>
+        <button class="opp-refresh" onclick="runNasdaqScanner()" title="Spustit scan Nasdaq 100">Scan</button>
+      </div>
+      <div id="nasdaqScannerInfo" class="opp-empty">Manualny scan buy signalov za posledne 3 dni.</div>
+    </div>
+
     <div class="card">
       <div class="card-title">Prognóza nasledujúcej sviečky</div>
       <div id="predInfo" style="color:var(--muted); font-size:12px;">Načítaj ticker…</div>
@@ -403,6 +411,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260529-heatmap-all-positions"></script>
+  <script src="/dashboard.js?v=20260529-nasdaq-scanner"></script>
 </body>
 </html>
