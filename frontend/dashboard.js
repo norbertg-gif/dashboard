@@ -666,7 +666,6 @@ async function renderRiskView(force = false) {
     <div style="padding:10px;border-bottom:1px solid var(--border);">
       ${(riskData.riskFlags || []).map(f => `<span class="risk-flag ${escHtml(f.level)}"><b>${escHtml(f.symbol)}</b> ${escHtml(f.message)}</span>`).join('') || '<span style="color:var(--muted);">Bez vyraznych flagov.</span>'}
     </div>
-    ${renderRiskHeatmap(heatmapRows)}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px;">
       <div><div class="tool-title" style="margin:0 0 8px;">Podla typu</div><table class="tool-table"><thead><tr>
         <th onclick="sortRisk('type','type')" style="cursor:pointer;">Typ${sortMarker(riskTypeSort, 'type')}</th>
@@ -675,7 +674,7 @@ async function renderRiskView(force = false) {
         <th onclick="sortRisk('type','pnl')" style="cursor:pointer;">P/L${sortMarker(riskTypeSort, 'pnl')}</th>
       </tr></thead><tbody>
         ${byType.map(x => `<tr><td>${escHtml(x.type)}</td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
-      </tbody></table></div>
+      </tbody></table>${renderRiskHeatmap(heatmapRows)}</div>
       <div><div class="tool-title" style="margin:0 0 8px;">Top pozicie</div><table class="tool-table"><thead><tr>
         <th onclick="sortRisk('position','symbol')" style="cursor:pointer;">Symbol${sortMarker(riskPositionSort, 'symbol')}</th>
         <th onclick="sortRisk('position','amount')" style="cursor:pointer;">Amount${sortMarker(riskPositionSort, 'amount')}</th>
@@ -686,6 +685,7 @@ async function renderRiskView(force = false) {
       </tbody></table></div>
     </div>
   </div>`;
+  hydrateRiskHeatmapDaily(heatmapRows);
 }
 
 function riskHeatColor(pct) {
@@ -716,15 +716,41 @@ function renderRiskHeatmap(rows) {
         const basis = Math.max(90, Math.min(360, 55 + w * 11));
         const grow = Math.max(1, Math.min(18, w));
         return `<button class="risk-tile" onclick="onSbTickerClick('${escHtml(r.symbol)}')"
+          data-risk-tile="${escHtml(r.symbol)}"
           style="flex:${grow} 1 ${basis}px;background:${riskHeatColor(daily)};"
           title="${escHtml(r.name || r.symbol)} · ${w.toFixed(1)}% equity · daily ${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%">
           <span class="risk-tile-symbol">${escHtml(r.symbol)}</span>
-          <span class="risk-tile-daily">${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
+          <span class="risk-tile-daily" data-risk-daily="${escHtml(r.symbol)}">${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
           <span class="risk-tile-weight">${w.toFixed(1)}% equity</span>
         </button>`;
       }).join('')}
     </div>
   </div>`;
+}
+
+async function hydrateRiskHeatmapDaily(rows) {
+  const symbols = [...new Set(rows.map(r => r.symbol).filter(Boolean))].slice(0, 30);
+  await Promise.allSettled(symbols.map(async sym => {
+    try {
+      const r = await fetch(`${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=5d&interval=1d`);
+      if (!r.ok) return;
+      const payload = await r.json();
+      const data = payload.data || [];
+      if (data.length < 2) return;
+      const last = Number(data[data.length - 1].close);
+      const prev = Number(data[data.length - 2].close);
+      if (!Number.isFinite(last) || !Number.isFinite(prev) || !prev) return;
+      const pct = (last - prev) / prev * 100;
+      const tile = document.querySelector(`[data-risk-tile="${CSS.escape(sym)}"]`);
+      const val = document.querySelector(`[data-risk-daily="${CSS.escape(sym)}"]`);
+      if (tile) tile.style.background = riskHeatColor(pct);
+      if (val) val.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+      if (tile) {
+        const baseTitle = tile.getAttribute('title') || sym;
+        tile.setAttribute('title', baseTitle.replace(/daily [+-]?\d+(\.\d+)?%/, `daily ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`));
+      }
+    } catch(e) {}
+  }));
 }
 
 function sortRisk(scope, key) {
