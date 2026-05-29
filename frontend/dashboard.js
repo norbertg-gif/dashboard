@@ -118,6 +118,7 @@ function switchMainTab(tab) {
         if (btn) btn.disabled = false;
         restorePredictiveTicker();
         initCharts();
+        initPredictiveCollapsibles();
         wlRender();
         loadData();
         refreshOpportunities();
@@ -125,6 +126,7 @@ function switchMainTab(tab) {
       };
       setTimeout(() => tryInit(20), 200);
     } else {
+      initPredictiveCollapsibles();
       setTimeout(() => {
         const rc = document.getElementById('realChart');
         if (window.pc_realChartInst && rc && rc.offsetWidth > 0)
@@ -135,7 +137,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','rates','history','journal','risk','predictive'].forEach(name => {
+  ['charts','portfolio','rates','history','risk','predictive'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -153,8 +155,6 @@ function switchMainTab(tab) {
     startRatesAutoRefresh();
   } else if (tab === 'history') {
     renderHistoryView();
-  } else if (tab === 'journal') {
-    renderJournalView();
   } else if (tab === 'risk') {
     renderRiskView();
   }
@@ -164,6 +164,91 @@ function escHtml(v) {
   return String(v ?? '').replace(/[&<>"']/g, ch => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
   }[ch]));
+}
+
+const PC_COLLAPSE_KEY = 'td_predictive_sidebar_collapsed';
+let pcCollapseObserverStarted = false;
+
+function pcCollapseMap() {
+  try { return JSON.parse(localStorage.getItem(PC_COLLAPSE_KEY) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+
+function pcSaveCollapseMap(map) {
+  try { localStorage.setItem(PC_COLLAPSE_KEY, JSON.stringify(map)); } catch(e) {}
+}
+
+function pcCardCollapseId(card, idx) {
+  return card.id || `pc-card-${idx}`;
+}
+
+function initPredictiveCollapsibles() {
+  const sidebar = document.getElementById('pcSidebar');
+  if (!sidebar) return;
+  const map = pcCollapseMap();
+
+  [...sidebar.querySelectorAll(':scope > .card')].forEach((card, idx) => {
+    if (!card.children.length) return;
+    const cid = pcCardCollapseId(card, idx);
+    let head = card.querySelector(':scope > .pc-collapse-head');
+    let body = card.querySelector(':scope > .pc-collapse-body');
+
+    if (!head || !body) {
+      card.classList.add('pc-collapsible');
+      const first = card.firstElementChild;
+      if (first && first.classList.contains('opp-toolbar')) {
+        head = first;
+        head.classList.add('pc-collapse-head');
+      } else {
+        head = document.createElement('div');
+        head.className = 'pc-collapse-head';
+        if (first) head.appendChild(first);
+        card.prepend(head);
+      }
+
+      if (!head.querySelector(':scope > .pc-collapse-toggle')) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pc-collapse-toggle';
+        btn.title = 'Zbalit / rozbalit sekciu';
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          togglePredictiveSection(card);
+        });
+        head.appendChild(btn);
+      }
+
+      body = document.createElement('div');
+      body.className = 'pc-collapse-body';
+      while (head.nextSibling) body.appendChild(head.nextSibling);
+      card.appendChild(body);
+    }
+
+    const collapsed = !!map[cid];
+    card.classList.toggle('collapsed', collapsed);
+    const toggle = card.querySelector(':scope > .pc-collapse-head > .pc-collapse-toggle');
+    if (toggle) {
+      const txt = collapsed ? '+' : '-';
+      if (toggle.textContent !== txt) toggle.textContent = txt;
+    }
+  });
+
+  if (!pcCollapseObserverStarted) {
+    pcCollapseObserverStarted = true;
+    const obs = new MutationObserver(() => setTimeout(initPredictiveCollapsibles, 0));
+    obs.observe(sidebar, { childList: true, subtree: true });
+  }
+}
+
+function togglePredictiveSection(card) {
+  const sidebar = document.getElementById('pcSidebar');
+  if (!sidebar || !card) return;
+  const cards = [...sidebar.querySelectorAll(':scope > .card')];
+  const cid = pcCardCollapseId(card, cards.indexOf(card));
+  const map = pcCollapseMap();
+  map[cid] = !card.classList.contains('collapsed');
+  pcSaveCollapseMap(map);
+  initPredictiveCollapsibles();
 }
 
 function fmtMoney(v) {
@@ -715,16 +800,16 @@ function renderRiskHeatmap(rows) {
         const w = Number(r.weightPct || 0);
         const daily = Number(r.dailyPct || 0);
         const totalPnl = Number(r.pnl || 0);
-        const dotCls = totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'flat';
+        const pnlCls = totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'flat';
         const basis = Math.max(90, Math.min(360, 55 + w * 11));
         const grow = Math.max(1, Math.min(18, w));
         return `<button class="risk-tile" onclick="onSbTickerClick('${escHtml(r.symbol)}')"
           data-risk-tile="${escHtml(r.symbol)}"
           style="flex:${grow} 1 ${basis}px;background:${riskHeatColor(daily)};"
           title="${escHtml(r.name || r.symbol)} · ${w.toFixed(1)}% equity · daily ${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%">
-          <span class="risk-tile-pnl-dot ${dotCls}" title="Celkové P/L: ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}"></span>
           <span class="risk-tile-symbol">${escHtml(r.symbol)}</span>
-          <span class="risk-tile-daily" data-risk-daily="${escHtml(r.symbol)}">${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
+          <span class="risk-tile-daily" data-risk-daily="${escHtml(r.symbol)}">D ${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
+          <span class="risk-tile-pnl ${pnlCls}">P/L ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(0)}</span>
           <span class="risk-tile-weight">${w.toFixed(1)}% equity</span>
         </button>`;
       }).join('')}
@@ -748,7 +833,7 @@ async function hydrateRiskHeatmapDaily(rows) {
       const tile = document.querySelector(`[data-risk-tile="${CSS.escape(sym)}"]`);
       const val = document.querySelector(`[data-risk-daily="${CSS.escape(sym)}"]`);
       if (tile) tile.style.background = riskHeatColor(pct);
-      if (val) val.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+      if (val) val.textContent = `D ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
       if (tile) {
         const baseTitle = tile.getAttribute('title') || sym;
         tile.setAttribute('title', baseTitle.replace(/daily [+-]?\d+(\.\d+)?%/, `daily ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`));
