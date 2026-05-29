@@ -301,7 +301,13 @@
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#22d3ee;"></div>
           <input type="checkbox" id="chk_fib" onchange="pc_applyOverlays()">
-          <label for="chk_fib">Fibonacci auto</label>
+          <label for="chk_fib">Fibonacci manual</label>
+        </div>
+        <div class="fib-manual-controls">
+          <input id="fibLowInput" class="fib-input" type="number" step="0.01" placeholder="Swing low">
+          <input id="fibHighInput" class="fib-input" type="number" step="0.01" placeholder="Swing high">
+          <button class="fib-btn" onclick="drawManualFibFromInputs()">Draw</button>
+          <button class="fib-btn" onclick="clearManualFib()">Clear</button>
         </div>
       </div>
     </div>
@@ -409,6 +415,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260529-fibonacci-v2"></script>
+  <script src="/dashboard.js?v=20260529-fibonacci-manual"></script>
 </body>
 </html>
