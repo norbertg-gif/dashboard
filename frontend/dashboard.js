@@ -4688,14 +4688,12 @@ function renderCharts(data) {
 
     // ── Signal markery na daily mini chart ─────────────────────────────────
     const HORIZON = 10;
-    const dayKey = ts => new Date(Number(ts) * 1000).toISOString().slice(0, 10);
-    const dailyIndexByDay = new Map(data.daily_candles.map((c, i) => [dayKey(c.time), i]));
     const dailyMarkers = (data.daily_buy_signals || []).map(s => {
-      const idx = dailyIndexByDay.get(dayKey(s.time)) ?? -1;
+      const idx = data.daily_candles.findIndex(c => c.time >= s.time);
       let color = '#f59e0b';  // pending default
       let text  = s.score + '/3';
       if (idx >= 0 && idx + HORIZON < data.daily_candles.length) {
-        const entry  = Number(data.daily_candles[idx].close);
+        const entry  = Number(s.close) || Number(data.daily_candles[idx].close);
         const latest = data.daily_candles[data.daily_candles.length - 1].close;
         const pct    = (latest - entry) / entry * 100;
         color = pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8';
@@ -4839,9 +4837,9 @@ function pc_renderDailyExtra(data) {
     const label = s.outcome || 'pending';
     const pct = Number.isFinite(s.pct) ? `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(1)}%` : '--';
     const entry = Number.isFinite(s.entry) ? s.entry.toFixed(2) : (Number.isFinite(Number(s.close)) ? Number(s.close).toFixed(2) : '--');
-    return `<div style="display:grid;grid-template-columns:42px 1fr 48px 48px;gap:4px;
+    return `<div style="display:grid;grid-template-columns:58px 1fr 48px 48px;gap:4px;
                 font-family:var(--font-mono);font-size:9px;color:var(--muted2);">
-      <span>${new Date(s.time*1000).toLocaleDateString('sk', {day:'2-digit', month:'2-digit'})}</span>
+      <span>${new Date(s.time*1000).toLocaleDateString('sk-SK', {day:'2-digit', month:'2-digit', year:'2-digit'})}</span>
       <span>entry ${entry}</span>
       <span style="color:${col};text-align:right;">${label}</span>
       <span style="color:${col};text-align:right;">${pct}</span>
