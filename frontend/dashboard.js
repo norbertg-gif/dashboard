@@ -1941,12 +1941,69 @@ function saveAlertFromEditor(sym) {
 // ── WATCHLIST ─────────────────────────────────────────────────────────────────
 // { symbol, price, chg, lastUpdated }
 let watchlist = [];
+let watchlistServerSaveTimer = null;
+
+function normalizeWatchlistItems(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .map(x => typeof x === 'string' ? {symbol:x} : (x || {}))
+    .map(x => ({...x, symbol:String(x.symbol || '').trim().toUpperCase()}))
+    .filter(x => {
+      if (!x.symbol || seen.has(x.symbol)) return false;
+      seen.add(x.symbol);
+      return true;
+    });
+}
 
 function loadWatchlist() {
-  try { const s = localStorage.getItem('td_watchlist'); if(s) return JSON.parse(s); } catch(e){}
+  try { const s = localStorage.getItem('td_watchlist'); if(s) return normalizeWatchlistItems(JSON.parse(s)); } catch(e){}
   return DEFAULT_WATCHLIST.map(s => ({symbol:s, price:null, chg:null}));
 }
-function saveWatchlist() { localStorage.setItem('td_watchlist', JSON.stringify(watchlist)); }
+function saveWatchlist() {
+  watchlist = normalizeWatchlistItems(watchlist);
+  localStorage.setItem('td_watchlist', JSON.stringify(watchlist));
+  scheduleServerWatchlistSave();
+}
+function scheduleServerWatchlistSave() {
+  clearTimeout(watchlistServerSaveTimer);
+  watchlistServerSaveTimer = setTimeout(saveWatchlistToServer, 700);
+}
+async function saveWatchlistToServer() {
+  try {
+    const items = watchlist.map(({symbol, name, instrumentId}) => {
+      const item = {symbol};
+      if (name) item.name = name;
+      if (instrumentId) item.instrumentId = instrumentId;
+      return item;
+    });
+    await fetch(`${API}/api/watchlist`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({items})
+    });
+  } catch(e) {
+    console.warn('Server watchlist save failed:', e);
+  }
+}
+async function syncWatchlistFromServer() {
+  const localItems = normalizeWatchlistItems(watchlist);
+  try {
+    const r = await fetch(`${API}/api/watchlist`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const serverItems = normalizeWatchlistItems(data.items || []);
+    if (serverItems.length) {
+      watchlist = serverItems;
+      localStorage.setItem('td_watchlist', JSON.stringify(watchlist));
+      renderSidebar();
+    } else if (localItems.length) {
+      watchlist = localItems;
+      await saveWatchlistToServer();
+    }
+  } catch(e) {
+    console.warn('Server watchlist load failed, using local watchlist:', e);
+  }
+}
 
 function addToWatchlist(symbol, name = null, instrumentId = null) {
   symbol = symbol.toUpperCase().trim();
@@ -4229,6 +4286,7 @@ Sheet: ${sheetName}`);
   loadLogoMap();
   watchlist = loadWatchlist();
   renderSidebar();
+  await syncWatchlistFromServer();
 
   // Načítaj layout — spracuj grafy aj portfolio panely
   for (const cfg of loadLayout()) {
@@ -5571,6 +5629,9 @@ const WL_DEFAULT = [];
 
 function wlLoad() {
   try {
+    if (Array.isArray(watchlist) && watchlist.length) {
+      return watchlist.map(x => x.symbol).filter(Boolean);
+    }
     const s = localStorage.getItem(WL_KEY);
     const data = s ? JSON.parse(s) : WL_DEFAULT;
     // Dashboard watchlist stores objects {symbol, name} — extract symbols
@@ -5579,7 +5640,13 @@ function wlLoad() {
 }
 
 function wlSave(list) {
-  try { localStorage.setItem(WL_KEY, JSON.stringify(list)); } catch {}
+  const symbols = [...new Set((list || []).map(t => String(t || '').trim().toUpperCase()).filter(Boolean))];
+  watchlist = symbols.map(symbol => {
+    const existing = watchlist.find(w => w.symbol === symbol);
+    return existing || {symbol, price:null, chg:null};
+  });
+  saveWatchlist();
+  renderSidebar();
 }
 
 function wlRender() {
