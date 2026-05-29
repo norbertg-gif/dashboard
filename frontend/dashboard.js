@@ -702,7 +702,7 @@ function riskHeatColor(pct) {
 }
 
 function renderRiskHeatmap(rows) {
-  const clean = rows.filter(r => Number(r.weightPct || 0) > 0).slice(0, 30);
+  const clean = rows.filter(r => Number(r.weightPct || 0) > 0);
   if (!clean.length) return '';
   return `<div class="risk-heatmap-wrap">
     <div class="risk-heatmap-head">
@@ -713,12 +713,15 @@ function renderRiskHeatmap(rows) {
       ${clean.map(r => {
         const w = Number(r.weightPct || 0);
         const daily = Number(r.dailyPct || 0);
+        const totalPnl = Number(r.pnl || 0);
+        const dotCls = totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'flat';
         const basis = Math.max(90, Math.min(360, 55 + w * 11));
         const grow = Math.max(1, Math.min(18, w));
         return `<button class="risk-tile" onclick="onSbTickerClick('${escHtml(r.symbol)}')"
           data-risk-tile="${escHtml(r.symbol)}"
           style="flex:${grow} 1 ${basis}px;background:${riskHeatColor(daily)};"
           title="${escHtml(r.name || r.symbol)} · ${w.toFixed(1)}% equity · daily ${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%">
+          <span class="risk-tile-pnl-dot ${dotCls}" title="Celkové P/L: ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}"></span>
           <span class="risk-tile-symbol">${escHtml(r.symbol)}</span>
           <span class="risk-tile-daily" data-risk-daily="${escHtml(r.symbol)}">${daily >= 0 ? '+' : ''}${daily.toFixed(2)}%</span>
           <span class="risk-tile-weight">${w.toFixed(1)}% equity</span>
@@ -729,7 +732,7 @@ function renderRiskHeatmap(rows) {
 }
 
 async function hydrateRiskHeatmapDaily(rows) {
-  const symbols = [...new Set(rows.map(r => r.symbol).filter(Boolean))].slice(0, 30);
+  const symbols = [...new Set(rows.map(r => r.symbol).filter(Boolean))];
   await Promise.allSettled(symbols.map(async sym => {
     try {
       const r = await fetch(`${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=5d&interval=1d`);
