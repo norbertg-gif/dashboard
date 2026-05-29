@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="sk" data-variant="konzervativna">
 <head>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,24 +22,24 @@
   </div>
   <div class="sep"></div>
   <div class="variant-switch">
-    <button id="v-kons-btn" class="active" onclick="setVariant('konzervativna')">Konzervatívna</button>
-    <button id="v-odv-btn" onclick="setVariant('odvazna')">Odvážna</button>
+    <button id="v-kons-btn" class="active" onclick="setVariant('konzervativna')">KonzervatĂ­vna</button>
+    <button id="v-odv-btn" onclick="setVariant('odvazna')">OdvĂˇĹľna</button>
   </div>
   <div class="sep"></div>
   <div id="preset-bar">
     <span class="lbl">PRESET</span>
-    <select class="sel" id="preset-sel"><option value="">— vyber —</option></select>
-    <button class="btn primary" onclick="loadPreset()">Načítaj</button>
-    <button class="btn" onclick="openSaveModal()">Ulož ako…</button>
-    <button class="btn danger" onclick="deletePreset()">Zmaž</button>
+    <select class="sel" id="preset-sel"><option value="">â€” vyber â€”</option></select>
+    <button class="btn primary" onclick="loadPreset()">NaÄŤĂ­taj</button>
+    <button class="btn" onclick="openSaveModal()">UloĹľ akoâ€¦</button>
+    <button class="btn danger" onclick="deletePreset()">ZmaĹľ</button>
   </div>
   <div class="sep"></div>
-  <button class="btn primary" onclick="loadAll()">⟳ LOAD ALL</button>
-  <button class="btn danger" onclick="clearAllPanels()" title="Vymaž všetky grafy">✕ VYMAŽ</button>
-  <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>
+  <button class="btn primary" onclick="loadAll()">âźł LOAD ALL</button>
+  <button class="btn danger" onclick="clearAllPanels()" title="VymaĹľ vĹˇetky grafy">âś• VYMAĹ˝</button>
+  <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">đźŚ™</button>
 
   <div class="sep"></div>
-  <div class="lbl">STĹPCE
+  <div class="lbl">STÄąPCE
     <select class="sel" id="col-sel" onchange="setCols(this.value)" style="min-width:55px;">
       <option value="1">1</option><option value="2" selected>2</option>
       <option value="3">3</option><option value="4">4</option>
@@ -52,7 +52,7 @@
       <option value="300">5 min</option><option value="900">15 min</option>
     </select>
   </div>
-  <div id="hdr-status">—</div>
+  <div id="hdr-status">â€”</div>
 </div>
 
 <!-- BODY -->
@@ -61,7 +61,7 @@
   <!-- SIDEBAR -->
   <div id="sidebar">
     <div id="sb-search">
-      <input id="sb-input" type="text" placeholder="hľadaj ticker…"
+      <input id="sb-input" type="text" placeholder="hÄľadaj tickerâ€¦"
              oninput="onSbInput(event)"
              onkeydown="onSbKeydown(event)"
              onfocus="if(this.value.trim().length>0){openSbDd(this);}"
@@ -76,37 +76,37 @@
     <div id="sb-list"></div>
     <div id="sb-etoro" style="display:none;flex:1;overflow-y:auto;flex-direction:column;">
       <div class="etoro-hint" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span>Klik na pozíciu → graf + markery vstupov</span>
+        <span>Klik na pozĂ­ciu â†’ graf + markery vstupov</span>
         <div style="display:flex;gap:6px;">
-          <span onclick="toggleRecommendations()" id="rec-toggle-btn" style="cursor:pointer;color:var(--muted);font-size:11px;padding:1px 6px;border:1px solid var(--border2);border-radius:3px;" title="eToro odporúčania">💡</span>
-          <span onclick="loadEtoroPositions(true)" style="cursor:pointer;color:var(--blue);font-size:11px;" title="Vynútiť refresh">⟳</span>
+          <span onclick="toggleRecommendations()" id="rec-toggle-btn" style="cursor:pointer;color:var(--muted);font-size:11px;padding:1px 6px;border:1px solid var(--border2);border-radius:3px;" title="eToro odporĂşÄŤania">đź’ˇ</span>
+          <span onclick="loadEtoroPositions(true)" style="cursor:pointer;color:var(--blue);font-size:11px;" title="VynĂştiĹĄ refresh">âźł</span>
         </div>
       </div>
       <div id="etoro-recommendations" style="display:none;border-bottom:1px solid var(--border);"></div>
       <div id="etoro-summary" style="display:none;padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:10px;display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;"></div>
       <div id="etoro-sort-bar" style="display:none;flex-shrink:0;display:flex;gap:4px;padding:4px 8px 2px;">
-        <button id="sort-pnl" onclick="etoroSortMode='pnl';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--blue);background:var(--blue-dim);color:var(--blue);cursor:pointer;">P/L ↓</button>
-        <button id="sort-az" onclick="etoroSortMode='az';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;">A→Z</button>
-        <button id="sort-za" onclick="etoroSortMode='za';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;">Z→A</button>
+        <button id="sort-pnl" onclick="etoroSortMode='pnl';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--blue);background:var(--blue-dim);color:var(--blue);cursor:pointer;">P/L â†“</button>
+        <button id="sort-az" onclick="etoroSortMode='az';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;">Aâ†’Z</button>
+        <button id="sort-za" onclick="etoroSortMode='za';updateEtoroSort()" style="flex:1;font-family:var(--font-ui);font-size:9px;font-weight:700;padding:2px 0;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;">Zâ†’A</button>
       </div>
-      <div id="etoro-list-inner"><div class="etoro-loading">Načítava…</div></div>
+      <div id="etoro-list-inner"><div class="etoro-loading">NaÄŤĂ­tavaâ€¦</div></div>
     </div>
 
     <div id="sb-add">
       <div style="display:flex;gap:5px;">
         <button id="sb-add-btn" onclick="document.getElementById('sb-input').focus()" style="flex:1;">+ pridaj ticker</button>
-        <button onclick="clearWatchlist()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;padding:5px 8px;border-radius:4px;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'" title="Vymaž celý watchlist">🗑</button>
+        <button onclick="clearWatchlist()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;padding:5px 8px;border-radius:4px;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'" title="VymaĹľ celĂ˝ watchlist">đź—‘</button>
       </div>
       <div style="display:flex;gap:4px;align-items:center;">
-        <label id="sb-xlsx-btn" title="Import tickerov z XLSX (sheet Ranking, TOTAL ≥ prah)">
-          📊 import xlsx
+        <label id="sb-xlsx-btn" title="Import tickerov z XLSX (sheet Ranking, TOTAL â‰Ą prah)">
+          đź“Š import xlsx
           <input type="file" id="sb-xlsx-input" accept=".xlsx" style="display:none;" onchange="importXlsx(event)">
         </label>
         <div style="display:flex;align-items:center;gap:3px;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;flex-shrink:0;">
           <span style="font-size:10px;color:var(--muted);white-space:nowrap;">min</span>
           <input id="xlsx-threshold" type="number" min="0" max="999" value="100"
             style="width:38px;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--font-mono);font-size:11px;font-weight:700;text-align:center;"
-            title="Minimálne skóre TOTAL pre import">
+            title="MinimĂˇlne skĂłre TOTAL pre import">
         </div>
       </div>
     </div>
@@ -117,24 +117,24 @@
   <div id="main">
     <div id="active-hint" class="none">
       <div class="hint-dot"></div>
-      <span id="hint-text">žiadny aktívny panel — klik na panel ho aktivuje</span>
+      <span id="hint-text">Ĺľiadny aktĂ­vny panel â€” klik na panel ho aktivuje</span>
     </div>
     <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
   <!-- Tab bar -->
   <div id="main-tabs" style="display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0;padding:0 10px;gap:2px;">
-    <div class="main-tab active" id="tab-charts" onclick="switchMainTab('charts')">📈 Grafy</div>
-    <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">📊 Portfólio</div>
+    <div class="main-tab active" id="tab-charts" onclick="switchMainTab('charts')">đź“ Grafy</div>
+    <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">đź“Š PortfĂłlio</div>
     <div class="main-tab" id="tab-rates" onclick="switchMainTab('rates')">Ceny</div>
-    <div class="main-tab" id="tab-history" onclick="switchMainTab('history')">História</div>
+    <div class="main-tab" id="tab-history" onclick="switchMainTab('history')">HistĂłria</div>
     <div class="main-tab" id="tab-journal" onclick="switchMainTab('journal')">Journal</div>
     <div class="main-tab" id="tab-risk" onclick="switchMainTab('risk')">Risk</div>
-    <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny</div>
+    <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">đź“ PrediktĂ­vny</div>
   </div>
   <!-- Grafy -->
   <div id="main-charts" style="flex:1;min-height:0;overflow:auto;">
     <div id="grid" onclick="onGridClick(event)"></div>
   </div>
-  <!-- Portfólio -->
+  <!-- PortfĂłlio -->
   <div id="main-portfolio" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;">
     <div id="portfolio-view" style="flex:1;display:flex;flex-direction:column;overflow:hidden;"></div>
   </div>
@@ -142,12 +142,12 @@
   <div id="main-history" class="tool-view" style="display:none;"></div>
   <div id="main-journal" class="tool-view" style="display:none;"></div>
   <div id="main-risk" class="tool-view" style="display:none;"></div>
-<!-- ══ PREDICTIVE CHART TAB ══ -->
+<!-- â•â• PREDICTIVE CHART TAB â•â• -->
 <div id="main-predictive" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;position:relative;">
   <div id="predictiveTab" style="display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden;">
     <div class="controls">
   <div style="position:relative;">
-    <input type="text" id="tickerInput" value="AAPL" maxlength="20" placeholder="Ticker alebo názov..." autocomplete="off"
+    <input type="text" id="tickerInput" value="AAPL" maxlength="20" placeholder="Ticker alebo nĂˇzov..." autocomplete="off"
       style="width:200px;"
       oninput="onTickerInput(this.value)"
       onkeydown="onTickerKeydown(event)">
@@ -164,11 +164,11 @@
     <option value="3y">3 roky</option>
     <option value="5y">5 rokov</option>
   </select>
-  <button class="btn" id="loadBtn" onclick="loadData()">Načítať</button>
+  <button class="btn" id="loadBtn" onclick="loadData()">NaÄŤĂ­taĹĄ</button>
   <button class="toggle-btn active" id="btToggle" onclick="toggleBacktest()">Backtest overlay</button>
   <button class="toggle-btn" id="exportBtn" onclick="exportSnapshot()" title="Ulozit staticky HTML snapshot">&#128190; Export snapshot</button>
   <button class="toggle-btn" onclick="openChecklist()" style="border-color:var(--accent);color:var(--accent);">&#9776; Checklist</button>
-  <button class="toggle-btn" id="reoptBtn" onclick="loadData(true)" title="Prepocitat optimalizovane vahy">&#9881; Prepočítať váhy</button>
+  <button class="toggle-btn" id="reoptBtn" onclick="loadData(true)" title="Prepocitat optimalizovane vahy">&#9881; PrepoÄŤĂ­taĹĄ vĂˇhy</button>
   <span id="statusMsg" style="color:var(--muted); font-size:12px;"></span>
 </div>
 
@@ -209,8 +209,8 @@
 
     <div class="chart-block">
       <div class="chart-header">
-        <span class="label">Prediktívny chart</span>
-        <span class="badge badge-pred">+1 prognóza</span>
+        <span class="label">PrediktĂ­vny chart</span>
+        <span class="badge badge-pred">+1 prognĂłza</span>
         <span class="badge badge-bt" id="btBadge" style="display:none;">backtest overlay</span>
       </div>
       <div class="chart-body"><div id="predChart"></div></div>
@@ -218,7 +218,7 @@
 
     <div id="subpanelBlock" class="chart-block" style="display:none; flex: 0 0 160px;">
       <div class="chart-header">
-        <span class="label" id="subpanelLabel">—</span>
+        <span class="label" id="subpanelLabel">â€”</span>
       </div>
       <div class="chart-body"><div id="subpanelChart"></div></div>
     </div>
@@ -232,38 +232,38 @@
     <div class="card" id="opportunitiesCard">
       <div class="opp-toolbar">
         <div class="card-title">Opportunities</div>
-        <button class="opp-refresh" onclick="refreshOpportunities(true)" title="Prepočítať radar">⟳</button>
+        <button class="opp-refresh" onclick="refreshOpportunities(true)" title="PrepoÄŤĂ­taĹĄ radar">âźł</button>
       </div>
-      <div id="opportunitiesInfo" class="opp-empty">Radar sa načíta z watchlistu a eToro pozícií.</div>
+      <div id="opportunitiesInfo" class="opp-empty">Radar sa naÄŤĂ­ta z watchlistu a eToro pozĂ­ciĂ­.</div>
     </div>
 
     <div class="card">
-      <div class="card-title">Prognóza nasledujúcej sviečky</div>
-      <div id="predInfo" style="color:var(--muted); font-size:12px;">Načítaj ticker…</div>
+      <div class="card-title">PrognĂłza nasledujĂşcej svieÄŤky</div>
+      <div id="predInfo" style="color:var(--muted); font-size:12px;">NaÄŤĂ­taj tickerâ€¦</div>
     </div>
     <div class="card" id="earningsCard" style="display:none;">
     </div>
     <div class="card" id="entryZoneCard">
-      <div class="card-title">Technická vstupná zóna <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;">⚠ len tech. analýza</span></div>
-      <div id="entryZoneInfo" style="color:var(--muted); font-size:12px;">—</div>
+      <div class="card-title">TechnickĂˇ vstupnĂˇ zĂłna <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;">âš  len tech. analĂ˝za</span></div>
+      <div id="entryZoneInfo" style="color:var(--muted); font-size:12px;">â€”</div>
     </div>
 
     <div class="card">
       <div class="card-title">Backtesting</div>
-      <div id="btInfo" style="color:var(--muted); font-size:12px;">—</div>
+      <div id="btInfo" style="color:var(--muted); font-size:12px;">â€”</div>
     </div>
     <div class="card">
-      <div class="card-title">Hit rate indikátorov</div>
-      <div id="indInfo" style="color:var(--muted); font-size:12px;">—</div>
+      <div class="card-title">Hit rate indikĂˇtorov</div>
+      <div id="indInfo" style="color:var(--muted); font-size:12px;">â€”</div>
     </div>
 
     <div class="card" id="weightsCard">
-      <div class="card-title">Váhy indikátorov <span id="weightsSource" style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;"></span></div>
-      <div id="weightsInfo" style="color:var(--muted); font-size:12px;">—</div>
+      <div class="card-title">VĂˇhy indikĂˇtorov <span id="weightsSource" style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;"></span></div>
+      <div id="weightsInfo" style="color:var(--muted); font-size:12px;">â€”</div>
     </div>
 
     <div class="card">
-      <div class="card-title">Indikátory — overlay</div>
+      <div class="card-title">IndikĂˇtory â€” overlay</div>
       <div class="ind-controls">
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#60a5fa;"></div>
@@ -295,11 +295,11 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Subpanel oscilátora</div>
+      <div class="card-title">Subpanel oscilĂˇtora</div>
       <div class="ind-controls">
         <div class="sub-radio-row">
           <input type="radio" name="subpanel" id="sub_none" value="none" checked onchange="applySubpanel()">
-          <label for="sub_none">Vypnutý</label>
+          <label for="sub_none">VypnutĂ˝</label>
         </div>
         <div class="sub-radio-row">
           <input type="radio" name="subpanel" id="sub_rsi" value="rsi" onchange="applySubpanel()">
@@ -338,12 +338,12 @@
 <!-- Modal -->
 <div id="modal-bg">
   <div id="modal">
-    <h2>Ulož konfiguráciu</h2>
-    <input id="modal-input" type="text" placeholder="Názov presetu…"
+    <h2>UloĹľ konfigurĂˇciu</h2>
+    <input id="modal-input" type="text" placeholder="NĂˇzov presetuâ€¦"
            onkeydown="if(event.key==='Enter')confirmSave(); if(event.key==='Escape')closeModal();">
     <div class="modal-btns">
-      <button class="btn" onclick="closeModal()">Zruš</button>
-      <button class="btn primary" onclick="confirmSave()">Ulož</button>
+      <button class="btn" onclick="closeModal()">ZruĹˇ</button>
+      <button class="btn primary" onclick="confirmSave()">UloĹľ</button>
     </div>
   </div>
 </div><div id="ttBox"></div>
@@ -352,13 +352,13 @@
 <!-- Checklist Tab -->
 <div id="checklistTab" style="display:none;">
   <div class="cl-header">
-    <button class="btn" onclick="closeChecklist()" style="background:var(--bg3);color:var(--text);">&#8592; Späť</button>
-    <span class="cl-title">Checklist — Buy Signály</span>
+    <button class="btn" onclick="closeChecklist()" style="background:var(--bg3);color:var(--text);">&#8592; SpĂ¤ĹĄ</button>
+    <span class="cl-title">Checklist â€” Buy SignĂˇly</span>
     <div class="cl-actions">
-      <span style="font-size:12px;color:var(--muted);">Posledných</span>
+      <span style="font-size:12px;color:var(--muted);">PoslednĂ˝ch</span>
       <input type="number" id="clDays" value="10" min="1" max="60" class="cl-input" style="width:60px;">
-      <span style="font-size:12px;color:var(--muted);">dní</span>
-      <button class="btn" onclick="runChecklist()">&#9654; Spustiť</button>
+      <span style="font-size:12px;color:var(--muted);">dnĂ­</span>
+      <button class="btn" onclick="runChecklist()">&#9654; SpustiĹĄ</button>
       <label class="btn" style="background:var(--bg3);color:var(--text);cursor:pointer;">
         &#128196; Import CSV
         <input type="file" accept=".csv" style="display:none" onchange="importChecklistCSV(event)">
@@ -385,18 +385,18 @@
       <thead>
         <tr>
           <th>Ticker</th>
-          <th>Posledná cena</th>
+          <th>PoslednĂˇ cena</th>
           <th>Weekly bias</th>
-          <th>Posledný signál</th>
-          <th>Skóre</th>
-          <th>Cena pri signáli</th>
-          <th>Celkom signálov</th>
+          <th>PoslednĂ˝ signĂˇl</th>
+          <th>SkĂłre</th>
+          <th>Cena pri signĂˇli</th>
+          <th>Celkom signĂˇlov</th>
         </tr>
       </thead>
       <tbody id="clBody"></tbody>
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260529-predictive-state"></script>
+  <script src="/dashboard.js?v=20260529-signal-history-v2"></script>
 </body>
 </html>
