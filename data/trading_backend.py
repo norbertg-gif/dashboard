@@ -961,6 +961,56 @@ CACHE_DIR.mkdir(exist_ok=True)
 (CACHE_DIR / "portfolio").mkdir(exist_ok=True)
 _cache_mem: dict[str, tuple[float, dict]] = {}
 _cache_mem_lock = threading.Lock()
+WATCHLIST_PATH = _Path(__file__).parent / "watchlist.json"
+_watchlist_lock = threading.Lock()
+
+def _normalize_watchlist_items(items):
+    out = []
+    seen = set()
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        if isinstance(item, str):
+            item = {"symbol": item}
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        clean = {"symbol": symbol}
+        for key in ("name", "price", "chg", "lastUpdated", "instrumentId"):
+            if item.get(key) is not None:
+                clean[key] = item.get(key)
+        out.append(clean)
+    return out
+
+def _read_watchlist_file():
+    with _watchlist_lock:
+        try:
+            if WATCHLIST_PATH.exists():
+                data = _json.loads(WATCHLIST_PATH.read_text(encoding="utf-8"))
+                return _normalize_watchlist_items(data.get("items", data if isinstance(data, list) else []))
+        except Exception as e:
+            print(f"  watchlist read error: {e}")
+    return []
+
+def _write_watchlist_file(items):
+    clean = _normalize_watchlist_items(items)
+    payload = {"items": clean, "updatedAt": datetime.now(timezone.utc).isoformat()}
+    with _watchlist_lock:
+        tmp = WATCHLIST_PATH.with_suffix(".json.tmp")
+        tmp.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(WATCHLIST_PATH)
+    return payload
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    return {"items": _read_watchlist_file()}
+
+@app.put("/api/watchlist")
+def put_watchlist(body: dict):
+    return _write_watchlist_file(body.get("items", []))
 
 def cache_write(path: _Path, data: dict):
     """Ulož JSON.gz na disk."""
