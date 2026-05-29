@@ -116,6 +116,7 @@ function switchMainTab(tab) {
         }
         _initDone = true;
         if (btn) btn.disabled = false;
+        restorePredictiveTicker();
         initCharts();
         wlRender();
         loadData();
@@ -4369,6 +4370,19 @@ let pc_btPredLine = null, pc_btActualLine = null;
 let btMarkers = [];
 let pc_showBacktest = true;
 let pc_lastData = null;
+const PC_LAST_TICKER_KEY = 'td_predictive_ticker';
+
+function restorePredictiveTicker() {
+  const input = document.getElementById('tickerInput');
+  if (!input) return;
+  const saved = (localStorage.getItem(PC_LAST_TICKER_KEY) || '').trim().toUpperCase();
+  if (saved) input.value = saved;
+}
+
+function rememberPredictiveTicker(ticker) {
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (sym) localStorage.setItem(PC_LAST_TICKER_KEY, sym);
+}
 
 // Daily mini chart
 let pc_dailyChartInst = null;
@@ -4678,9 +4692,9 @@ function renderCharts(data) {
       let color = '#f59e0b';  // pending default
       let text  = s.score + '/3';
       if (idx >= 0 && idx + HORIZON < data.daily_candles.length) {
-        const entry  = data.daily_candles[idx].close;
-        const future = data.daily_candles[idx + HORIZON].close;
-        const pct    = (future - entry) / entry * 100;
+        const entry  = Number(s.close) || Number(data.daily_candles[idx].close);
+        const latest = data.daily_candles[data.daily_candles.length - 1].close;
+        const pct    = (latest - entry) / entry * 100;
         color = pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8';
         text = (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
       }
@@ -4741,11 +4755,14 @@ function pc_renderDailyExtra(data) {
   const currentClose = daily.length ? daily[daily.length - 1].close : null;
   const evaluated = signals.map(s => {
     const idx = daily.findIndex(c => c.time >= s.time);
-    if (idx < 0 || idx + HORIZON >= daily.length) {
+    if (idx >= 0 && idx + HORIZON >= daily.length) {
       return {...s, outcome: null};   // ešte sa nevyhodnotil
     }
-    const entry  = daily[idx].close;
-    const pct    = currentClose != null ? (currentClose - entry) / entry * 100 : 0;
+    const entry  = Number(s.close) || (idx >= 0 ? Number(daily[idx].close) : NaN);
+    if (!Number.isFinite(entry) || !entry || currentClose == null) {
+      return {...s, outcome: null};
+    }
+    const pct    = (currentClose - entry) / entry * 100;
     return {...s, outcome: pct >= 1.5 ? 'win' : pct <= -1.5 ? 'loss' : 'flat', pct};
   });
 
@@ -5085,6 +5102,7 @@ function pc_renderDropdown(items) {
 
 function pc_selectTicker(symbol) {
   document.getElementById('tickerInput').value = symbol;
+  rememberPredictiveTicker(symbol);
   pc_closeDropdown();
   loadData();
 }
@@ -5696,6 +5714,7 @@ async function loadData(reoptimize = false) {
   const ticker = document.getElementById('tickerInput').value.trim().toUpperCase();
   const period = document.getElementById('periodSel').value;
   if (!ticker) return;
+  rememberPredictiveTicker(ticker);
 
   const btn = document.getElementById('loadBtn');
   const status = document.getElementById('statusMsg');
