@@ -4688,12 +4688,14 @@ function renderCharts(data) {
 
     // ── Signal markery na daily mini chart ─────────────────────────────────
     const HORIZON = 10;
+    const dayKey = ts => new Date(Number(ts) * 1000).toISOString().slice(0, 10);
+    const dailyIndexByDay = new Map(data.daily_candles.map((c, i) => [dayKey(c.time), i]));
     const dailyMarkers = (data.daily_buy_signals || []).map(s => {
-      const idx = data.daily_candles.findIndex(c => c.time >= s.time);
+      const idx = dailyIndexByDay.get(dayKey(s.time)) ?? -1;
       let color = '#f59e0b';  // pending default
       let text  = s.score + '/3';
       if (idx >= 0 && idx + HORIZON < data.daily_candles.length) {
-        const entry  = Number(s.close) || Number(data.daily_candles[idx].close);
+        const entry  = Number(data.daily_candles[idx].close);
         const latest = data.daily_candles[data.daily_candles.length - 1].close;
         const pct    = (latest - entry) / entry * 100;
         color = pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8';
@@ -4749,22 +4751,34 @@ function pc_renderDailyExtra(data) {
 
   const signals = data.daily_buy_signals || [];
   const daily   = data.daily_candles    || [];
+  const dayKey = ts => new Date(Number(ts) * 1000).toISOString().slice(0, 10);
+  const dailyIndexByDay = new Map(daily.map((c, i) => [dayKey(c.time), i]));
+  const findSignalDailyIndex = s => {
+    const exact = dailyIndexByDay.get(dayKey(s.time));
+    if (exact != null) return exact;
+    let best = -1, bestDelta = Infinity;
+    for (let i = 0; i < daily.length; i++) {
+      const delta = Math.abs(Number(daily[i].time) - Number(s.time));
+      if (delta < bestDelta) { bestDelta = delta; best = i; }
+    }
+    return bestDelta <= 36 * 3600 ? best : -1;
+  };
 
   // ── 1. Vyhodnotenie historických signálov ──────────────────────────────
   // Signál musí mať aspoň 10 dní na vyzretie, potom sa hodnotí voči aktuálnej cene.
   const HORIZON = 10;
   const currentClose = daily.length ? daily[daily.length - 1].close : null;
   const evaluated = signals.map(s => {
-    const idx = daily.findIndex(c => c.time >= s.time);
+    const idx = findSignalDailyIndex(s);
     if (idx >= 0 && idx + HORIZON >= daily.length) {
       return {...s, outcome: null};   // ešte sa nevyhodnotil
     }
-    const entry  = Number(s.close) || (idx >= 0 ? Number(daily[idx].close) : NaN);
+    const entry  = idx >= 0 ? Number(daily[idx].close) : Number(s.close);
     if (!Number.isFinite(entry) || !entry || currentClose == null) {
       return {...s, outcome: null};
     }
     const pct    = (currentClose - entry) / entry * 100;
-    return {...s, outcome: pct >= 1.5 ? 'win' : pct <= -1.5 ? 'loss' : 'flat', pct};
+    return {...s, outcome: pct >= 1.5 ? 'win' : pct <= -1.5 ? 'loss' : 'flat', pct, entry};
   });
 
   const total   = evaluated.length;
@@ -4817,6 +4831,22 @@ function pc_renderDailyExtra(data) {
       border-radius:50%;background:${col};
       box-shadow:0 0 4px ${col}80;cursor:help;"></div>`;
   }).join('');
+  const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
+    const col = s.outcome === 'win'  ? '#26a69a'
+             : s.outcome === 'loss' ? '#ef5350'
+             : s.outcome === 'flat' ? '#94a3b8'
+             : '#f59e0b';
+    const label = s.outcome || 'pending';
+    const pct = Number.isFinite(s.pct) ? `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(1)}%` : '--';
+    const entry = Number.isFinite(s.entry) ? s.entry.toFixed(2) : (Number.isFinite(Number(s.close)) ? Number(s.close).toFixed(2) : '--');
+    return `<div style="display:grid;grid-template-columns:42px 1fr 48px 48px;gap:4px;
+                font-family:var(--font-mono);font-size:9px;color:var(--muted2);">
+      <span>${new Date(s.time*1000).toLocaleDateString('sk', {day:'2-digit', month:'2-digit'})}</span>
+      <span>entry ${entry}</span>
+      <span style="color:${col};text-align:right;">${label}</span>
+      <span style="color:${col};text-align:right;">${pct}</span>
+    </div>`;
+  }).join('');
 
   el.innerHTML = `
     <div style="padding:10px 12px;border-top:1px solid var(--border);height:100%;
@@ -4851,6 +4881,9 @@ function pc_renderDailyExtra(data) {
           <span>${startTs ? new Date(startTs*1000).toLocaleDateString('sk', {month:'short', year:'2-digit'}) : ''}</span>
           <span>od +${HORIZON}d po aktuálnu cenu</span>
           <span>${endTs ? new Date(endTs*1000).toLocaleDateString('sk', {month:'short', year:'2-digit'}) : ''}</span>
+        </div>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:2px;">
+          ${detailRows}
         </div>
       </div>
 
