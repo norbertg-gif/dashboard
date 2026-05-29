@@ -1668,14 +1668,16 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
     for p in positions:
         typ = p.get("type") or "Other"
         sym = p.get("symbol") or str(p.get("instrumentId"))
-        by_type.setdefault(typ, {"type": typ, "amount": 0, "pnl": 0, "count": 0})
+        by_type.setdefault(typ, {"type": typ, "amount": 0, "pnl": 0, "dailyPnl": 0, "count": 0})
         by_type[typ]["amount"] += p.get("amount") or 0
         by_type[typ]["pnl"] += p.get("pnl") or 0
+        by_type[typ]["dailyPnl"] += p.get("dailyPnl") or 0
         by_type[typ]["count"] += 1
 
-        by_symbol.setdefault(sym, {"symbol": sym, "name": p.get("name"), "amount": 0, "pnl": 0, "count": 0})
+        by_symbol.setdefault(sym, {"symbol": sym, "name": p.get("name"), "amount": 0, "pnl": 0, "dailyPnl": 0, "count": 0})
         by_symbol[sym]["amount"] += p.get("amount") or 0
         by_symbol[sym]["pnl"] += p.get("pnl") or 0
+        by_symbol[sym]["dailyPnl"] += p.get("dailyPnl") or 0
         by_symbol[sym]["count"] += 1
 
         amount = p.get("amount") or 0
@@ -1702,6 +1704,7 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
     for row in list(by_type.values()) + top_positions:
         row["weightPct"] = round(row["amount"] / equity * 100, 2) if equity else 0
         row["pnlPct"] = round(row["pnl"] / row["amount"] * 100, 2) if row["amount"] else 0
+        row["dailyPct"] = round(row["dailyPnl"] / row["amount"] * 100, 2) if row["amount"] else 0
 
     concentration_top5 = sum(x["amount"] for x in top_positions[:5])
     return {
