@@ -5852,38 +5852,38 @@ function renderNasdaqScanner(payload) {
     return;
   }
 
-  const ranked = rows.slice(0, 12);
-  el.className = 'opp-list scanner-list';
-  el.innerHTML = `<div class="scanner-status">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>` + ranked.map(r => {
+  const ranked = rows.slice().sort((a, b) => Number(b.setup_score || 0) - Number(a.setup_score || 0));
+  const copyText = ranked.map(r => {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
-    const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
-    const biasCls = r.weekly_bullish ? 'good' : 'bad';
-    const sigCls = Number(sig.score || 0) >= 3 ? 'good' : 'warn';
+    const signal = sig.date ? `${sig.date} ${sig.score || '-'}/3` : '-';
+    const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
+    const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
+    return `${r.ticker}\t${score}\t${grade}\t${signal}\t${price}\t${reason}`;
+  }).join('\n');
+
+  el.className = 'scanner-list-simple';
+  el.innerHTML = `<div class="scanner-status">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>
+    <textarea class="scanner-copy-box" readonly spellcheck="false">Ticker\tScore\tGrade\tSignal\tLast\tReason
+${escHtml(copyText)}</textarea>
+    <div class="scanner-rows">` + ranked.map(r => {
+    const sig = r.recent_signal || {};
+    const score = Number(r.setup_score || 0);
+    const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
+    const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
     const metrics = r.metrics ? `RSI ${r.metrics.rsi ?? '-'} | ATR ${r.metrics.atr_pct ?? '-'}%` : '';
-    const reasons = [
-      ...(r.positive_factors || []).slice(0, 2).map(text => ({cls: 'good', text})),
-      ...(r.risk_flags || []).slice(0, 2).map(text => ({cls: 'warn', text})),
-    ].slice(0, 4).map(reason =>
-      `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${escHtml(reason.text)}</span>`
-    ).join('');
-    return `<div class="opp-item scanner-item" onclick="pc_selectTicker('${escHtml(r.ticker)}')">
-      <div class="opp-top">
-        <span class="opp-sym">${escHtml(r.ticker)}</span>
-        <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
-        <span class="opp-score-wrap"><span class="opp-score-label">score</span><span class="opp-score">${score}</span></span>
-      </div>
-      <div class="opp-meta">
-        <span class="opp-pill ${gradeCls}">${escHtml(grade)}</span>
-        <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
-        <span class="opp-pill ${sigCls}">${sig.score || '-'}/3 ${escHtml(sig.date || '')}</span>
-        <span class="opp-pill">Nasdaq 100</span>
-      </div>
-      ${metrics ? `<div style="font-family:var(--font-mono);font-size:10px;color:var(--muted2);padding:2px 0 0;">${metrics}</div>` : ''}
-      <div class="opp-reasons">${reasons}</div>
-    </div>`;
-  }).join('') + `<div class="opp-empty scanner-hint">Zobrazene top ${ranked.length} z ${rows.length} signalov.</div>`;
+    const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
+    return `<button class="scanner-row" onclick="pc_selectTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
+      <span class="scanner-ticker">${escHtml(r.ticker)}</span>
+      <span>${score}</span>
+      <span>${escHtml(grade)}</span>
+      <span>${escHtml(sig.date || '-')}</span>
+      <span>${sig.score || '-'}/3</span>
+      <span>${price}</span>
+      <span>${escHtml(metrics || reason)}</span>
+    </button>`;
+  }).join('') + `</div><div class="scanner-hint">Zobrazenych ${ranked.length} signalov. Textove pole vyssie je pripravene na kopirovanie.</div>`;
 }
 
 async function loadNasdaqScannerResults() {
