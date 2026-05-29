@@ -5438,19 +5438,113 @@ function addFibPriceLine(series, price, label, color) {
   pc_fibLines.push({ series, line });
 }
 
+function pcFormatFibDate(time) {
+  try {
+    const d = typeof time === 'number' ? new Date(time * 1000) : new Date(time);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  } catch(e) {
+    return '';
+  }
+}
+
+function findFibImpulse(candles) {
+  const data = (candles || [])
+    .map((c, idx) => ({
+      idx,
+      time: c.time,
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+    }))
+    .filter(c => Number.isFinite(c.high) && Number.isFinite(c.low) && Number.isFinite(c.close));
+  if (data.length < 24) return null;
+
+  const lookback = data.slice(-140);
+  const pivotWindow = lookback.length >= 80 ? 3 : 2;
+  const pivots = [];
+
+  for (let i = pivotWindow; i < lookback.length - pivotWindow; i++) {
+    const c = lookback[i];
+    let isHigh = true, isLow = true;
+    for (let j = i - pivotWindow; j <= i + pivotWindow; j++) {
+      if (j === i) continue;
+      if (lookback[j].high >= c.high) isHigh = false;
+      if (lookback[j].low <= c.low) isLow = false;
+    }
+    if (isHigh) pivots.push({ type: 'high', idx: i, time: c.time, price: c.high });
+    if (isLow) pivots.push({ type: 'low', idx: i, time: c.time, price: c.low });
+  }
+
+  if (pivots.length < 2) return null;
+
+  const lastClose = lookback[lookback.length - 1].close;
+  const minMovePct = lookback.length >= 80 ? 8 : 5;
+  const maxAge = Math.min(90, Math.max(28, Math.floor(lookback.length * 0.75)));
+  const candidates = [];
+
+  for (let a = 0; a < pivots.length - 1; a++) {
+    for (let b = a + 1; b < pivots.length; b++) {
+      const p1 = pivots[a], p2 = pivots[b];
+      if (p1.type === p2.type) continue;
+      const age = lookback.length - 1 - p2.idx;
+      if (age > maxAge) continue;
+      const low = p1.type === 'low' ? p1 : p2;
+      const high = p1.type === 'high' ? p1 : p2;
+      if (high.price <= low.price) continue;
+      const movePct = (high.price - low.price) / low.price * 100;
+      if (movePct < minMovePct) continue;
+      const direction = p1.type === 'low' && p2.type === 'high' ? 'up' : 'down';
+      const recencyScore = 1 / (age + 4);
+      const moveScore = Math.min(movePct, 80) / 80;
+      const priceContext = direction === 'up'
+        ? Math.max(0, 1 - Math.abs(lastClose - high.price) / Math.max(high.price - low.price, 1e-9))
+        : Math.max(0, 1 - Math.abs(lastClose - low.price) / Math.max(high.price - low.price, 1e-9));
+      candidates.push({
+        start: p1,
+        end: p2,
+        low,
+        high,
+        direction,
+        movePct,
+        score: moveScore * 0.55 + recencyScore * 8 + priceContext * 0.2,
+      });
+    }
+  }
+
+  if (!candidates.length) {
+    const slice = lookback.slice(-90);
+    let hi = { price: -Infinity, idx: -1 };
+    let lo = { price: Infinity, idx: -1 };
+    slice.forEach((c, idx) => {
+      if (c.high > hi.price) hi = { price: c.high, idx, time: c.time };
+      if (c.low < lo.price) lo = { price: c.low, idx, time: c.time };
+    });
+    if (!Number.isFinite(hi.price) || !Number.isFinite(lo.price) || hi.price <= lo.price) return null;
+    return {
+      low: lo,
+      high: hi,
+      direction: lo.idx <= hi.idx ? 'up' : 'down',
+      movePct: (hi.price - lo.price) / lo.price * 100,
+      fallback: true,
+    };
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0];
+}
+
 function drawAutoFibonacci(series, candles, prefix = 'Fib') {
-  if (!series || !Array.isArray(candles) || candles.length < 10) return;
-  const slice = candles.slice(-90);
-  let hi = { price: -Infinity, idx: -1 };
-  let lo = { price: Infinity, idx: -1 };
-  slice.forEach((c, idx) => {
-    const high = Number(c.high), low = Number(c.low);
-    if (Number.isFinite(high) && high > hi.price) hi = { price: high, idx };
-    if (Number.isFinite(low) && low < lo.price) lo = { price: low, idx };
-  });
-  if (!Number.isFinite(hi.price) || !Number.isFinite(lo.price) || hi.price <= lo.price) return;
-  const upMove = lo.idx <= hi.idx;
+  if (!series || !Array.isArray(candles) || candles.length < 24) return;
+  const impulse = findFibImpulse(candles);
+  if (!impulse || !impulse.low || !impulse.high) return;
+  const hi = impulse.high;
+  const lo = impulse.low;
+  const upMove = impulse.direction === 'up';
   const range = hi.price - lo.price;
+  if (!Number.isFinite(range) || range <= 0) return;
+  const anchor = `${pcFormatFibDate(upMove ? lo.time : hi.time)}-${pcFormatFibDate(upMove ? hi.time : lo.time)}`;
+  const mode = impulse.fallback ? 'range' : (upMove ? 'swing up' : 'swing down');
   const levels = [
     ['0', upMove ? hi.price : lo.price],
     ['23.6', upMove ? hi.price - range * 0.236 : lo.price + range * 0.236],
@@ -5462,7 +5556,10 @@ function drawAutoFibonacci(series, candles, prefix = 'Fib') {
   ];
   levels.forEach(([name, price]) => {
     const key = name === '50' || name === '61.8' ? '#22d3ee' : '#64748b';
-    addFibPriceLine(series, price, `${prefix} ${name}%`, key);
+    const label = name === '0'
+      ? `${prefix} ${mode} ${anchor}`
+      : `${prefix} ${name}%`;
+    addFibPriceLine(series, price, label, key);
   });
 }
 
