@@ -1262,8 +1262,9 @@ select.sel:focus {
 .risk-flag.warn { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-soft); }
 .risk-flag.good { color: var(--up); border-color: var(--up); background: var(--up-soft); }
 .risk-heatmap-wrap {
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 .risk-heatmap-head {
   display: flex;
@@ -1281,7 +1282,7 @@ select.sel:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
-  min-height: 260px;
+  min-height: 320px;
   align-content: stretch;
   background: var(--bg);
   border: 1px solid var(--border);
