@@ -1752,6 +1752,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .opp-reason.warn { color: var(--yellow); }
 #predictiveTab .opp-reason.bad  { color: var(--down); }
 
+#predictiveTab .scanner-status,
+#predictiveTab .scanner-hint {
+  color: var(--muted2);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 0 8px;
+}
+#predictiveTab .scanner-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+#predictiveTab .scanner-item {
+  border-left: 2px solid var(--accent);
+}
+
 #predictiveTab .sig-history-row {
   display: grid;
   grid-template-columns: 75px 45px 1fr 60px;
