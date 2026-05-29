@@ -1716,7 +1716,7 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
             "symbols": len(by_symbol),
         },
         "byType": sorted(by_type.values(), key=lambda x: x["amount"], reverse=True),
-        "topPositions": top_positions[:15],
+        "topPositions": top_positions,
         "riskFlags": risk_flags[:100],
     }
 
