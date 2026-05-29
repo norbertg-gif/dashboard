@@ -1290,7 +1290,7 @@ select.sel:focus {
   padding: 4px;
 }
 .risk-tile {
-  min-height: 72px;
+  min-height: 92px;
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 3px;
   color: #fff;
@@ -1304,19 +1304,6 @@ select.sel:focus {
   text-shadow: 0 1px 2px rgba(0,0,0,0.45);
   transition: transform .12s ease, border-color .12s ease, filter .12s ease;
 }
-.risk-tile-pnl-dot {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.75);
-  box-shadow: 0 0 5px rgba(0,0,0,0.45);
-}
-.risk-tile-pnl-dot.pos { background: var(--up); }
-.risk-tile-pnl-dot.neg { background: var(--down); }
-.risk-tile-pnl-dot.flat { background: var(--muted); }
 .risk-tile:hover {
   border-color: var(--accent);
   filter: brightness(1.12);
@@ -1334,6 +1321,18 @@ select.sel:focus {
   font-weight: 800;
   margin-top: 4px;
 }
+.risk-tile-pnl {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 3px;
+  padding: 1px 5px;
+  border-radius: 99px;
+  background: rgba(0,0,0,0.28);
+}
+.risk-tile-pnl.pos { color: var(--up); }
+.risk-tile-pnl.neg { color: var(--down); }
+.risk-tile-pnl.flat { color: rgba(255,255,255,0.75); }
 .risk-tile-weight {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1623,6 +1622,42 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border-radius: var(--radius-md);
   padding: 12px;
 }
+#predictiveTab .pc-collapsible {
+  padding: 10px 12px;
+}
+#predictiveTab .pc-collapse-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+#predictiveTab .pc-collapse-head .card-title {
+  margin-bottom: 0;
+  flex: 1;
+}
+#predictiveTab .pc-collapse-toggle {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+#predictiveTab .pc-collapse-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#predictiveTab .pc-collapsible.collapsed .pc-collapse-head {
+  margin-bottom: 0;
+}
+#predictiveTab .pc-collapsible.collapsed .pc-collapse-body {
+  display: none;
+}
 #predictiveTab .card-title {
   font-size: 10px;
   font-weight: 700;
@@ -1663,6 +1698,9 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
+}
+#predictiveTab .pc-collapsible.collapsed .opp-toolbar {
+  margin-bottom: 0;
 }
 #predictiveTab .opp-toolbar .card-title {
   margin-bottom: 0;
