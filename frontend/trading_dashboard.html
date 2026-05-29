@@ -267,29 +267,35 @@
       <div class="ind-controls">
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#60a5fa;"></div>
-          <input type="checkbox" id="chk_ema10" onchange="applyOverlays()">
+          <input type="checkbox" id="chk_ema10" onchange="pc_applyOverlays()">
           <label for="chk_ema10">EMA 10</label>
         </div>
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#f59e0b;"></div>
-          <input type="checkbox" id="chk_ema20" onchange="applyOverlays()">
+          <input type="checkbox" id="chk_ema20" onchange="pc_applyOverlays()">
           <label for="chk_ema20">EMA 20</label>
         </div>
         <div class="ind-group-label" style="margin-top:6px;">Ichimoku</div>
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#34d399;"></div>
-          <input type="checkbox" id="chk_tenkan" onchange="applyOverlays()">
+          <input type="checkbox" id="chk_tenkan" onchange="pc_applyOverlays()">
           <label for="chk_tenkan">Tenkan (9)</label>
         </div>
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#f87171;"></div>
-          <input type="checkbox" id="chk_kijun" onchange="applyOverlays()">
+          <input type="checkbox" id="chk_kijun" onchange="pc_applyOverlays()">
           <label for="chk_kijun">Kijun (26)</label>
         </div>
         <div class="ind-check-row">
           <div class="ind-dot" style="background:rgba(124,106,247,0.4); height:8px; border-radius:2px;"></div>
-          <input type="checkbox" id="chk_kumo" onchange="applyOverlays()">
+          <input type="checkbox" id="chk_kumo" onchange="pc_applyOverlays()">
           <label for="chk_kumo">Kumo cloud</label>
+        </div>
+        <div class="ind-group-label" style="margin-top:6px;">Úrovne</div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:#22d3ee;"></div>
+          <input type="checkbox" id="chk_fib" onchange="pc_applyOverlays()">
+          <label for="chk_fib">Fibonacci auto</label>
         </div>
       </div>
     </div>
@@ -397,6 +403,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260529-daily-width-fix"></script>
+  <script src="/dashboard.js?v=20260529-fib-heatmap-v1"></script>
 </body>
 </html>
