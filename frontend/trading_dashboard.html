@@ -128,6 +128,7 @@
     <div class="main-tab" id="tab-history" onclick="switchMainTab('history')">História</div>
     <div class="main-tab" id="tab-risk" onclick="switchMainTab('risk')">Risk</div>
     <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny</div>
+    <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner</div>
   </div>
   <!-- Grafy -->
   <div id="main-charts" style="flex:1;min-height:0;overflow:auto;">
@@ -140,6 +141,7 @@
   <div id="main-rates" class="tool-view" style="display:none;"></div>
   <div id="main-history" class="tool-view" style="display:none;"></div>
   <div id="main-risk" class="tool-view" style="display:none;"></div>
+  <div id="main-scanner" class="tool-view" style="display:none;"></div>
 <!-- ══ PREDICTIVE CHART TAB ══ -->
 <div id="main-predictive" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;position:relative;">
   <div id="predictiveTab" style="display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden;">
@@ -233,14 +235,6 @@
         <button class="opp-refresh" onclick="refreshOpportunities(true)" title="Prepočítať radar">⟳</button>
       </div>
       <div id="opportunitiesInfo" class="opp-empty">Radar sa načíta z watchlistu a eToro pozícií.</div>
-    </div>
-
-    <div class="card" id="nasdaqScannerCard">
-      <div class="opp-toolbar">
-        <div class="card-title">Nasdaq scanner</div>
-        <button class="opp-refresh" onclick="runNasdaqScanner()" title="Spustit scan Nasdaq 100">Scan</button>
-      </div>
-      <div id="nasdaqScannerInfo" class="opp-empty">Manualny scan buy signalov za posledne 3 dni.</div>
     </div>
 
     <div class="card">
@@ -415,6 +409,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260529-fibonacci-manual"></script>
+  <script src="/dashboard.js?v=20260602-scanner-tab-dip"></script>
 </body>
 </html>
