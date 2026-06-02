@@ -7,7 +7,7 @@ pip install fastapi uvicorn yfinance pandas requests
 import json, os, math, threading
 from io import BytesIO
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 _executor = ThreadPoolExecutor(max_workers=2)
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -3245,6 +3245,16 @@ NASDAQ100_TICKERS = [
     "TSLA", "TTD", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS",
 ]
 
+SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "8"))
+SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "30"))
+SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "15"))
+SCANNER_DEFAULT_DAYS = 3
+SIGNAL_PROXIMITY_TOL = 0.005
+SIGNAL_RSI_PULLBACK = 45
+SIGNAL_VOLUME_MULT = 1.2
+DIP_STRONG_THRESHOLD = 90
+DIP_VERY_STRONG_THRESHOLD = 100
+
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
 _scanner_lock = threading.Lock()
@@ -3301,9 +3311,9 @@ def _dip_label(total):
     total = _num_or_none(total)
     if total is None:
         return "TECH ONLY"
-    if total >= 100:
+    if total >= DIP_VERY_STRONG_THRESHOLD:
         return "VERY STRONG"
-    if total >= 90:
+    if total >= DIP_STRONG_THRESHOLD:
         return "STRONG"
     if total >= 80:
         return "WATCH"
@@ -3340,11 +3350,11 @@ def enrich_scanner_payload(payload: dict) -> dict:
     clean_scores = {k: v for k, v in dip_scores.items() if not k.startswith("_")}
     out["dip_import"]["count"] = len(clean_scores)
     out["results"] = [enrich_with_dip(r, clean_scores) for r in rows]
-    out["crossover_matches"] = sum(1 for r in out["results"] if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= 90)
+    out["crossover_matches"] = sum(1 for r in out["results"] if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD)
     return out
 
 
-def parse_dip_ranking_xlsx(raw: bytes) -> dict:
+def parse_dip_ranking_xlsx(raw: bytes, filename: str | None = None) -> dict:
     try:
         import openpyxl
     except Exception as e:
@@ -3392,6 +3402,7 @@ def parse_dip_ranking_xlsx(raw: bytes) -> dict:
         }
     scores["_meta"] = {
         "sheet": sheet_name,
+        "filename": filename or "",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "count": len([k for k in scores.keys() if not k.startswith("_")]),
     }
@@ -3399,25 +3410,25 @@ def parse_dip_ranking_xlsx(raw: bytes) -> dict:
 
 
 @app.post("/api/scanner/dip/import")
-async def import_dip_scores(request: Request):
+async def import_dip_scores(request: Request, filename: str | None = Query(None)):
     raw = await request.body()
     if not raw:
         raise HTTPException(400, "Chyba importny subor")
-    scores = parse_dip_ranking_xlsx(raw)
+    scores = parse_dip_ranking_xlsx(raw, filename=filename)
     save_dip_scores(scores)
     meta = scores.get("_meta", {})
-    return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "updated_at": meta.get("updated_at")}
+    return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at")}
 
 
 @app.get("/api/scanner/dip/status")
 def get_dip_status():
     scores = load_dip_scores()
     meta = scores.get("_meta", {}) if isinstance(scores.get("_meta"), dict) else {}
-    return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet")}
+    return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet"), "filename": meta.get("filename")}
 
 
-def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
-    raw_d = yf.download(ticker, period="6mo", interval="1d", auto_adjust=True, progress=False)
+def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
+    raw_d = yf.download(ticker, period="6mo", interval="1d", auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
     if isinstance(raw_d.columns, pd.MultiIndex):
         raw_d.columns = raw_d.columns.get_level_values(0)
     raw_d = raw_d.dropna(subset=["Open", "High", "Low", "Close"])
@@ -3426,11 +3437,12 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
 
     df_d = add_indicators(raw_d)
 
-    raw_w = yf.download(ticker, period="1y", interval="1wk", auto_adjust=True, progress=False)
+    raw_w = yf.download(ticker, period="1y", interval="1wk", auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
     if isinstance(raw_w.columns, pd.MultiIndex):
         raw_w.columns = raw_w.columns.get_level_values(0)
     raw_w = raw_w.dropna(subset=["Open", "High", "Low", "Close"])
-    weekly_bullish = False
+    weekly_bullish = None
+    weekly_status = "insufficient_history"
     if len(raw_w) >= 30:
         df_w = add_indicators(raw_w)
         last_w = df_w.iloc[-1]
@@ -3443,10 +3455,11 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
         )
         w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
         weekly_bullish = w_comp > 0.05 and w_above_kumo and w_ema_bull
+        weekly_status = "bullish" if weekly_bullish else "not_bullish"
 
     today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
     cutoff = today_date - pd.Timedelta(days=days)
-    ticker_slog = slog.get(ticker, {})
+    ticker_slog = dict(ticker_slog or {})
     recent_signal = None
     all_signals = []
 
@@ -3468,10 +3481,9 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
         vol = float(row["Volume"])
         vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
 
-        tol = 0.005
-        c1 = abs(close - ema20) / close < tol or abs(close - kijun) / close < tol
-        c2 = rsi < 45
-        c3 = close > open_ and vol > vol_ma * 1.2
+        c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
+        c2 = rsi < SIGNAL_RSI_PULLBACK
+        c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
         sc = sum([c1, c2, c3])
 
         if sc >= 2:
@@ -3491,16 +3503,15 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
                 if recent_signal is None or date_key > recent_signal["date"]:
                     recent_signal = sig
 
-    if ticker_slog:
-        slog[ticker] = ticker_slog
-
-    setup = build_setup_assessment(df_d, weekly_bullish, recent_signal, len(all_signals))
+    setup = build_setup_assessment(df_d, bool(weekly_bullish), recent_signal, len(all_signals))
     return {
         "ticker": ticker,
         "weekly_bullish": weekly_bullish,
+        "weekly_status": weekly_status,
         "recent_signal": recent_signal,
         "signal_count": len(all_signals),
         "last_close": round(float(df_d.iloc[-1]["Close"]), 2),
+        "slog_update": ticker_slog,
         **setup,
         "error": None,
     }
@@ -3509,7 +3520,8 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
 def _run_nasdaq_scanner(days: int):
     started = datetime.now(timezone.utc).isoformat()
     results, errors = [], []
-    slog = load_signals_log()
+    slog_source = load_signals_log()
+    slog_work = {k: dict(v) if isinstance(v, dict) else v for k, v in slog_source.items()}
     tickers = NASDAQ100_TICKERS[:]
 
     with _scanner_lock:
@@ -3524,21 +3536,53 @@ def _run_nasdaq_scanner(days: int):
         })
 
     try:
-        for idx, ticker in enumerate(tickers, start=1):
-            with _scanner_lock:
-                _scanner_state.update({"progress": idx - 1, "current": ticker})
-            try:
-                row = _scan_buy_signal_for_ticker(ticker, days, slog)
-                if row.get("error"):
-                    errors.append(row)
-                elif row.get("recent_signal"):
-                    results.append(row)
-            except Exception as e:
-                errors.append({"ticker": ticker, "error": str(e)[:80]})
-            with _scanner_lock:
-                _scanner_state.update({"progress": idx, "current": ticker})
+        done_count = 0
+        max_workers = max(1, min(SCANNER_MAX_WORKERS, len(tickers)))
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        futures = {}
+        started_at = {}
+        try:
+            for ticker in tickers:
+                fut = pool.submit(_scan_buy_signal_for_ticker, ticker, days, dict(slog_work.get(ticker, {})))
+                futures[fut] = ticker
+                started_at[fut] = _time_module.time()
 
-        save_signals_log(slog)
+            pending = set(futures.keys())
+            while pending:
+                done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
+
+                timed_out = [f for f in list(pending) if _time_module.time() - started_at.get(f, 0) > SCANNER_TICKER_TIMEOUT]
+                for fut in timed_out:
+                    ticker = futures[fut]
+                    fut.cancel()
+                    pending.remove(fut)
+                    errors.append({"ticker": ticker, "error": f"Timeout po {SCANNER_TICKER_TIMEOUT}s"})
+                    done_count += 1
+                    with _scanner_lock:
+                        _scanner_state.update({"progress": done_count, "current": ticker})
+
+                for future in done:
+                    ticker = futures[future]
+                    with _scanner_lock:
+                        _scanner_state.update({"progress": done_count, "current": ticker})
+                    try:
+                        row = future.result()
+                        slog_update = row.pop("slog_update", None)
+                        if isinstance(slog_update, dict) and slog_update:
+                            slog_work[ticker] = slog_update
+                        if row.get("error"):
+                            errors.append(row)
+                        elif row.get("recent_signal"):
+                            results.append(row)
+                    except Exception as e:
+                        errors.append({"ticker": ticker, "error": str(e)[:80]})
+                    done_count += 1
+                    with _scanner_lock:
+                        _scanner_state.update({"progress": done_count, "current": ticker})
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        save_signals_log(slog_work)
         dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
         results = [enrich_with_dip(r, dip_scores) for r in results]
         results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
@@ -3549,7 +3593,7 @@ def _run_nasdaq_scanner(days: int):
             "total": len(tickers),
             "matches": len(results),
             "errors": len(errors),
-            "crossover_matches": sum(1 for r in results if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= 90),
+            "crossover_matches": sum(1 for r in results if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD),
             "results": results,
         }
         save_scanner_cache(payload)
@@ -3572,7 +3616,7 @@ def _run_nasdaq_scanner(days: int):
 
 
 @app.post("/api/scanner/nasdaq/run")
-def start_nasdaq_scanner(days: int = Query(3, ge=1, le=10)):
+def start_nasdaq_scanner(days: int = Query(SCANNER_DEFAULT_DAYS, ge=1, le=10)):
     with _scanner_lock:
         if _scanner_state.get("running"):
             return {"status": "running", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
