@@ -1919,27 +1919,64 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-height: 0;
   overflow: auto;
   padding: 14px;
+  flex: 1;
 }
-#main-scanner .scanner-copy-box-wide {
-  min-height: 155px;
+.scanner-result-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
 }
-#main-scanner .scanner-table-head,
-#main-scanner .scanner-row-wide {
-  grid-template-columns: 66px 46px 46px 42px 42px 48px 92px 82px 38px 62px minmax(180px, 1fr);
-}
-#main-scanner .scanner-table-head {
-  display: grid;
-  gap: 6px;
-  color: var(--muted2);
+.scanner-status-line {
+  color: var(--muted);
+  font-size: 11px;
   font-family: var(--font-mono);
-  font-size: 10px;
+}
+.scanner-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+.scanner-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  background: var(--bg-card);
+}
+.scanner-table {
+  min-width: 1120px;
+}
+.scanner-table tr {
+  cursor: pointer;
+}
+.scanner-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-input);
+}
+.scanner-export {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 10px;
+}
+.scanner-export summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
-  padding: 8px 5px 5px;
-  border-bottom: 1px solid var(--border);
+  letter-spacing: .04em;
+  margin-bottom: 8px;
 }
-#main-scanner .scanner-rows-wide {
-  max-height: none;
+#main-scanner .scanner-copy-box-wide {
+  height: 210px;
+  min-height: 180px;
+  max-height: 420px;
+  resize: vertical;
+  display: block;
+  box-sizing: border-box;
 }
 .scanner-label {
   display: inline-flex;
