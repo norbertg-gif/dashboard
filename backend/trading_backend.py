@@ -5,6 +5,7 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import json, os, math, threading
+from io import BytesIO
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -3245,6 +3246,7 @@ NASDAQ100_TICKERS = [
 ]
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
+DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
 _scanner_lock = threading.Lock()
 _scanner_state = {
     "running": False,
@@ -3268,6 +3270,150 @@ def load_scanner_cache():
 
 def save_scanner_cache(data):
     SCANNER_CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_dip_scores():
+    if DIP_SCORES_FILE.exists():
+        try:
+            return json.loads(DIP_SCORES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_dip_scores(data):
+    DIP_SCORES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _num_or_none(value):
+    try:
+        if value is None or value == "":
+            return None
+        v = float(value)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return int(v) if abs(v - int(v)) < 1e-9 else v
+    except Exception:
+        return None
+
+
+def _dip_label(total):
+    total = _num_or_none(total)
+    if total is None:
+        return "TECH ONLY"
+    if total >= 100:
+        return "VERY STRONG"
+    if total >= 90:
+        return "STRONG"
+    if total >= 80:
+        return "WATCH"
+    return "WEAK DIP"
+
+
+def enrich_with_dip(row: dict, dip_scores: dict) -> dict:
+    out = dict(row)
+    ticker = str(out.get("ticker") or "").upper()
+    dip = dip_scores.get(ticker)
+    if dip:
+        out["dip"] = dip
+        out["dip_total"] = dip.get("total")
+        out["dip_rank"] = dip.get("rank")
+        out["dip_label"] = _dip_label(dip.get("total"))
+    else:
+        out["dip"] = None
+        out["dip_total"] = None
+        out["dip_rank"] = None
+        out["dip_label"] = "TECH ONLY"
+    return out
+
+
+def enrich_scanner_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    dip_scores = load_dip_scores()
+    out = dict(payload)
+    rows = out.get("results") or []
+    out["dip_import"] = {
+        "count": len(dip_scores),
+        "updated_at": dip_scores.get("_meta", {}).get("updated_at") if isinstance(dip_scores.get("_meta"), dict) else None,
+    }
+    clean_scores = {k: v for k, v in dip_scores.items() if not k.startswith("_")}
+    out["dip_import"]["count"] = len(clean_scores)
+    out["results"] = [enrich_with_dip(r, clean_scores) for r in rows]
+    out["crossover_matches"] = sum(1 for r in out["results"] if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= 90)
+    return out
+
+
+def parse_dip_ranking_xlsx(raw: bytes) -> dict:
+    try:
+        import openpyxl
+    except Exception as e:
+        raise HTTPException(500, f"openpyxl chyba/import dependency: {e}")
+
+    wb = openpyxl.load_workbook(BytesIO(raw), read_only=True, data_only=True)
+    sheet_name = "Ranking" if "Ranking" in wb.sheetnames else ("ranking" if "ranking" in wb.sheetnames else wb.sheetnames[0])
+    ws = wb[sheet_name]
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        raise HTTPException(400, "Excel neobsahuje data")
+    headers = [str(h or "").strip().lower() for h in rows[0]]
+
+    def col(*names):
+        for name in names:
+            if name.lower() in headers:
+                return headers.index(name.lower())
+        return None
+
+    idx_rank = col("rank")
+    idx_ticker = col("ticker")
+    idx_company = col("company")
+    idx_price = col("price")
+    idx_fa = col("fa")
+    idx_ta = col("ta")
+    idx_total = col("total")
+    if idx_ticker is None or idx_total is None:
+        raise HTTPException(400, "Zalozka Ranking musi obsahovat aspon stlpce Ticker a TOTAL")
+
+    scores = {}
+    for row in rows[1:]:
+        ticker = str(row[idx_ticker] or "").strip().upper() if idx_ticker < len(row) else ""
+        if not ticker:
+            continue
+        total = _num_or_none(row[idx_total] if idx_total < len(row) else None)
+        scores[ticker] = {
+            "rank": _num_or_none(row[idx_rank] if idx_rank is not None and idx_rank < len(row) else None),
+            "ticker": ticker,
+            "company": str(row[idx_company] or "").strip() if idx_company is not None and idx_company < len(row) and row[idx_company] is not None else "",
+            "price": _num_or_none(row[idx_price] if idx_price is not None and idx_price < len(row) else None),
+            "fa": _num_or_none(row[idx_fa] if idx_fa is not None and idx_fa < len(row) else None),
+            "ta": _num_or_none(row[idx_ta] if idx_ta is not None and idx_ta < len(row) else None),
+            "total": total,
+            "label": _dip_label(total),
+        }
+    scores["_meta"] = {
+        "sheet": sheet_name,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "count": len([k for k in scores.keys() if not k.startswith("_")]),
+    }
+    return scores
+
+
+@app.post("/api/scanner/dip/import")
+async def import_dip_scores(request: Request):
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(400, "Chyba importny subor")
+    scores = parse_dip_ranking_xlsx(raw)
+    save_dip_scores(scores)
+    meta = scores.get("_meta", {})
+    return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "updated_at": meta.get("updated_at")}
+
+
+@app.get("/api/scanner/dip/status")
+def get_dip_status():
+    scores = load_dip_scores()
+    meta = scores.get("_meta", {}) if isinstance(scores.get("_meta"), dict) else {}
+    return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet")}
 
 
 def _scan_buy_signal_for_ticker(ticker: str, days: int, slog: dict) -> dict:
@@ -3393,7 +3539,9 @@ def _run_nasdaq_scanner(days: int):
                 _scanner_state.update({"progress": idx, "current": ticker})
 
         save_signals_log(slog)
-        results.sort(key=lambda r: (r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
+        dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
+        results = [enrich_with_dip(r, dip_scores) for r in results]
+        results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
         payload = {
             "universe": "nasdaq100",
             "days": days,
@@ -3401,6 +3549,7 @@ def _run_nasdaq_scanner(days: int):
             "total": len(tickers),
             "matches": len(results),
             "errors": len(errors),
+            "crossover_matches": sum(1 for r in results if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= 90),
             "results": results,
         }
         save_scanner_cache(payload)
@@ -3426,18 +3575,18 @@ def _run_nasdaq_scanner(days: int):
 def start_nasdaq_scanner(days: int = Query(3, ge=1, le=10)):
     with _scanner_lock:
         if _scanner_state.get("running"):
-            return {"status": "running", "state": dict(_scanner_state), "cache": load_scanner_cache()}
+            return {"status": "running", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
         _scanner_state.update({"running": True, "progress": 0, "total": len(NASDAQ100_TICKERS), "current": None, "error": None})
     t = threading.Thread(target=_run_nasdaq_scanner, args=(days,), daemon=True)
     t.start()
-    return {"status": "started", "state": dict(_scanner_state), "cache": load_scanner_cache()}
+    return {"status": "started", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
 
 
 @app.get("/api/scanner/nasdaq/results")
 def get_nasdaq_scanner_results():
     with _scanner_lock:
         state = dict(_scanner_state)
-    return {"state": state, "cache": load_scanner_cache()}
+    return {"state": state, "cache": enrich_scanner_payload(load_scanner_cache())}
 
 
 @app.get("/api/checklist")
