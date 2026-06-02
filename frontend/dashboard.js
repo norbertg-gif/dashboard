@@ -137,7 +137,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','rates','history','risk','predictive'].forEach(name => {
+  ['charts','portfolio','rates','history','risk','predictive','scanner'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -157,6 +157,8 @@ function switchMainTab(tab) {
     renderHistoryView();
   } else if (tab === 'risk') {
     renderRiskView();
+  } else if (tab === 'scanner') {
+    renderScannerView();
   }
 }
 
@@ -6100,6 +6102,76 @@ function scannerStatusLine(state, cache) {
   return 'Zatial nie je spusteny ziaden Nasdaq scan.';
 }
 
+async function loadDipStatus() {
+  try {
+    const res = await fetch('/api/scanner/dip/status');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch(e) {
+    return { error: e.message };
+  }
+}
+
+async function importDipExcel() {
+  const input = document.getElementById('dipImportInput');
+  const status = document.getElementById('dipImportStatus');
+  const file = input?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = 'Vyber Excel subor so zalozkou Ranking.';
+    return;
+  }
+  if (status) status.innerHTML = '<span class="cl-spinner"></span>Importujem DIP ranking...';
+  try {
+    const body = await file.arrayBuffer();
+    const res = await fetch('/api/scanner/dip/import?filename=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+      body,
+    });
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { msg = (await res.json()).detail || msg; } catch(e) {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    if (status) status.textContent = `DIP import OK: ${data.count || 0} titulov (${data.sheet || 'Ranking'})`;
+    await loadNasdaqScannerResults();
+  } catch(e) {
+    if (status) status.textContent = 'DIP import chyba: ' + e.message;
+  }
+}
+
+async function renderScannerView() {
+  const el = document.getElementById('main-scanner');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="scanner-page">
+      <div class="tool-panel fill">
+        <div class="tool-toolbar">
+          <div class="tool-title">Nasdaq Scanner + DIP crossover</div>
+          <div class="scanner-actions">
+            <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
+            <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
+            <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+          </div>
+        </div>
+        <div class="scanner-meta-row">
+          <span id="dipImportStatus">Načítavam DIP stav...</span>
+          <span id="scannerPageStatus"></span>
+        </div>
+        <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
+      </div>
+    </div>`;
+  const dip = await loadDipStatus();
+  const status = document.getElementById('dipImportStatus');
+  if (status) {
+    if (dip.error) status.textContent = 'DIP stav nedostupný: ' + dip.error;
+    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
+    else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
+  }
+  await loadNasdaqScannerResults();
+}
+
 function renderNasdaqScanner(payload) {
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el) return;
@@ -6126,38 +6198,53 @@ function renderNasdaqScanner(payload) {
     return;
   }
 
-  const ranked = rows.slice().sort((a, b) => Number(b.setup_score || 0) - Number(a.setup_score || 0));
+  const ranked = rows.slice().sort((a, b) =>
+    Number(b.dip_total ?? -1) - Number(a.dip_total ?? -1) ||
+    Number(b.setup_score || 0) - Number(a.setup_score || 0)
+  );
   const copyText = ranked.map(r => {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
     const signal = sig.date ? `${sig.date} ${sig.score || '-'}/3` : '-';
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
+    const dip = Number.isFinite(Number(r.dip_total)) ? r.dip_total : '-';
+    const rank = r.dip_rank ?? '-';
+    const label = r.dip_label || 'TECH ONLY';
     const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
-    return `${r.ticker}\t${score}\t${grade}\t${signal}\t${price}\t${reason}`;
+    return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${reason}`;
   }).join('\n');
 
   el.className = 'scanner-list-simple';
   el.innerHTML = `<div class="scanner-status">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>
-    <textarea class="scanner-copy-box" readonly spellcheck="false">Ticker\tScore\tGrade\tSignal\tLast\tReason
+    <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
 ${escHtml(copyText)}</textarea>
-    <div class="scanner-rows">` + ranked.map(r => {
+    <div class="scanner-table-head">
+      <span>Ticker</span><span>Tech</span><span>DIP</span><span>FA</span><span>TA</span><span>Rank</span><span>Crossover</span><span>Date</span><span>Sig</span><span>Last</span><span>Reason</span>
+    </div>
+    <div class="scanner-rows scanner-rows-wide">` + ranked.map(r => {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
-    const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
-    const metrics = r.metrics ? `RSI ${r.metrics.rsi ?? '-'} | ATR ${r.metrics.atr_pct ?? '-'}%` : '';
     const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
-    return `<button class="scanner-row" onclick="pc_selectTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
+    const dip = r.dip || {};
+    const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
+    const label = r.dip_label || 'TECH ONLY';
+    const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';
+    return `<button class="scanner-row scanner-row-wide" onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <span class="scanner-ticker">${escHtml(r.ticker)}</span>
       <span>${score}</span>
-      <span>${escHtml(grade)}</span>
+      <span>${dipTotal ?? '-'}</span>
+      <span>${dip.fa ?? '-'}</span>
+      <span>${dip.ta ?? '-'}</span>
+      <span>${r.dip_rank ?? '-'}</span>
+      <span class="scanner-label ${labelCls}">${escHtml(label)}</span>
       <span>${escHtml(sig.date || '-')}</span>
       <span>${sig.score || '-'}/3</span>
       <span>${price}</span>
-      <span>${escHtml(metrics || reason)}</span>
+      <span>${escHtml(reason)}</span>
     </button>`;
-  }).join('') + `</div><div class="scanner-hint">Zobrazenych ${ranked.length} signalov. Textove pole vyssie je pripravene na kopirovanie.</div>`;
+  }).join('') + `</div><div class="scanner-hint">Zobrazenych ${ranked.length} signalov, crossover ${cache.crossover_matches || 0}. Textove pole vyssie je pripravene na kopirovanie.</div>`;
 }
 
 async function loadNasdaqScannerResults() {
@@ -6198,6 +6285,11 @@ async function runNasdaqScanner() {
   } finally {
     pc_scannerLoading = false;
   }
+}
+
+function openScannerTicker(ticker) {
+  switchMainTab('predictive');
+  setTimeout(() => pc_selectTicker(ticker), 120);
 }
 
 const WL_KEY = 'td_watchlist'; // shared with dashboard
@@ -6533,6 +6625,9 @@ window.runChecklist = runChecklist;
 window.refreshOpportunities = refreshOpportunities;
 window.runNasdaqScanner = runNasdaqScanner;
 window.loadNasdaqScannerResults = loadNasdaqScannerResults;
+window.importDipExcel = importDipExcel;
+window.renderScannerView = renderScannerView;
+window.openScannerTicker = openScannerTicker;
 window.importChecklistCSV = importChecklistCSV;
 window.addToChecklist = addToChecklist;
 window.removeFromChecklist = removeFromChecklist;
