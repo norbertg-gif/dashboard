@@ -6102,6 +6102,21 @@ function scannerStatusLine(state, cache) {
   return 'Zatial nie je spusteny ziaden Nasdaq scan.';
 }
 
+const SCANNER_EXPORT_HEIGHT_KEY = 'td_scanner_export_height';
+
+function attachScannerExportResize() {
+  const box = document.querySelector('#main-scanner .scanner-copy-box-wide');
+  if (!box) return;
+  const saved = Number(localStorage.getItem(SCANNER_EXPORT_HEIGHT_KEY) || 0);
+  if (saved >= 160) box.style.height = `${saved}px`;
+  const save = () => {
+    const h = Math.round(box.getBoundingClientRect().height);
+    if (h >= 160) localStorage.setItem(SCANNER_EXPORT_HEIGHT_KEY, String(h));
+  };
+  box.addEventListener('mouseup', save);
+  box.addEventListener('keyup', save);
+}
+
 async function loadDipStatus() {
   try {
     const res = await fetch('/api/scanner/dip/status');
@@ -6215,14 +6230,27 @@ function renderNasdaqScanner(payload) {
     return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${reason}`;
   }).join('\n');
 
-  el.className = 'scanner-list-simple';
-  el.innerHTML = `<div class="scanner-status">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>
-    <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
-${escHtml(copyText)}</textarea>
-    <div class="scanner-table-head">
-      <span>Ticker</span><span>Tech</span><span>DIP</span><span>FA</span><span>TA</span><span>Rank</span><span>Crossover</span><span>Date</span><span>Sig</span><span>Last</span><span>Reason</span>
+  const kpis = {
+    total: ranked.length,
+    crossover: Number(cache.crossover_matches || 0),
+    strong: ranked.filter(r => String(r.dip_label || '').includes('STRONG')).length,
+    techOnly: ranked.filter(r => (r.dip_label || 'TECH ONLY') === 'TECH ONLY').length,
+  };
+  el.className = 'scanner-output';
+  el.innerHTML = `<div class="scanner-result-shell">
+    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>
+    <div class="scanner-kpis">
+      <div class="tool-kpi"><div class="tool-kpi-label">Signály</div><div class="tool-kpi-val">${kpis.total}</div></div>
+      <div class="tool-kpi"><div class="tool-kpi-label">Crossover</div><div class="tool-kpi-val">${kpis.crossover}</div></div>
+      <div class="tool-kpi"><div class="tool-kpi-label">Strong</div><div class="tool-kpi-val">${kpis.strong}</div></div>
+      <div class="tool-kpi"><div class="tool-kpi-label">Tech only</div><div class="tool-kpi-val">${kpis.techOnly}</div></div>
     </div>
-    <div class="scanner-rows scanner-rows-wide">` + ranked.map(r => {
+    <div class="scanner-table-wrap">
+      <table class="tool-table scanner-table">
+        <thead><tr>
+          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Reason</th>
+        </tr></thead>
+        <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
@@ -6231,20 +6259,27 @@ ${escHtml(copyText)}</textarea>
     const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
     const label = r.dip_label || 'TECH ONLY';
     const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';
-    return `<button class="scanner-row scanner-row-wide" onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <span class="scanner-ticker">${escHtml(r.ticker)}</span>
-      <span>${score}</span>
-      <span>${dipTotal ?? '-'}</span>
-      <span>${dip.fa ?? '-'}</span>
-      <span>${dip.ta ?? '-'}</span>
-      <span>${r.dip_rank ?? '-'}</span>
-      <span class="scanner-label ${labelCls}">${escHtml(label)}</span>
-      <span>${escHtml(sig.date || '-')}</span>
-      <span>${sig.score || '-'}/3</span>
-      <span>${price}</span>
-      <span>${escHtml(reason)}</span>
-    </button>`;
-  }).join('') + `</div><div class="scanner-hint">Zobrazenych ${ranked.length} signalov, crossover ${cache.crossover_matches || 0}. Textove pole vyssie je pripravene na kopirovanie.</div>`;
+    return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b></td>
+      <td class="r">${score}</td>
+      <td class="r">${dipTotal ?? '-'}</td>
+      <td class="r">${dip.fa ?? '-'}</td>
+      <td class="r">${dip.ta ?? '-'}</td>
+      <td class="r">${r.dip_rank ?? '-'}</td>
+      <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
+      <td>${escHtml(sig.date || '-')}</td>
+      <td>${sig.score || '-'}/3</td>
+      <td class="r">${price}</td>
+      <td>${escHtml(reason)}</td>
+    </tr>`;
+  }).join('') + `</tbody></table></div>
+    <details class="scanner-export" open>
+      <summary>Export / kopírovanie</summary>
+      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
+${escHtml(copyText)}</textarea>
+    </details>
+  </div>`;
+  attachScannerExportResize();
 }
 
 async function loadNasdaqScannerResults() {
