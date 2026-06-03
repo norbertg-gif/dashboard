@@ -1410,13 +1410,14 @@ function renderPortPanel(pid) {
     html += `</colgroup><thead><tr>`;
     for (const col of cols) {
       const sortCls = s.sortCol === col.key ? (s.sortDir === -1 ? ' sort-desc' : ' sort-asc') : '';
+      const sortMark = s.sortCol === col.key ? (s.sortDir === 1 ? ' ▲' : ' ▼') : '';
       html += `<th class="${sortCls}" data-col="${col.key}" draggable="true"${portColStyle(s, col.key)}
         onclick="portSort('${pid}','${col.key}')"
         ondragstart="portDragStart(event,'${pid}','${col.key}')"
         ondragover="portDragOver(event,'${pid}','${col.key}')"
         ondrop="portDrop(event,'${pid}','${col.key}')"
         ondragleave="portDragLeave(event)"
-        ><span class="port-th-label">${col.label}</span><span class="port-col-resizer" style="float:right;width:8px;height:18px;cursor:col-resize;opacity:.55;" onclick="event.stopPropagation()" onmousedown="portResizeStart(event,'${pid}','${col.key}')">⋮</span></th>`;
+        ><span class="port-th-label">${col.label}${sortMark}</span><span class="port-col-resizer" style="float:right;width:8px;height:18px;cursor:col-resize;opacity:.55;" onclick="event.stopPropagation()" onmousedown="portResizeStart(event,'${pid}','${col.key}')">⋮</span></th>`;
     }
     html += `</tr></thead><tbody>`;
     for (const row of rows) {
