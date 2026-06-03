@@ -137,7 +137,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','rates','history','risk','predictive','scanner'].forEach(name => {
+  ['charts','portfolio','history','risk','predictive','scanner'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -150,9 +150,6 @@ function switchMainTab(tab) {
   });
   if (tab === 'portfolio') {
     renderPortMainView();
-  } else if (tab === 'rates') {
-    renderRatesView();
-    startRatesAutoRefresh();
   } else if (tab === 'history') {
     renderHistoryView();
   } else if (tab === 'risk') {
@@ -161,6 +158,40 @@ function switchMainTab(tab) {
     renderScannerView();
   }
 }
+
+// ── LEFT SIDEBAR VISIBILITY ─────────────────────────────────────────────
+const SIDEBAR_COLLAPSED_KEY = 'td_sidebar_collapsed';
+
+function applySidebarCollapsed(collapsed) {
+  const isCollapsed = !!collapsed;
+  document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+  try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed ? '1' : '0'); } catch(e) {}
+
+  const btn = document.getElementById('sidebar-toggle');
+  if (btn) {
+    btn.classList.toggle('active', isCollapsed);
+    btn.textContent = isCollapsed ? '☰' : '‹';
+    btn.title = isCollapsed ? 'Ukázať ľavý panel' : 'Skryť ľavý panel';
+  }
+
+  setTimeout(() => {
+    Object.values(registry || {}).forEach(r => {
+      try { r?.mainChart?.resize?.(); } catch(e) {}
+    });
+    if (window.pc_realChartInst && document.getElementById('realChart')?.offsetWidth > 0) {
+      try { window.pc_realChartInst.applyOptions({ width: document.getElementById('realChart').offsetWidth }); } catch(e) {}
+    }
+    if (window.pc_predChartInst && document.getElementById('predChart')?.offsetWidth > 0) {
+      try { window.pc_predChartInst.applyOptions({ width: document.getElementById('predChart').offsetWidth }); } catch(e) {}
+    }
+  }, 80);
+}
+
+function toggleSidebar() {
+  applySidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+}
+
+window.toggleSidebar = toggleSidebar;
 
 function escHtml(v) {
   return String(v ?? '').replace(/[&<>"']/g, ch => ({
@@ -4503,8 +4534,10 @@ Sheet: ${sheetName}`);
     sidebar.style.width = w + 'px';
     document.documentElement.style.setProperty('--sb-width', w + 'px');
   }
+  applySidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
 
   resizer.addEventListener('mousedown', e => {
+    if (document.body.classList.contains('sidebar-collapsed')) return;
     startX = e.clientX;
     startW = sidebar.offsetWidth;
     resizer.classList.add('dragging');
