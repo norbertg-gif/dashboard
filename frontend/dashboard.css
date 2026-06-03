@@ -1932,6 +1932,19 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 11px;
   font-family: var(--font-mono);
 }
+.scanner-progress-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-bottom: 5px;
+  overflow: hidden;
+}
+.scanner-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
 .scanner-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));

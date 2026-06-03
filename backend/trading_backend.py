@@ -174,7 +174,11 @@ def load_weights_log() -> dict:
     return {}
 
 def save_weights_log(log: dict):
-    WEIGHTS_LOG.write_text(json.dumps(log, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Prunovanie: vyhoď tickery ktoré neboli optimalizované posledných 180 dní
+    cutoff = str((datetime.now(timezone.utc) - timedelta(days=180)).date())
+    pruned = {t: v for t, v in log.items()
+              if isinstance(v, dict) and str(v.get("optimized_at", "9999")) >= cutoff}
+    WEIGHTS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def load_signals_log() -> dict:
     if SIGNALS_LOG.exists():
@@ -185,7 +189,16 @@ def load_signals_log() -> dict:
     return {}
 
 def save_signals_log(log: dict):
-    SIGNALS_LOG.write_text(json.dumps(log, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Prunovanie: zachovaj len záznamy z posledných 90 dní
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date()
+    pruned = {}
+    for ticker, entries in log.items():
+        if not isinstance(entries, dict):
+            continue
+        kept = {d: v for d, v in entries.items() if d >= str(cutoff)}
+        if kept:
+            pruned[ticker] = kept
+    SIGNALS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
 
 ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
                "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio"]
@@ -755,7 +768,8 @@ def get_public_portfolio(
             "source":    "live",
         }
     except Exception as e:
-        raise HTTPException(502, f"Portfolio nedostupné: {e}")
+        err_type = type(e).__name__
+        raise HTTPException(502, f"Portfolio nedostupné ({err_type}) — skontrolujte eToro proxy")
 
 PRESETS_FILE = str(DATA_ROOT / "presets.json")
 JOURNAL_FILE = str(DATA_ROOT / "trade_journal.json")
@@ -978,8 +992,9 @@ CACHE_DIR = _Path(DATA_ROOT) / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 (CACHE_DIR / "ohlcv").mkdir(exist_ok=True)
 (CACHE_DIR / "portfolio").mkdir(exist_ok=True)
-_cache_mem: dict[str, tuple[float, dict]] = {}
+_cache_mem: dict[str, tuple[float, dict]] = {}   # key → (mtime, data)
 _cache_mem_lock = threading.Lock()
+_CACHE_MEM_MAX = 200   # max počet položiek v RAM cache (100 tickerov × ~2 aktívne intervaly)
 WATCHLIST_PATH = _Path(DATA_ROOT) / "watchlist.json"
 _watchlist_lock = threading.Lock()
 
@@ -1037,8 +1052,14 @@ def cache_write(path: _Path, data: dict):
         with _gzip.open(str(path) + ".gz", "wt", encoding="utf-8") as f:
             _json.dump(data, f)
         p = _Path(str(path) + ".gz")
+        key = str(path)
         with _cache_mem_lock:
-            _cache_mem[str(path)] = (p.stat().st_mtime, data)
+            _cache_mem[key] = (p.stat().st_mtime, data)
+            # Evict najstaršie záznamy ak prekročíme limit
+            if len(_cache_mem) > _CACHE_MEM_MAX:
+                oldest = sorted(_cache_mem, key=lambda k: _cache_mem[k][0])
+                for k in oldest[:len(_cache_mem) - _CACHE_MEM_MAX]:
+                    del _cache_mem[k]
     except Exception as e:
         print(f"  cache_write error: {e}")
 
@@ -1170,7 +1191,7 @@ def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
             data = stale
             print(f"  Portfolio stale fallback pre account {account}")
         else:
-            raise HTTPException(502, f"eToro proxy nedostupný: {e}")
+            raise HTTPException(502, "eToro proxy nedostupný — skúste neskôr alebo skontrolujte localhost:8765")
 
     positions_raw = data.get("clientPortfolio", {}).get("positions", [])
 

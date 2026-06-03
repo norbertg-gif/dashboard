@@ -274,12 +274,16 @@ let riskPositionSort = { key: 'amount', dir: -1 };
 let journalArchiveCollapsed = localStorage.getItem('td_journal_archive_collapsed') === '1';
 
 // Cache pre 52w + sentiment dáta
-let ratesExtCache = {};   // { symbol: { w52h, w52l, sentiment } }
+let ratesExtCache = {};   // { symbol: { w52h, w52l, sentiment, _ts } }
+const RATES_EXT_TTL = 6 * 3600 * 1000;   // 6 hodín
+const RATES_EXT_MAX = 150;               // max symbolov v cache
 
 async function fetchRatesExt(symbols) {
   // Paralelne načítaj 52w + sentiment pre všetky symboly
+  const now = Date.now();
   await Promise.allSettled(symbols.map(async sym => {
-    if (ratesExtCache[sym]) return;
+    const cached = ratesExtCache[sym];
+    if (cached && (now - cached._ts) < RATES_EXT_TTL) return;
     try {
       // 52w z Yahoo Finance summary
       const r = await fetch(`${API}/api/summary?symbol=${encodeURIComponent(sym)}`);
@@ -291,10 +295,17 @@ async function fetchRatesExt(symbols) {
           sentiment: d.sentiment,   // 'Bullish' | 'Bearish' | 'Neutral' | null
           sentimentScore: d.sentimentScore, // 1-5
           name: d.name,
+          _ts: now,
         };
       }
     } catch(e) {}
   }));
+  // Evict najstaršie záznamy ak prekročíme limit
+  const keys = Object.keys(ratesExtCache);
+  if (keys.length > RATES_EXT_MAX) {
+    keys.sort((a, b) => (ratesExtCache[a]._ts || 0) - (ratesExtCache[b]._ts || 0));
+    keys.slice(0, keys.length - RATES_EXT_MAX).forEach(k => delete ratesExtCache[k]);
+  }
 }
 
 let _ratesAutoTimer = null;
@@ -6092,14 +6103,16 @@ function scannerStatusLine(state, cache) {
     const progress = Number(state.progress || 0);
     const total = Number(state.total || 0);
     const pct = total ? Math.round(progress / total * 100) : 0;
-    const cur = state.current ? ` · ${state.current}` : '';
-    return `Scan bezi: ${progress}/${total} (${pct}%)${cur}`;
+    const cur = state.current ? ` · <b>${escHtml(state.current)}</b>` : '';
+    const bar = total ? `<div class="scanner-progress-bar"><div class="scanner-progress-fill" style="width:${pct}%"></div></div>` : '';
+    return `${bar}Scan beží: ${progress}/${total} (${pct}%)${cur}`;
   }
   if (cache && cache.generated_at) {
     const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
-    return `Posledny scan: ${dt} · ${cache.matches || 0}/${cache.total || 0} signalov`;
+    const errors = cache.errors ? ` · ${cache.errors} chýb` : '';
+    return `Posledný scan: ${dt} · ${cache.matches || 0}/${cache.total || 0} signálov${errors}`;
   }
-  return 'Zatial nie je spusteny ziaden Nasdaq scan.';
+  return 'Zatiaľ nie je spustený žiadny Nasdaq scan.';
 }
 
 const SCANNER_EXPORT_HEIGHT_KEY = 'td_scanner_export_height';
@@ -6149,7 +6162,8 @@ async function importDipExcel() {
       throw new Error(msg);
     }
     const data = await res.json();
-    if (status) status.textContent = `DIP import OK: ${data.count || 0} titulov (${data.sheet || 'Ranking'})`;
+    const fileLabel = data.filename ? ` · ${data.filename}` : '';
+    if (status) status.textContent = `DIP import OK: ${data.count || 0} titulov (${data.sheet || 'Ranking'}${fileLabel})`;
     await loadNasdaqScannerResults();
   } catch(e) {
     if (status) status.textContent = 'DIP import chyba: ' + e.message;
@@ -6181,7 +6195,7 @@ async function renderScannerView() {
   const status = document.getElementById('dipImportStatus');
   if (status) {
     if (dip.error) status.textContent = 'DIP stav nedostupný: ' + dip.error;
-    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
+    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
   await loadNasdaqScannerResults();
@@ -6203,13 +6217,13 @@ function renderNasdaqScanner(payload) {
 
   if (state.running && !rows.length) {
     el.className = 'opp-empty';
-    el.innerHTML = `<span class="cl-spinner"></span>${escHtml(status)}`;
+    el.innerHTML = `<span class="cl-spinner"></span>${status}`;
     return;
   }
 
   if (!rows.length) {
     el.className = 'opp-empty';
-    el.innerHTML = `${escHtml(status)}<div class="scanner-hint">Klikni Scan pre Nasdaq 100.</div>`;
+    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre Nasdaq 100.</div>`;
     return;
   }
 
@@ -6238,7 +6252,7 @@ function renderNasdaqScanner(payload) {
   };
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
-    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${escHtml(status)}</div>
+    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}</div>
     <div class="scanner-kpis">
       <div class="tool-kpi"><div class="tool-kpi-label">Signály</div><div class="tool-kpi-val">${kpis.total}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Crossover</div><div class="tool-kpi-val">${kpis.crossover}</div></div>
