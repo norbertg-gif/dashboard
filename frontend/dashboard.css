@@ -267,6 +267,31 @@ select.sel:focus {
   color: var(--text);
 }
 
+.sidebar-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border2);
+  background: var(--bg-input);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.sidebar-toggle:hover,
+.sidebar-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .variant-switch {
   display: inline-flex;
   background: var(--bg-input);
@@ -372,6 +397,17 @@ select.sel:focus {
   overflow: hidden;
   position: relative;
   transition: width 0.05s linear;
+}
+
+body.sidebar-collapsed #sidebar {
+  width: 0 !important;
+  min-width: 0 !important;
+  border-right: 0;
+  overflow: hidden;
+}
+
+body.sidebar-collapsed #sb-resizer {
+  display: none;
 }
 
 #sb-search {
