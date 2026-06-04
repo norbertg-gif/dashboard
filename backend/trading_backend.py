@@ -4014,6 +4014,11 @@ def root():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "trading_dashboard.html")
 
+@app.get("/help")
+def help_page():
+    from fastapi.responses import FileResponse
+    return FileResponse(FRONTEND_DIR / "help.html")
+
 @app.get("/dashboard.css")
 def dashboard_css():
     from fastapi.responses import FileResponse

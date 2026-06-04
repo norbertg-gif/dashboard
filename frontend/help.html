@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Dashboard — Manuál</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#161b22; --border:#30363d; --fg:#e6edf3;
+    --muted:#8b949e; --accent:#2f81f7; --good:#26a69a; --warn:#f59e0b; --bad:#ef5350;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px}
+  .wrap{max-width:920px;margin:0 auto;padding:32px 22px 80px}
+  header{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:8px}
+  header h1{margin:0 0 6px;font-size:26px}
+  header p{margin:0;color:var(--muted)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .back{display:inline-block;margin-bottom:18px;font-size:13px}
+  h2{margin:38px 0 12px;font-size:20px;border-bottom:1px solid var(--border);padding-bottom:6px}
+  h3{margin:24px 0 8px;font-size:16px;color:#c9d1d9}
+  h4{margin:18px 0 6px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--bg2);font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  code{background:var(--bg2);border:1px solid var(--border);border-radius:4px;
+    padding:1px 5px;font-size:13px;font-family:"SF Mono",Consolas,Monaco,monospace}
+  pre{background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+    padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+  pre code{background:none;border:none;padding:0}
+  blockquote{border-left:3px solid var(--accent);margin:14px 0;padding:6px 16px;
+    background:rgba(47,129,247,.06);color:#c9d1d9;border-radius:0 6px 6px 0}
+  blockquote p{margin:4px 0}
+  .toc{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 22px;margin:22px 0}
+  .toc ol{margin:6px 0;padding-left:22px}
+  .toc li{margin:3px 0}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .legend span{margin-right:16px;font-size:13px}
+  hr{border:none;border-top:1px solid var(--border);margin:34px 0}
+  footer{margin-top:40px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← Späť na dashboard</a>
+  <header>
+    <h1>Trading Dashboard — Manuál</h1>
+    <p>Monitorovanie eToro účtu a technická analýza. Rozhranie v slovenčine.</p>
+  </header>
+
+  <nav class="toc">
+    <strong>Obsah</strong>
+    <ol>
+      <li><a href="#login">Prihlásenie a prístup</a></li>
+      <li><a href="#topbar">Horná lišta</a></li>
+      <li><a href="#tabs">Záložky</a></li>
+      <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
+      <li><a href="#scanner">Scanner + DIP stratégia</a></li>
+      <li><a href="#philosophy">Filozofia signálov</a></li>
+      <li><a href="#presets">Presety, watchlist, eToro</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+      <li><a href="#tech">Technická príloha</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="login">1. Prihlásenie a prístup</h2>
+  <ul>
+    <li>Dashboard je chránený <strong>HTTP Basic auth</strong> (používateľ + heslo). Prehliadač vyzve na prihlásenie pri prvom načítaní.</li>
+    <li>Verejné API (<code>/api/public/*</code>) používa <strong>token</strong> namiesto hesla — pre externý prístup.</li>
+    <li>Prevádzka beží na Render.com; po prihlásení sa dashboard načíta na svojej URL.</li>
+  </ul>
+
+  <h2 id="topbar">2. Horná lišta</h2>
+  <table>
+    <tr><th>Prvok</th><th>Význam</th></tr>
+    <tr><td><strong>Konzervatívna / Odvážna</strong></td><td>Profil rizika — ovplyvňuje agresivitu prahov a zobrazenia.</td></tr>
+    <tr><td><strong>PRESET — vyber</strong></td><td>Výber uloženého rozloženia panelov (watchlist + grafy).</td></tr>
+    <tr><td><strong>Načítaj / Ulož ako… / Zmaž</strong></td><td>Práca s presetmi.</td></tr>
+    <tr><td><strong>LOAD ALL</strong></td><td>Načíta dáta pre všetky panely naraz.</td></tr>
+    <tr><td><strong>VYMAŽ</strong></td><td>Vyčistí aktuálne rozloženie panelov.</td></tr>
+    <tr><td><strong>STĹPCE (1–4)</strong></td><td>Počet stĺpcov v mriežke grafov.</td></tr>
+    <tr><td><strong>AUTO ON/OFF</strong></td><td>Automatické obnovovanie dát.</td></tr>
+    <tr><td><strong>🌙</strong></td><td>Prepínač témy (tmavá/svetlá).</td></tr>
+    <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania.</td></tr>
+  </table>
+
+  <h2 id="tabs">3. Záložky</h2>
+  <ul>
+    <li><strong>📈 Grafy</strong> — mriežka panelov s grafmi tickerov z watchlistu. Klik aktivuje panel.</li>
+    <li><strong>📊 Portfólio</strong> — eToro pozície, summary (invested / equity / P&amp;L).</li>
+    <li><strong>História</strong> — uzavreté obchody a journal.</li>
+    <li><strong>Risk</strong> — riziková analýza portfólia.</li>
+    <li><strong>📈 Prediktívny</strong> — predikcia ďalšej sviečky + denné/týždenné buy signály.</li>
+    <li><strong>Scanner</strong> — Nasdaq skener s DIP crossover stratégiou.</li>
+  </ul>
+
+  <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
+
+  <h3>Ovládanie</h3>
+  <table>
+    <tr><th>Prvok</th><th>Funkcia</th></tr>
+    <tr><td><strong>Ticker</strong></td><td>Symbol alebo názov (s autodoplňovaním).</td></tr>
+    <tr><td><strong>Obdobie</strong></td><td>1 rok / 2 roky histórie.</td></tr>
+    <tr><td><strong>Načítať</strong></td><td>Spustí výpočet.</td></tr>
+    <tr><td><strong>Backtest overlay</strong></td><td>Prekryje historickú predikciu (hit/miss).</td></tr>
+    <tr><td><strong>Export snapshot</strong></td><td>Uloží HTML snapshot stavu.</td></tr>
+    <tr><td><strong>Checklist</strong></td><td>Rýchla kontrola viacerých tickerov.</td></tr>
+    <tr><td><strong>Prepočítať váhy</strong></td><td>Preučí váhy indikátorov pre ticker.</td></tr>
+  </table>
+
+  <h3>Pravý panel</h3>
+  <ul>
+    <li><strong>Daily buy signál</strong>
+      <ul>
+        <li><strong>Weekly bias</strong> — BULLISH / BEARISH-NEUTRÁLNY: composite &gt; 5 %, cena nad Kumo, EMA10 &gt; EMA20.</li>
+        <li><strong>Dnešné skóre 0–4</strong> — počet splnených denných podmienok. Dnešný signál je aktívny len pri bullish weekly bias.</li>
+        <li><strong>História signálov</strong> — minulé signály a výsledok voči aktuálnej cene (win/loss/flat/pending). Farba skóre = tier.</li>
+      </ul>
+    </li>
+    <li><strong>Opportunities</strong> — najsľubnejšie tickery podľa setup skóre.</li>
+    <li><strong>Prognóza nasledujúcej sviečky</strong> — Smer (BULLISH/BEARISH + % zmena), <strong>Regime</strong> (HMM: Bull/Bear/Sideways/High volatility — diagnostika, nezasahuje do ML), Open/High/Low/Close, Composite signal, ML bull prob, ML accuracy.</li>
+    <li><strong>Technická vstupná zóna</strong> — len technický odhad vstupu.</li>
+    <li><strong>Backtesting</strong> — celková správnosť, priemerná chyba, vs. default váhy.</li>
+    <li><strong>Hit rate / Váhy indikátorov</strong> — výkonnosť a váhy indikátorov.</li>
+  </ul>
+
+  <h3>Ľavý mini panel</h3>
+  <ul>
+    <li><strong>DAILY</strong> — mini graf so signálmi.</li>
+    <li><strong>SIGNAL HISTORY</strong> — časová os signálov s win rate.</li>
+    <li><strong>TIMEFRAME ALIGNMENT</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
+  </ul>
+
+  <h3>Farby signálov (tier)</h3>
+  <p>O farbe rozhoduje <strong>kontext trendu</strong>, nie hrubé skóre:</p>
+  <table>
+    <tr><th>Farba</th><th>Tier</th><th>Význam</th></tr>
+    <tr><td><span class="dot" style="background:var(--good)"></span>zelená</td><td class="good"><strong>Buy</strong></td><td>Dip v uptrende (EMA10 &gt; EMA20) — kupovateľný podľa DIP stratégie.</td></tr>
+    <tr><td><span class="dot" style="background:var(--warn)"></span>oranžová</td><td class="warn"><strong>Watch</strong></td><td>Sideways / prechod — sleduj, trend ešte nepotvrdený.</td></tr>
+    <tr><td><span class="dot" style="background:var(--bad)"></span>červená</td><td class="bad"><strong>Counter</strong></td><td>Dip počas downtrendu (EMA10 &lt; EMA20 a cena pod EMA20) — proti-trendový, „falling-knife" riziko.</td></tr>
+  </table>
+  <p>Číslo <code>x/4</code> na markeri = <strong>sila</strong> (koľko podmienok). Farba povie <em>či</em> kupovať, číslo <em>ako silný</em> signál je.</p>
+  <blockquote><p>Historické signály sa neprepisujú — staré záznamy bez tieru sa dočasne zobrazia ako watch a prefarbia sa po novom vyhodnotení tickera.</p></blockquote>
+
+  <h2 id="scanner">5. Scanner + DIP stratégia</h2>
+  <p>Záložka <strong>Scanner</strong> prechádza Nasdaq-100 a hľadá denné buy signály, ktoré kombinuje s externým <strong>DIP rankingom</strong> (importovaný Excel).</p>
+
+  <h3>Ovládanie</h3>
+  <ul>
+    <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX.</li>
+    <li><strong>Spustiť scanner</strong> — paralelný sken Nasdaq-100 (progress bar, beží na pozadí).</li>
+  </ul>
+
+  <h3>KPI dlaždice</h3>
+  <table>
+    <tr><th>KPI</th><th>Význam</th></tr>
+    <tr><td><strong>Signály</strong></td><td>Počet tickerov s čerstvým signálom.</td></tr>
+    <tr><td><strong>Crossover</strong></td><td>Stretnutie technického signálu s vysokým DIP rankingom.</td></tr>
+    <tr><td><strong>Strong</strong></td><td>Tickery s labelom STRONG / VERY STRONG.</td></tr>
+    <tr><td><strong>Tech only</strong></td><td>Signály bez DIP dát (len technické).</td></tr>
+  </table>
+
+  <h3>Stĺpce tabuľky</h3>
+  <table>
+    <tr><th>Stĺpec</th><th>Význam</th></tr>
+    <tr><td><strong>Ticker</strong></td><td>Symbol (klik otvorí v prediktívnom tabe).</td></tr>
+    <tr><td><strong>Tech</strong></td><td>Technické setup skóre (0–100).</td></tr>
+    <tr><td><strong>DIP</strong></td><td>Celkové DIP skóre z importu.</td></tr>
+    <tr><td><strong>FA / TA</strong></td><td>Fundamentálna / technická časť DIP skóre.</td></tr>
+    <tr><td><strong>Rank</strong></td><td>Poradie v DIP rankingu.</td></tr>
+    <tr><td><strong>Crossover</strong></td><td>VERY STRONG / STRONG / WATCH / WEAK DIP / TECH ONLY.</td></tr>
+    <tr><td><strong>Date</strong></td><td>Dátum posledného signálu.</td></tr>
+    <tr><td><strong>Sig</strong></td><td>Skóre <code>x/4</code> (farba = tier).</td></tr>
+    <tr><td><strong>Last</strong></td><td>Posledná cena.</td></tr>
+    <tr><td><strong>Reason</strong></td><td>Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8").</td></tr>
+  </table>
+
+  <h3>Watch vs. Buy</h3>
+  <p>Signál sa zaznamenáva od <strong>2/4</strong> podmienok. Či je buy/watch/counter rozhoduje trendový kontext (viď farby vyššie), nie len počet podmienok.</p>
+
+  <h2 id="philosophy">6. Filozofia signálov</h2>
+
+  <h3>Štyri denné podmienky (c1–c4)</h3>
+  <table>
+    <tr><th>Kód</th><th>Podmienka</th><th>Prah</th></tr>
+    <tr><td><strong>c1</strong></td><td>Dotyk EMA20 alebo Kijun</td><td>vzdialenosť &lt; 0,5 %</td></tr>
+    <tr><td><strong>c2</strong></td><td>RSI pullback</td><td>RSI &lt; 45</td></tr>
+    <tr><td><strong>c3</strong></td><td>Bullish sviečka s objemom</td><td>close &gt; open a objem &gt; 1,2× priemer</td></tr>
+    <tr><td><strong>c4</strong></td><td>Štatistický dip (z-score)</td><td>60-dňový rolling z-score ≤ −1,5</td></tr>
+  </table>
+  <p><strong>z-score</strong> meria, ako veľmi je cena „lacná" voči vlastnému 60-dňovému priemeru. Nie je samostatný indikátor — prejaví sa v skóre <code>x/4</code> a v stĺpci Reason.</p>
+
+  <h3>Trend-primárne určenie tieru</h3>
+  <p>Skóre = <em>koľko</em> podmienok (sila). O <strong>farbe/tieri</strong> rozhoduje trend:</p>
+  <ul>
+    <li><span class="good"><strong>Uptrend</strong></span> (EMA10 &gt; EMA20) → <strong>buy</strong> — aj pri 2/4. Jadro DIP stratégie.</li>
+    <li><span class="bad"><strong>Downtrend</strong></span> (EMA10 &lt; EMA20 a cena pod EMA20) → <strong>counter</strong> — proti-trendový dip.</li>
+    <li><span class="warn"><strong>Sideways / prechod</strong></span> → <strong>watch</strong>.</li>
+  </ul>
+
+  <h3>Jednotný scoring (single source of truth)</h3>
+  <p>Scanner aj prediktívny graf používajú <strong>tú istú</strong> funkciu skórovania — pre ten istý ticker ukazujú rovnaké hodnoty.</p>
+  <blockquote><p>Nie je to „falling-knife" lovenie dna — systém zámerne odlišuje dipy v uptrende (kupovať) od dipov v páde (vyhnúť sa).</p></blockquote>
+
+  <h2 id="presets">7. Presety, watchlist, eToro</h2>
+  <ul>
+    <li><strong>Watchlist</strong> — sledované tickery (Grafy, Opportunities, prefetch).</li>
+    <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>
+    <li><strong>eToro pozície</strong> — Portfólio tab ukazuje živé pozície a P&amp;L. Equity sa počíta jednotne ako <code>cash + invested + total_pnl</code>.</li>
+  </ul>
+
+  <h2 id="trouble">8. Troubleshooting</h2>
+  <table>
+    <tr><th>Príznak</th><th>Príčina / riešenie</th></tr>
+    <tr><td>Prázdny graf / žiadne dáta</td><td>yfinance rate-limit alebo timeout. Skús znova o chvíľu.</td></tr>
+    <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Dá sa zvýšiť <code>SCANNER_YF_TIMEOUT</code>.</td></tr>
+    <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
+    <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
+    <tr><td>Market recommendations 502</td><td>Free eToro API tier — tiché zlyhanie.</td></tr>
+    <tr><td>Staré signály majú zlú farbu</td><td>Log sa neprepisuje; prefarbia sa po novom vyhodnotení.</td></tr>
+  </table>
+
+  <h2 id="tech">9. Technická príloha</h2>
+  <blockquote><p>Pre údržbu. Detailné pravidlá a pasce sú v <code>CLAUDE.md</code>.</p></blockquote>
+
+  <h3>Stack</h3>
+  <ul>
+    <li><strong>Backend:</strong> FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn.</li>
+    <li><strong>eToro proxy:</strong> stdlib HTTPServer na <code>localhost:8765</code>, background thread (nie samostatný proces v produkcii).</li>
+    <li><strong>Frontend:</strong> vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS — bez build kroku.</li>
+    <li><strong>Storage:</strong> <code>/data</code> (Render disk) — presets, journal, signal/weights logy, <code>cache/{ohlcv,portfolio,instruments}</code>.</li>
+  </ul>
+
+  <h3>Rozloženie</h3>
+  <pre><code>backend/
+  trading_backend.py   # FastAPI app, routy, indikátory, predictive engine
+  etoro_proxy.py       # eToro REST proxy (port 8765), in-process thread
+frontend/
+  trading_dashboard.html
+  dashboard.css
+  dashboard.js
+  help.html            # tento manuál (HTML), servovaný na /help
+docs/
+  MANUAL.md            # tento manuál (Markdown)
+trading_backend.py     # entrypoint shim pre Render
+render.yaml            # web service + 1GB disk na /data</code></pre>
+
+  <h3>Auth</h3>
+  <ul>
+    <li>Globálny <code>_BasicAuth</code> middleware vynucuje Basic auth na všetkom okrem <code>/api/public/*</code>. Bez <code>DASH_USER</code> je auth vypnutá (lokál). V produkcii (<code>RENDER=1</code>) fail-closed.</li>
+    <li><code>/help</code> je teda automaticky chránené Basic auth.</li>
+  </ul>
+
+  <h3>Premenné prostredia</h3>
+  <table>
+    <tr><th>Premenná</th><th>Účel</th></tr>
+    <tr><td><code>DASH_USER</code> / <code>DASH_PASS</code></td><td>Basic auth (povinné v produkcii).</td></tr>
+    <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>.</td></tr>
+    <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
+    <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (default 8).</td></tr>
+    <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania (default 15 s).</td></tr>
+    <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 30 s).</td></tr>
+    <tr><td><code>RENDER</code></td><td>Príznak produkcie.</td></tr>
+  </table>
+
+  <h3>Signal scoring — kde žije</h3>
+  <ul>
+    <li><code>score_signal_day(row, zscore)</code> — jediný zdroj pravdy pre c1–c4 + per-bar trend.</li>
+    <li><code>rolling_zscore(close)</code> — 60-dňový rolling z-score.</li>
+    <li><code>signal_tier(score, trend)</code> — mapuje trend na buy/watch/counter.</li>
+    <li><code>build_setup_assessment(...)</code> — setup skóre (counter = risk, nie pozitívum).</li>
+    <li>Volané z <code>_scan_buy_signal_for_ticker</code> aj predictive endpointu — rovnaká logika.</li>
+  </ul>
+
+  <h3>Dátové toky</h3>
+  <ul>
+    <li><strong>OHLCV cache inkrementálna</strong> — <code>cache/ohlcv/{SYMBOL}_{INTERVAL}.gz</code>, až 1000 sviečok, doťahuje len tail.</li>
+    <li><strong>Portfolio cache TTL = 120 s RAM</strong>, fallback na disk pri výpadku proxy.</li>
+    <li><strong>WebSocket</strong> (<code>wss://ws.etoro.com/ws</code>) ženie živé ceny; REST refresh každých 15 s ako fallback.</li>
+    <li><strong>Background prefetch</strong> (<code>/api/prefetch</code>) zahrieva cache pri štarte.</li>
+  </ul>
+
+  <h3>Deploy</h3>
+  <ul>
+    <li>Render auto-deploy z vetvy <code>main</code> — push spustí redeploy.</li>
+    <li>Perzistentný disk <code>/data</code>; logy a cache sa necommitujú (<code>.renderignore</code>).</li>
+  </ul>
+
+  <footer>Trading Dashboard — interný manuál. UI v slovenčine, identifikátory v angličtine.</footer>
+</div>
+</body>
+</html>
+</content>
