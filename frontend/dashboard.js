@@ -5183,6 +5183,8 @@ function pc_renderSidebar(data) {
     const rm = regimeMeta[regime.regime] || { label: regime.regime, col: 'var(--muted)', tip: '' };
     const conf = regime.confidence != null ? ` · ${Math.round(regime.confidence * 100)}%` : '';
     regimeHtml = `<div class="pred-row"><span class="tt key" data-tip="Trhový režim odhadnutý HMM modelom (Gaussian Hidden Markov Model, 3 stavy). Diagnostický ukazovateľ — ešte nie je súčasťou ML scoringu.">Regime <span class="tt-icon">ⓘ</span></span><span class="val"><span style="color:${rm.col};font-weight:600" title="${rm.tip}">${rm.label}${conf}</span></span></div>`;
+  } else if (regime.error) {
+    regimeHtml = `<div class="pred-row"><span class="key">Regime</span><span class="val" style="color:var(--muted);font-size:10px" title="${regime.error}">n/a</span></div>`;
   }
 
   document.getElementById('predInfo').innerHTML = `

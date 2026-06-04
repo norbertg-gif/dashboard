@@ -251,7 +251,7 @@ def detect_market_regime(df) -> dict:
     regime_history (list of {date, regime} for last 26 bars), or error (str).
     """
     try:
-        from hmmlearn import GaussianHMM
+        from hmmlearn.hmm import GaussianHMM
     except ImportError:
         return {"error": "hmmlearn nie je nainštalovaný (pip install hmmlearn)"}
 
