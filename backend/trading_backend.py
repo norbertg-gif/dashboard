@@ -3043,26 +3043,10 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                 macd_ds = float(np.tanh(last_d["macd_hist"]/(lc_d*0.001+1e-9)))
                 daily_signal = float(np.clip((ema_d*0.4 + rsi_ds*0.3 + macd_ds*0.3), -1.0, 1.0))
 
-                # --- Buy signal scoring (long only, weekly bullish required) ---
-                def score_day(row, prev_rows, check_weekly=True):
-                    try:
-                        if check_weekly and not weekly_bullish:
-                            return 0, {}
-                        close  = float(row["Close"])
-                        open_  = float(row["Open"])
-                        ema20  = float(row["ema20"])
-                        kijun  = float(row["ichi_kijun"]) if not math.isnan(float(row["ichi_kijun"])) else close
-                        rsi    = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
-                        vol    = float(row["Volume"])
-                        vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
-                        tol    = 0.005
-                        c1 = abs(close - ema20) / close < tol or abs(close - kijun) / close < tol
-                        c2 = rsi < 45
-                        c3 = close > open_ and vol > vol_ma * 1.2
-                        details = {"ema_kijun_touch": c1, "rsi_pullback": c2, "bull_volume": c3}
-                        return sum([c1, c2, c3]), details
-                    except Exception:
-                        return 0, {}
+                # --- Buy signal scoring (long only) — zdieľaná score_signal_day (c1..c4) ---
+                # Rolling z-score na celom DF, potom zarovnané na posledných 90 sviečok
+                _zscore_series_d = rolling_zscore(df_d["Close"])
+                zscore_slice = _zscore_series_d.iloc[-90:].values
 
                 # Load existing signals for this ticker
                 slog = load_signals_log()
@@ -3079,21 +3063,25 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     if row_date.date() >= today_date.date():
                         continue
                     date_key = str(row_date.date())
-                    sc, details = score_day(row, df_score.iloc[max(0, i-5):i], check_weekly=False)
+                    zscore   = float(zscore_slice[i]) if i < len(zscore_slice) else 0.0
+                    sc, details = score_signal_day(row, zscore)
                     if sc >= 2:
                         ts = int(pd.Timestamp(row.iloc[0]).timestamp())
+                        tier = signal_tier(sc)
                         # Save to log if not already there
                         if date_key not in ticker_slog:
                             ticker_slog[date_key] = {
                                 "score":   sc,
+                                "tier":    tier,
                                 "close":   round(float(row["Close"]), 2),
-                                "details": {k: bool(v) for k, v in details.items()},
+                                "details": details,
                             }
                         # Always include in chart signals (from log if exists)
                         saved = ticker_slog.get(date_key, {})
                         daily_buy_signals.append({
                             "time":  ts,
                             "score": saved.get("score", sc),
+                            "tier":  saved.get("tier", tier),
                             "close": saved.get("close", round(float(row["Close"]), 2)),
                         })
 
@@ -3103,9 +3091,11 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     save_signals_log(slog)
 
                 # Today's score (informational only — not saved, candle not closed)
+                # Weekly bias must still confirm for today's live marker
                 try:
-                    today_sc, today_details = score_day(df_d.iloc[-1], df_d.iloc[-6:-1], check_weekly=True)
-                    today_score = int(today_sc) if today_sc is not None else 0
+                    today_z = float(_zscore_series_d.iloc[-1]) if len(_zscore_series_d) else 0.0
+                    today_sc, today_details = score_signal_day(df_d.iloc[-1], today_z)
+                    today_score = int(today_sc) if weekly_bullish else 0
                 except Exception:
                     today_score = 0
 
@@ -3116,6 +3106,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                         daily_buy_signals.append({
                             "time":  ts,
                             "score": sig["score"],
+                            "tier":  sig.get("tier", signal_tier(sig["score"])),
                             "close": sig["close"],
                         })
                 daily_buy_signals.sort(key=lambda x: x["time"])
@@ -3241,7 +3232,7 @@ def _finite_float(value, default=None):
         return default
 
 
-def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | None, signal_count: int) -> dict:
+def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | None, signal_count: int, latest_zscore: float | None = None) -> dict:
     """Lightweight ranking layer for Opportunities. It is a decision aid, not a trade instruction."""
     last = df_d.iloc[-1]
     close = _finite_float(last.get("Close"), 0) or 0
@@ -3265,8 +3256,12 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
 
     if recent_signal:
         sig_score = int(recent_signal.get("score") or 0)
-        score += 28 if sig_score >= 3 else 20
-        positive.append(f"novy signal {sig_score}/4")
+        if sig_score >= SIGNAL_BUY_THRESHOLD:
+            score += 28
+            positive.append(f"novy buy signal {sig_score}/4")
+        else:
+            score += 16
+            positive.append(f"watch signal {sig_score}/4")
     else:
         risk.append("bez cerstveho daily signalu")
 
@@ -3312,6 +3307,14 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
         score -= 8
         risk.append("vysoka volatilita")
 
+    if latest_zscore is not None:
+        if latest_zscore <= SIGNAL_ZSCORE_THRESHOLD:
+            score += 8
+            positive.append(f"statisticky dip (z-score {latest_zscore:.1f})")
+        elif latest_zscore >= 1.5:
+            score -= 6
+            risk.append(f"cena natiahnuta (z-score {latest_zscore:.1f})")
+
     if vol_ratio >= 1.2:
         score += 5
         positive.append("objem nad priemerom")
@@ -3336,6 +3339,7 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
             "atr_pct": round(atr_pct, 2),
             "dist_ema20_pct": round(dist_ema, 2),
             "vol_ratio": round(vol_ratio, 2),
+            "zscore": round(latest_zscore, 2) if latest_zscore is not None else None,
         },
     }
 
@@ -3363,6 +3367,43 @@ SIGNAL_VOLUME_MULT = 1.2
 SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je štatisticky lacná
 DIP_STRONG_THRESHOLD = 90
 DIP_VERY_STRONG_THRESHOLD = 100
+SIGNAL_BUY_THRESHOLD = 3   # 3/4+ = plný buy signál, 2/4 = watch
+
+
+def rolling_zscore(close_series):
+    """60-period rolling z-score ceny. Jeden zdroj pravdy pre scanner aj predikt."""
+    roll = close_series.rolling(60, min_periods=30)
+    return ((close_series - roll.mean()) / roll.std().replace(0, float("nan"))).fillna(0)
+
+
+def score_signal_day(row, zscore: float) -> tuple[int, dict]:
+    """Jediný zdroj pravdy pre denné buy-signal skórovanie (c1..c4).
+    Volá scanner aj prediktívna signal history — obe hovoria rovnakým jazykom (skóre /4)."""
+    close = float(row["Close"])
+    open_ = float(row["Open"])
+    ema20 = float(row["ema20"])
+    kijun = float(row["ichi_kijun"]) if not math.isnan(float(row["ichi_kijun"])) else close
+    rsi = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
+    vol = float(row["Volume"])
+    vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
+    c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
+    c2 = rsi < SIGNAL_RSI_PULLBACK
+    c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
+    c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
+    sc = int(sum([c1, c2, c3, c4]))
+    details = {
+        "ema_kijun_touch": bool(c1),
+        "rsi_pullback": bool(c2),
+        "bull_volume": bool(c3),
+        "zscore_dip": bool(c4),
+    }
+    return sc, details
+
+
+def signal_tier(score: int) -> str:
+    """3/4+ = plný buy signál, 2/4 = watch (slabší marker)."""
+    return "buy" if score >= SIGNAL_BUY_THRESHOLD else "watch"
+
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
@@ -3572,10 +3613,10 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     recent_signal = None
     all_signals = []
 
-    # Rolling 60-period z-score: (close - μ) / σ — vypočítaný raz pre celý DF
-    _zscore_roll = df_d["Close"].rolling(60, min_periods=30)
-    _zscore_series = ((df_d["Close"] - _zscore_roll.mean()) / _zscore_roll.std().replace(0, float("nan"))).fillna(0)
+    # Rolling 60-period z-score: cena vs vlastný 60p režim — jeden zdroj pravdy
+    _zscore_series = rolling_zscore(df_d["Close"])
     zscore_values = _zscore_series.values  # zarovnané s df_d
+    latest_zscore = float(_zscore_series.iloc[-1]) if len(_zscore_series) else 0.0
 
     df_score = df_d.reset_index()
     for i in range(5, len(df_score)):
@@ -3588,40 +3629,26 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
 
         date_key = str(row_date.date())
         close = float(row["Close"])
-        open_ = float(row["Open"])
-        ema20 = float(row["ema20"])
-        kijun = float(row["ichi_kijun"]) if not math.isnan(float(row["ichi_kijun"])) else close
-        rsi = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
-        vol = float(row["Volume"])
-        vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
-
         zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
-
-        c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
-        c2 = rsi < SIGNAL_RSI_PULLBACK
-        c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
-        c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD   # cena štatisticky lacná voči vlastnému 60p režimu
-        sc = sum([c1, c2, c3, c4])
+        sc, details = score_signal_day(row, zscore)
 
         if sc >= 2:
+            tier = signal_tier(sc)
             if date_key not in ticker_slog:
                 ticker_slog[date_key] = {
                     "score": sc,
+                    "tier": tier,
                     "close": round(close, 2),
-                    "details": {
-                        "ema_kijun_touch": bool(c1),
-                        "rsi_pullback": bool(c2),
-                        "bull_volume": bool(c3),
-                        "zscore_dip": bool(c4),
-                    },
+                    "details": details,
                 }
-            sig = {"date": date_key, "score": sc, "close": round(close, 2)}
+            sig = {"date": date_key, "score": sc, "tier": tier,
+                   "close": round(close, 2), "zscore_dip": details["zscore_dip"]}
             all_signals.append(sig)
             if row_date.date() >= cutoff.date():
                 if recent_signal is None or date_key > recent_signal["date"]:
                     recent_signal = sig
 
-    setup = build_setup_assessment(df_d, bool(weekly_bullish), recent_signal, len(all_signals))
+    setup = build_setup_assessment(df_d, bool(weekly_bullish), recent_signal, len(all_signals), latest_zscore)
     return {
         "ticker": ticker,
         "weekly_bullish": weekly_bullish,

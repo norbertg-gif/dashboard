@@ -4812,7 +4812,7 @@ function renderCharts(data) {
           position: 'belowBar',
           color:    wk.score >= 3 ? '#26a69a' : '#f59e0b',
           shape:    'arrowUp',
-          text:     wk.count > 1 ? `${wk.count}×` : (wk.score >= 3 ? '3/3' : '2/3'),
+          text:     wk.count > 1 ? `${wk.count}×` : `${wk.score}/4`,
           size:     wk.score >= 3 ? 1.2 : 0.8,
         });
       }
@@ -4898,7 +4898,7 @@ function renderCharts(data) {
     const dailyMarkers = (data.daily_buy_signals || []).map(s => {
       const idx = data.daily_candles.findIndex(c => c.time >= s.time);
       let color = '#f59e0b';  // pending default
-      let text  = s.score + '/3';
+      let text  = s.score + '/4';
       if (idx >= 0 && idx + HORIZON < data.daily_candles.length) {
         const entry  = Number(s.close) || Number(data.daily_candles[idx].close);
         const latest = data.daily_candles[data.daily_candles.length - 1].close;
@@ -5029,8 +5029,8 @@ function pc_renderDailyExtra(data) {
              : '#f59e0b';   // pending
     const sz = s.score >= 3 ? 7 : 5;
     const tip = s.outcome === null
-      ? `${new Date(s.time*1000).toLocaleDateString('sk')} · skóre ${s.score}/3 · čaká na vyhodnotenie`
-      : `${new Date(s.time*1000).toLocaleDateString('sk')} · skóre ${s.score}/3 · ${s.outcome.toUpperCase()} (${s.pct>=0?'+':''}${s.pct.toFixed(1)}%)`;
+      ? `${new Date(s.time*1000).toLocaleDateString('sk')} · skóre ${s.score}/4 · čaká na vyhodnotenie`
+      : `${new Date(s.time*1000).toLocaleDateString('sk')} · skóre ${s.score}/4 · ${s.outcome.toUpperCase()} (${s.pct>=0?'+':''}${s.pct.toFixed(1)}%)`;
     return `<div title="${tip}" style="position:absolute;left:${x}%;top:50%;
       transform:translate(-50%,-50%);width:${sz}px;height:${sz}px;
       border-radius:50%;background:${col};
@@ -5920,10 +5920,10 @@ function renderDailyMain(data) {
     const markers = data.daily_buy_signals.map(s => ({
       time:     s.time,
       position: 'belowBar',
-      color:    s.score === 3 ? '#26a69a' : '#f59e0b',
+      color:    s.score >= 3 ? '#26a69a' : '#f59e0b',
       shape:    'arrowUp',
-      text:     s.score === 3 ? '3/3' : '2/3',
-      size:     s.score === 3 ? 1.5 : 1,
+      text:     s.score + '/4',
+      size:     s.score >= 3 ? 1.5 : 1,
     }));
     cs.setMarkers(markers);
   }
@@ -5950,7 +5950,7 @@ function renderDailySidebar(data) {
   const biasColor  = wb.bullish ? '#26a69a' : '#ef5350';
   const biasText   = wb.bullish ? '▲ BULLISH' : '▼ BEARISH/NEUTRÁLNY';
   const scoreColor = score >= 3 ? '#26a69a' : score === 2 ? '#f59e0b' : 'var(--muted)';
-  const scoreLabel = score >= 3 ? 'Silný signál' : score === 2 ? 'Mierny signál' : 'Žiadny signál';
+  const scoreLabel = score >= 3 ? 'Buy signál' : score === 2 ? 'Watch' : 'Žiadny signál';
   const signalOutcome = (s) => {
     const entry = Number(s.close);
     if (!Number.isFinite(entry) || !Number.isFinite(latestClose) || !entry) {
@@ -5969,10 +5969,10 @@ function renderDailySidebar(data) {
     '<div style="padding:2px 0 6px 0;font-size:10px;color:var(--muted);">' +
       'Composite: ' + (wb.composite || 0) + '% | Nad Kumo: ' + (wb.above_kumo ? '✓' : '✗') + ' | EMA bull: ' + (wb.ema_bull ? '✓' : '✗') +
     '</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Skóre 0-3: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer.">Dnešné skóre <span class="tt-icon">ⓘ</span></span>' +
-      '<span class="val" style="color:' + scoreColor + '">' + score + '/3 - ' + scoreLabel + '</span></div>' +
+    '<div class="pred-row"><span class="tt key" data-tip="Skóre 0-4: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer, +1 z-score ≤ -1.5 (štatistický dip). 3/4+ = buy, 2/4 = watch.">Dnešné skóre <span class="tt-icon">ⓘ</span></span>' +
+      '<span class="val" style="color:' + scoreColor + '">' + score + '/4 - ' + scoreLabel + '</span></div>' +
     (lastSig ? '<div class="pred-row"><span class="key">Posledný signál</span>' +
-      '<span class="val">' + new Date(lastSig.time * 1000).toLocaleDateString("sk-SK") + ' (' + lastSig.score + '/3)</span></div>' : '') +
+      '<span class="val">' + new Date(lastSig.time * 1000).toLocaleDateString("sk-SK") + ' (' + lastSig.score + '/4)</span></div>' : '') +
     (!wb.bullish ? '<div style="margin-top:8px;padding:6px 8px;background:rgba(239,83,80,0.08);border-radius:4px;font-size:11px;color:#ef5350;">Weekly trend nie je bullish - nové signály nie sú aktívne.</div>' : '') +
     '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
@@ -5982,11 +5982,11 @@ function renderDailySidebar(data) {
       '<div class="sig-history-list">' +
       (sigs.slice().reverse().slice(0, 8).map(s => {
         const d   = new Date(s.time * 1000).toLocaleDateString("sk-SK");
-        const col = s.score === 3 ? "#26a69a" : "#f59e0b";
+        const col = s.score >= 3 ? "#26a69a" : "#f59e0b";
         const out = signalOutcome(s);
         return '<div class="sig-history-row ' + out.cls + '">' +
           '<span class="sig-history-date">' + d + '</span>' +
-          '<span class="sig-history-score" style="color:' + col + '">' + s.score + '/3</span>' +
+          '<span class="sig-history-score" style="color:' + col + '">' + s.score + '/4</span>' +
           '<span class="sig-history-price">' + s.close + '</span>' +
           '<span class="sig-history-result">' + out.label + ' ' + out.pct + '</span>' +
         '</div>';
@@ -6043,7 +6043,7 @@ function scoreOpportunity(row) {
   if (Number.isFinite(Number(row.setup_score))) return Number(row.setup_score);
   let score = 0;
   if (row.weekly_bullish) score += 35;
-  if (row.recent_signal) score += row.recent_signal.score === 3 ? 35 : 24;
+  if (row.recent_signal) score += row.recent_signal.score >= 3 ? 35 : 24;
   score += Math.min(row.signal_count || 0, 10);
   const pos = opportunityPositionInfo(row.ticker);
   if (pos) score += 8;
@@ -6058,7 +6058,7 @@ function opportunityReasons(row, pos, days) {
   if (reasons.length >= 4) return reasons.slice(0, 4);
   reasons.push({ cls: row.weekly_bullish ? 'good' : 'bad', text: row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup' });
   if (sig) {
-    reasons.push({ cls: sig.score === 3 ? 'good' : 'warn', text: 'Najnovší signál ' + sig.score + '/3 z ' + sig.date });
+    reasons.push({ cls: sig.score >= 3 ? 'good' : 'warn', text: (sig.score >= 3 ? 'Buy' : 'Watch') + ' signál ' + sig.score + '/4 z ' + sig.date });
   } else {
     reasons.push({ cls: 'warn', text: 'Bez nového signálu za ' + days + ' dní' });
   }
@@ -6092,9 +6092,9 @@ function renderOpportunities(rows, days) {
     const sig = r.recent_signal;
     const pos = r._pos;
     const biasCls = r.weekly_bullish ? 'good' : 'bad';
-    const sigCls = sig ? (sig.score === 3 ? 'good' : 'warn') : '';
+    const sigCls = sig ? (sig.score >= 3 ? 'good' : 'warn') : '';
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
-    const sigTxt = sig ? `${sig.score}/3 ${sig.date}` : `bez signálu ${days}d`;
+    const sigTxt = sig ? `${sig.score}/4 ${sig.date}` : `bez signálu ${days}d`;
     const posTxt = pos ? `${pos.count}x eToro ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(0)}` : 'mimo portf.';
     const grade = r.setup_grade || (r._score >= 78 ? 'A' : r._score >= 62 ? 'B' : r._score >= 45 ? 'Watch' : 'Risky');
     const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
@@ -6287,7 +6287,7 @@ function renderNasdaqScanner(payload) {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
-    const signal = sig.date ? `${sig.date} ${sig.score || '-'}/3` : '-';
+    const signal = sig.date ? `${sig.date} ${sig.score || '-'}/4` : '-';
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
     const dip = Number.isFinite(Number(r.dip_total)) ? r.dip_total : '-';
     const rank = r.dip_rank ?? '-';
@@ -6334,7 +6334,7 @@ function renderNasdaqScanner(payload) {
       <td class="r">${r.dip_rank ?? '-'}</td>
       <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
-      <td>${sig.score || '-'}/4</td>
+      <td>${sig.score ? `<span style="color:${sig.score >= 3 ? '#26a69a' : '#f59e0b'}" title="${sig.score >= 3 ? 'buy' : 'watch'}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${price}</td>
       <td>${escHtml(reason)}</td>
     </tr>`;
@@ -6665,9 +6665,9 @@ async function runChecklist() {
       const biasLbl = r.weekly_bullish ? '▲ Bullish' : '▼ Bearish';
       const sigDate = r.recent_signal ? r.recent_signal.date : '—';
       const sigBadge = !hasSig ? '<span class="cl-badge none">—</span>'
-        : r.recent_signal.score === 3
-          ? '<span class="cl-badge strong">3/3 Silný</span>'
-          : '<span class="cl-badge mild">2/3 Mierny</span>';
+        : r.recent_signal.score >= 3
+          ? '<span class="cl-badge strong">' + r.recent_signal.score + '/4 Buy</span>'
+          : '<span class="cl-badge mild">' + r.recent_signal.score + '/4 Watch</span>';
       const sigClose = r.recent_signal ? r.recent_signal.close : '—';
 
       const tr = document.createElement('tr');
