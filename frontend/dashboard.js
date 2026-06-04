@@ -2601,18 +2601,6 @@ function toggleTheme() {
   applyTheme();
 }
 
-// ── VARIANT (Konzervatívna / Odvážna) ────────────────────────────────────────
-function setVariant(v) {
-  document.documentElement.setAttribute('data-variant', v);
-  localStorage.setItem('td_variant', v);
-  document.getElementById('v-kons-btn').classList.toggle('active', v === 'konzervativna');
-  document.getElementById('v-odv-btn').classList.toggle('active', v === 'odvazna');
-}
-(function initVariant() {
-  const saved = localStorage.getItem('td_variant') || 'konzervativna';
-  setVariant(saved);
-})();
-
 // ── ETORO TRADE LINK ─────────────────────────────────────────────────────────
 function etoroTradeUrl(sym) {
   return `https://www.etoro.com/markets/${(sym||'').toLowerCase()}`;

@@ -37,7 +37,6 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 | Prvok | Význam |
 |---|---|
-| **Konzervatívna / Odvážna** | Profil rizika — ovplyvňuje agresivitu prahov a zobrazenia. |
 | **PRESET — vyber** | Výber uloženého rozloženia panelov (watchlist + grafy). |
 | **Načítaj / Ulož ako… / Zmaž** | Práca s presetmi (načítať, uložiť aktuálne rozloženie, vymazať). |
 | **LOAD ALL** | Načíta dáta pre všetky panely naraz. |
