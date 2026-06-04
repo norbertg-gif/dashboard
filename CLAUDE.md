@@ -71,6 +71,7 @@ These were already in the codebase and need to stay fixed:
 2. **Scanner + DIP strategy integration.** New dashboard tab. (Latest work — context lives in this conversation.)
 3. **Hover tooltip for eToro markers.** Crosshair tooltip works; native hover on markers not resolved.
 4. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
+5. **User manual (requested).** Owner wants a usage manual in **both Markdown and HTML**. Slovak UI-facing text, English identifiers. Likely `docs/MANUAL.md` + an HTML version (consider a `/help` route served from the dashboard). Cover: tabs (Grafy/Portfólio/História/Risk/Prediktívny/Scanner), predictive signals (composite, weekly bias, daily buy signal 0–4, HMM regime, z-score), Scanner+DIP columns and watch-vs-buy (2/4 vs 3/4), signal philosophy (c1–c4, unified scoring), presets/watchlist/eToro, ops (Render deploy, `/data`, env vars), troubleshooting. Confirm scope (user-only vs + technical appendix) before writing.
 
 ## Data flow worth knowing
 
