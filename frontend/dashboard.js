@@ -6292,7 +6292,7 @@ function renderNasdaqScanner(payload) {
     const dip = Number.isFinite(Number(r.dip_total)) ? r.dip_total : '-';
     const rank = r.dip_rank ?? '-';
     const label = r.dip_label || 'TECH ONLY';
-    const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
+    const reason = (r.positive_factors || []).find(f => !/signal \d\/4/.test(f)) || (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
     return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${reason}`;
   }).join('\n');
 
@@ -6320,7 +6320,7 @@ function renderNasdaqScanner(payload) {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
-    const reason = (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
+    const reason = (r.positive_factors || []).find(f => !/signal \d\/4/.test(f)) || (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
     const dip = r.dip || {};
     const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
     const label = r.dip_label || 'TECH ONLY';
