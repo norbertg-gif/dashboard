@@ -199,6 +199,21 @@ function escHtml(v) {
   }[ch]));
 }
 
+// Signal tier → farba/label. Mäkký trend gate: buy (zelená), watch (oranžová),
+// counter = proti-trendový dip počas downtrendu (červená). Fallback pre staré
+// logy bez tier: odvodí z skóre.
+function sigTier(tier, score) {
+  return tier || ((Number(score) || 0) >= 3 ? 'buy' : 'watch');
+}
+function sigTierColor(tier, score) {
+  const t = sigTier(tier, score);
+  return t === 'buy' ? '#26a69a' : t === 'counter' ? '#ef5350' : '#f59e0b';
+}
+function sigTierLabel(tier, score) {
+  const t = sigTier(tier, score);
+  return t === 'buy' ? 'Buy' : t === 'counter' ? 'Counter' : 'Watch';
+}
+
 const PC_COLLAPSE_KEY = 'td_predictive_sidebar_collapsed';
 let pcCollapseObserverStarted = false;
 
@@ -4792,7 +4807,7 @@ function renderCharts(data) {
   if (data.daily_buy_signals && data.daily_buy_signals.length && candles.length) {
     // Zostav lookup: pre každý week timestamp → najlepšie skóre signálov v tom týždni
     const weekMap = {};
-    for (const c of candles) weekMap[c.time] = { time: c.time, score: 0, count: 0 };
+    for (const c of candles) weekMap[c.time] = { time: c.time, score: 0, count: 0, tiers: new Set() };
     for (const sig of data.daily_buy_signals) {
       // Nájdi weekly sviečku do ktorej patrí tento daily signál
       let best = null;
@@ -4803,17 +4818,20 @@ function renderCharts(data) {
       if (best && weekMap[best]) {
         weekMap[best].score = Math.max(weekMap[best].score, sig.score);
         weekMap[best].count++;
+        weekMap[best].tiers.add(sigTier(sig.tier, sig.score));
       }
     }
     for (const wk of Object.values(weekMap)) {
       if (wk.score >= 2) {
+        // Priorita farby v týždni: buy > counter > watch
+        const wkTier = wk.tiers.has('buy') ? 'buy' : wk.tiers.has('counter') ? 'counter' : 'watch';
         markers.push({
           time:     wk.time,
           position: 'belowBar',
-          color:    wk.score >= 3 ? '#26a69a' : '#f59e0b',
+          color:    sigTierColor(wkTier),
           shape:    'arrowUp',
           text:     wk.count > 1 ? `${wk.count}×` : `${wk.score}/4`,
-          size:     wk.score >= 3 ? 1.2 : 0.8,
+          size:     wkTier === 'buy' ? 1.2 : 0.8,
         });
       }
     }
@@ -5920,10 +5938,10 @@ function renderDailyMain(data) {
     const markers = data.daily_buy_signals.map(s => ({
       time:     s.time,
       position: 'belowBar',
-      color:    s.score >= 3 ? '#26a69a' : '#f59e0b',
+      color:    sigTierColor(s.tier, s.score),
       shape:    'arrowUp',
       text:     s.score + '/4',
-      size:     s.score >= 3 ? 1.5 : 1,
+      size:     sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1,
     }));
     cs.setMarkers(markers);
   }
@@ -5979,14 +5997,19 @@ function renderDailySidebar(data) {
         '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;">História signálov</div>' +
         '<div style="font-size:10px;color:var(--muted);">voči aktuálnej cene</div>' +
       '</div>' +
+      '<div style="display:flex;gap:10px;font-size:9px;color:var(--muted);margin-bottom:5px;">' +
+        '<span style="color:#26a69a">● Buy</span>' +
+        '<span style="color:#f59e0b">● Watch</span>' +
+        '<span style="color:#ef5350">● Counter (downtrend)</span>' +
+      '</div>' +
       '<div class="sig-history-list">' +
       (sigs.slice().reverse().slice(0, 8).map(s => {
         const d   = new Date(s.time * 1000).toLocaleDateString("sk-SK");
-        const col = s.score >= 3 ? "#26a69a" : "#f59e0b";
+        const col = sigTierColor(s.tier, s.score);
         const out = signalOutcome(s);
         return '<div class="sig-history-row ' + out.cls + '">' +
           '<span class="sig-history-date">' + d + '</span>' +
-          '<span class="sig-history-score" style="color:' + col + '">' + s.score + '/4</span>' +
+          '<span class="sig-history-score" style="color:' + col + '" title="' + sigTierLabel(s.tier, s.score) + '">' + s.score + '/4</span>' +
           '<span class="sig-history-price">' + s.close + '</span>' +
           '<span class="sig-history-result">' + out.label + ' ' + out.pct + '</span>' +
         '</div>';
@@ -6043,7 +6066,10 @@ function scoreOpportunity(row) {
   if (Number.isFinite(Number(row.setup_score))) return Number(row.setup_score);
   let score = 0;
   if (row.weekly_bullish) score += 35;
-  if (row.recent_signal) score += row.recent_signal.score >= 3 ? 35 : 24;
+  if (row.recent_signal) {
+    const t = sigTier(row.recent_signal.tier, row.recent_signal.score);
+    score += t === 'buy' ? 35 : t === 'counter' ? 8 : 24;
+  }
   score += Math.min(row.signal_count || 0, 10);
   const pos = opportunityPositionInfo(row.ticker);
   if (pos) score += 8;
@@ -6058,7 +6084,9 @@ function opportunityReasons(row, pos, days) {
   if (reasons.length >= 4) return reasons.slice(0, 4);
   reasons.push({ cls: row.weekly_bullish ? 'good' : 'bad', text: row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup' });
   if (sig) {
-    reasons.push({ cls: sig.score >= 3 ? 'good' : 'warn', text: (sig.score >= 3 ? 'Buy' : 'Watch') + ' signál ' + sig.score + '/4 z ' + sig.date });
+    const t = sigTier(sig.tier, sig.score);
+    const cls = t === 'buy' ? 'good' : t === 'counter' ? 'bad' : 'warn';
+    reasons.push({ cls, text: sigTierLabel(sig.tier, sig.score) + ' signál ' + sig.score + '/4 z ' + sig.date + (t === 'counter' ? ' (downtrend)' : '') });
   } else {
     reasons.push({ cls: 'warn', text: 'Bez nového signálu za ' + days + ' dní' });
   }
@@ -6092,9 +6120,10 @@ function renderOpportunities(rows, days) {
     const sig = r.recent_signal;
     const pos = r._pos;
     const biasCls = r.weekly_bullish ? 'good' : 'bad';
-    const sigCls = sig ? (sig.score >= 3 ? 'good' : 'warn') : '';
+    const sigT = sig ? sigTier(sig.tier, sig.score) : '';
+    const sigCls = sig ? (sigT === 'buy' ? 'good' : sigT === 'counter' ? 'bad' : 'warn') : '';
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
-    const sigTxt = sig ? `${sig.score}/4 ${sig.date}` : `bez signálu ${days}d`;
+    const sigTxt = sig ? `${sigTierLabel(sig.tier, sig.score)} ${sig.score}/4 ${sig.date}` : `bez signálu ${days}d`;
     const posTxt = pos ? `${pos.count}x eToro ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(0)}` : 'mimo portf.';
     const grade = r.setup_grade || (r._score >= 78 ? 'A' : r._score >= 62 ? 'B' : r._score >= 45 ? 'Watch' : 'Risky');
     const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
@@ -6334,7 +6363,7 @@ function renderNasdaqScanner(payload) {
       <td class="r">${r.dip_rank ?? '-'}</td>
       <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
-      <td>${sig.score ? `<span style="color:${sig.score >= 3 ? '#26a69a' : '#f59e0b'}" title="${sig.score >= 3 ? 'buy' : 'watch'}">${sig.score}/4</span>` : '-'}</td>
+      <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}" title="${sigTierLabel(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${price}</td>
       <td>${escHtml(reason)}</td>
     </tr>`;
@@ -6665,9 +6694,7 @@ async function runChecklist() {
       const biasLbl = r.weekly_bullish ? '▲ Bullish' : '▼ Bearish';
       const sigDate = r.recent_signal ? r.recent_signal.date : '—';
       const sigBadge = !hasSig ? '<span class="cl-badge none">—</span>'
-        : r.recent_signal.score >= 3
-          ? '<span class="cl-badge strong">' + r.recent_signal.score + '/4 Buy</span>'
-          : '<span class="cl-badge mild">' + r.recent_signal.score + '/4 Watch</span>';
+        : '<span class="cl-badge" style="background:' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + '22;color:' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + ';border:1px solid ' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + '55;">' + r.recent_signal.score + '/4 ' + sigTierLabel(r.recent_signal.tier, r.recent_signal.score) + '</span>';
       const sigClose = r.recent_signal ? r.recent_signal.close : '—';
 
       const tr = document.createElement('tr');

@@ -3067,7 +3067,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     sc, details = score_signal_day(row, zscore)
                     if sc >= 2:
                         ts = int(pd.Timestamp(row.iloc[0]).timestamp())
-                        tier = signal_tier(sc)
+                        tier = signal_tier(sc, details["downtrend"])
                         # Save to log if not already there
                         if date_key not in ticker_slog:
                             ticker_slog[date_key] = {
@@ -3256,9 +3256,13 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
 
     if recent_signal:
         sig_score = int(recent_signal.get("score") or 0)
-        if sig_score >= SIGNAL_BUY_THRESHOLD:
+        sig_tier = recent_signal.get("tier") or signal_tier(sig_score)
+        if sig_tier == "buy":
             score += 28
             positive.append(f"novy buy signal {sig_score}/4")
+        elif sig_tier == "counter":
+            score += 6
+            risk.append(f"proti-trendovy dip {sig_score}/4 (downtrend)")
         else:
             score += 16
             positive.append(f"watch signal {sig_score}/4")
@@ -3386,22 +3390,30 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     rsi = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
     vol = float(row["Volume"])
     vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
+    ema10 = float(row["ema10"]) if not math.isnan(float(row["ema10"])) else ema20
     c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
     c2 = rsi < SIGNAL_RSI_PULLBACK
     c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
     c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
     sc = int(sum([c1, c2, c3, c4]))
+    # Mäkký trend gate (per-bar): downtrend = krátka EMA pod dlhšou a cena pod EMA20.
+    # Dip počas downtrendu = proti-trendový (falling-knife) → tier "counter", nie buy.
+    downtrend = ema10 < ema20 and close < ema20
     details = {
         "ema_kijun_touch": bool(c1),
         "rsi_pullback": bool(c2),
         "bull_volume": bool(c3),
         "zscore_dip": bool(c4),
+        "downtrend": bool(downtrend),
     }
     return sc, details
 
 
-def signal_tier(score: int) -> str:
-    """3/4+ = plný buy signál, 2/4 = watch (slabší marker)."""
+def signal_tier(score: int, downtrend: bool = False) -> str:
+    """Mäkký trend gate. Dip počas downtrendu = 'counter' (proti-trendový, vizuálne
+    odlíšený, neráta sa ako buy). Inak 3/4+ = 'buy', 2/4 = 'watch'."""
+    if downtrend:
+        return "counter"
     return "buy" if score >= SIGNAL_BUY_THRESHOLD else "watch"
 
 
@@ -3633,7 +3645,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         sc, details = score_signal_day(row, zscore)
 
         if sc >= 2:
-            tier = signal_tier(sc)
+            tier = signal_tier(sc, details["downtrend"])
             if date_key not in ticker_slog:
                 ticker_slog[date_key] = {
                     "score": sc,
