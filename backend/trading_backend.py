@@ -3067,7 +3067,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     sc, details = score_signal_day(row, zscore)
                     if sc >= 2:
                         ts = int(pd.Timestamp(row.iloc[0]).timestamp())
-                        tier = signal_tier(sc, details["downtrend"])
+                        tier = signal_tier(sc, details["trend"])
                         # Save to log if not already there
                         if date_key not in ticker_slog:
                             ticker_slog[date_key] = {
@@ -3396,25 +3396,35 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
     c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
     sc = int(sum([c1, c2, c3, c4]))
-    # Mäkký trend gate (per-bar): downtrend = krátka EMA pod dlhšou a cena pod EMA20.
-    # Dip počas downtrendu = proti-trendový (falling-knife) → tier "counter", nie buy.
-    downtrend = ema10 < ema20 and close < ema20
+    # Trend-primárna klasifikácia (per-bar) podľa štruktúry EMA:
+    #   up   = ema10 > ema20            → dip v uptrende = buyovateľný (DIP stratégia)
+    #   down = ema10 < ema20 a cena < ema20 → proti-trendový dip (falling-knife)
+    #   side = prechod/sideways
+    if ema10 > ema20:
+        trend = "up"
+    elif ema10 < ema20 and close < ema20:
+        trend = "down"
+    else:
+        trend = "side"
     details = {
         "ema_kijun_touch": bool(c1),
         "rsi_pullback": bool(c2),
         "bull_volume": bool(c3),
         "zscore_dip": bool(c4),
-        "downtrend": bool(downtrend),
+        "trend": trend,
     }
     return sc, details
 
 
-def signal_tier(score: int, downtrend: bool = False) -> str:
-    """Mäkký trend gate. Dip počas downtrendu = 'counter' (proti-trendový, vizuálne
-    odlíšený, neráta sa ako buy). Inak 3/4+ = 'buy', 2/4 = 'watch'."""
-    if downtrend:
+def signal_tier(score: int, trend: str = "side") -> str:
+    """Trend-primárny tier. O farbe rozhoduje kontext trendu, nie hrubé skóre:
+    uptrend = 'buy' (zelená, aj pri 2/4), downtrend = 'counter' (červená,
+    proti-trendový dip), inak 'watch' (oranžová). Skóre ostáva ako sila/text."""
+    if trend == "up":
+        return "buy"
+    if trend == "down":
         return "counter"
-    return "buy" if score >= SIGNAL_BUY_THRESHOLD else "watch"
+    return "watch"
 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
@@ -3645,7 +3655,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         sc, details = score_signal_day(row, zscore)
 
         if sc >= 2:
-            tier = signal_tier(sc, details["downtrend"])
+            tier = signal_tier(sc, details["trend"])
             if date_key not in ticker_slog:
                 ticker_slog[date_key] = {
                     "score": sc,
