@@ -241,6 +241,88 @@ def train_ml_model(df):
     return model, round(acc, 1), bull_prob
 
 
+# ── HMM Regime Detection ──────────────────────────────────────────────────────
+
+def detect_market_regime(df) -> dict:
+    """Fit a 3-state Gaussian HMM on log-returns and map states to
+    bear / sideways / bull / high_volatility using mean return + volatility.
+
+    Returns dict with: regime (str), confidence (float 0-1), states (list),
+    regime_history (list of {date, regime} for last 26 bars), or error (str).
+    """
+    try:
+        from hmmlearn import GaussianHMM
+    except ImportError:
+        return {"error": "hmmlearn nie je nainštalovaný (pip install hmmlearn)"}
+
+    try:
+        closes = df["Close"].values.astype(float)
+        if len(closes) < 60:
+            return {"error": "Nedostatok dát (min 60 sviečok)"}
+
+        log_returns = np.diff(np.log(closes))
+        X = log_returns.reshape(-1, 1)
+
+        model = GaussianHMM(
+            n_components=3,
+            covariance_type="diag",
+            n_iter=200,
+            random_state=42,
+            tol=1e-4,
+        )
+        model.fit(X)
+
+        if not model.monitor_.converged:
+            # Retry with more iterations — convergence failure is common on short/flat series
+            model = GaussianHMM(n_components=3, covariance_type="diag", n_iter=500, random_state=0)
+            model.fit(X)
+
+        hidden_states = model.predict(X)
+
+        # Map hidden states → semantic labels by mean return per state
+        state_means = [log_returns[hidden_states == s].mean() if (hidden_states == s).any() else 0
+                       for s in range(3)]
+        state_vols  = [log_returns[hidden_states == s].std()  if (hidden_states == s).any() else 0
+                       for s in range(3)]
+
+        # Sort by mean return: lowest = bear, mid = sideways, highest = bull
+        order = np.argsort(state_means)   # [bear_state, sideways_state, bull_state]
+        label_map = {order[0]: "bear", order[1]: "sideways", order[2]: "bull"}
+
+        # High volatility override: if current state has vol > 1.8× median → high_volatility
+        median_vol = float(np.median(state_vols))
+        current_raw_state = int(hidden_states[-1])
+        current_vol = state_vols[current_raw_state]
+        if median_vol > 0 and current_vol > median_vol * 1.8:
+            current_regime = "high_volatility"
+        else:
+            current_regime = label_map[current_raw_state]
+
+        # Posterior probability of current state = confidence
+        log_prob, posteriors = model.score_samples(X)
+        confidence = float(posteriors[-1, current_raw_state])
+
+        # Last 26 bars of regime history for chart shading
+        dates = df.index[-26:] if len(df) >= 26 else df.index
+        states_tail = hidden_states[-(len(dates)):]
+        vols_tail   = [state_vols[s] for s in states_tail]
+        history = []
+        for i, (d, s, v) in enumerate(zip(dates, states_tail, vols_tail)):
+            lbl = "high_volatility" if (median_vol > 0 and v > median_vol * 1.8) else label_map[int(s)]
+            history.append({"date": str(d.date() if hasattr(d, 'date') else d)[:10], "regime": lbl})
+
+        return {
+            "regime":          current_regime,
+            "confidence":      round(confidence, 3),
+            "regime_history":  history,
+            "state_means_pct": [round(m * 100, 3) for m in [state_means[i] for i in order]],
+            "state_vols_pct":  [round(v * 100, 3) for v in [state_vols[i]  for i in order]],
+            "error": None,
+        }
+    except Exception as e:
+        return {"error": f"HMM chyba: {type(e).__name__}: {str(e)[:80]}"}
+
+
 # ── Prediction engine ─────────────────────────────────────────────────────────
 
 def predict_next_candle(df, weights: dict = None, **kwargs):
@@ -2815,14 +2897,18 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         print("[CHART] Step 10: backtest2 done", flush=True)
 
         print("[CHART] Step 11: ML training...", flush=True)
-        print("[CHART] Step 11: ML training...", flush=True)
         # Train ML confidence model (skip if taking too long)
         try:
             _ml_model, ml_acc, ml_bull_prob = train_ml_model(df)
             print("[CHART] Step 12: ML done", flush=True)
-            print("[CHART] Step 12: ML done", flush=True)
         except Exception:
             ml_acc, ml_bull_prob = None, 0.5
+
+        print("[CHART] Step 12b: HMM regime...", flush=True)
+        try:
+            regime_info = detect_market_regime(df)
+        except Exception as e:
+            regime_info = {"error": str(e)[:80]}
 
         pred        = predict_next_candle(df, weights=final_weights, ml_bull_prob=ml_bull_prob)
         pred_default = predict_next_candle(df, weights=DEFAULT_WEIGHTS)
@@ -3121,6 +3207,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "weekly_bias":        weekly_bias,
             "today_score":        today_score,
             "earnings_dates": sorted(earnings_dates),
+            "regime":             regime_info,
             "candles":     candles,
             "prediction":  pred,
             "pred_candle": pred_candle,
@@ -3179,7 +3266,7 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
     if recent_signal:
         sig_score = int(recent_signal.get("score") or 0)
         score += 28 if sig_score >= 3 else 20
-        positive.append(f"novy signal {sig_score}/3")
+        positive.append(f"novy signal {sig_score}/4")
     else:
         risk.append("bez cerstveho daily signalu")
 
@@ -3273,6 +3360,7 @@ SCANNER_DEFAULT_DAYS = 3
 SIGNAL_PROXIMITY_TOL = 0.005
 SIGNAL_RSI_PULLBACK = 45
 SIGNAL_VOLUME_MULT = 1.2
+SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je štatisticky lacná
 DIP_STRONG_THRESHOLD = 90
 DIP_VERY_STRONG_THRESHOLD = 100
 
@@ -3484,6 +3572,11 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     recent_signal = None
     all_signals = []
 
+    # Rolling 60-period z-score: (close - μ) / σ — vypočítaný raz pre celý DF
+    _zscore_roll = df_d["Close"].rolling(60, min_periods=30)
+    _zscore_series = ((df_d["Close"] - _zscore_roll.mean()) / _zscore_roll.std().replace(0, float("nan"))).fillna(0)
+    zscore_values = _zscore_series.values  # zarovnané s df_d
+
     df_score = df_d.reset_index()
     for i in range(5, len(df_score)):
         row = df_score.iloc[i]
@@ -3502,10 +3595,13 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         vol = float(row["Volume"])
         vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
 
+        zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
+
         c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
         c2 = rsi < SIGNAL_RSI_PULLBACK
         c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
-        sc = sum([c1, c2, c3])
+        c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD   # cena štatisticky lacná voči vlastnému 60p režimu
+        sc = sum([c1, c2, c3, c4])
 
         if sc >= 2:
             if date_key not in ticker_slog:
@@ -3516,6 +3612,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
                         "ema_kijun_touch": bool(c1),
                         "rsi_pullback": bool(c2),
                         "bull_volume": bool(c3),
+                        "zscore_dip": bool(c4),
                     },
                 }
             sig = {"date": date_key, "score": sc, "close": round(close, 2)}

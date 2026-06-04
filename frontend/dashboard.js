@@ -5170,8 +5170,24 @@ function pc_renderSidebar(data) {
 
   const now = Math.floor(Date.now()/1000);
 
+  // HMM Regime badge
+  const regime = data.regime || {};
+  let regimeHtml = '';
+  if (regime.regime && !regime.error) {
+    const regimeMeta = {
+      bull:            { label: 'Bull',         col: '#26a69a', tip: 'HMM model identifikoval bull režim. Buy signály sú dôveryhodnejšie.' },
+      sideways:        { label: 'Sideways',      col: '#f59e0b', tip: 'HMM model identifikoval sideways režim. Signály sú menej spoľahlivé, vstupuj opatrne.' },
+      bear:            { label: 'Bear',          col: '#ef5350', tip: 'HMM model identifikoval bear režim. Buy signály sú len na sledovanie, nie entry.' },
+      high_volatility: { label: 'High Vol',      col: '#a78bfa', tip: 'Volatilita výrazne nad normálom — trhový regime je nestabilný.' },
+    };
+    const rm = regimeMeta[regime.regime] || { label: regime.regime, col: 'var(--muted)', tip: '' };
+    const conf = regime.confidence != null ? ` · ${Math.round(regime.confidence * 100)}%` : '';
+    regimeHtml = `<div class="pred-row"><span class="tt key" data-tip="Trhový režim odhadnutý HMM modelom (Gaussian Hidden Markov Model, 3 stavy). Diagnostický ukazovateľ — ešte nie je súčasťou ML scoringu.">Regime <span class="tt-icon">ⓘ</span></span><span class="val"><span style="color:${rm.col};font-weight:600" title="${rm.tip}">${rm.label}${conf}</span></span></div>`;
+  }
+
   document.getElementById('predInfo').innerHTML = `
     <div class="pred-row"><span class="tt key" data-tip="Predikovaný smer nasledujúcej weekly sviečky na základe kombinácie technických indikátorov a ML modelu.">Smer <span class="tt-icon">ⓘ</span></span><span class="val">${dirHtml}</span></div>
+    ${regimeHtml}
     <div class="pred-row"><span class="key">Open</span><span class="val">${pc.open.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Predikované maximum sviečky. Počítané ako stred (open+close)/2 + ATR×0.75">High <span class="tt-icon">ⓘ</span></span><span class="val">${pc.high.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Predikované minimum sviečky. Počítané ako stred (open+close)/2 - ATR×0.75">Low <span class="tt-icon">ⓘ</span></span><span class="val">${pc.low.toFixed(2)}</span></div>
@@ -6316,7 +6332,7 @@ function renderNasdaqScanner(payload) {
       <td class="r">${r.dip_rank ?? '-'}</td>
       <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
-      <td>${sig.score || '-'}/3</td>
+      <td>${sig.score || '-'}/4</td>
       <td class="r">${price}</td>
       <td>${escHtml(reason)}</td>
     </tr>`;
