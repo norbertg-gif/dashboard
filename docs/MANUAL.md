@@ -286,7 +286,7 @@ render.yaml            # web service + 1GB disk na /data
 | `DASH_USER` / `DASH_PASS` | Basic auth (povinné v produkcii). |
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
-| `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 8). |
+| `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
 | `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |
 | `RENDER` | Príznak produkcie. |
