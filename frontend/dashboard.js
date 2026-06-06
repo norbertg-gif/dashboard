@@ -6328,10 +6328,11 @@ function renderNasdaqScanner(payload) {
       <div class="tool-kpi"><div class="tool-kpi-label">Strong</div><div class="tool-kpi-val">${kpis.strong}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Tech only</div><div class="tool-kpi-val">${kpis.techOnly}</div></div>
     </div>
+    <div class="scanner-main-row">
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Poznámky</th>
+          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -6353,9 +6354,24 @@ function renderNasdaqScanner(payload) {
       <td>${escHtml(sig.date || '-')}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}" title="${sigTierLabel(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${price}</td>
-      <td class="scanner-note-cell"><div class="scanner-note" contenteditable="true" data-ticker="${escHtml(r.ticker)}" title="Ctrl+B tučné, Ctrl+I kurzíva">${_scannerNotes[r.ticker] || ''}</div></td>
+      <td>${escHtml(reason)}</td>
     </tr>`;
   }).join('') + `</tbody></table></div>
+    <aside class="scanner-notes-panel">
+      <div class="scanner-notes-head">
+        <span class="scanner-notes-title">Poznámky</span>
+        <div id="scannerNotesToolbar" class="scanner-notes-toolbar">
+          <button type="button" data-cmd="bold" title="Tučné (Ctrl+B)"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Kurzíva (Ctrl+I)"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="Podčiarknuté (Ctrl+U)"><u>U</u></button>
+          <button type="button" data-cmd="insertUnorderedList" title="Zoznam">•</button>
+          <button type="button" data-cmd="removeFormat" title="Zmazať formát">✕</button>
+        </div>
+        <span id="scannerNotesStatus" class="scanner-notes-status"></span>
+      </div>
+      <div id="scannerNotesBox" class="scanner-notes-box" contenteditable="true" spellcheck="false"></div>
+    </aside>
+    </div>
     <details class="scanner-export" open>
       <summary>Export / kopírovanie</summary>
       <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
@@ -6363,50 +6379,75 @@ ${escHtml(copyText)}</textarea>
     </details>
   </div>`;
   attachScannerExportResize();
-  attachScannerNoteHandlers();
+  attachScannerNotesPanel();
 }
 
-let _scannerNotes = {};
+let _scannerNotesContent = '';
+let _scannerNotesLoaded = false;
 
 async function loadScannerNotes() {
   try {
     const res = await fetch('/api/scanner/notes');
-    if (res.ok) _scannerNotes = await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      _scannerNotesContent = data?.content || '';
+    }
   } catch(e) { /* non-critical */ }
+  _scannerNotesLoaded = true;
+  const box = document.getElementById('scannerNotesBox');
+  if (box && box.innerHTML !== _scannerNotesContent) box.innerHTML = _scannerNotesContent;
 }
 
-const _scannerNoteSaveTimers = {};
-function saveScannerNote(ticker, content) {
-  clearTimeout(_scannerNoteSaveTimers[ticker]);
-  _scannerNoteSaveTimers[ticker] = setTimeout(async () => {
+let _scannerNotesSaveTimer = null;
+let _scannerNotesStatusEl = null;
+function saveScannerNotes(content) {
+  if (_scannerNotesStatusEl) _scannerNotesStatusEl.textContent = 'ukladám…';
+  clearTimeout(_scannerNotesSaveTimer);
+  _scannerNotesSaveTimer = setTimeout(async () => {
     try {
       await fetch('/api/scanner/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker, content }),
+        body: JSON.stringify({ content }),
       });
-      _scannerNotes[ticker] = content;
-    } catch(e) { /* ignore */ }
+      _scannerNotesContent = content;
+      if (_scannerNotesStatusEl) _scannerNotesStatusEl.textContent = 'uložené';
+    } catch(e) {
+      if (_scannerNotesStatusEl) _scannerNotesStatusEl.textContent = 'chyba ukladania';
+    }
   }, 800);
 }
 
-function attachScannerNoteHandlers() {
-  document.querySelectorAll('.scanner-note').forEach(div => {
-    const ticker = div.dataset.ticker;
-    div.addEventListener('input', () => saveScannerNote(ticker, div.innerHTML));
-    div.addEventListener('keydown', e => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); document.execCommand('bold'); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'i') { e.preventDefault(); document.execCommand('italic'); }
-    });
-    div.addEventListener('click', e => e.stopPropagation()); // neklikni na riadok
+function attachScannerNotesPanel() {
+  const box = document.getElementById('scannerNotesBox');
+  if (!box || box.dataset.bound) return;
+  box.dataset.bound = '1';
+  _scannerNotesStatusEl = document.getElementById('scannerNotesStatus');
+  if (_scannerNotesLoaded) box.innerHTML = _scannerNotesContent;
+  box.addEventListener('input', () => saveScannerNotes(box.innerHTML));
+  box.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); document.execCommand('bold'); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'i') { e.preventDefault(); document.execCommand('italic'); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'u') { e.preventDefault(); document.execCommand('underline'); }
   });
+  const toolbar = document.getElementById('scannerNotesToolbar');
+  if (toolbar) {
+    toolbar.addEventListener('click', e => {
+      const btn = e.target.closest('[data-cmd]');
+      if (!btn) return;
+      e.preventDefault();
+      box.focus();
+      document.execCommand(btn.dataset.cmd, false, btn.dataset.arg || null);
+      saveScannerNotes(box.innerHTML);
+    });
+  }
 }
 
 async function loadNasdaqScannerResults() {
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el) return;
   try {
-    await loadScannerNotes();
+    if (!_scannerNotesLoaded) loadScannerNotes();
     const res = await fetch('/api/scanner/nasdaq/results');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();

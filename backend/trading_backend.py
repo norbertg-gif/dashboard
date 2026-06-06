@@ -3813,31 +3813,23 @@ def get_nasdaq_scanner_results():
 def get_scanner_notes():
     if SCANNER_NOTES_FILE.exists():
         try:
-            return json.loads(SCANNER_NOTES_FILE.read_text(encoding="utf-8"))
+            data = json.loads(SCANNER_NOTES_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "content" in data:
+                return data
         except Exception:
             pass
-    return {}
+    return {"content": ""}
 
 
 @app.post("/api/scanner/notes")
 async def save_scanner_note(request: Request):
     body = await request.json()
-    ticker = str(body.get("ticker", "")).strip().upper()
     content = str(body.get("content", ""))
-    if not ticker:
-        raise HTTPException(status_code=400, detail="ticker required")
-    notes: dict = {}
-    if SCANNER_NOTES_FILE.exists():
-        try:
-            notes = json.loads(SCANNER_NOTES_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    if content.strip() in ("", "<br>", "<div><br></div>"):
-        notes.pop(ticker, None)
-    else:
-        notes[ticker] = content
-    SCANNER_NOTES_FILE.write_text(json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "ticker": ticker}
+    SCANNER_NOTES_FILE.write_text(
+        json.dumps({"content": content, "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return {"ok": True}
 
 
 @app.get("/api/checklist")
