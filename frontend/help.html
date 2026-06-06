@@ -112,6 +112,14 @@
     <tr><td><strong>Prepočítať váhy</strong></td><td>Preučí váhy indikátorov pre ticker.</td></tr>
   </table>
 
+  <h3>Graf</h3>
+  <ul>
+    <li>Hlavný graf prepína <strong>Weekly / Daily</strong>.</li>
+    <li><strong>Buy signál markery</strong> (šípky pod sviečkami) — farba podľa tieru (viď nižšie).</li>
+    <li><strong>eToro kolieska</strong> — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa malé krúžky pod sviečkou, kde bola pozícia otvorená (zelená = v zisku, červená = v strate, odlíšené podľa účtu).</li>
+    <li>Spodný <strong>Prediktívny chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1) — ukazuje predikciu ďalšej sviečky a voliteľne backtest overlay.</li>
+  </ul>
+
   <h3>Pravý panel</h3>
   <ul>
     <li><strong>Daily buy signál</strong>
@@ -178,6 +186,18 @@
     <tr><td><strong>Last</strong></td><td>Posledná cena.</td></tr>
     <tr><td><strong>Reason</strong></td><td>Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8").</td></tr>
   </table>
+
+  <h3>Poznámky (bočný panel)</h3>
+  <p>Vpravo od tabuľky je <strong>resizovateľný panel s poznámkami</strong> — globálny, nezávislý od tickerov (jeden zdieľaný blok textu).</p>
+  <ul>
+    <li><strong>Formátovanie</strong>: tučné (<code>Ctrl+B</code>), kurzíva (<code>Ctrl+I</code>), podčiarknuté (<code>Ctrl+U</code>), zoznam / clear (toolbar).</li>
+    <li><strong>Auto-save</strong> ~800 ms po zmene → <code>/data/scanner_notes.json</code>. Status („ukladám… / uložené") v hlavičke panelu.</li>
+    <li><strong>Resize</strong>: ťahaj pravý okraj panelu (horizontálne) alebo dolný okraj boxu (vertikálne).</li>
+    <li>Pod šírkou ~1100 px sa panel zarovná pod tabuľku.</li>
+  </ul>
+
+  <h3>Export / kopírovanie</h3>
+  <p>Nad KPI dlaždicami je zbalený blok <strong>Export / kopírovanie</strong> — TSV formát pripravený na vloženie do Excelu / Google Sheets.</p>
 
   <h3>Watch vs. Buy</h3>
   <p>Signál sa zaznamenáva od <strong>2/4</strong> podmienok. Či je buy/watch/counter rozhoduje trendový kontext (viď farby vyššie), nie len počet podmienok.</p>

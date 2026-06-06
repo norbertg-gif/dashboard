@@ -78,8 +78,12 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 - Hlavný graf prepína **Weekly / Daily**.
 - **Buy signál markery** (šípky pod sviečkami) — viď farby nižšie.
+- **eToro kolieska** — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa
+  malé krúžky pod sviečkou v ktorej bola pozícia otvorená (zelená = v zisku,
+  červená = v strate, odlíšené podľa účtu).
 - Spodný **Prediktívny chart** ukazuje predikciu ďalšej sviečky (+1 prognóza) a
-  voliteľne backtest overlay (reálne vs. predikované sviečky).
+  voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
+  hlavného grafu** (pomer 2:1).
 
 ### Pravý panel (sidebar)
 
@@ -165,6 +169,24 @@ kombinuje s externým **DIP rankingom** (importovaný Excel).
 | **Sig** | Skóre signálu `x/4` (farba = tier buy/watch/counter). |
 | **Last** | Posledná cena. |
 | **Reason** | Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8", „blízko EMA/Kijun zóny"). |
+
+### Poznámky (bočný panel)
+
+Vpravo od tabuľky je **resizovateľný panel s poznámkami** (globálne, nezávislé od
+tickerov — jeden zdieľaný blok textu pre celý scanner).
+
+- **Formátovanie**: tučné (`Ctrl+B`), kurzíva (`Ctrl+I`), podčiarknuté (`Ctrl+U`),
+  zoznam (toolbar), reset formátu (✕).
+- **Auto-save** ~800 ms po poslednej zmene → `/data/scanner_notes.json`. Status
+  („ukladám… / uložené") sa zobrazí v hlavičke panelu.
+- **Resize**: ťahaj pravý okraj panelu (horizontálne) alebo dolný okraj boxu
+  (vertikálne).
+- Pod šírkou ~1100 px sa panel zarovná pod tabuľku.
+
+### Export / kopírovanie
+
+Nad KPI dlaždicami je zbalený blok **Export / kopírovanie** — `Ticker\tTech\t…`
+formát pripravený na vloženie do Excelu / Google Sheets.
 
 ### Watch vs. Buy
 
