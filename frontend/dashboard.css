@@ -1588,10 +1588,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-width: 0;
 }
 #predictiveTab .chart-block {
-  flex: 1;
+  flex: 2;
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+#predictiveTab .chart-block.chart-block-sub {
+  flex: 1;
 }
 #predictiveTab .chart-block + .chart-block {
   border-top: 1px solid var(--border);

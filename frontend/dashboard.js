@@ -4835,6 +4835,18 @@ function renderCharts(data) {
       size:     0.4,
     });
   }
+  // eToro open-position markers — kolieska podľa open rate
+  const ticker = (document.getElementById('tickerInput')?.value || '').trim().toUpperCase();
+  const lastClose = candles.length ? candles[candles.length - 1].close : null;
+  for (const acct of ['1', '2']) {
+    (etoroPositionsAll[acct] || []).filter(p => p.symbol === ticker).forEach(pos => {
+      const mt = resolveMarkerTime({ ...pos, _acct: acct }, candles);
+      if (!mt) return;
+      const inProfit = lastClose != null ? (pos.openRate || 0) <= lastClose : true;
+      const col = inProfit ? ACCT_COLORS[acct].profit : ACCT_COLORS[acct].loss;
+      markers.push({ time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
+    });
+  }
   pc_realSeries.setMarkers(markers.sort((a, b) => a.time - b.time));
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
@@ -6585,6 +6597,17 @@ async function loadData(reoptimize = false) {
     renderCharts(data);
     setManualFibInputs();
     pc_applyOverlays();
+    // Donačítaj eToro pozície ak ešte nie sú, potom re-renderuj markery
+    (async () => {
+      let updated = false;
+      for (const acct of ['1', '2']) {
+        if (!etoroPositionsAll[acct]?.length) {
+          await loadPositionsForAccount(acct);
+          updated = true;
+        }
+      }
+      if (updated && pc_lastData) renderCharts(pc_lastData);
+    })();
     pc_renderSidebar(data);
     status.textContent = `✓ ${ticker} · ${data.candles.length} weekly sviečok`;
     document.getElementById('btBadge').style.display = pc_showBacktest ? '' : 'none';
