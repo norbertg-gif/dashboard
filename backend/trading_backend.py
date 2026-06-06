@@ -4,7 +4,7 @@ Trading Dashboard Backend — port 8766
 pip install fastapi uvicorn yfinance pandas requests
 """
 
-import json, os, math, threading
+import gc, json, os, math, threading
 from io import BytesIO
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -1076,7 +1076,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 (CACHE_DIR / "portfolio").mkdir(exist_ok=True)
 _cache_mem: dict[str, tuple[float, dict]] = {}   # key → (mtime, data)
 _cache_mem_lock = threading.Lock()
-_CACHE_MEM_MAX = 200   # max počet položiek v RAM cache (100 tickerov × ~2 aktívne intervaly)
+_CACHE_MEM_MAX = 75    # max položiek v RAM cache (25 tickerov × 3 intervaly)
 WATCHLIST_PATH = _Path(DATA_ROOT) / "watchlist.json"
 _watchlist_lock = threading.Lock()
 
@@ -3361,7 +3361,7 @@ NASDAQ100_TICKERS = [
     "TSLA", "TTD", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS",
 ]
 
-SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "8"))
+SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
 SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "30"))
 SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "15"))
 SCANNER_DEFAULT_DAYS = 3
@@ -3671,13 +3671,19 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
                     recent_signal = sig
 
     setup = build_setup_assessment(df_d, bool(weekly_bullish), recent_signal, len(all_signals), latest_zscore)
+    last_close = round(float(df_d.iloc[-1]["Close"]), 2)
+    del raw_d, df_d, df_score, _zscore_series, zscore_values
+    try:
+        del raw_w, df_w
+    except NameError:
+        pass
     return {
         "ticker": ticker,
         "weekly_bullish": weekly_bullish,
         "weekly_status": weekly_status,
         "recent_signal": recent_signal,
         "signal_count": len(all_signals),
-        "last_close": round(float(df_d.iloc[-1]["Close"]), 2),
+        "last_close": last_close,
         "slog_update": ticker_slog,
         **setup,
         "error": None,
@@ -3750,6 +3756,8 @@ def _run_nasdaq_scanner(days: int):
             pool.shutdown(wait=False, cancel_futures=True)
 
         save_signals_log(slog_work)
+        del slog_work, slog_source
+        gc.collect()
         dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
         results = [enrich_with_dip(r, dip_scores) for r in results]
         results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
