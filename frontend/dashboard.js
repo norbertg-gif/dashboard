@@ -6331,7 +6331,7 @@ function renderNasdaqScanner(payload) {
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Reason</th>
+          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Poznámky</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -6353,7 +6353,7 @@ function renderNasdaqScanner(payload) {
       <td>${escHtml(sig.date || '-')}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}" title="${sigTierLabel(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${price}</td>
-      <td>${escHtml(reason)}</td>
+      <td class="scanner-note-cell"><div class="scanner-note" contenteditable="true" data-ticker="${escHtml(r.ticker)}" title="Ctrl+B tučné, Ctrl+I kurzíva">${_scannerNotes[r.ticker] || ''}</div></td>
     </tr>`;
   }).join('') + `</tbody></table></div>
     <details class="scanner-export" open>
@@ -6363,12 +6363,50 @@ ${escHtml(copyText)}</textarea>
     </details>
   </div>`;
   attachScannerExportResize();
+  attachScannerNoteHandlers();
+}
+
+let _scannerNotes = {};
+
+async function loadScannerNotes() {
+  try {
+    const res = await fetch('/api/scanner/notes');
+    if (res.ok) _scannerNotes = await res.json();
+  } catch(e) { /* non-critical */ }
+}
+
+const _scannerNoteSaveTimers = {};
+function saveScannerNote(ticker, content) {
+  clearTimeout(_scannerNoteSaveTimers[ticker]);
+  _scannerNoteSaveTimers[ticker] = setTimeout(async () => {
+    try {
+      await fetch('/api/scanner/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, content }),
+      });
+      _scannerNotes[ticker] = content;
+    } catch(e) { /* ignore */ }
+  }, 800);
+}
+
+function attachScannerNoteHandlers() {
+  document.querySelectorAll('.scanner-note').forEach(div => {
+    const ticker = div.dataset.ticker;
+    div.addEventListener('input', () => saveScannerNote(ticker, div.innerHTML));
+    div.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); document.execCommand('bold'); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'i') { e.preventDefault(); document.execCommand('italic'); }
+    });
+    div.addEventListener('click', e => e.stopPropagation()); // neklikni na riadok
+  });
 }
 
 async function loadNasdaqScannerResults() {
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el) return;
   try {
+    await loadScannerNotes();
     const res = await fetch('/api/scanner/nasdaq/results');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();

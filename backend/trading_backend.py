@@ -162,6 +162,7 @@ def add_indicators(df):
 
 WEIGHTS_LOG     = DATA_ROOT / "predictive_weights_log.json"
 SIGNALS_LOG     = DATA_ROOT / "predictive_signals_log.json"
+SCANNER_NOTES_FILE = DATA_ROOT / "scanner_notes.json"
 DEFAULT_WEIGHTS = {"ema": 0.20, "rsi": 0.10, "macd": 0.20, "vol": 0.15, "ichi": 0.25, "stoch": 0.10}
 
 
@@ -3806,6 +3807,37 @@ def get_nasdaq_scanner_results():
     with _scanner_lock:
         state = dict(_scanner_state)
     return {"state": state, "cache": enrich_scanner_payload(load_scanner_cache())}
+
+
+@app.get("/api/scanner/notes")
+def get_scanner_notes():
+    if SCANNER_NOTES_FILE.exists():
+        try:
+            return json.loads(SCANNER_NOTES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+@app.post("/api/scanner/notes")
+async def save_scanner_note(request: Request):
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).strip().upper()
+    content = str(body.get("content", ""))
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker required")
+    notes: dict = {}
+    if SCANNER_NOTES_FILE.exists():
+        try:
+            notes = json.loads(SCANNER_NOTES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if content.strip() in ("", "<br>", "<div><br></div>"):
+        notes.pop(ticker, None)
+    else:
+        notes[ticker] = content
+    SCANNER_NOTES_FILE.write_text(json.dumps(notes, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "ticker": ticker}
 
 
 @app.get("/api/checklist")
