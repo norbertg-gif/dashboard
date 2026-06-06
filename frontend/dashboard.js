@@ -6322,6 +6322,11 @@ function renderNasdaqScanner(payload) {
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}</div>
+    <details class="scanner-export">
+      <summary>Export / kopírovanie</summary>
+      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
+${escHtml(copyText)}</textarea>
+    </details>
     <div class="scanner-kpis">
       <div class="tool-kpi"><div class="tool-kpi-label">Signály</div><div class="tool-kpi-val">${kpis.total}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Crossover</div><div class="tool-kpi-val">${kpis.crossover}</div></div>
@@ -6372,11 +6377,6 @@ function renderNasdaqScanner(payload) {
       <div id="scannerNotesBox" class="scanner-notes-box" contenteditable="true" spellcheck="false"></div>
     </aside>
     </div>
-    <details class="scanner-export" open>
-      <summary>Export / kopírovanie</summary>
-      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
-${escHtml(copyText)}</textarea>
-    </details>
   </div>`;
   attachScannerExportResize();
   attachScannerNotesPanel();
