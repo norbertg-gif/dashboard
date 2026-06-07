@@ -299,6 +299,9 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
   <h3>Dátové toky</h3>
   <ul>
     <li><strong>OHLCV cache inkrementálna</strong> — <code>cache/ohlcv/{SYMBOL}_{INTERVAL}.gz</code>, až 1000 sviečok, doťahuje len tail.</li>
+    <li><strong>Progresívne grafy</strong> — prvý render panelu načíta posledných 300 sviečok; staršie bloky po 300 sa doplnia pri posune doľava.</li>
+    <li><strong>Live update</strong> — WebSocket a tichý REST refresh aktualizujú iba poslednú sviečku, nie celú sériu.</li>
+    <li><strong>Lazy indikátory</strong> — počítajú sa len zapnuté indikátory; kompletná sada pre Wizard až po jeho otvorení.</li>
     <li><strong>Portfolio cache TTL = 120 s RAM</strong>, fallback na disk pri výpadku proxy.</li>
     <li><strong>WebSocket</strong> (<code>wss://ws.etoro.com/ws</code>) ženie živé ceny; REST refresh každých 15 s ako fallback.</li>
     <li><strong>Background prefetch</strong> (<code>/api/prefetch</code>) zahrieva cache pri štarte.</li>
