@@ -5783,8 +5783,10 @@ class FibonacciPrimitive {
       if (!Number.isFinite(lowX) || !Number.isFinite(highX)) return;
       const lowXBitmap = Math.round(lowX * horizontalPixelRatio);
       const highXBitmap = Math.round(highX * horizontalPixelRatio);
-      const x1 = Math.min(lowXBitmap, highXBitmap);
-      const x2 = Math.max(lowXBitmap, highXBitmap);
+      // Left boundary = leftmost anchor; right boundary = full chart width
+      const xAnchorLeft = Math.min(lowXBitmap, highXBitmap);
+      const xAnchorRight = Math.max(lowXBitmap, highXBitmap);
+
       const levels = this.levels()
         .map(level => ({ ...level, y: this.series.priceToCoordinate(level.price) }))
         .filter(level => Number.isFinite(level.y))
@@ -5792,14 +5794,14 @@ class FibonacciPrimitive {
 
       context.save();
       context.font = `${11 * verticalPixelRatio}px JetBrains Mono, monospace`;
-      context.textBaseline = 'bottom';
 
+      // Shaded zones between retracement levels — only in the anchor range
       const retracements = levels.filter(level => level.kind === 'retracement').sort((a, b) => a.y - b.y);
       for (let i = 0; i < retracements.length - 1; i++) {
         const top = retracements[i].y;
         const bottom = retracements[i + 1].y;
-        context.fillStyle = i % 2 ? 'rgba(34,211,238,0.035)' : 'rgba(100,116,139,0.025)';
-        context.fillRect(x1, top, x2 - x1, bottom - top);
+        context.fillStyle = i % 2 ? 'rgba(34,211,238,0.04)' : 'rgba(100,116,139,0.03)';
+        context.fillRect(xAnchorLeft, top, xAnchorRight - xAnchorLeft, bottom - top);
       }
 
       levels.forEach(level => {
@@ -5809,16 +5811,30 @@ class FibonacciPrimitive {
           ? [5 * horizontalPixelRatio, 4 * horizontalPixelRatio]
           : []);
         context.strokeStyle = level.color;
-        context.globalAlpha = level.kind === 'extension' ? 0.85 : 0.72;
-        context.lineWidth = (level.name === '50%' || level.name === '61.8%' ? 1.35 : 1) * verticalPixelRatio;
-        context.moveTo(x1, level.y);
-        context.lineTo(x2, level.y);
+        context.globalAlpha = level.kind === 'extension' ? 0.75 : 0.65;
+        context.lineWidth = (level.name === '50%' || level.name === '61.8%' ? 1.4 : 1) * verticalPixelRatio;
+        // Lines span from the left anchor all the way to the right edge of the chart
+        context.moveTo(xAnchorLeft, level.y);
+        context.lineTo(width, level.y);
         context.stroke();
+
+        // Label: anchored near right edge, always visible
+        context.setLineDash([]);
         context.globalAlpha = 1;
         context.fillStyle = level.color;
-        context.fillText(`${level.name}  ${level.price.toFixed(2)}`, x1 + 6 * horizontalPixelRatio, level.y - 3 * verticalPixelRatio);
+        context.textBaseline = 'bottom';
+        const label = `${level.name}  ${level.price.toFixed(2)}`;
+        const labelWidth = context.measureText(label).width;
+        const labelX = width - labelWidth - 8 * horizontalPixelRatio;
+        const labelY = level.y - 3 * verticalPixelRatio;
+        // Tiny background pill for readability
+        context.fillStyle = 'rgba(13,17,23,0.72)';
+        context.fillRect(labelX - 3 * horizontalPixelRatio, labelY - 11 * verticalPixelRatio, labelWidth + 6 * horizontalPixelRatio, 13 * verticalPixelRatio);
+        context.fillStyle = level.color;
+        context.fillText(label, labelX, labelY);
       });
 
+      // Anchor drag handles — dots at their exact price+time position
       [
         { name: 'low', color: '#22d3ee', x: lowXBitmap },
         { name: 'high', color: '#f59e0b', x: highXBitmap },
@@ -5834,12 +5850,13 @@ class FibonacciPrimitive {
         context.stroke();
       });
 
+      // Diagonal line connecting the two anchors (visual reference for the impulse)
       const lowY = this.anchorCoordinate('low');
       const highY = this.anchorCoordinate('high');
       if (Number.isFinite(lowY) && Number.isFinite(highY)) {
         context.beginPath();
-        context.setLineDash([]);
-        context.strokeStyle = 'rgba(148,163,184,0.65)';
+        context.setLineDash([3 * horizontalPixelRatio, 4 * horizontalPixelRatio]);
+        context.strokeStyle = 'rgba(148,163,184,0.45)';
         context.lineWidth = 1 * verticalPixelRatio;
         context.moveTo(lowXBitmap, lowY * verticalPixelRatio);
         context.lineTo(highXBitmap, highY * verticalPixelRatio);
@@ -5973,23 +5990,28 @@ function drawManualFibForCurrentView() {
 function drawManualFibFromInputs() {
   let low = Number(document.getElementById('fibLowInput')?.value);
   let high = Number(document.getElementById('fibHighInput')?.value);
-  let direction = high >= low ? 'up' : 'down';
-  let automatic = getAutomaticFibAnchors();
+  const automatic = getAutomaticFibAnchors();
   if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
-    low = automatic?.low;
-    high = automatic?.high;
-    direction = automatic?.direction || 'up';
+    if (!automatic) { alert('Pre tento graf sa nepodarilo nájsť použiteľný swing low/high.'); return; }
+    low = automatic.low; high = automatic.high;
   }
-  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
-    alert('Pre tento graf sa nepodarilo nájsť použiteľný swing low/high.');
-    return;
-  }
-  if (!automatic) automatic = getAutomaticFibAnchors();
+  const [lo, hi] = low < high ? [low, high] : [high, low];
+  const direction = low < high ? 'up' : 'down';
+  // Find candle nearest to each price to get a meaningful time anchor
+  const candles = (pc_currentView === 'daily' ? pc_lastData?.daily_candles : pc_lastData?.candles) || [];
+  const nearestTime = (targetPrice) => {
+    if (!candles.length) return null;
+    let best = candles[0], bestDist = Math.abs(Number(candles[0].close) - targetPrice);
+    for (const c of candles) {
+      const dist = Math.abs(Number(c.close) - targetPrice);
+      if (dist < bestDist) { best = c; bestDist = dist; }
+    }
+    return best.time;
+  };
   saveManualFibAnchors({
-    low,
-    high,
-    lowTime: automatic?.lowTime,
-    highTime: automatic?.highTime,
+    low: lo, high: hi,
+    lowTime: nearestTime(lo) ?? automatic?.lowTime,
+    highTime: nearestTime(hi) ?? automatic?.highTime,
     direction,
   });
   const chk = document.getElementById('chk_fib');
