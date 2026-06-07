@@ -73,6 +73,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Export snapshot** — uloží HTML snapshot aktuálneho stavu.
 - **Checklist** — rýchla kontrola viacerých tickerov na čerstvé signály.
 - **Prepočítať váhy** — preučí váhy indikátorov pre daný ticker.
+- **Fibonacci interactive** — po zadaní swing low/high vykreslí retracement aj
+  extension úrovne ako natívnu vrstvu grafu. Body low/high možno následne
+  presúvať priamo v grafe; hodnoty sa ukladajú osobitne pre ticker a timeframe.
 
 ### Graf
 
