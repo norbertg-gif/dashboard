@@ -290,14 +290,15 @@
         <div class="ind-check-row">
           <div class="ind-dot" style="background:#22d3ee;"></div>
           <input type="checkbox" id="chk_fib" onchange="pc_applyOverlays()">
-          <label for="chk_fib">Fibonacci manual</label>
+          <label for="chk_fib">Fibonacci interactive</label>
         </div>
         <div class="fib-manual-controls">
           <input id="fibLowInput" class="fib-input" type="number" step="0.01" placeholder="Swing low">
           <input id="fibHighInput" class="fib-input" type="number" step="0.01" placeholder="Swing high">
-          <button class="fib-btn" onclick="drawManualFibFromInputs()">Draw</button>
-          <button class="fib-btn" onclick="clearManualFib()">Clear</button>
+          <button class="fib-btn" onclick="drawManualFibFromInputs()">Vykresliť</button>
+          <button class="fib-btn" onclick="clearManualFib()">Vymazať</button>
         </div>
+        <div class="fib-hint">Úchyty low/high môžeš presúvať priamo v grafe.</div>
       </div>
     </div>
 
@@ -404,6 +405,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260607-progressive-charts"></script>
+  <script src="/dashboard.js?v=20260607-fibonacci-primitive"></script>
 </body>
 </html>
