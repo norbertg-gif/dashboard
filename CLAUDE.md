@@ -68,10 +68,12 @@ These were already in the codebase and need to stay fixed:
 ## Backlog (priority order)
 
 1. **Predictive chart accuracy → 60%+ directional.** Current: AAPL 55.4%, TSLA 51.4%. Planned: walk-forward validation, ROC (4-week), 52-week high/low position feature.
-2. **Scanner + DIP strategy integration.** New dashboard tab. (Latest work — context lives in this conversation.)
-3. **Hover tooltip for eToro markers.** Crosshair tooltip works; native hover on markers not resolved.
+2. **Scanner + DIP strategy integration.** Done — context lives in this conversation.
+3. **Hover tooltip for eToro markers.** Crosshair tooltip works; native hover on markers not resolved. → Blocked on LWC v4 API; **LWC v5 `hoveredItem` hit-testing solves this cleanly** (see item 6).
 4. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
-5. **User manual (requested).** Owner wants a usage manual in **both Markdown and HTML**. Slovak UI-facing text, English identifiers. Likely `docs/MANUAL.md` + an HTML version (consider a `/help` route served from the dashboard). Cover: tabs (Grafy/Portfólio/História/Risk/Prediktívny/Scanner), predictive signals (composite, weekly bias, daily buy signal 0–4, HMM regime, z-score), Scanner+DIP columns and watch-vs-buy (2/4 vs 3/4), signal philosophy (c1–c4, unified scoring), presets/watchlist/eToro, ops (Render deploy, `/data`, env vars), troubleshooting. Confirm scope (user-only vs + technical appendix) before writing.
+5. **User manual.** Done — `docs/MANUAL.md` + `frontend/help.html` at `/help`.
+6. **Upgrade Lightweight Charts 4.1.3 → v5.** Breaking changes are mechanical (find-replace friendly): `chart.addLineSeries()` → `chart.addSeries(LineSeries, opts)`, `series.setMarkers()` → `createSeriesMarkers()`. Gains: MagnetOHLC crosshair, data conflation (zoom-out perf), `hoveredItem` hit-testing (fixes item 3), `setSeriesOrder()`, −16% bundle. Multi-pane support simplifies subpanel. Est. effort: half-day. **Do not rush — test locally first.**
+7. **Volume Profile (SafariTrader plugin).** After LWC v5 migration — plugin targets v4.2, verify v5 compat first. Adds price-level volume distribution (institutional footprint). Repo: `https://github.com/safaritrader/lightweight-chart-plugin`.
 
 ## Data flow worth knowing
 
