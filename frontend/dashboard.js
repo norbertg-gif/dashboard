@@ -4735,7 +4735,7 @@ let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc_fibLines = [];
 const pc_fibPrimitives = new Set();
-const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib_v2';
+const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib_v3';
 let pc__kumoAreaSeries = [];
 // Subpanel
 let pc_subChartInst = null;
@@ -5671,10 +5671,12 @@ function getManualFibAnchors() {
   const row = store[currentFibKey()];
   if (!row) return null;
   const low = Number(row.low), high = Number(row.high);
-  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) return null;
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high || row.lowTime == null || row.highTime == null) return null;
   return {
     low: Math.min(low, high),
     high: Math.max(low, high),
+    lowTime: row.lowTime,
+    highTime: row.highTime,
     direction: row.direction === 'down' ? 'down' : 'up',
   };
 }
@@ -5688,10 +5690,19 @@ function setManualFibInputs(anchors = null) {
   highEl.value = a ? Number(a.high).toFixed(2) : '';
 }
 
+function fibTimeValue(time) {
+  if (typeof time === 'number') return time;
+  if (typeof time === 'string') return Date.parse(`${time.slice(0, 10)}T00:00:00Z`) / 1000;
+  if (time && typeof time === 'object') return Date.UTC(time.year, time.month - 1, time.day) / 1000;
+  return NaN;
+}
+
 class FibonacciPrimitive {
-  constructor(series, container, anchors, onChange) {
+  constructor(chart, series, container, candles, anchors, onChange) {
+    this.chart = chart;
     this.series = series;
     this.container = container;
+    this.candles = Array.isArray(candles) ? candles : [];
     this.anchors = { ...anchors };
     this.onChange = onChange;
     this.dragging = null;
@@ -5743,8 +5754,23 @@ class FibonacciPrimitive {
     return this.series.priceToCoordinate(Number(this.anchors[name]));
   }
 
-  anchorX(name, width) {
-    return width * (name === 'low' ? 0.12 : 0.78);
+  anchorX(name) {
+    return this.chart.timeScale().timeToCoordinate(this.anchors[`${name}Time`]);
+  }
+
+  nearestCandleTime(time) {
+    const target = fibTimeValue(time);
+    if (!Number.isFinite(target) || !this.candles.length) return null;
+    let nearest = this.candles[0].time;
+    let distance = Math.abs(fibTimeValue(nearest) - target);
+    for (let i = 1; i < this.candles.length; i++) {
+      const nextDistance = Math.abs(fibTimeValue(this.candles[i].time) - target);
+      if (nextDistance < distance) {
+        nearest = this.candles[i].time;
+        distance = nextDistance;
+      }
+    }
+    return nearest;
   }
 
   draw(target) {
@@ -5752,8 +5778,13 @@ class FibonacciPrimitive {
     target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
       const width = bitmapSize.width;
       const height = bitmapSize.height;
-      const x1 = Math.round(this.anchorX('low', width));
-      const x2 = Math.round(this.anchorX('high', width));
+      const lowX = this.anchorX('low');
+      const highX = this.anchorX('high');
+      if (!Number.isFinite(lowX) || !Number.isFinite(highX)) return;
+      const lowXBitmap = Math.round(lowX * horizontalPixelRatio);
+      const highXBitmap = Math.round(highX * horizontalPixelRatio);
+      const x1 = Math.min(lowXBitmap, highXBitmap);
+      const x2 = Math.max(lowXBitmap, highXBitmap);
       const levels = this.levels()
         .map(level => ({ ...level, y: this.series.priceToCoordinate(level.price) }))
         .filter(level => Number.isFinite(level.y))
@@ -5789,8 +5820,8 @@ class FibonacciPrimitive {
       });
 
       [
-        { name: 'low', color: '#22d3ee', x: x1 },
-        { name: 'high', color: '#f59e0b', x: x2 },
+        { name: 'low', color: '#22d3ee', x: lowXBitmap },
+        { name: 'high', color: '#f59e0b', x: highXBitmap },
       ].forEach(anchor => {
         const mediaY = this.anchorCoordinate(anchor.name);
         if (!Number.isFinite(mediaY)) return;
@@ -5802,6 +5833,18 @@ class FibonacciPrimitive {
         context.fill();
         context.stroke();
       });
+
+      const lowY = this.anchorCoordinate('low');
+      const highY = this.anchorCoordinate('high');
+      if (Number.isFinite(lowY) && Number.isFinite(highY)) {
+        context.beginPath();
+        context.setLineDash([]);
+        context.strokeStyle = 'rgba(148,163,184,0.65)';
+        context.lineWidth = 1 * verticalPixelRatio;
+        context.moveTo(lowXBitmap, lowY * verticalPixelRatio);
+        context.lineTo(highXBitmap, highY * verticalPixelRatio);
+        context.stroke();
+      }
       context.restore();
     });
   }
@@ -5814,12 +5857,12 @@ class FibonacciPrimitive {
   handlePointerDown(event) {
     const point = this.pointerPosition(event);
     const candidates = [
-      { name: 'low', distance: Math.hypot(point.x - this.anchorX('low', this.container.clientWidth), point.y - this.anchorCoordinate('low')) },
-      { name: 'high', distance: Math.hypot(point.x - this.anchorX('high', this.container.clientWidth), point.y - this.anchorCoordinate('high')) },
+      { name: 'low', distance: Math.hypot(point.x - this.anchorX('low'), point.y - this.anchorCoordinate('low')) },
+      { name: 'high', distance: Math.hypot(point.x - this.anchorX('high'), point.y - this.anchorCoordinate('high')) },
     ].sort((a, b) => a.distance - b.distance);
     if (!Number.isFinite(candidates[0].distance) || candidates[0].distance > 24) return;
     this.dragging = candidates[0].name;
-    this.container.style.cursor = 'ns-resize';
+    this.container.style.cursor = 'move';
     window.addEventListener('pointermove', this.onPointerMove, true);
     window.addEventListener('pointerup', this.onPointerUp, true);
     window.addEventListener('pointercancel', this.onPointerUp, true);
@@ -5829,11 +5872,16 @@ class FibonacciPrimitive {
 
   handlePointerMove(event) {
     if (!this.dragging) return;
-    const price = this.series.coordinateToPrice(this.pointerPosition(event).y);
+    const point = this.pointerPosition(event);
+    const price = this.series.coordinateToPrice(point.y);
+    const rawTime = this.chart.timeScale().coordinateToTime(point.x);
+    const candleTime = this.nearestCandleTime(rawTime);
     if (!Number.isFinite(price) || price <= 0) return;
     this.anchors[this.dragging] = price;
+    if (candleTime != null) this.anchors[`${this.dragging}Time`] = candleTime;
     if (this.anchors.low > this.anchors.high) {
       [this.anchors.low, this.anchors.high] = [this.anchors.high, this.anchors.low];
+      [this.anchors.lowTime, this.anchors.highTime] = [this.anchors.highTime, this.anchors.lowTime];
       this.dragging = this.dragging === 'low' ? 'high' : 'low';
     }
     this.requestUpdate?.();
@@ -5871,19 +5919,22 @@ class FibonacciPrimitive {
 
 function saveManualFibAnchors(anchors) {
   const store = loadManualFibStore();
+  const direction = fibTimeValue(anchors.lowTime) <= fibTimeValue(anchors.highTime) ? 'up' : 'down';
   store[currentFibKey()] = {
     low: Math.min(anchors.low, anchors.high),
     high: Math.max(anchors.low, anchors.high),
-    direction: anchors.direction || 'up',
+    lowTime: anchors.lowTime,
+    highTime: anchors.highTime,
+    direction,
     savedAt: Date.now(),
   };
   saveManualFibStore(store);
   setManualFibInputs(store[currentFibKey()]);
 }
 
-function drawFibPrimitive(series, container, anchors) {
-  if (!series || !container || typeof series.attachPrimitive !== 'function') return;
-  const primitive = new FibonacciPrimitive(series, container, anchors, saveManualFibAnchors);
+function drawFibPrimitive(chart, series, container, candles, anchors) {
+  if (!chart || !series || !container || typeof series.attachPrimitive !== 'function') return;
+  const primitive = new FibonacciPrimitive(chart, series, container, candles, anchors, saveManualFibAnchors);
   pc_fibPrimitives.add(primitive);
   series.attachPrimitive(primitive);
 }
@@ -5898,6 +5949,8 @@ function getAutomaticFibAnchors() {
   return {
     low: Number(impulse.low.price),
     high: Number(impulse.high.price),
+    lowTime: impulse.low.time,
+    highTime: impulse.high.time,
     direction: impulse.direction === 'down' ? 'down' : 'up',
   };
 }
@@ -5911,9 +5964,9 @@ function drawManualFibForCurrentView() {
   setManualFibInputs(anchors);
   if (!document.getElementById('chk_fib')?.checked || !anchors) return;
   if (pc_currentView === 'daily' && pc_dailyMainSeries) {
-    drawFibPrimitive(pc_dailyMainSeries, document.getElementById('dailyMainChart'), anchors);
+    drawFibPrimitive(pc_dailyMainInst, pc_dailyMainSeries, document.getElementById('dailyMainChart'), pc_lastData?.daily_candles, anchors);
   } else if (pc_realSeries) {
-    drawFibPrimitive(pc_realSeries, document.getElementById('realChart'), anchors);
+    drawFibPrimitive(pc_realChartInst, pc_realSeries, document.getElementById('realChart'), pc_lastData?.candles, anchors);
   }
 }
 
@@ -5921,8 +5974,8 @@ function drawManualFibFromInputs() {
   let low = Number(document.getElementById('fibLowInput')?.value);
   let high = Number(document.getElementById('fibHighInput')?.value);
   let direction = high >= low ? 'up' : 'down';
+  let automatic = getAutomaticFibAnchors();
   if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
-    const automatic = getAutomaticFibAnchors();
     low = automatic?.low;
     high = automatic?.high;
     direction = automatic?.direction || 'up';
@@ -5931,7 +5984,14 @@ function drawManualFibFromInputs() {
     alert('Pre tento graf sa nepodarilo nájsť použiteľný swing low/high.');
     return;
   }
-  saveManualFibAnchors({ low, high, direction });
+  if (!automatic) automatic = getAutomaticFibAnchors();
+  saveManualFibAnchors({
+    low,
+    high,
+    lowTime: automatic?.lowTime,
+    highTime: automatic?.highTime,
+    direction,
+  });
   const chk = document.getElementById('chk_fib');
   if (chk) chk.checked = true;
   pc_applyOverlays();
