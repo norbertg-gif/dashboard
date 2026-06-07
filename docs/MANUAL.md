@@ -81,6 +81,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   po 30, 60 a 90 obchodných sviečkach. Zobrazuje výnos, win rate, priemer,
   medián, MFE (maximálny rast) a MAE (maximálny pokles). Táto vrstva zatiaľ
   nemení skóre ani generovanie signálov.
+- **Signal Analytics** — výsledky možno prepínať medzi 30D/60D/90D a porovnať
+  podľa tieru (Buy/Watch/Counter) alebo sily signálu (2/4, 3/4, 4/4). Vzorka
+  menšia než päť vyhodnotených signálov je vizuálne označená ako predbežná.
 
 ### Graf
 
