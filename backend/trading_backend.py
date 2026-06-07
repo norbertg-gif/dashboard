@@ -3026,6 +3026,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         daily_indicators  = {}
         daily_buy_signals = []
         signal_outcome_summary = {}
+        signal_outcome_segments = {}
         weekly_bias       = {}
         today_score       = 0
 
@@ -3134,7 +3135,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                             "close": sig["close"],
                         })
                 daily_buy_signals.sort(key=lambda x: x["time"])
-                daily_buy_signals, signal_outcome_summary = build_signal_outcome_analytics(
+                daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
                     df_d, daily_buy_signals
                 )
 
@@ -3223,6 +3224,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "daily_indicators":   daily_indicators,
             "daily_buy_signals":  daily_buy_signals,
             "signal_outcome_summary": signal_outcome_summary,
+            "signal_outcome_segments": signal_outcome_segments,
             "weekly_bias":        weekly_bias,
             "today_score":        today_score,
             "earnings_dates": sorted(earnings_dates),
@@ -3457,14 +3459,14 @@ def signal_tier(score: int, trend: str = "side") -> str:
     return "watch"
 
 
-def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) -> tuple[list[dict], dict]:
+def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) -> tuple[list[dict], dict, dict]:
     """Pridá k signálom forward výsledky po 30/60/90 obchodných sviečkach.
 
     Výpočet je čisto analytický a nemení signal score ani tier. MFE/MAE sa merajú
     od close signálnej sviečky po high/low nasledujúcich sviečok.
     """
     if df_daily is None or df_daily.empty:
-        return signals, {}
+        return signals, {}, {}
 
     frame = df_daily.copy()
     today = pd.Timestamp.now("UTC").tz_localize(None).normalize()
@@ -3475,7 +3477,7 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
         ]
     ]
     if frame.empty:
-        return signals, {}
+        return signals, {}, {}
     normalized_dates = []
     for value in frame.index:
         ts = pd.Timestamp(value)
@@ -3542,16 +3544,15 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
         item["outcomes"] = outcomes
         enriched.append(item)
 
-    summary = {}
-    for horizon in SIGNAL_OUTCOME_HORIZONS:
+    def summarize(rows: list[dict], horizon: int) -> dict:
         key = str(horizon)
         completed = [
             signal["outcomes"][key]
-            for signal in enriched
+            for signal in rows
             if signal.get("outcomes", {}).get(key, {}).get("status") == "complete"
         ]
         pending = sum(
-            1 for signal in enriched
+            1 for signal in rows
             if signal.get("outcomes", {}).get(key, {}).get("status") == "pending"
         )
         returns = [row["return_pct"] for row in completed]
@@ -3560,11 +3561,11 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
         wins = sum(row.get("outcome") == "win" for row in completed)
         losses = sum(row.get("outcome") == "loss" for row in completed)
         flats = sum(row.get("outcome") == "flat" for row in completed)
-        summary[key] = {
+        return {
             "horizon": horizon,
             "completed": len(completed),
             "pending": pending,
-            "unavailable": len(enriched) - len(completed) - pending,
+            "unavailable": len(rows) - len(completed) - pending,
             "wins": wins,
             "losses": losses,
             "flats": flats,
@@ -3574,7 +3575,34 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
             "avg_mfe_pct": round(float(np.mean(mfes)), 2) if mfes else None,
             "avg_mae_pct": round(float(np.mean(maes)), 2) if maes else None,
         }
-    return enriched, summary
+
+    summary = {}
+    for horizon in SIGNAL_OUTCOME_HORIZONS:
+        summary[str(horizon)] = summarize(enriched, horizon)
+
+    segment_groups = {
+        "tier": [
+            ("buy", "Buy", [signal for signal in enriched if signal.get("tier") == "buy"]),
+            ("watch", "Watch", [signal for signal in enriched if signal.get("tier") == "watch"]),
+            ("counter", "Counter", [signal for signal in enriched if signal.get("tier") == "counter"]),
+        ],
+        "score": [
+            (str(score), f"{score}/4", [signal for signal in enriched if int(signal.get("score", 0)) == score])
+            for score in (2, 3, 4)
+        ],
+    }
+    segments = {}
+    for group_name, groups in segment_groups.items():
+        segments[group_name] = {}
+        for horizon in SIGNAL_OUTCOME_HORIZONS:
+            rows = []
+            for key, label, group_signals in groups:
+                row = summarize(group_signals, horizon)
+                row.update({"key": key, "label": label, "total": len(group_signals)})
+                rows.append(row)
+            segments[group_name][str(horizon)] = rows
+
+    return enriched, summary, segments
 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
