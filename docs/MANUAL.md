@@ -77,6 +77,10 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   významný swing a vykreslí retracement aj extension úrovne. Farebné body
   low/high možno presúvať horizontálne aj vertikálne; horizontálna poloha sa
   prichytí k najbližšej sviečke. Ukladajú sa osobitne pre ticker a timeframe.
+- **30D / 60D / 90D validácia** — historické signály sa analyticky vyhodnocujú
+  po 30, 60 a 90 obchodných sviečkach. Zobrazuje výnos, win rate, priemer,
+  medián, MFE (maximálny rast) a MAE (maximálny pokles). Táto vrstva zatiaľ
+  nemení skóre ani generovanie signálov.
 
 ### Graf
 
@@ -118,6 +122,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 - **DAILY** — mini graf so signálmi.
 - **SIGNAL HISTORY** — časová os signálov s win rate.
+- **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
+  horizonty zostávajú `pending`.
 - **TIMEFRAME ALIGNMENT** — zhoda timeframeov: Weekly bias, Weekly trend, Daily
   trend, Daily signal → súhrn **PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ**.
 
