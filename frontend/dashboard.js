@@ -4734,7 +4734,7 @@ let pc_scannerLoading = false;
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc_fibLines = [];
-let pc_fibPrimitive = null;
+const pc_fibPrimitives = new Set();
 const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib_v2';
 let pc__kumoAreaSeries = [];
 // Subpanel
@@ -5631,10 +5631,8 @@ function clearOverlays() {
 }
 
 function clearFibLines() {
-  if (pc_fibPrimitive) {
-    pc_fibPrimitive.destroy();
-    pc_fibPrimitive = null;
-  }
+  pc_fibPrimitives.forEach(primitive => primitive.destroy());
+  pc_fibPrimitives.clear();
   for (const item of pc_fibLines) {
     try { item.series.removePriceLine(item.line); } catch(e) {}
   }
@@ -5881,8 +5879,9 @@ function saveManualFibAnchors(anchors) {
 
 function drawFibPrimitive(series, container, anchors) {
   if (!series || !container || typeof series.attachPrimitive !== 'function') return;
-  pc_fibPrimitive = new FibonacciPrimitive(series, container, anchors, saveManualFibAnchors);
-  series.attachPrimitive(pc_fibPrimitive);
+  const primitive = new FibonacciPrimitive(series, container, anchors, saveManualFibAnchors);
+  pc_fibPrimitives.add(primitive);
+  series.attachPrimitive(primitive);
 }
 
 function getAutomaticFibAnchors() {
