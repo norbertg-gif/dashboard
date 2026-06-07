@@ -4729,6 +4729,7 @@ let pc_oppLoading = false;
 let pc_oppLoadedAt = 0;
 let pc_scannerPollTimer = null;
 let pc_scannerLoading = false;
+let pc_signalSegmentHorizon = 60;
 
 // Overlay series refs
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
@@ -5102,6 +5103,7 @@ function pc_renderDailyExtra(data) {
 
   const signals = data.daily_buy_signals || [];
   const outcomeSummary = data.signal_outcome_summary || {};
+  const outcomeSegments = data.signal_outcome_segments || {};
   const daily   = data.daily_candles    || [];
   const fmtSigned = value => {
     const number = Number(value);
@@ -5223,6 +5225,37 @@ function pc_renderDailyExtra(data) {
       </div>
     </div>`;
   }).join('');
+  const segmentMetric = value => value != null && Number.isFinite(Number(value))
+    ? fmtSigned(value)
+    : '--';
+  const segmentRows = (group, horizon) => {
+    const rows = outcomeSegments[group]?.[String(horizon)] || [];
+    return rows.map(row => {
+      const sample = Number(row.completed) || 0;
+      const rate = row.win_rate != null ? `${Number(row.win_rate).toFixed(0)}%` : '--';
+      const lowSample = sample > 0 && sample < 5;
+      return `<div class="signal-segment-row${lowSample ? ' low-sample' : ''}">
+        <span class="signal-segment-name">${row.label}</span>
+        <span title="${Number(row.total) || 0} signálov celkom">${sample}</span>
+        <span>${rate}</span>
+        <span>${segmentMetric(row.median_return_pct)}</span>
+        <span class="positive">${segmentMetric(row.avg_mfe_pct)}</span>
+        <span class="negative">${segmentMetric(row.avg_mae_pct)}</span>
+      </div>`;
+    }).join('') || '<div class="signal-segment-empty">Zatiaľ bez dát</div>';
+  };
+  const segmentHorizonButtons = [30, 60, 90].map(horizon =>
+    `<button class="signal-segment-horizon${pc_signalSegmentHorizon === horizon ? ' active' : ''}"
+      onclick="setSignalSegmentHorizon(${horizon})">${horizon}D</button>`
+  ).join('');
+  const segmentTable = group => `
+    <div class="signal-segment-table">
+      <div class="signal-segment-title">${group === 'tier' ? 'Podľa tieru' : 'Podľa skóre'}</div>
+      <div class="signal-segment-row header">
+        <span>Segment</span><span>N</span><span>Win</span><span>Medián</span><span>MFE</span><span>MAE</span>
+      </div>
+      ${segmentRows(group, pc_signalSegmentHorizon)}
+    </div>`;
   const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
     const col = s.outcome === 'win'  ? '#26a69a'
              : s.outcome === 'loss' ? '#ef5350'
@@ -5293,6 +5326,18 @@ function pc_renderDailyExtra(data) {
         <div class="signal-outcome-note">Obchodné sviečky · MFE = maximálny rast · MAE = maximálny pokles</div>
       </div>
 
+      <details class="signal-segments" open>
+        <summary>
+          <span>SIGNAL ANALYTICS</span>
+          <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>
+        </summary>
+        <div class="signal-segment-tables">
+          ${segmentTable('tier')}
+          ${segmentTable('score')}
+        </div>
+        <div class="signal-outcome-note">N = počet vyhodnotených signálov. Vzorka pod 5 je označená ako predbežná.</div>
+      </details>
+
       <!-- ── MULTI-TIMEFRAME ALIGNMENT ──────────────────────────── -->
       <div>
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
@@ -5350,6 +5395,13 @@ function pc_renderDailyExtra(data) {
       </div>
     </div>
   `;
+}
+
+function setSignalSegmentHorizon(horizon) {
+  const value = Number(horizon);
+  if (![30, 60, 90].includes(value)) return;
+  pc_signalSegmentHorizon = value;
+  if (pc_lastData) pc_renderDailyExtra(pc_lastData);
 }
 
 function pc_renderSidebar(data) {
@@ -7288,6 +7340,7 @@ function loadTickerFromChecklist(ticker) {
 window.pc_applyOverlays = pc_applyOverlays;
 window.drawManualFibFromInputs = drawManualFibFromInputs;
 window.clearManualFib = clearManualFib;
+window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;
 window.pc_renderSidebar = pc_renderSidebar;
