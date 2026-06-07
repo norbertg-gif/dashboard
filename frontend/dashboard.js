@@ -2,6 +2,8 @@ const API = (window.location.hostname === 'localhost' || window.location.hostnam
   ? 'http://localhost:8766' : '';
 const PERIODS = ['auto'];
 const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
+const CHART_INITIAL_BARS = 300;
+const CHART_HISTORY_PAGE = 300;
 const DEFAULTS = [
   {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
   {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
@@ -3273,6 +3275,7 @@ function createPanel(cfg) {
     viewSaveTimer: null,
     lastWizardData: null, avgPriceLine: null, entryPriceLines: [], etoroPct: null,
     abortController: null, loadSeq: 0,
+    _rawChartData: [], hasMoreHistory: false, historyLoading: false,
   };
 
   mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
@@ -3283,6 +3286,9 @@ function createPanel(cfg) {
     reg.viewRange = { from, to };
     clearTimeout(reg.viewSaveTimer);
     reg.viewSaveTimer = setTimeout(saveLayout, 350);
+    if (from < 20 && reg.hasMoreHistory && !reg.historyLoading) {
+      loadOlderChartData(id);
+    }
   });
 
   // Aplikuj tag
@@ -3494,9 +3500,9 @@ function toggleWizard(id) {
     btn.style.color = 'var(--blue)';
     btn.style.background = 'var(--blue-dim)';
     wiz.classList.remove('hidden');
-    // Ak nemáme dáta, načítaj
-    if (r.lastWizardData) renderWizard(id, r.lastWizardData);
-    else loadChart(id);
+    // Wizard potrebuje širšiu sadu indikátorov, ktorú pri zatvorenom paneli
+    // zámerne nepočítame.
+    loadChart(id);
   } else {
     btn.style.borderColor = '';
     btn.style.color = '';
@@ -4066,6 +4072,85 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
 }
 
 // ── LOAD CHART ────────────────────────────────────────────────────────────────
+function mergeChartRows(older, current) {
+  const rows = new Map();
+  [...(older || []), ...(current || [])].forEach(row => {
+    if (row?.time != null) rows.set(String(row.time), row);
+  });
+  return [...rows.values()].sort((a, b) => {
+    const av = typeof a.time === 'number' ? a.time : Date.parse(a.time);
+    const bv = typeof b.time === 'number' ? b.time : Date.parse(b.time);
+    return av - bv;
+  });
+}
+
+function applyPanelSeriesData(r, data) {
+  const candleData = data.map(d => ({ time:d.time, open:d.open, high:d.high, low:d.low, close:d.close }));
+  const volumeData = data.map(d => ({
+    time:d.time,
+    value:d.volume,
+    color:d.close >= d.open ? '#00c99a22' : '#ff456022',
+  }));
+  r._chartData = candleData;
+  r.candleSeries.setData(candleData);
+  r.volSeries.setData(volumeData);
+}
+
+async function loadOlderChartData(id) {
+  const panel = document.getElementById(id);
+  const r = registry[id];
+  if (!panel || !r || r.historyLoading || !r.hasMoreHistory || !r._rawChartData?.length) return;
+
+  const sym = panel.querySelector('.p-sym')?.value.trim().toUpperCase();
+  const interval = panel.querySelector('.interval-sel')?.value;
+  const firstTime = r._rawChartData[0]?.time;
+  if (!sym || !interval || firstTime == null) return;
+
+  r.historyLoading = true;
+  try {
+    const indParam = getActiveIndicators(id);
+    const wizardInds = r.indicators.wizard ? 'ema,ichimoku,rsi,adx,macd,bb,obv,stochrsi' : '';
+    const allInds = [...new Set([...indParam.split(',').filter(Boolean), ...wizardInds.split(',').filter(Boolean)])].join(',');
+    const params = new URLSearchParams({
+      symbol: sym,
+      period: 'auto',
+      interval,
+      indicators: allInds,
+      ha: r.indicators.ha ? '1' : '0',
+      account: activeAccount || '1',
+      refresh: '0',
+      limit: String(CHART_HISTORY_PAGE),
+      before: String(firstTime),
+    });
+    const resp = await fetch(`${API}/api/ohlcv?${params}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    const older = Array.isArray(payload.data) ? payload.data : [];
+    if (!older.length) {
+      r.hasMoreHistory = false;
+      return;
+    }
+
+    const visible = r.mainChart.timeScale().getVisibleRange();
+    r._rawChartData = mergeChartRows(older, r._rawChartData);
+    applyPanelSeriesData(r, r._rawChartData);
+    applyOverlays(id, r._rawChartData, r);
+    r.lastWizardData = r._rawChartData;
+    r.hasMoreHistory = !!payload.hasMore;
+    if (!r.indicators.ha) {
+      applyEtoroMarkers(id, sym, r, r._rawChartData)
+        .catch(e => console.warn('eToro markers after history load failed:', e));
+    }
+    if (visible) {
+      try { r.mainChart.timeScale().setVisibleRange(visible); } catch(e) {}
+    }
+  } catch(e) {
+    console.warn(`Staršia história ${sym} zlyhala:`, e);
+  } finally {
+    r.historyLoading = false;
+  }
+}
+
 async function loadChart(id, opts = {}) {
   const panel = document.getElementById(id); if (!panel) return;
   const sym      = panel.querySelector('.p-sym').value.trim().toUpperCase();
@@ -4078,6 +4163,9 @@ async function loadChart(id, opts = {}) {
   const chartKey = `${sym}|${period}|${interval}`;
   if (r.loadedChartKey && r.loadedChartKey !== chartKey) {
     r.viewRange = null;
+    r._rawChartData = [];
+    r._chartData = [];
+    r.hasMoreHistory = false;
   }
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
@@ -4096,9 +4184,12 @@ async function loadChart(id, opts = {}) {
     if (r.indicators.news === undefined) r.indicators.news = false;
     if (r.indicators.ha   === undefined) r.indicators.ha   = false;
     const indParam = getActiveIndicators(id);
-    // Wizard potrebuje všetky indikátory vždy
+    // Náročnejšie indikátory pre Wizard žiadaj iba keď je Wizard otvorený.
     const wizardInds = 'ema,ichimoku,rsi,adx,macd,bb,obv,stochrsi';
-    const allInds = [...new Set([...indParam.split(',').filter(Boolean), ...wizardInds.split(',')])].join(',');
+    const allInds = [...new Set([
+      ...indParam.split(',').filter(Boolean),
+      ...(r.indicators.wizard ? wizardInds.split(',') : []),
+    ])].join(',');
     const haParam = r.indicators.ha ? 1 : 0;
     const acct  = activeAccount || '1';
 
@@ -4111,12 +4202,15 @@ async function loadChart(id, opts = {}) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
+      r.hasMoreHistory = !!cached.hasMore;
     } else {
       const refreshParam = opts.refresh === 1 ? 1 : 0;
-      const url = `${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=${period}&interval=${interval}&indicators=${allInds}&ha=${haParam}&account=${acct}&refresh=${refreshParam}`;
+      const url = `${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=${period}&interval=${interval}&indicators=${allInds}&ha=${haParam}&account=${acct}&refresh=${refreshParam}&limit=${CHART_INITIAL_BARS}`;
       const resp = await fetch(url, { signal: r.abortController.signal });
       if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail); }
-      ({ name, data, instrumentId } = await resp.json());
+      const payload = await resp.json();
+      ({ name, data, instrumentId } = payload);
+      r.hasMoreHistory = !!payload.hasMore;
     }
     if (instrumentId) {
       cacheInstrumentId(sym, instrumentId);
@@ -4127,13 +4221,40 @@ async function loadChart(id, opts = {}) {
     if (loadSeq !== r.loadSeq) return;
     if (!data?.length) throw new Error('Žiadne dáta');
 
-    const candleData = data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close}));
-    const volumeData = data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?'#00c99a22':'#ff456022'}));
-    r._chartData = candleData;  // uložiť pre live WS update
-    r.candleSeries.setData(candleData);
-    r.volSeries.setData(volumeData);
-    if (candleData.length) r.candleSeries.update(candleData[candleData.length - 1]);
-    if (volumeData.length) r.volSeries.update(volumeData[volumeData.length - 1]);
+    // Tichý tail refresh nesmie znovu posielať celú sériu do chart enginu.
+    // Aktualizuj iba poslednú sviečku; plný setData patrí prvému loadu,
+    // zmene tickeru/timeframe a lazy doplneniu histórie.
+    if (opts.liveTailOnly && r.loadedChartKey === chartKey && r._rawChartData?.length) {
+      const latest = data[data.length - 1];
+      const previous = r._rawChartData[r._rawChartData.length - 1];
+      if (latest?.time != null) {
+        if (String(previous?.time) === String(latest.time)) {
+          r._rawChartData[r._rawChartData.length - 1] = { ...previous, ...latest };
+        } else {
+          r._rawChartData.push(latest);
+        }
+        const candle = { time:latest.time, open:latest.open, high:latest.high, low:latest.low, close:latest.close };
+        const volume = {
+          time:latest.time,
+          value:latest.volume,
+          color:latest.close >= latest.open ? '#00c99a22' : '#ff456022',
+        };
+        r.candleSeries.update(candle);
+        r.volSeries.update(volume);
+        r._chartData = r._rawChartData.map(d => ({
+          time:d.time, open:d.open, high:d.high, low:d.low, close:d.close,
+        }));
+        r.lastWizardData = r._rawChartData;
+        if (!r.indicators.ha && !opts.skipEtoro) {
+          applyEtoroMarkers(id, sym, r, r._rawChartData)
+            .catch(e => console.warn('eToro markers failed:', e));
+        }
+      }
+      return;
+    }
+
+    r._rawChartData = data;
+    applyPanelSeriesData(r, data);
     const restoredView = r.viewRange && Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
       ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
       : null;
@@ -4324,9 +4445,15 @@ async function loadAll() {
     const interval = panel.querySelector('.interval-sel').value;
     const r        = registry[panel.id];
     const indParam = r ? getActiveIndicators(panel.id) : '';
-    const allInds  = [...new Set([...indParam.split(',').filter(Boolean), ...wizardInds.split(',')])].join(',');
+    const allInds  = [...new Set([
+      ...indParam.split(',').filter(Boolean),
+      ...(r?.indicators?.wizard ? wizardInds.split(',') : []),
+    ])].join(',');
     const ha       = r?.indicators?.ha ? 1 : 0;
-    return { symbol: sym, period, interval, indicators: allInds, ha, account: acct, refresh: 0, _id: panel.id };
+    return {
+      symbol: sym, period, interval, indicators: allInds, ha,
+      account: acct, refresh: 0, limit: CHART_INITIAL_BARS, _id: panel.id,
+    };
   });
 
   try {
@@ -4370,7 +4497,7 @@ async function loadAll() {
     async function liveWorker() {
       while (liveNext < ids.length) {
         const id = ids[liveNext++];
-        await loadChart(id, { refresh: 1, silent: true });
+        await loadChart(id, { refresh: 1, silent: true, liveTailOnly: true });
         setStatus(`Live refresh ${++liveDone}/${ids.length}…`, '');
       }
     }
