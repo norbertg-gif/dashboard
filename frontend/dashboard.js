@@ -4735,7 +4735,7 @@ let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc_fibLines = [];
 let pc_fibPrimitive = null;
-const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib';
+const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib_v2';
 let pc__kumoAreaSeries = [];
 // Subpanel
 let pc_subChartInst = null;
@@ -5815,12 +5815,12 @@ class FibonacciPrimitive {
       { name: 'low', distance: Math.hypot(point.x - this.container.clientWidth * 0.08, point.y - this.anchorCoordinate('low')) },
       { name: 'high', distance: Math.hypot(point.x - this.container.clientWidth * 0.92, point.y - this.anchorCoordinate('high')) },
     ].sort((a, b) => a.distance - b.distance);
-    if (!Number.isFinite(candidates[0].distance) || candidates[0].distance > 18) return;
+    if (!Number.isFinite(candidates[0].distance) || candidates[0].distance > 24) return;
     this.dragging = candidates[0].name;
-    this.container.setPointerCapture?.(event.pointerId);
-    this.container.addEventListener('pointermove', this.onPointerMove, true);
-    this.container.addEventListener('pointerup', this.onPointerUp, true);
-    this.container.addEventListener('pointercancel', this.onPointerUp, true);
+    this.container.style.cursor = 'ns-resize';
+    window.addEventListener('pointermove', this.onPointerMove, true);
+    window.addEventListener('pointerup', this.onPointerUp, true);
+    window.addEventListener('pointercancel', this.onPointerUp, true);
     event.preventDefault();
     event.stopPropagation();
   }
@@ -5842,6 +5842,7 @@ class FibonacciPrimitive {
   handlePointerUp(event) {
     if (!this.dragging) return;
     this.dragging = null;
+    this.container.style.cursor = '';
     this.removeMoveListeners();
     this.onChange?.({ ...this.anchors });
     event.preventDefault();
@@ -5849,13 +5850,14 @@ class FibonacciPrimitive {
   }
 
   removeMoveListeners() {
-    this.container.removeEventListener('pointermove', this.onPointerMove, true);
-    this.container.removeEventListener('pointerup', this.onPointerUp, true);
-    this.container.removeEventListener('pointercancel', this.onPointerUp, true);
+    window.removeEventListener('pointermove', this.onPointerMove, true);
+    window.removeEventListener('pointerup', this.onPointerUp, true);
+    window.removeEventListener('pointercancel', this.onPointerUp, true);
   }
 
   removeListeners() {
     this.removeMoveListeners();
+    this.container.style.cursor = '';
     this.container.removeEventListener('pointerdown', this.onPointerDown, true);
   }
 
@@ -5883,8 +5885,26 @@ function drawFibPrimitive(series, container, anchors) {
   series.attachPrimitive(pc_fibPrimitive);
 }
 
+function getAutomaticFibAnchors() {
+  if (!pc_lastData) return null;
+  const candles = pc_currentView === 'daily'
+    ? pc_lastData.daily_candles
+    : pc_lastData.candles;
+  const impulse = findFibImpulse(candles);
+  if (!impulse?.low || !impulse?.high) return null;
+  return {
+    low: Number(impulse.low.price),
+    high: Number(impulse.high.price),
+    direction: impulse.direction === 'down' ? 'down' : 'up',
+  };
+}
+
 function drawManualFibForCurrentView() {
-  const anchors = getManualFibAnchors();
+  let anchors = getManualFibAnchors();
+  if (!anchors && document.getElementById('chk_fib')?.checked) {
+    anchors = getAutomaticFibAnchors();
+    if (anchors) saveManualFibAnchors(anchors);
+  }
   setManualFibInputs(anchors);
   if (!document.getElementById('chk_fib')?.checked || !anchors) return;
   if (pc_currentView === 'daily' && pc_dailyMainSeries) {
@@ -5895,13 +5915,20 @@ function drawManualFibForCurrentView() {
 }
 
 function drawManualFibFromInputs() {
-  const low = Number(document.getElementById('fibLowInput')?.value);
-  const high = Number(document.getElementById('fibHighInput')?.value);
+  let low = Number(document.getElementById('fibLowInput')?.value);
+  let high = Number(document.getElementById('fibHighInput')?.value);
+  let direction = high >= low ? 'up' : 'down';
   if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
-    alert('Zadaj platny Swing low a Swing high.');
+    const automatic = getAutomaticFibAnchors();
+    low = automatic?.low;
+    high = automatic?.high;
+    direction = automatic?.direction || 'up';
+  }
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
+    alert('Pre tento graf sa nepodarilo nájsť použiteľný swing low/high.');
     return;
   }
-  saveManualFibAnchors({ low, high, direction: high >= low ? 'up' : 'down' });
+  saveManualFibAnchors({ low, high, direction });
   const chk = document.getElementById('chk_fib');
   if (chk) chk.checked = true;
   pc_applyOverlays();
@@ -5911,6 +5938,8 @@ function clearManualFib() {
   const store = loadManualFibStore();
   delete store[currentFibKey()];
   saveManualFibStore(store);
+  const chk = document.getElementById('chk_fib');
+  if (chk) chk.checked = false;
   setManualFibInputs(null);
   pc_applyOverlays();
 }
