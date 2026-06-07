@@ -293,12 +293,12 @@
           <label for="chk_fib">Fibonacci interactive</label>
         </div>
         <div class="fib-manual-controls">
-          <input id="fibLowInput" class="fib-input" type="number" step="0.01" placeholder="Swing low">
-          <input id="fibHighInput" class="fib-input" type="number" step="0.01" placeholder="Swing high">
+          <input id="fibLowInput" class="fib-input" type="number" step="0.01" placeholder="Auto swing low">
+          <input id="fibHighInput" class="fib-input" type="number" step="0.01" placeholder="Auto swing high">
           <button class="fib-btn" onclick="drawManualFibFromInputs()">Vykresliť</button>
           <button class="fib-btn" onclick="clearManualFib()">Vymazať</button>
         </div>
-        <div class="fib-hint">Úchyty low/high môžeš presúvať priamo v grafe.</div>
+        <div class="fib-hint">Pri prvom zapnutí sa swing vyberie automaticky. Farebné úchyty môžeš ťahať zvislo.</div>
       </div>
     </div>
 
@@ -405,6 +405,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260607-fibonacci-primitive"></script>
+  <script src="/dashboard.js?v=20260607-fibonacci-drag-fix"></script>
 </body>
 </html>
