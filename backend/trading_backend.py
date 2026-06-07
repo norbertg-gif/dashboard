@@ -2372,6 +2372,8 @@ def get_ohlcv(
     ha:         int  = Query(0),
     account:    str  = Query("1"),
     refresh:    int  = Query(1),
+    limit:      int  = Query(0, ge=0, le=1000),
+    before:     str  = Query(""),
 ):
     """Načíta OHLCV z eToro API. Indikátory počítame lokálne."""
     sym = symbol.upper().strip()
@@ -2598,8 +2600,23 @@ def get_ohlcv(
         try: patterns = detect_patterns(df)
         except Exception as e: print(f"  Pattern err: {e}")
 
+    # Frontend môže požiadať iba o posledný blok a staršiu históriu dopĺňať
+    # pri posune doľava. Výpočty indikátorov stále bežia nad celým cached DF,
+    # takže prvý bod každého bloku má korektné warm-up hodnoty.
+    if before:
+        try:
+            boundary = int(before) if is_intraday else before[:10]
+            result = [point for point in result if point["time"] < boundary]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Neplatný parameter before")
+    available_count = len(result)
+    if limit and available_count > limit:
+        result = result[-limit:]
+    has_more = available_count > len(result)
+
     return {"symbol": sym, "name": sym, "interval": interval,
             "count": len(result), "data": result, "instrumentId": iid,
+            "hasMore": has_more,
             "patterns": patterns}
 
 
@@ -2623,11 +2640,14 @@ async def get_ohlcv_batch(request: Request):
         ha       = int(req.get("ha", 0))
         account  = str(req.get("account", "1"))
         refresh  = int(req.get("refresh", 1))
+        limit    = int(req.get("limit", 0))
+        before   = str(req.get("before", ""))
         key      = f"{sym}|{period}|{interval}|{ha}"
         try:
             result = get_ohlcv(
                 symbol=sym, period=period, interval=interval,
-                indicators=inds, ha=ha, account=account, refresh=refresh
+                indicators=inds, ha=ha, account=account, refresh=refresh,
+                limit=limit, before=before,
             )
             return key, result
         except HTTPException as e:
