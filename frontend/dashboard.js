@@ -5743,13 +5743,17 @@ class FibonacciPrimitive {
     return this.series.priceToCoordinate(Number(this.anchors[name]));
   }
 
+  anchorX(name, width) {
+    return width * (name === 'low' ? 0.12 : 0.78);
+  }
+
   draw(target) {
     if (!target.useBitmapCoordinateSpace) return;
     target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
       const width = bitmapSize.width;
       const height = bitmapSize.height;
-      const x1 = Math.round(width * 0.08);
-      const x2 = Math.round(width * 0.92);
+      const x1 = Math.round(this.anchorX('low', width));
+      const x2 = Math.round(this.anchorX('high', width));
       const levels = this.levels()
         .map(level => ({ ...level, y: this.series.priceToCoordinate(level.price) }))
         .filter(level => Number.isFinite(level.y))
@@ -5810,8 +5814,8 @@ class FibonacciPrimitive {
   handlePointerDown(event) {
     const point = this.pointerPosition(event);
     const candidates = [
-      { name: 'low', distance: Math.hypot(point.x - this.container.clientWidth * 0.08, point.y - this.anchorCoordinate('low')) },
-      { name: 'high', distance: Math.hypot(point.x - this.container.clientWidth * 0.92, point.y - this.anchorCoordinate('high')) },
+      { name: 'low', distance: Math.hypot(point.x - this.anchorX('low', this.container.clientWidth), point.y - this.anchorCoordinate('low')) },
+      { name: 'high', distance: Math.hypot(point.x - this.anchorX('high', this.container.clientWidth), point.y - this.anchorCoordinate('high')) },
     ].sort((a, b) => a.distance - b.distance);
     if (!Number.isFinite(candidates[0].distance) || candidates[0].distance > 24) return;
     this.dragging = candidates[0].name;
