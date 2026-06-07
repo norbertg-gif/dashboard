@@ -1858,6 +1858,12 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border-color: var(--accent);
   color: var(--accent);
 }
+#predictiveTab .fib-hint {
+  color: var(--muted2);
+  font-size: 9px;
+  line-height: 1.35;
+  margin-top: 6px;
+}
 
 #predictiveTab .scanner-status,
 #predictiveTab .scanner-hint,
