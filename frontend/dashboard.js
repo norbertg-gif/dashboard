@@ -4734,6 +4734,7 @@ let pc_scannerLoading = false;
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc_fibLines = [];
+let pc_fibPrimitive = null;
 const PC_FIB_MANUAL_KEY = 'td_predictive_manual_fib';
 let pc__kumoAreaSeries = [];
 // Subpanel
@@ -5630,6 +5631,10 @@ function clearOverlays() {
 }
 
 function clearFibLines() {
+  if (pc_fibPrimitive) {
+    pc_fibPrimitive.destroy();
+    pc_fibPrimitive = null;
+  }
   for (const item of pc_fibLines) {
     try { item.series.removePriceLine(item.line); } catch(e) {}
   }
@@ -5669,7 +5674,11 @@ function getManualFibAnchors() {
   if (!row) return null;
   const low = Number(row.low), high = Number(row.high);
   if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) return null;
-  return { low: Math.min(low, high), high: Math.max(low, high), direction: high >= low ? 'up' : 'down' };
+  return {
+    low: Math.min(low, high),
+    high: Math.max(low, high),
+    direction: row.direction === 'down' ? 'down' : 'up',
+  };
 }
 
 function setManualFibInputs(anchors = null) {
@@ -5681,32 +5690,197 @@ function setManualFibInputs(anchors = null) {
   highEl.value = a ? Number(a.high).toFixed(2) : '';
 }
 
-function drawFibLevels(series, low, high, prefix = 'Fib', direction = 'up') {
-  if (!series || !Number.isFinite(low) || !Number.isFinite(high) || high <= low) return;
-  const range = high - low;
-  const upMove = direction !== 'down';
-  const retrace = [
-    ['0', upMove ? high : low],
-    ['23.6', upMove ? high - range * 0.236 : low + range * 0.236],
-    ['38.2', upMove ? high - range * 0.382 : low + range * 0.382],
-    ['50', upMove ? high - range * 0.5 : low + range * 0.5],
-    ['61.8', upMove ? high - range * 0.618 : low + range * 0.618],
-    ['78.6', upMove ? high - range * 0.786 : low + range * 0.786],
-    ['100', upMove ? low : high],
-  ];
-  const extensions = [
-    ['127.2', upMove ? high + range * 0.272 : low - range * 0.272],
-    ['161.8', upMove ? high + range * 0.618 : low - range * 0.618],
-    ['200', upMove ? high + range : low - range],
-    ['261.8', upMove ? high + range * 1.618 : low - range * 1.618],
-  ];
-  retrace.forEach(([name, price]) => {
-    const color = name === '50' || name === '61.8' ? '#22d3ee' : '#64748b';
-    addFibPriceLine(series, price, `${prefix} R ${name}%`, color);
-  });
-  extensions.forEach(([name, price]) => {
-    addFibPriceLine(series, price, `${prefix} X ${name}%`, '#f59e0b');
-  });
+class FibonacciPrimitive {
+  constructor(series, container, anchors, onChange) {
+    this.series = series;
+    this.container = container;
+    this.anchors = { ...anchors };
+    this.onChange = onChange;
+    this.dragging = null;
+    this.requestUpdate = null;
+    this.view = {
+      renderer: () => ({ draw: target => this.draw(target) }),
+      zOrder: () => 'top',
+    };
+    this.onPointerDown = this.handlePointerDown.bind(this);
+    this.onPointerMove = this.handlePointerMove.bind(this);
+    this.onPointerUp = this.handlePointerUp.bind(this);
+    container.addEventListener('pointerdown', this.onPointerDown, true);
+  }
+
+  attached({ requestUpdate }) { this.requestUpdate = requestUpdate; }
+  detached() { this.removeListeners(); }
+  paneViews() { return [this.view]; }
+
+  autoscaleInfo() {
+    const prices = this.levels().map(level => level.price).filter(Number.isFinite);
+    return prices.length
+      ? { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } }
+      : null;
+  }
+
+  levels() {
+    const low = Number(this.anchors.low);
+    const high = Number(this.anchors.high);
+    if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return [];
+    const range = high - low;
+    const up = this.anchors.direction !== 'down';
+    const price = ratio => up ? high - range * ratio : low + range * ratio;
+    return [
+      { name: '0%', price: price(0), color: '#94a3b8', kind: 'retracement' },
+      { name: '23.6%', price: price(0.236), color: '#64748b', kind: 'retracement' },
+      { name: '38.2%', price: price(0.382), color: '#64748b', kind: 'retracement' },
+      { name: '50%', price: price(0.5), color: '#22d3ee', kind: 'retracement' },
+      { name: '61.8%', price: price(0.618), color: '#22d3ee', kind: 'retracement' },
+      { name: '78.6%', price: price(0.786), color: '#64748b', kind: 'retracement' },
+      { name: '100%', price: price(1), color: '#94a3b8', kind: 'retracement' },
+      { name: '127.2%', price: up ? high + range * 0.272 : low - range * 0.272, color: '#f59e0b', kind: 'extension' },
+      { name: '161.8%', price: up ? high + range * 0.618 : low - range * 0.618, color: '#f59e0b', kind: 'extension' },
+      { name: '200%', price: up ? high + range : low - range, color: '#f59e0b', kind: 'extension' },
+      { name: '261.8%', price: up ? high + range * 1.618 : low - range * 1.618, color: '#f59e0b', kind: 'extension' },
+    ];
+  }
+
+  anchorCoordinate(name) {
+    return this.series.priceToCoordinate(Number(this.anchors[name]));
+  }
+
+  draw(target) {
+    if (!target.useBitmapCoordinateSpace) return;
+    target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
+      const width = bitmapSize.width;
+      const height = bitmapSize.height;
+      const x1 = Math.round(width * 0.08);
+      const x2 = Math.round(width * 0.92);
+      const levels = this.levels()
+        .map(level => ({ ...level, y: this.series.priceToCoordinate(level.price) }))
+        .filter(level => Number.isFinite(level.y))
+        .map(level => ({ ...level, y: Math.round(level.y * verticalPixelRatio) }));
+
+      context.save();
+      context.font = `${11 * verticalPixelRatio}px JetBrains Mono, monospace`;
+      context.textBaseline = 'bottom';
+
+      const retracements = levels.filter(level => level.kind === 'retracement').sort((a, b) => a.y - b.y);
+      for (let i = 0; i < retracements.length - 1; i++) {
+        const top = retracements[i].y;
+        const bottom = retracements[i + 1].y;
+        context.fillStyle = i % 2 ? 'rgba(34,211,238,0.035)' : 'rgba(100,116,139,0.025)';
+        context.fillRect(x1, top, x2 - x1, bottom - top);
+      }
+
+      levels.forEach(level => {
+        if (level.y < 0 || level.y > height) return;
+        context.beginPath();
+        context.setLineDash(level.kind === 'extension'
+          ? [5 * horizontalPixelRatio, 4 * horizontalPixelRatio]
+          : []);
+        context.strokeStyle = level.color;
+        context.globalAlpha = level.kind === 'extension' ? 0.85 : 0.72;
+        context.lineWidth = (level.name === '50%' || level.name === '61.8%' ? 1.35 : 1) * verticalPixelRatio;
+        context.moveTo(x1, level.y);
+        context.lineTo(x2, level.y);
+        context.stroke();
+        context.globalAlpha = 1;
+        context.fillStyle = level.color;
+        context.fillText(`${level.name}  ${level.price.toFixed(2)}`, x1 + 6 * horizontalPixelRatio, level.y - 3 * verticalPixelRatio);
+      });
+
+      [
+        { name: 'low', color: '#22d3ee', x: x1 },
+        { name: 'high', color: '#f59e0b', x: x2 },
+      ].forEach(anchor => {
+        const mediaY = this.anchorCoordinate(anchor.name);
+        if (!Number.isFinite(mediaY)) return;
+        context.beginPath();
+        context.fillStyle = anchor.color;
+        context.strokeStyle = '#07111f';
+        context.lineWidth = 2 * verticalPixelRatio;
+        context.arc(anchor.x, mediaY * verticalPixelRatio, 6 * verticalPixelRatio, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      });
+      context.restore();
+    });
+  }
+
+  pointerPosition(event) {
+    const rect = this.container.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  handlePointerDown(event) {
+    const point = this.pointerPosition(event);
+    const candidates = [
+      { name: 'low', distance: Math.hypot(point.x - this.container.clientWidth * 0.08, point.y - this.anchorCoordinate('low')) },
+      { name: 'high', distance: Math.hypot(point.x - this.container.clientWidth * 0.92, point.y - this.anchorCoordinate('high')) },
+    ].sort((a, b) => a.distance - b.distance);
+    if (!Number.isFinite(candidates[0].distance) || candidates[0].distance > 18) return;
+    this.dragging = candidates[0].name;
+    this.container.setPointerCapture?.(event.pointerId);
+    this.container.addEventListener('pointermove', this.onPointerMove, true);
+    this.container.addEventListener('pointerup', this.onPointerUp, true);
+    this.container.addEventListener('pointercancel', this.onPointerUp, true);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  handlePointerMove(event) {
+    if (!this.dragging) return;
+    const price = this.series.coordinateToPrice(this.pointerPosition(event).y);
+    if (!Number.isFinite(price) || price <= 0) return;
+    this.anchors[this.dragging] = price;
+    if (this.anchors.low > this.anchors.high) {
+      [this.anchors.low, this.anchors.high] = [this.anchors.high, this.anchors.low];
+      this.dragging = this.dragging === 'low' ? 'high' : 'low';
+    }
+    this.requestUpdate?.();
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  handlePointerUp(event) {
+    if (!this.dragging) return;
+    this.dragging = null;
+    this.removeMoveListeners();
+    this.onChange?.({ ...this.anchors });
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  removeMoveListeners() {
+    this.container.removeEventListener('pointermove', this.onPointerMove, true);
+    this.container.removeEventListener('pointerup', this.onPointerUp, true);
+    this.container.removeEventListener('pointercancel', this.onPointerUp, true);
+  }
+
+  removeListeners() {
+    this.removeMoveListeners();
+    this.container.removeEventListener('pointerdown', this.onPointerDown, true);
+  }
+
+  destroy() {
+    this.removeListeners();
+    try { this.series.detachPrimitive(this); } catch(e) {}
+  }
+}
+
+function saveManualFibAnchors(anchors) {
+  const store = loadManualFibStore();
+  store[currentFibKey()] = {
+    low: Math.min(anchors.low, anchors.high),
+    high: Math.max(anchors.low, anchors.high),
+    direction: anchors.direction || 'up',
+    savedAt: Date.now(),
+  };
+  saveManualFibStore(store);
+  setManualFibInputs(store[currentFibKey()]);
+}
+
+function drawFibPrimitive(series, container, anchors) {
+  if (!series || !container || typeof series.attachPrimitive !== 'function') return;
+  pc_fibPrimitive = new FibonacciPrimitive(series, container, anchors, saveManualFibAnchors);
+  series.attachPrimitive(pc_fibPrimitive);
 }
 
 function drawManualFibForCurrentView() {
@@ -5714,9 +5888,9 @@ function drawManualFibForCurrentView() {
   setManualFibInputs(anchors);
   if (!document.getElementById('chk_fib')?.checked || !anchors) return;
   if (pc_currentView === 'daily' && pc_dailyMainSeries) {
-    drawFibLevels(pc_dailyMainSeries, anchors.low, anchors.high, 'Fib D', anchors.direction);
+    drawFibPrimitive(pc_dailyMainSeries, document.getElementById('dailyMainChart'), anchors);
   } else if (pc_realSeries) {
-    drawFibLevels(pc_realSeries, anchors.low, anchors.high, 'Fib W', anchors.direction);
+    drawFibPrimitive(pc_realSeries, document.getElementById('realChart'), anchors);
   }
 }
 
@@ -5727,9 +5901,7 @@ function drawManualFibFromInputs() {
     alert('Zadaj platny Swing low a Swing high.');
     return;
   }
-  const store = loadManualFibStore();
-  store[currentFibKey()] = { low: Math.min(low, high), high: Math.max(low, high), savedAt: Date.now() };
-  saveManualFibStore(store);
+  saveManualFibAnchors({ low, high, direction: high >= low ? 'up' : 'down' });
   const chk = document.getElementById('chk_fib');
   if (chk) chk.checked = true;
   pc_applyOverlays();
