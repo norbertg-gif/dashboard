@@ -302,6 +302,10 @@ def detect_market_regime(df) -> dict:
         # Posterior probability of current state = confidence
         log_prob, posteriors = model.score_samples(X)
         confidence = float(posteriors[-1, current_raw_state])
+        regime_probabilities = {
+            label_map[state]: round(float(posteriors[-1, state]), 4)
+            for state in range(3)
+        }
 
         # Last 26 bars of regime history for chart shading
         dates = df.index[-26:] if len(df) >= 26 else df.index
@@ -315,9 +319,18 @@ def detect_market_regime(df) -> dict:
         return {
             "regime":          current_regime,
             "confidence":      round(confidence, 3),
+            "regime_probabilities": regime_probabilities,
             "regime_history":  history,
             "state_means_pct": [round(m * 100, 3) for m in [state_means[i] for i in order]],
             "state_vols_pct":  [round(v * 100, 3) for v in [state_vols[i]  for i in order]],
+            "model": {
+                "name": "GaussianHMM",
+                "components": 3,
+                "covariance_type": "diag",
+                "random_state": int(model.random_state or 0),
+                "n_iter": int(model.n_iter),
+                "training_bars": int(len(closes)),
+            },
             "error": None,
         }
     except Exception as e:
@@ -3079,6 +3092,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
 
                 # Score all closed candles (exclude last if today is open)
                 today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
+                latest_closed_date = latest_closed_daily_date(df_d)
                 df_score   = df_d.iloc[-90:].reset_index()
 
                 for i in range(5, len(df_score)):
@@ -3095,12 +3109,17 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                         tier = signal_tier(sc, details["trend"])
                         # Save to log if not already there
                         if date_key not in ticker_slog:
-                            ticker_slog[date_key] = {
+                            entry = {
                                 "score":   sc,
                                 "tier":    tier,
                                 "close":   round(float(row["Close"]), 2),
                                 "details": details,
                             }
+                            if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
+                                entry["context"] = build_signal_context(
+                                    df_d, row_date, details, zscore, weekly_bullish
+                                )
+                            ticker_slog[date_key] = entry
                         # Always include in chart signals (from log if exists)
                         saved = ticker_slog.get(date_key, {})
                         daily_buy_signals.append({
@@ -3459,6 +3478,110 @@ def signal_tier(score: int, trend: str = "side") -> str:
     return "watch"
 
 
+SIGNAL_CONTEXT_VERSION = 1
+
+
+def latest_closed_daily_date(df_daily: pd.DataFrame):
+    """Najnovší uzavretý denný bar; dnešný potenciálne otvorený bar ignoruje."""
+    if df_daily is None or df_daily.empty:
+        return None
+    today = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    closed = []
+    for value in df_daily.index:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        if ts.normalize() < today:
+            closed.append(ts.normalize())
+    return max(closed) if closed else None
+
+
+def build_signal_context(
+    df_daily: pd.DataFrame,
+    signal_date,
+    details: dict,
+    zscore: float,
+    weekly_bullish: bool | None,
+) -> dict | None:
+    """Snapshot kontextu pre nový signál bez použitia budúcich dát."""
+    if df_daily is None or df_daily.empty:
+        return None
+    cutoff = pd.Timestamp(signal_date)
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_localize(None)
+    cutoff = cutoff.normalize()
+
+    normalized_index = []
+    for value in df_daily.index:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        normalized_index.append(ts.normalize())
+    history = df_daily.loc[[ts <= cutoff for ts in normalized_index]].copy()
+    if history.empty:
+        return None
+
+    close = float(history["Close"].iloc[-1])
+    returns = history["Close"].astype(float).pct_change()
+    returns_5d = (close / float(history["Close"].iloc[-6]) - 1) * 100 if len(history) >= 6 else None
+    returns_20d = (close / float(history["Close"].iloc[-21]) - 1) * 100 if len(history) >= 21 else None
+    volatility_20d = (
+        float(returns.iloc[-20:].std()) * math.sqrt(252) * 100
+        if len(history) >= 21 else None
+    )
+    high_52w = float(history["High"].astype(float).iloc[-252:].max())
+    price_vs_52w_high = (close / high_52w - 1) * 100 if high_52w > 0 else None
+    atr = safe_float(history.iloc[-1].get("atr"))
+    atr_pct = atr / close * 100 if atr is not None and close > 0 else None
+
+    regime = detect_market_regime(history)
+    if regime.get("error"):
+        regime_snapshot = {
+            "label": None,
+            "confidence": None,
+            "probabilities": None,
+            "error": regime["error"],
+            "model": regime.get("model"),
+        }
+    else:
+        regime_snapshot = {
+            "label": regime.get("regime"),
+            "confidence": regime.get("confidence"),
+            "probabilities": regime.get("regime_probabilities"),
+            "state_means_pct": regime.get("state_means_pct"),
+            "state_vols_pct": regime.get("state_vols_pct"),
+            "model": regime.get("model"),
+            "error": None,
+        }
+
+    return {
+        "context_version": SIGNAL_CONTEXT_VERSION,
+        "context_source": "live",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "data_through": str(cutoff.date()),
+        "daily_bars": int(len(history)),
+        "regime": regime_snapshot,
+        "returns_5d": round(returns_5d, 3) if returns_5d is not None else None,
+        "returns_20d": round(returns_20d, 3) if returns_20d is not None else None,
+        "volatility_20d": round(volatility_20d, 3) if volatility_20d is not None else None,
+        "atr_pct": round(atr_pct, 3) if atr_pct is not None else None,
+        "price_vs_52w_high": round(price_vs_52w_high, 3) if price_vs_52w_high is not None else None,
+        "weekly_bias": (
+            "bullish" if weekly_bullish is True
+            else "not_bullish" if weekly_bullish is False
+            else "unavailable"
+        ),
+        "trend": details.get("trend"),
+        "zscore": round(float(zscore), 4),
+        "conditions": {
+            "c1_ema_kijun_touch": bool(details.get("ema_kijun_touch")),
+            "c2_rsi_pullback": bool(details.get("rsi_pullback")),
+            "c3_bull_volume": bool(details.get("bull_volume")),
+            "c4_zscore_dip": bool(details.get("zscore_dip")),
+        },
+    }
+
+
 def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) -> tuple[list[dict], dict, dict]:
     """Pridá k signálom forward výsledky po 30/60/90 obchodných sviečkach.
 
@@ -3808,6 +3931,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         weekly_status = "bullish" if weekly_bullish else "not_bullish"
 
     today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
+    latest_closed_date = latest_closed_daily_date(df_d)
     cutoff = today_date - pd.Timedelta(days=days)
     ticker_slog = dict(ticker_slog or {})
     recent_signal = None
@@ -3835,12 +3959,17 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         if sc >= 2:
             tier = signal_tier(sc, details["trend"])
             if date_key not in ticker_slog:
-                ticker_slog[date_key] = {
+                entry = {
                     "score": sc,
                     "tier": tier,
                     "close": round(close, 2),
                     "details": details,
                 }
+                if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
+                    entry["context"] = build_signal_context(
+                        df_d, row_date, details, zscore, weekly_bullish
+                    )
+                ticker_slog[date_key] = entry
             sig = {"date": date_key, "score": sc, "tier": tier,
                    "close": round(close, 2), "zscore_dip": details["zscore_dip"]}
             all_signals.append(sig)
@@ -4058,6 +4187,8 @@ def run_checklist(tickers: str = "", days: int = 10):
             ticker_slog = slog.get(ticker, {})
             recent_signal = None
             all_signals   = []
+            latest_closed_date = latest_closed_daily_date(df_d)
+            zscore_values = rolling_zscore(df_d["Close"]).values
 
             df_score = df_d.reset_index()
             for i in range(5, len(df_score)):
@@ -4068,27 +4199,25 @@ def run_checklist(tickers: str = "", days: int = 10):
                     continue
 
                 date_key = str(row_date.date())
-                close    = float(row["Close"])
-                open_    = float(row["Open"])
-                ema20    = float(row["ema20"])
-                kijun    = float(row["ichi_kijun"]) if not math.isnan(float(row["ichi_kijun"])) else close
-                rsi      = float(row["rsi"]) if not math.isnan(float(row["rsi"])) else 50
-                vol      = float(row["Volume"])
-                vol_ma   = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
-
-                tol = 0.005
-                c1  = abs(close - ema20) / close < tol or abs(close - kijun) / close < tol
-                c2  = rsi < 45
-                c3  = close > open_ and vol > vol_ma * 1.2
-                sc  = sum([c1, c2, c3])
+                close = float(row["Close"])
+                zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
+                sc, details = score_signal_day(row, zscore)
 
                 if sc >= 2:
+                    tier = signal_tier(sc, details["trend"])
                     if date_key not in ticker_slog:
-                        ticker_slog[date_key] = {"score": sc, "close": round(close, 2),
-                                                  "details": {"ema_kijun_touch": bool(c1),
-                                                               "rsi_pullback": bool(c2),
-                                                               "bull_volume": bool(c3)}}
-                    sig = {"date": date_key, "score": sc, "close": round(close, 2)}
+                        entry = {
+                            "score": sc,
+                            "tier": tier,
+                            "close": round(close, 2),
+                            "details": details,
+                        }
+                        if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
+                            entry["context"] = build_signal_context(
+                                df_d, row_date, details, zscore, weekly_bullish
+                            )
+                        ticker_slog[date_key] = entry
+                    sig = {"date": date_key, "score": sc, "tier": tier, "close": round(close, 2)}
                     all_signals.append(sig)
                     if row_date.date() >= cutoff.date():
                         if recent_signal is None or date_key > recent_signal["date"]:
