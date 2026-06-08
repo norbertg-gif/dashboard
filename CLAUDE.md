@@ -64,6 +64,7 @@ These were already in the codebase and need to stay fixed:
 - **JS: chart options come from `getPcChartOpts()`.** Don't spread a non-existent `pc_CHART_OPTS` — it silently becomes default LWC theme (white background in dark mode).
 - **InstrumentTypeID:** eToro uses 5=Stocks, 6=ETF, 10=Crypto, 1=Currencies, 2=Commodities, 4=Indices. `ALLOWED_INSTRUMENT_TYPES` and `type_map` in `get_portfolio` must agree. Verify against live data before changing.
 - **Currency conversion.** `estimatePositionLivePnl` (JS) and `currentRate` fallback (Python) ignore that non-USD instruments report `units × price_delta` in instrument currency, while eToro `pnL` is USD. Fine for US stocks/ETF, wrong for European tickers. If touching this, use `conversionRateBid/Ask` from rates.
+- **Fibonacci primitive draws full-width lines.** `FibonacciPrimitive.draw()` intentionally draws lines from the left anchor (`xAnchorLeft`) to the chart right edge (`width`), NOT between x1–x2. Shaded zones stay within anchor bounds. Labels are pinned to the right edge with a dark pill background. `drawManualFibFromInputs()` resolves times by finding the nearest candle by price — do NOT use `automatic?.lowTime/highTime` when the user has entered custom prices.
 
 ## Backlog (priority order)
 

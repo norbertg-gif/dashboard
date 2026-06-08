@@ -75,8 +75,12 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Prepočítať váhy** — preučí váhy indikátorov pre daný ticker.
 - **Fibonacci interactive** — pri prvom zapnutí automaticky vyberie posledný
   významný swing a vykreslí retracement aj extension úrovne. Farebné body
-  low/high možno presúvať horizontálne aj vertikálne; horizontálna poloha sa
-  prichytí k najbližšej sviečke. Ukladajú sa osobitne pre ticker a timeframe.
+  (low = cyan, high = oranžová) možno ťahať myšou — horizontálna poloha sa
+  prichytí k najbližšej sviečke. Línie sa tiahnu od ľavého kotevného bodu po
+  **pravý okraj grafu** a sú vždy viditeľné aj pri scrollovaní histórie.
+  Labely s cenou sú kotvené na pravý okraj s tmavým pozadím pre čitateľnosť.
+  Manuálne zadanie cien cez inputy Swing low / Swing high (Draw tlačidlo) nájde
+  najbližšiu sviečku k zadanej cene. Ukladajú sa osobitne pre ticker a timeframe.
 
 ### Graf
 
