@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260608-header-equity-ema">
+<link rel="stylesheet" href="/dashboard.css?v=20260608-events-tabs">
 </head>
 <body>
 
@@ -123,13 +123,28 @@
     <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
   <!-- Tab bar -->
   <div id="main-tabs" style="display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0;padding:0 10px;gap:2px;">
-    <div class="main-tab active" id="tab-charts" onclick="switchMainTab('charts')">📈 Grafy</div>
-    <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">📊 Portfólio</div>
-    <div class="main-tab" id="tab-history" onclick="switchMainTab('history')">História</div>
-    <div class="main-tab" id="tab-risk" onclick="switchMainTab('risk')">Risk</div>
-    <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny</div>
-    <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner</div>
+    <div class="main-tab active" id="tab-charts" onclick="switchMainTab('charts')">📈 Grafy <button class="tab-popout" onclick="openMainTabWindow(event,'charts')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">📊 Portfólio <button class="tab-popout" onclick="openMainTabWindow(event,'portfolio')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-history" onclick="switchMainTab('history')">História <button class="tab-popout" onclick="openMainTabWindow(event,'history')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-risk" onclick="switchMainTab('risk')">Risk <button class="tab-popout" onclick="openMainTabWindow(event,'risk')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny <button class="tab-popout" onclick="openMainTabWindow(event,'predictive')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner <button class="tab-popout" onclick="openMainTabWindow(event,'scanner')" title="Otvoriť v novej karte">↗</button></div>
+    <button id="event-center-toggle" onclick="toggleEventCenter()" title="Nové udalosti za posledných 24/48 hodín">
+      Udalosti <span id="event-center-count">0</span>
+    </button>
   </div>
+  <aside id="event-center" aria-label="Centrum udalostí">
+    <div class="event-center-head">
+      <strong>Nové udalosti</strong>
+      <div class="event-window-switch">
+        <button class="active" data-hours="24" onclick="setEventWindow(24)">24 h</button>
+        <button data-hours="48" onclick="setEventWindow(48)">48 h</button>
+      </div>
+      <button class="event-close" onclick="toggleEventCenter(false)" title="Zavrieť">×</button>
+    </div>
+    <div class="event-center-meta" id="event-center-meta">Načítavam...</div>
+    <div id="event-center-list"></div>
+  </aside>
   <!-- Grafy -->
   <div id="main-charts" style="flex:1;min-height:0;overflow:auto;">
     <div id="grid" onclick="onGridClick(event)"></div>
@@ -409,6 +424,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260608-header-equity-ema"></script>
+  <script src="/dashboard.js?v=20260608-events-tabs"></script>
 </body>
 </html>

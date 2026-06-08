@@ -4115,6 +4115,78 @@ def get_nasdaq_scanner_results():
     return {"state": state, "cache": enrich_scanner_payload(load_scanner_cache())}
 
 
+@app.get("/api/events")
+def get_recent_events(hours: int = Query(24, ge=1, le=168)):
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=hours)
+    events = []
+
+    for ticker, entries in load_signals_log().items():
+        if not isinstance(entries, dict):
+            continue
+        for date_key, signal in entries.items():
+            if not isinstance(signal, dict):
+                continue
+            try:
+                signal_time = datetime.fromisoformat(f"{date_key}T21:00:00+00:00")
+            except Exception:
+                continue
+            if signal_time < cutoff or signal_time > now + timedelta(hours=12):
+                continue
+            score = int(signal.get("score") or 0)
+            tier = str(signal.get("tier") or signal_tier(score)).lower()
+            events.append({
+                "id": f"signal:{ticker}:{date_key}",
+                "type": "signal",
+                "ticker": str(ticker).upper(),
+                "time": signal_time.isoformat(),
+                "tier": tier,
+                "score": score,
+                "price": _num_or_none(signal.get("close")),
+                "title": f"{tier.title()} signal {score}/4",
+            })
+
+    scanner = enrich_scanner_payload(load_scanner_cache())
+    generated_at = scanner.get("generated_at")
+    try:
+        scan_time = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+    except Exception:
+        scan_time = None
+    if scan_time and scan_time >= cutoff:
+        for row in (scanner.get("results") or []):
+            recent = row.get("recent_signal") or {}
+            ticker = str(row.get("ticker") or "").upper()
+            if not ticker:
+                continue
+            events.append({
+                "id": f"scanner:{ticker}:{generated_at}",
+                "type": "scanner",
+                "ticker": ticker,
+                "time": scan_time.isoformat(),
+                "tier": str(recent.get("tier") or "").lower(),
+                "score": int(row.get("setup_score") or recent.get("score") or 0),
+                "dip_label": row.get("dip_label"),
+                "dip_total": _num_or_none(row.get("dip_total")),
+                "title": "Nasdaq scanner",
+            })
+
+    priority = {"buy": 0, "watch": 1, "counter": 2}
+    events.sort(
+        key=lambda event: (
+            event.get("time") or "",
+            -priority.get(event.get("tier"), 9),
+            event.get("score") or 0,
+        ),
+        reverse=True,
+    )
+    counts = {
+        "total": len(events),
+        "signals": sum(1 for event in events if event["type"] == "signal"),
+        "scanner": sum(1 for event in events if event["type"] == "scanner"),
+    }
+    return {"hours": hours, "generated_at": now.isoformat(), "counts": counts, "events": events[:100]}
+
+
 @app.get("/api/scanner/notes")
 def get_scanner_notes():
     if SCANNER_NOTES_FILE.exists():

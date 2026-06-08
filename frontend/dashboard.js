@@ -96,6 +96,7 @@ let activePanelId = null;
 
 // ── MAIN TABS ────────────────────────────────────────────────────────────────
 let activeMainTab = 'charts';
+let eventWindowHours = Number(localStorage.getItem('td_event_window_hours')) === 48 ? 48 : 24;
 
 function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
@@ -159,6 +160,94 @@ function switchMainTab(tab) {
   } else if (tab === 'scanner') {
     renderScannerView();
   }
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', tab);
+  history.replaceState(null, '', url);
+}
+
+function openMainTabWindow(event, tab) {
+  event?.stopPropagation();
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', tab);
+  window.open(url.toString(), '_blank', 'noopener');
+}
+
+function toggleEventCenter(force) {
+  const panel = document.getElementById('event-center');
+  const button = document.getElementById('event-center-toggle');
+  if (!panel) return;
+  const open = typeof force === 'boolean' ? force : !panel.classList.contains('open');
+  panel.classList.toggle('open', open);
+  button?.classList.toggle('active', open);
+  if (open) loadRecentEvents();
+}
+
+function setEventWindow(hours) {
+  eventWindowHours = Number(hours) === 48 ? 48 : 24;
+  localStorage.setItem('td_event_window_hours', String(eventWindowHours));
+  document.querySelectorAll('.event-window-switch button').forEach(button => {
+    button.classList.toggle('active', Number(button.dataset.hours) === eventWindowHours);
+  });
+  loadRecentEvents();
+}
+
+function eventTimeLabel(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const hours = Math.max(0, (Date.now() - date.getTime()) / 3600000);
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`;
+  if (hours < 24) return `${Math.round(hours)} h`;
+  return date.toLocaleDateString('sk-SK', { day:'2-digit', month:'2-digit' });
+}
+
+function renderRecentEvents(payload) {
+  const events = payload?.events || [];
+  const count = document.getElementById('event-center-count');
+  const meta = document.getElementById('event-center-meta');
+  const list = document.getElementById('event-center-list');
+  if (count) count.textContent = String(events.length);
+  if (meta) meta.textContent = `${events.length} udalostí za posledných ${eventWindowHours} hodín`;
+  if (!list) return;
+  if (!events.length) {
+    list.innerHTML = '<div class="event-empty">Za zvolené obdobie nie sú uložené žiadne nové signály ani výsledky scanneru.</div>';
+    return;
+  }
+  list.innerHTML = events.map(item => {
+    const tier = ['buy','watch','counter'].includes(item.tier) ? item.tier : 'watch';
+    const source = item.type === 'scanner' ? 'Nasdaq scanner' : 'Prediktívny signál';
+    const score = item.score ? `${item.score}/4` : '';
+    const dip = item.dip_label && item.dip_label !== 'TECH ONLY'
+      ? ` · ${item.dip_label}${item.dip_total != null ? ` ${item.dip_total}` : ''}`
+      : '';
+    const price = item.price != null ? ` · entry ${Number(item.price).toFixed(2)}` : '';
+    return `<div class="event-item ${tier} ${item.type === 'scanner' ? 'scanner' : ''}"
+      onclick="openEventTicker('${escHtml(item.ticker)}')">
+      <span class="event-dot"></span>
+      <div class="event-main">
+        <div class="event-title">${escHtml(item.ticker)} · ${escHtml(item.title || source)}</div>
+        <div class="event-detail">${source}${score ? ` · ${score}` : ''}${price}${dip}</div>
+      </div>
+      <span class="event-time">${eventTimeLabel(item.time)}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadRecentEvents() {
+  const meta = document.getElementById('event-center-meta');
+  if (meta) meta.textContent = 'Načítavam udalosti...';
+  try {
+    const response = await fetch(`${API}/api/events?hours=${eventWindowHours}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderRecentEvents(await response.json());
+  } catch(e) {
+    if (meta) meta.textContent = `Udalosti sa nepodarilo načítať: ${e.message}`;
+  }
+}
+
+function openEventTicker(ticker) {
+  toggleEventCenter(false);
+  switchMainTab('predictive');
+  setTimeout(() => pc_selectTicker(ticker), 120);
 }
 
 // ── LEFT SIDEBAR VISIBILITY ─────────────────────────────────────────────
@@ -4695,6 +4784,11 @@ Sheet: ${sheetName}`);
   // Aplikuj tému a tint podľa aktívneho účtu hneď pri štarte
   isLightMode = localStorage.getItem('td_theme') === 'light';
   applyTheme();
+  setEventWindow(eventWindowHours);
+  const requestedTab = new URLSearchParams(window.location.search).get('tab');
+  if (['charts','portfolio','history','risk','predictive','scanner'].includes(requestedTab)) {
+    switchMainTab(requestedTab);
+  }
 
   setTimeout(async () => {
     await loadAll();

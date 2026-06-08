@@ -47,6 +47,14 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
 
+### Udalosti a samostatné karty
+
+- Tlačidlo **Udalosti** pri hlavných záložkách zobrazí uložené signály a výsledky
+  posledného Nasdaq scanu za **24 alebo 48 hodín**. Panel nespúšťa nový scan.
+- Klik na ticker v udalostiach ho otvorí v záložke Prediktívny.
+- Ikona **↗** pri Grafy / Portfólio / História / Risk / Prediktívny / Scanner otvorí
+  danú sekciu v novej karte. Aktívna sekcia je uložená v URL parametri `tab`.
+
 ---
 
 ## 3. Záložky
