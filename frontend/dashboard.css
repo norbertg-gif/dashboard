@@ -372,6 +372,40 @@ select.sel:focus {
   background: var(--down);
   box-shadow: 0 0 0 3px var(--down-soft);
 }
+#header-equities {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.header-equity {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 92px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+}
+.header-equity.acct1 { border-color: color-mix(in srgb, var(--acct1-color) 45%, var(--border)); }
+.header-equity.acct2 { border-color: color-mix(in srgb, var(--acct2-color) 45%, var(--border)); }
+.header-equity-label {
+  color: var(--muted2);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.header-equity strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.header-equity.live strong { color: var(--up); }
+.header-equity.stale strong { color: var(--muted); }
 @keyframes pulse-ok {
   0% { box-shadow: 0 0 0 0px var(--up-soft); }
   70% { box-shadow: 0 0 0 6px var(--up-soft); }
@@ -811,6 +845,43 @@ body.sidebar-collapsed #sb-resizer {
 .ind-btn.active-rsi      { border-color: var(--ind-rsi); color: var(--ind-rsi); background: var(--ind-rsi-soft); }
 .ind-btn.active-adx      { border-color: var(--ind-adx); color: var(--ind-adx); background: var(--ind-adx-soft); }
 .ind-btn.active-macd     { border-color: var(--ind-macd); color: var(--ind-macd); background: var(--ind-macd-soft); }
+.ema-indicator-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.ema-hover-card {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 120;
+  display: none;
+  min-width: 112px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.ema-hover-card span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.ema-hover-card i {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.ema-indicator-wrap:hover .ema-hover-card,
+.ema-indicator-wrap:focus-within .ema-hover-card {
+  display: block;
+}
 
 .p-info {
   display: flex;

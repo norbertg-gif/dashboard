@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260608-signal-analytics-layout">
+<link rel="stylesheet" href="/dashboard.css?v=20260608-header-equity-ema">
 </head>
 <body>
 
@@ -48,6 +48,10 @@
       <option value="0">OFF</option><option value="60">1 min</option>
       <option value="300">5 min</option><option value="900">15 min</option>
     </select>
+  </div>
+  <div id="header-equities" aria-label="Live equity eToro uctov">
+    <div class="header-equity acct1"><span class="header-equity-label" id="header-equity-label-1">Ucet 1</span><strong id="header-equity-1">--</strong></div>
+    <div class="header-equity acct2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
   </div>
   <div id="hdr-status">—</div>
 </div>
@@ -405,6 +409,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260608-prediction-layout"></script>
+  <script src="/dashboard.js?v=20260608-header-equity-ema"></script>
 </body>
 </html>

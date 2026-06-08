@@ -1086,6 +1086,7 @@ function normalizePortColumns(saved = {}) {
 
 // Per-panel portfolio state
 const portState = {};
+const portfolioAccountData = {};
 
 function getPortState(pid) {
   if (!portState[pid]) {
@@ -1170,6 +1171,8 @@ async function loadPortData(pid) {
     s.data = await r.json();
     preparePortfolioSnapshot(s.data);
     rememberLiveInstruments(s.data.positions);
+    portfolioAccountData[String(s.account)] = s.data;
+    updateHeaderEquities();
   } catch(e) {
     s.data = { error: e.message };
   }
@@ -1245,6 +1248,54 @@ function updatePortfolioSummaryDom(pid, data) {
     pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
   }
   if (eqEl) eqEl.textContent = `$${eq.toFixed(2)}`;
+}
+
+function findLivePortfolioSummaryByAccount(accountId) {
+  const wanted = String(accountId);
+  for (const state of Object.values(portState)) {
+    if (String(state?.account || '1') !== wanted || !state?.data?.summary) continue;
+    return state.data.summary;
+  }
+  return null;
+}
+
+function updateHeaderEquities() {
+  const accounts = etoroAccounts.length ? etoroAccounts : [{ id:'1', name:'Ucet 1' }, { id:'2', name:'Ucet 2' }];
+  for (const acc of accounts.slice(0, 2)) {
+    const id = String(acc.id);
+    const label = document.getElementById(`header-equity-label-${id}`);
+    const valEl = document.getElementById(`header-equity-${id}`);
+    const box = valEl?.closest('.header-equity');
+    if (label) label.textContent = acc.name || `Ucet ${id}`;
+    if (!valEl || !box) continue;
+    const sum = findLivePortfolioSummaryByAccount(id) || portfolioAccountData[id]?.summary || etoroSummary[id] || null;
+    const eq = Number(sum?._liveEquity ?? sum?.equity);
+    if (Number.isFinite(eq) && eq > 0) {
+      valEl.textContent = `$${eq.toFixed(2)}`;
+      box.classList.add('live');
+      box.classList.remove('stale');
+    } else {
+      valEl.textContent = '--';
+      box.classList.remove('live');
+      box.classList.add('stale');
+    }
+  }
+}
+
+async function loadHeaderPortfolioAccounts() {
+  const accountIds = (etoroAccounts.length ? etoroAccounts.map(a => String(a.id)) : ['1', '2']).slice(0, 2);
+  await Promise.all(accountIds.map(async accountId => {
+    if (portfolioAccountData[accountId]) return;
+    try {
+      const r = await fetch(`${API}/api/etoro/portfolio?account=${accountId}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      preparePortfolioSnapshot(data);
+      portfolioAccountData[accountId] = data;
+      rememberLiveInstruments(data.positions);
+    } catch(e) {}
+  }));
+  updateHeaderEquities();
 }
 
 function updatePortfolioTickerRowsDom(pid, state, sym) {
@@ -1921,6 +1972,12 @@ function onLivePriceUpdate(instrumentId) {
       updatePortfolioSummaryDom(pid, state.data);
       updatePortfolioTickerRowsDom(pid, state, sym);
     }
+    for (const data of Object.values(portfolioAccountData)) {
+      if (!data?.positions || Object.values(portState).some(state => state?.data === data)) continue;
+      updatePositionRowsWithLive(data.positions, sym, livePrice);
+      recalcPortfolioLiveSummary(data);
+    }
+    updateHeaderEquities();
     applyPredictiveLivePrice(sym, livePrice);
   }
 
@@ -2542,7 +2599,7 @@ let etoroSummary   = {};   // { accountId: { total_pnl, total_value, ... } }
 async function loadEtoroAccounts() {
   try {
     const r = await fetch(`${API}/api/etoro/accounts`);
-    if (r.ok) { etoroAccounts = await r.json(); renderAccountTabs(); }
+    if (r.ok) { etoroAccounts = await r.json(); renderAccountTabs(); updateHeaderEquities(); }
   } catch(e) {}
 }
 
@@ -2729,6 +2786,7 @@ async function loadEtoroPositions(forceRefresh = false) {
       if (resp.summary) {
         etoroSummary[activeAccount] = resp.summary;
         renderAccountTabs();   // aktualizuj tab s hodnotou
+        updateHeaderEquities();
       }
     }
     rememberLiveInstruments(etoroPositions);
@@ -3205,7 +3263,14 @@ function createPanel(cfg) {
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
     <div class="p-inds" onclick="setActivePanel('${id}')">
-      <button id="ind-${id}-ema"      class="ind-btn${inds.ema      ?' active-ema':''}"      onclick="toggleIndicator('${id}','ema')">EMA</button>
+      <span class="ema-indicator-wrap">
+        <button id="ind-${id}-ema" class="ind-btn${inds.ema ?' active-ema':''}" onclick="toggleIndicator('${id}','ema')">EMA</button>
+        <span class="ema-hover-card">
+          <span><i style="background:#a070ff"></i>EMA 20</span>
+          <span><i style="background:#4a9eff"></i>EMA 50</span>
+          <span><i style="background:#ff8c42"></i>EMA 200</span>
+        </span>
+      </span>
       <button id="ind-${id}-ichimoku" class="ind-btn${inds.ichimoku ?' active-ichimoku':''}" onclick="toggleIndicator('${id}','ichimoku')">ICHIMOKU</button>
       <button id="ind-${id}-rsi"      class="ind-btn${inds.rsi      ?' active-rsi':''}"      onclick="toggleIndicator('${id}','rsi')">RSI</button>
       <button id="ind-${id}-adx"      class="ind-btn${inds.adx      ?' active-adx':''}"      onclick="toggleIndicator('${id}','adx')">ADX</button>
@@ -4639,6 +4704,8 @@ Sheet: ${sheetName}`);
     startBackgroundPrefetch();
     // eToro inicializácia
     await loadEtoroWatchlistId();
+    await loadEtoroAccounts();
+    await loadHeaderPortfolioAccounts();
     // Subscribe existujúce watchlist tickery na WS
     for (const item of watchlist) {
       cacheInstrumentId(item.symbol, item.instrumentId);

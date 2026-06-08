@@ -43,6 +43,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **VYMAŽ** | Vyčistí aktuálne rozloženie panelov. |
 | **STĹPCE (1–4)** | Počet stĺpcov v mriežke grafov. |
 | **AUTO ON/OFF** | Automatické obnovovanie dát. |
+| **Ucet 1 / Ucet 2 equity** | Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab. |
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
 
