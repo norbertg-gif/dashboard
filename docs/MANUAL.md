@@ -175,6 +175,13 @@ kombinuje s externým **DIP rankingom** (importovaný Excel).
 ### Ovládanie
 
 - **Vybrať súbor → Import DIP Excel** — nahrá DIP ranking (FA/TA skóre) z XLSX.
+- **Import Finviz HTML folder** — vyberie priečinok so stránkami uloženými cez
+  Save Page WE. Backend spojí tabuľky `screener_table`, odstráni duplicity,
+  normalizuje percentá a vypočíta rovnaké FA / TA / TOTAL skóre ako Excel.
+- Pod importom sa zobrazí kontrolná tabuľka raw Finviz hodnôt a výsledného
+  rankingu. Chýbajúce hodnoty sú zvýraznené a ticker je klikateľný.
+- XLSX a HTML import sú rovnocenné vstupné cesty a obe aktualizujú tú istú DIP
+  cache používanú Nasdaq scannerom.
 - **Spustiť scanner** — spustí paralelný sken Nasdaq-100 (progress bar ukazuje
   priebeh). Beží na pozadí, výsledky sa priebežne dopĺňajú.
 

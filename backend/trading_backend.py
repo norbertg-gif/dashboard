@@ -3730,6 +3730,7 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
+FINVIZ_IMPORT_FILE = DATA_ROOT / "finviz_html_import.json"
 _scanner_lock = threading.Lock()
 _scanner_state = {
     "running": False,
@@ -3766,6 +3767,155 @@ def load_dip_scores():
 
 def save_dip_scores(data):
     DIP_SCORES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _finviz_number(value):
+    if value is None or isinstance(value, (int, float)):
+        return _num_or_none(value)
+    text = str(value).strip()
+    if text in {"", "-", "—", "N/A"}:
+        return None
+    percent = text.endswith("%")
+    if percent:
+        text = text[:-1].strip()
+    try:
+        number = float(text.replace(",", ""))
+        return number / 100 if percent else number
+    except Exception:
+        return None
+
+
+def _score_lt(value, thresholds):
+    value = _finviz_number(value)
+    if value is None:
+        # Excel porovnava prazdnu bunku ako 0, preto zachovavame rovnake scoring spravanie.
+        value = 0
+    for limit, points in thresholds:
+        if value < limit:
+            return points
+    return 0
+
+
+def _score_gt(value, thresholds):
+    value = _finviz_number(value)
+    if value is None:
+        return 0
+    for limit, points in thresholds:
+        if value > limit:
+            return points
+    return 0
+
+
+def score_finviz_row(row):
+    fa = (
+        _score_lt(row.get("Forward P/E"), [(15, 12), (20, 10), (30, 7), (50, 4)])
+        + _score_lt(row.get("PEG"), [(0.8, 12), (1, 10), (1.5, 8), (2.5, 4)])
+        + _score_lt(row.get("P/S"), [(2, 10), (5, 8), (10, 5), (20, 3)])
+        + _score_lt(row.get("P/B"), [(2, 5), (5, 4), (10, 2)])
+        + _score_lt(row.get("P/FCF"), [(15, 10), (20, 8), (40, 5), (60, 3)])
+        + _score_gt(row.get("EPS Next Y"), [(0.3, 12), (0.2, 10), (0.1, 7), (0, 4)])
+        + _score_gt(row.get("Sales Q/Q"), [(0.15, 8), (0.08, 6), (0, 4)])
+        + _score_lt(row.get("Debt/Eq"), [(0.5, 8), (1, 6), (1.5, 4), (2, 2)])
+        + _score_gt(row.get("Curr R"), [(2, 3), (1.5, 2), (1, 1)])
+    )
+    sma50 = _finviz_number(row.get("SMA50"))
+    sma200 = _finviz_number(row.get("SMA200"))
+    sma_score = 10 if sma50 is not None and sma200 is not None and sma50 < 0 < sma200 else (
+        7 if sma50 is not None and sma200 is not None and sma50 < 0 and sma200 < 0 else (
+            0 if sma50 is not None and sma200 is not None and sma50 > 0 and sma200 > 0 else 3
+        )
+    )
+    beta = _finviz_number(row.get("Beta"))
+    beta_score = 3 if beta is not None and 0.5 <= beta <= 1.2 else (2 if beta is not None and 1.2 < beta <= 1.8 else 0)
+    ta = (
+        _score_lt(row.get("RSI"), [(25, 12), (30, 10), (35, 8), (45, 5), (55, 3)])
+        + _score_lt(row.get("52W High"), [(-0.6, 12), (-0.4, 10), (-0.2, 8), (-0.1, 5)])
+        + sma_score
+        + _score_lt(row.get("Perf Half"), [(-0.4, 10), (-0.2, 8), (-0.1, 5), (0, 3)])
+        + _score_gt(row.get("Rel Volume"), [(2, 8), (1.5, 6), (1, 3)])
+        + beta_score
+    )
+    return fa, ta, fa + ta
+
+
+def parse_finviz_html_files(files):
+    try:
+        from bs4 import BeautifulSoup
+    except Exception as e:
+        raise HTTPException(500, f"beautifulsoup4 chyba/import dependency: {e}")
+    combined = {}
+    page_stats = []
+    expected_headers = None
+    for item in files:
+        name = str(item.get("name") or "finviz.html")
+        html = str(item.get("html") or "")
+        soup = BeautifulSoup(html, "html.parser")
+        table = soup.find("table", class_="screener_table")
+        if table is None:
+            page_stats.append({"file": name, "rows": 0, "error": "screener_table nenajdena"})
+            continue
+        header_row = table.find("thead")
+        header_row = header_row.find("tr") if header_row else table.find("tr")
+        headers = [cell.get_text(strip=True) for cell in header_row.find_all(["th", "td"])] if header_row else []
+        if headers and not headers[0]:
+            headers = headers[1:]
+        if "Ticker" not in headers:
+            page_stats.append({"file": name, "rows": 0, "error": "chyba stlpec Ticker"})
+            continue
+        expected_headers = expected_headers or headers
+        count = 0
+        for tr in table.find_all("tr"):
+            cells = tr.find_all("td")
+            if not cells:
+                continue
+            values = [cell.get_text(strip=True) for cell in cells]
+            if values and not values[0]:
+                values = values[1:]
+            if len(values) != len(headers):
+                continue
+            raw = dict(zip(headers, values))
+            ticker = str(raw.get("Ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            normalized = {key: (_finviz_number(value) if key not in {"Ticker", "Company"} else value) for key, value in raw.items()}
+            normalized["Ticker"] = ticker
+            normalized["_source"] = name
+            combined.setdefault(ticker, normalized)
+            count += 1
+        page_stats.append({"file": name, "rows": count, "error": None})
+    if not combined:
+        raise HTTPException(400, "V HTML suboroch neboli najdene ziadne Finviz data")
+    preview = []
+    scores = {}
+    ranked = []
+    for ticker, row in combined.items():
+        fa, ta, total = score_finviz_row(row)
+        scored = dict(row)
+        scored.update({"FA": fa, "TA": ta, "TOTAL": total})
+        ranked.append(scored)
+    ranked.sort(key=lambda row: (row["TOTAL"], row["FA"], row["TA"], row["Ticker"]), reverse=True)
+    for rank, row in enumerate(ranked, 1):
+        ticker = row["Ticker"]
+        scores[ticker] = {
+            "rank": rank, "ticker": ticker, "company": row.get("Company") or "",
+            "price": _finviz_number(row.get("Price")), "fa": row["FA"], "ta": row["TA"],
+            "total": row["TOTAL"], "label": _dip_label(row["TOTAL"]),
+        }
+        row["Rank"] = rank
+        preview.append(row)
+    now = datetime.now(timezone.utc).isoformat()
+    scores["_meta"] = {
+        "sheet": "Finviz HTML", "filename": f"{len(files)} HTML suborov",
+        "updated_at": now, "count": len(ranked), "source": "html_folder",
+    }
+    result = {
+        "updated_at": now, "files": len(files), "pages": page_stats,
+        "rows_total": sum(page["rows"] for page in page_stats),
+        "unique_tickers": len(ranked),
+        "duplicates": max(0, sum(page["rows"] for page in page_stats) - len(ranked)),
+        "headers": expected_headers or [], "rows": preview,
+    }
+    return scores, result
 
 
 def _num_or_none(value):
@@ -3891,6 +4041,34 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
     save_dip_scores(scores)
     meta = scores.get("_meta", {})
     return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at")}
+
+
+@app.post("/api/scanner/dip/import-html")
+async def import_dip_html(request: Request):
+    body = await request.json()
+    files = body.get("files") if isinstance(body, dict) else None
+    if not isinstance(files, list) or not files:
+        raise HTTPException(400, "Vyber priecinok s HTML subormi")
+    if len(files) > 50:
+        raise HTTPException(400, "Prilis vela HTML suborov (maximum 50)")
+    scores, result = parse_finviz_html_files(files)
+    save_dip_scores(scores)
+    FINVIZ_IMPORT_FILE.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "ok": True, "count": result["unique_tickers"], "files": result["files"],
+        "rows_total": result["rows_total"], "duplicates": result["duplicates"],
+        "updated_at": result["updated_at"], "pages": result["pages"],
+    }
+
+
+@app.get("/api/scanner/dip/html-preview")
+def get_dip_html_preview():
+    if not FINVIZ_IMPORT_FILE.exists():
+        return {"rows": [], "pages": [], "unique_tickers": 0}
+    try:
+        return json.loads(FINVIZ_IMPORT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"rows": [], "pages": [], "unique_tickers": 0, "error": "Import preview sa neda nacitat"}
 
 
 @app.get("/api/scanner/dip/status")

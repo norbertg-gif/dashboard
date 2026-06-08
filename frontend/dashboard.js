@@ -6959,6 +6959,98 @@ async function importDipExcel() {
   }
 }
 
+async function importFinvizHtmlFolder() {
+  const input = document.getElementById('finvizHtmlFolderInput');
+  const status = document.getElementById('dipImportStatus');
+  const files = [...(input?.files || [])].filter(file => /\.(html?|xhtml)$/i.test(file.name));
+  if (!files.length) {
+    if (status) status.textContent = 'Vyber priecinok so stiahnutymi Finviz HTML subormi.';
+    return;
+  }
+  if (status) status.innerHTML = `<span class="cl-spinner"></span>Spracuvam ${files.length} HTML suborov...`;
+  try {
+    const payload = { files: await Promise.all(files.map(async file => {
+      const html = await file.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const table = doc.querySelector('table.screener_table');
+      return {
+        name: file.webkitRelativePath || file.name,
+        html: table ? table.outerHTML : html,
+      };
+    })) };
+    const res = await fetch('/api/scanner/dip/import-html', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { msg = (await res.json()).detail || msg; } catch(e) {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    if (status) status.textContent =
+      `Finviz HTML OK: ${data.count} titulov · ${data.files} suborov · ${data.rows_total} riadkov · ${data.duplicates} duplicit`;
+    await loadFinvizHtmlPreview();
+    await loadNasdaqScannerResults();
+  } catch(e) {
+    if (status) status.textContent = 'Finviz HTML import chyba: ' + e.message;
+  }
+}
+
+function fmtFinvizPreview(value, percent = false) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '<span class="finviz-missing">--</span>';
+  return percent ? `${number >= 0 ? '+' : ''}${(number * 100).toFixed(1)}%` : number.toFixed(2);
+}
+
+async function loadFinvizHtmlPreview() {
+  const wrap = document.getElementById('finvizPreview');
+  if (!wrap) return;
+  try {
+    const res = await fetch('/api/scanner/dip/html-preview');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="scanner-hint">Zatial nie je dostupny HTML import na kontrolu.</div>';
+      return;
+    }
+    const pageErrors = (data.pages || []).filter(page => page.error);
+    wrap.innerHTML = `
+      <details class="finviz-preview-details" open>
+        <summary>Kontrola Finviz importu
+          <span>${data.unique_tickers} titulov · ${data.files} suborov · ${data.duplicates} duplicit${pageErrors.length ? ` · ${pageErrors.length} chyb stranok` : ''}</span>
+        </summary>
+        ${pageErrors.length ? `<div class="finviz-page-errors">${pageErrors.map(page => `${escHtml(page.file)}: ${escHtml(page.error)}`).join('<br>')}</div>` : ''}
+        <div class="finviz-preview-table-wrap">
+          <table class="finviz-preview-table">
+            <thead><tr>
+              <th>Rank</th><th>Ticker</th><th>Company</th><th>FA</th><th>TA</th><th>Total</th>
+              <th>Fwd P/E</th><th>PEG</th><th>P/S</th><th>P/B</th><th>P/FCF</th>
+              <th>EPS Next Y</th><th>Sales Q/Q</th><th>Curr R</th><th>Debt/Eq</th>
+              <th>Perf Half</th><th>Beta</th><th>SMA50</th><th>SMA200</th><th>52W High</th><th>RSI</th><th>Rel Vol</th><th>Price</th>
+            </tr></thead>
+            <tbody>${rows.map(row => `<tr>
+              <td>${row.Rank}</td><td class="ticker" onclick="openScannerTicker('${escHtml(row.Ticker)}')">${escHtml(row.Ticker)}</td>
+              <td>${escHtml(row.Company || '')}</td><td>${row.FA}</td><td>${row.TA}</td><td class="total">${row.TOTAL}</td>
+              <td>${fmtFinvizPreview(row['Forward P/E'])}</td><td>${fmtFinvizPreview(row.PEG)}</td>
+              <td>${fmtFinvizPreview(row['P/S'])}</td><td>${fmtFinvizPreview(row['P/B'])}</td><td>${fmtFinvizPreview(row['P/FCF'])}</td>
+              <td>${fmtFinvizPreview(row['EPS Next Y'], true)}</td><td>${fmtFinvizPreview(row['Sales Q/Q'], true)}</td>
+              <td>${fmtFinvizPreview(row['Curr R'])}</td><td>${fmtFinvizPreview(row['Debt/Eq'])}</td>
+              <td>${fmtFinvizPreview(row['Perf Half'], true)}</td><td>${fmtFinvizPreview(row.Beta)}</td>
+              <td>${fmtFinvizPreview(row.SMA50, true)}</td><td>${fmtFinvizPreview(row.SMA200, true)}</td>
+              <td>${fmtFinvizPreview(row['52W High'], true)}</td><td>${fmtFinvizPreview(row.RSI)}</td>
+              <td>${fmtFinvizPreview(row['Rel Volume'])}</td><td>${fmtFinvizPreview(row.Price)}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>
+      </details>`;
+  } catch(e) {
+    wrap.innerHTML = `<div class="error-msg">Kontrola HTML importu: ${escHtml(e.message)}</div>`;
+  }
+}
+
 async function renderScannerView() {
   const el = document.getElementById('main-scanner');
   if (!el) return;
@@ -6970,6 +7062,8 @@ async function renderScannerView() {
           <div class="scanner-actions">
             <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
             <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
+            <input id="finvizHtmlFolderInput" class="scanner-file" type="file" accept=".html,.htm" webkitdirectory directory multiple>
+            <button class="btn" onclick="importFinvizHtmlFolder()">Import Finviz HTML folder</button>
             <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
           </div>
         </div>
@@ -6977,6 +7071,7 @@ async function renderScannerView() {
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
         </div>
+        <div id="finvizPreview"></div>
         <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
       </div>
     </div>`;
@@ -6987,6 +7082,7 @@ async function renderScannerView() {
     else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
+  await loadFinvizHtmlPreview();
   await loadNasdaqScannerResults();
 }
 
