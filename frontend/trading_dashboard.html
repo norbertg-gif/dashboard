@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260607-signal-segments">
+<link rel="stylesheet" href="/dashboard.css?v=20260608-prediction-layout">
 </head>
 <body>
 
@@ -173,16 +173,12 @@
 </div>
 
 <div class="layout">
-  <div class="daily-col" id="dailyCol">
+  <div class="daily-col signal-col" id="dailyCol">
     <div class="daily-resizer" id="dailyResizer"></div>
     <div class="chart-header" style="flex-shrink:0;">
-      <span class="label">Daily</span>
+      <span class="label">Signaly a analytika</span>
       <span id="dailySignalBadge" style="font-size:10px;"></span>
     </div>
-    <div style="flex:0 0 50%;position:relative;min-height:0;">
-      <div id="dailyChart" style="position:absolute;inset:0;"></div>
-    </div>
-    <div id="dailyInfo" style="padding:8px;font-size:11px;color:var(--muted);flex-shrink:0;border-top:1px solid var(--border);"></div>
     <div id="dailyExtra" style="flex:1;min-height:0;"></div>
   </div>
   <div class="charts-col">
@@ -192,6 +188,10 @@
         <span class="label" id="mainChartLabel">Weekly chart</span>
         <span id="realBadge" class="badge" style="font-size:11px; color:var(--muted);"></span>
         <div style="margin-left:auto;display:flex;gap:4px;">
+          <div id="dailyMarkerModeControls" class="daily-marker-mode" style="display:none;">
+            <button class="toggle-btn active" id="btnDailyMarkerStrength" onclick="setDailyMarkerMode('strength')">Sila</button>
+            <button class="toggle-btn" id="btnDailyMarkerReturn" onclick="setDailyMarkerMode('return')">Vynos %</button>
+          </div>
           <button class="toggle-btn active" id="btnWeekly" onclick="switchView('weekly')" style="padding:3px 10px;font-size:11px;">Weekly</button>
           <button class="toggle-btn" id="btnDaily" onclick="switchView('daily')" style="padding:3px 10px;font-size:11px;">Daily</button>
         </div>
@@ -405,6 +405,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260607-signal-segments"></script>
+  <script src="/dashboard.js?v=20260608-prediction-layout"></script>
 </body>
 </html>

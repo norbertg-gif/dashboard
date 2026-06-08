@@ -1578,6 +1578,21 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .daily-resizer:hover {
   background: var(--accent);
 }
+#predictiveTab .signal-col #dailyExtra {
+  overflow: auto;
+  scrollbar-width: thin;
+}
+#predictiveTab .daily-marker-mode {
+  display: flex;
+  gap: 3px;
+  padding-right: 5px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+#predictiveTab .daily-marker-mode .toggle-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+}
 
 #predictiveTab .charts-col {
   display: flex;

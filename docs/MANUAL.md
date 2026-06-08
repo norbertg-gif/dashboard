@@ -96,7 +96,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 ### Graf
 
-- Hlavný graf prepína **Weekly / Daily**.
+- Hlavný graf prepína **Weekly / Daily**. V režime Daily možno markery prepnúť
+  medzi **Sila** (`2/4`, `3/4`, `4/4`) a **Výnos %** voči aktuálnej cene.
 - **Buy signál markery** (šípky pod sviečkami) — viď farby nižšie.
 - **eToro kolieska** — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa
   malé krúžky pod sviečkou v ktorej bola pozícia otvorená (zelená = v zisku,
@@ -130,9 +131,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Hit rate indikátorov / Váhy indikátorov** — výkonnosť a váhy jednotlivých
   indikátorov.
 
-### Ľavý mini panel
+### Ľavý signálový panel
 
-- **DAILY** — mini graf so signálmi.
+- Celá výška ľavého stĺpca je vyhradená pre históriu a analytiku signálov.
 - **SIGNAL HISTORY** — časová os signálov s win rate.
 - **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
   horizonty zostávajú `pending`.

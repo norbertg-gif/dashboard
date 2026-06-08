@@ -4812,30 +4812,6 @@ function initCharts() {
   });
 
   // Daily mini chart
-  const dailyEl = document.getElementById('dailyChart');
-  if (dailyEl) {
-    if (pc_dailyChartInst) { pc_dailyChartInst.remove(); pc_dailyChartInst = null; }
-    pc_dailySeries = null;
-    pc_dailyChartInst = LightweightCharts.createChart(dailyEl, {
-      ...getPcChartOpts(),
-      width: dailyEl.offsetWidth,
-      height: dailyEl.offsetHeight,
-      timeScale: { borderColor: getChartTheme().border, timeVisible: false, rightOffset: 1 },
-      rightPriceScale: { borderColor: getChartTheme().border, scaleMargins: { top: 0.1, bottom: 0.1 } },
-      crosshair: { mode: 0 },
-      handleScroll: true,
-      handleScale: { mouseWheel: true, pinch: true },
-    });
-    pc_dailySeries = pc_dailyChartInst.addCandlestickSeries({
-      upColor: '#26a69a', downColor: '#ef5350',
-      borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-      wickUpColor: '#26a69a', wickDownColor: '#ef5350',
-    });
-    new ResizeObserver(() => {
-      if (pc_dailyChartInst) pc_dailyChartInst.applyOptions({ width: dailyEl.offsetWidth, height: dailyEl.offsetHeight });
-    }).observe(dailyEl);
-  }
-
   // Sync scroll/zoom — len real ↔ pred, daily je nezávislý
   let pc_syncing = false;
   pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
@@ -5086,6 +5062,17 @@ function renderCharts(data) {
     if (badge) badge.textContent = '';
     const info = document.getElementById('dailyInfo');
     if (info) info.textContent = 'Daily dáta nie sú dostupné.';
+  }
+
+  if (data.daily_candles && data.daily_candles.length) {
+    const sig = data.daily_signal;
+    const badge = document.getElementById('dailySignalBadge');
+    if (badge) {
+      const col = sig > 0.05 ? '#26a69a' : sig < -0.05 ? '#ef5350' : '#64748b';
+      badge.textContent = (sig > 0.05 ? '+' : '') + (sig * 100).toFixed(0) + '%';
+      badge.style.color = col;
+    }
+    pc_renderDailyExtra(data);
   }
 
   // Fit real chart, copy its logical range to pred chart after render
@@ -6417,12 +6404,46 @@ function switchView(view) {
   document.getElementById('dailyMainChart').style.display  = view === 'daily'  ? '' : 'none';
   document.getElementById('btnWeekly').classList.toggle('active', view === 'weekly');
   document.getElementById('btnDaily').classList.toggle('active',  view === 'daily');
+  const markerControls = document.getElementById('dailyMarkerModeControls');
+  if (markerControls) markerControls.style.display = view === 'daily' ? 'flex' : 'none';
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   const dsp = document.getElementById('dailySignalPanel');
   if (dsp) dsp.style.display = view === 'daily' ? '' : 'none';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
   setManualFibInputs();
   pc_applyOverlays();
+}
+
+let pc_dailyMarkerMode = localStorage.getItem('pc_daily_marker_mode') === 'return' ? 'return' : 'strength';
+
+function setDailyMarkerMode(mode) {
+  pc_dailyMarkerMode = mode === 'return' ? 'return' : 'strength';
+  localStorage.setItem('pc_daily_marker_mode', pc_dailyMarkerMode);
+  setDailyMarkerModeButtons();
+  if (pc_currentView === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
+}
+
+function setDailyMarkerModeButtons() {
+  document.getElementById('btnDailyMarkerStrength')?.classList.toggle('active', pc_dailyMarkerMode === 'strength');
+  document.getElementById('btnDailyMarkerReturn')?.classList.toggle('active', pc_dailyMarkerMode === 'return');
+}
+
+function dailySignalReturnMarker(signal, candles) {
+  const idx = candles.findIndex(c => c.time >= signal.time);
+  if (idx < 0 || idx + 10 >= candles.length) {
+    return { color: '#f59e0b', text: '...', shape: 'circle' };
+  }
+  const entry = Number(signal.close) || Number(candles[idx].close);
+  const latest = Number(candles[candles.length - 1].close);
+  if (!Number.isFinite(entry) || !entry || !Number.isFinite(latest)) {
+    return { color: '#f59e0b', text: '...', shape: 'circle' };
+  }
+  const pct = (latest - entry) / entry * 100;
+  return {
+    color: pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8',
+    text: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
+    shape: 'circle',
+  };
 }
 
 function renderDailyMain(data) {
@@ -6455,14 +6476,19 @@ function renderDailyMain(data) {
   }
 
   if (data.daily_buy_signals && data.daily_buy_signals.length) {
-    const markers = data.daily_buy_signals.map(s => ({
-      time:     s.time,
-      position: 'belowBar',
-      color:    sigTierColor(s.tier, s.score),
-      shape:    'arrowUp',
-      text:     s.score + '/4',
-      size:     sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1,
-    }));
+    const markers = data.daily_buy_signals.map(s => {
+      const display = pc_dailyMarkerMode === 'return'
+        ? dailySignalReturnMarker(s, data.daily_candles)
+        : { color: sigTierColor(s.tier, s.score), shape: 'arrowUp', text: s.score + '/4' };
+      return {
+        time: s.time,
+        position: 'belowBar',
+        color: display.color,
+        shape: display.shape,
+        text: display.text,
+        size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1),
+      };
+    });
     cs.setMarkers(markers);
   }
 
@@ -6474,6 +6500,7 @@ function renderDailyMain(data) {
     pc_dailyMainInst.timeScale().fitContent();
   });
   renderDailySidebar(data);
+  setDailyMarkerModeButtons();
 }
 
 function renderDailySidebar(data) {
