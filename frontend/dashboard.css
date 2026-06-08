@@ -2177,6 +2177,181 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .sig-history-result { justify-self: end; font-weight: 700; font-family: var(--font-mono); }
 #predictiveTab .sig-history-row.good .sig-history-result { color: var(--up); }
 #predictiveTab .sig-history-row.bad .sig-history-result { color: var(--down); }
+#predictiveTab .sig-outcome-detail {
+  border-top: 1px solid var(--border);
+  padding: 5px 0;
+}
+#predictiveTab .sig-outcome-detail-meta,
+#predictiveTab .sig-outcome-horizons {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+#predictiveTab .sig-outcome-detail-meta {
+  color: var(--muted2);
+  margin-bottom: 4px;
+}
+#predictiveTab .sig-outcome-horizons {
+  flex-wrap: wrap;
+}
+#predictiveTab .sig-horizon {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  color: var(--muted2);
+}
+#predictiveTab .sig-horizon.win { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, var(--border)); }
+#predictiveTab .sig-horizon.loss { color: var(--down); border-color: color-mix(in srgb, var(--down) 45%, var(--border)); }
+#predictiveTab .sig-horizon.flat { color: var(--muted); }
+#predictiveTab .sig-horizon.pending { color: var(--yellow); }
+#predictiveTab .sig-horizon.unavailable { opacity: .65; }
+#predictiveTab .signal-outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+#predictiveTab .signal-outcome-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 7px;
+  min-width: 0;
+}
+#predictiveTab .signal-outcome-head,
+#predictiveTab .signal-outcome-main,
+#predictiveTab .signal-outcome-range {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+#predictiveTab .signal-outcome-head {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--muted2);
+  margin-bottom: 6px;
+}
+#predictiveTab .signal-outcome-head strong {
+  color: var(--accent);
+  font-size: 11px;
+}
+#predictiveTab .signal-outcome-main span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+}
+#predictiveTab .signal-outcome-main small {
+  color: var(--muted2);
+  font-size: 7px;
+  margin-bottom: 2px;
+}
+#predictiveTab .signal-outcome-range {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--muted2);
+}
+#predictiveTab .signal-outcome-range .positive { color: var(--up); }
+#predictiveTab .signal-outcome-range .negative { color: var(--down); }
+#predictiveTab .signal-outcome-note {
+  color: var(--muted2);
+  font-size: 8px;
+  margin-top: 5px;
+}
+#predictiveTab .signal-segments {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+#predictiveTab .signal-segments > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  list-style: none;
+}
+#predictiveTab .signal-segments > summary::-webkit-details-marker { display: none; }
+#predictiveTab .signal-segment-tabs {
+  display: inline-flex;
+  gap: 3px;
+}
+#predictiveTab .signal-segment-horizon {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--muted2);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  padding: 3px 5px;
+}
+#predictiveTab .signal-segment-horizon.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+#predictiveTab .signal-segment-tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+#predictiveTab .signal-segment-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+#predictiveTab .signal-segment-title {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 5px 6px;
+  text-transform: uppercase;
+}
+#predictiveTab .signal-segment-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 1.25fr) repeat(5, minmax(30px, 1fr));
+  gap: 3px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  padding: 5px 6px;
+  text-align: right;
+}
+#predictiveTab .signal-segment-row:last-child { border-bottom: 0; }
+#predictiveTab .signal-segment-row.header {
+  color: var(--muted2);
+  font-size: 7px;
+}
+#predictiveTab .signal-segment-row span:first-child { text-align: left; }
+#predictiveTab .signal-segment-row.low-sample { opacity: .65; }
+#predictiveTab .signal-segment-row .positive { color: var(--up); }
+#predictiveTab .signal-segment-row .negative { color: var(--down); }
+#predictiveTab .signal-segment-name { font-weight: 700; }
+#predictiveTab .signal-segment-empty {
+  color: var(--muted2);
+  font-size: 9px;
+  padding: 8px;
+}
+@media (max-width: 900px) {
+  #predictiveTab .signal-outcome-grid { grid-template-columns: 1fr; }
+  #predictiveTab .signal-segment-tables { grid-template-columns: 1fr; }
+}
 
 #checklistTab {
   position: fixed;

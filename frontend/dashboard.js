@@ -4729,6 +4729,7 @@ let pc_oppLoading = false;
 let pc_oppLoadedAt = 0;
 let pc_scannerPollTimer = null;
 let pc_scannerLoading = false;
+let pc_signalSegmentHorizon = 60;
 
 // Overlay series refs
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
@@ -5101,7 +5102,13 @@ function pc_renderDailyExtra(data) {
   if (!el) return;
 
   const signals = data.daily_buy_signals || [];
+  const outcomeSummary = data.signal_outcome_summary || {};
+  const outcomeSegments = data.signal_outcome_segments || {};
   const daily   = data.daily_candles    || [];
+  const fmtSigned = value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number >= 0 ? '+' : ''}${number.toFixed(1)}%` : '--';
+  };
   const dayKey = ts => new Date(Number(ts) * 1000).toISOString().slice(0, 10);
   const dailyIndexByDay = new Map(daily.map((c, i) => [dayKey(c.time), i]));
   const findSignalDailyIndex = s => {
@@ -5182,6 +5189,73 @@ function pc_renderDailyExtra(data) {
       border-radius:50%;background:${col};
       box-shadow:0 0 4px ${col}80;cursor:help;"></div>`;
   }).join('');
+  const formatHorizonOutcome = (signal, horizon) => {
+    const result = signal.outcomes?.[String(horizon)];
+    if (!result || result.status === 'unavailable') {
+      return `<span class="sig-horizon unavailable">${horizon}D n/a</span>`;
+    }
+    if (result.status !== 'complete') {
+      const available = Number(result.days_available) || 0;
+      return `<span class="sig-horizon pending">${horizon}D ${available}/${horizon}</span>`;
+    }
+    const pct = Number(result.return_pct);
+    const cls = result.outcome === 'win' ? 'win' : result.outcome === 'loss' ? 'loss' : 'flat';
+    return `<span class="sig-horizon ${cls}" title="MFE ${fmtSigned(result.mfe_pct)} · MAE ${fmtSigned(result.mae_pct)}">${horizon}D ${fmtSigned(pct)}</span>`;
+  };
+  const fmtMetric = value => value != null && Number.isFinite(Number(value)) ? fmtSigned(Number(value)) : '--';
+  const horizonCards = [30, 60, 90].map(horizon => {
+    const row = outcomeSummary[String(horizon)] || {};
+    const completedCount = Number(row.completed) || 0;
+    const winRateText = row.win_rate != null && Number.isFinite(Number(row.win_rate))
+      ? `${Number(row.win_rate).toFixed(0)}%`
+      : '--';
+    return `<div class="signal-outcome-card">
+      <div class="signal-outcome-head">
+        <strong>${horizon}D</strong>
+        <span>${completedCount} vyhodn. · ${Number(row.pending) || 0} pending</span>
+      </div>
+      <div class="signal-outcome-main">
+        <span><small>win rate</small>${winRateText}</span>
+        <span><small>priemer</small>${fmtMetric(row.avg_return_pct)}</span>
+        <span><small>medián</small>${fmtMetric(row.median_return_pct)}</span>
+      </div>
+      <div class="signal-outcome-range">
+        <span>MFE <b class="positive">${fmtMetric(row.avg_mfe_pct)}</b></span>
+        <span>MAE <b class="negative">${fmtMetric(row.avg_mae_pct)}</b></span>
+      </div>
+    </div>`;
+  }).join('');
+  const segmentMetric = value => value != null && Number.isFinite(Number(value))
+    ? fmtSigned(value)
+    : '--';
+  const segmentRows = (group, horizon) => {
+    const rows = outcomeSegments[group]?.[String(horizon)] || [];
+    return rows.map(row => {
+      const sample = Number(row.completed) || 0;
+      const rate = row.win_rate != null ? `${Number(row.win_rate).toFixed(0)}%` : '--';
+      const lowSample = sample > 0 && sample < 5;
+      return `<div class="signal-segment-row${lowSample ? ' low-sample' : ''}">
+        <span class="signal-segment-name">${row.label}</span>
+        <span title="${Number(row.total) || 0} signálov celkom">${sample}</span>
+        <span>${rate}</span>
+        <span>${segmentMetric(row.median_return_pct)}</span>
+        <span class="positive">${segmentMetric(row.avg_mfe_pct)}</span>
+        <span class="negative">${segmentMetric(row.avg_mae_pct)}</span>
+      </div>`;
+    }).join('') || '<div class="signal-segment-empty">Zatiaľ bez dát</div>';
+  };
+  const segmentHorizonButtons = [30, 60, 90].map(horizon =>
+    `<button class="signal-segment-horizon${pc_signalSegmentHorizon === horizon ? ' active' : ''}"
+      onclick="setSignalSegmentHorizon(${horizon})">${horizon}D</button>`
+  ).join('');
+  const segmentTable = group => `
+    <div class="signal-segment-table">
+      <div class="signal-segment-title">${group === 'tier' ? 'Podľa tieru' : 'Podľa skóre'}</div>
+      <div class="signal-segment-row header">
+        <span>Segment</span><span>N</span><span>Win</span><span>Medián</span><span>MFE</span><span>MAE</span>
+      </div>
+      ${segmentRows(group, pc_signalSegmentHorizon)}
+    </div>`;
   const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
     const col = s.outcome === 'win'  ? '#26a69a'
              : s.outcome === 'loss' ? '#ef5350'
@@ -5190,18 +5264,23 @@ function pc_renderDailyExtra(data) {
     const label = s.outcome || 'pending';
     const pct = Number.isFinite(s.pct) ? `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(1)}%` : '--';
     const entry = Number.isFinite(s.entry) ? s.entry.toFixed(2) : (Number.isFinite(Number(s.close)) ? Number(s.close).toFixed(2) : '--');
-    return `<div style="display:grid;grid-template-columns:58px 1fr 48px 48px;gap:4px;
-                font-family:var(--font-mono);font-size:9px;color:var(--muted2);">
-      <span>${new Date(s.time*1000).toLocaleDateString('sk-SK', {day:'2-digit', month:'2-digit', year:'2-digit'})}</span>
-      <span>entry ${entry}</span>
-      <span style="color:${col};text-align:right;">${label}</span>
-      <span style="color:${col};text-align:right;">${pct}</span>
+    return `<div class="sig-outcome-detail">
+      <div class="sig-outcome-detail-meta">
+        <span>${new Date(s.time*1000).toLocaleDateString('sk-SK', {day:'2-digit', month:'2-digit', year:'2-digit'})}</span>
+        <span>entry ${entry}</span>
+        <span style="color:${col};">${label} ${pct}</span>
+      </div>
+      <div class="sig-outcome-horizons">
+        ${formatHorizonOutcome(s, 30)}
+        ${formatHorizonOutcome(s, 60)}
+        ${formatHorizonOutcome(s, 90)}
+      </div>
     </div>`;
   }).join('');
 
   el.innerHTML = `
     <div style="padding:10px 12px;border-top:1px solid var(--border);height:100%;
-                display:flex;flex-direction:column;gap:12px;overflow:hidden;">
+                display:flex;flex-direction:column;gap:12px;overflow:auto;">
 
       <!-- ── SIGNAL HISTORY ─────────────────────────────────────── -->
       <div>
@@ -5237,6 +5316,27 @@ function pc_renderDailyExtra(data) {
           ${detailRows}
         </div>
       </div>
+
+      <div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--text);
+                    letter-spacing:0.06em;margin-bottom:6px;">
+          30D / 60D / 90D VALIDÁCIA
+        </div>
+        <div class="signal-outcome-grid">${horizonCards}</div>
+        <div class="signal-outcome-note">Obchodné sviečky · MFE = maximálny rast · MAE = maximálny pokles</div>
+      </div>
+
+      <details class="signal-segments" open>
+        <summary>
+          <span>SIGNAL ANALYTICS</span>
+          <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>
+        </summary>
+        <div class="signal-segment-tables">
+          ${segmentTable('tier')}
+          ${segmentTable('score')}
+        </div>
+        <div class="signal-outcome-note">N = počet vyhodnotených signálov. Vzorka pod 5 je označená ako predbežná.</div>
+      </details>
 
       <!-- ── MULTI-TIMEFRAME ALIGNMENT ──────────────────────────── -->
       <div>
@@ -5295,6 +5395,13 @@ function pc_renderDailyExtra(data) {
       </div>
     </div>
   `;
+}
+
+function setSignalSegmentHorizon(horizon) {
+  const value = Number(horizon);
+  if (![30, 60, 90].includes(value)) return;
+  pc_signalSegmentHorizon = value;
+  if (pc_lastData) pc_renderDailyExtra(pc_lastData);
 }
 
 function pc_renderSidebar(data) {
@@ -7233,6 +7340,7 @@ function loadTickerFromChecklist(ticker) {
 window.pc_applyOverlays = pc_applyOverlays;
 window.drawManualFibFromInputs = drawManualFibFromInputs;
 window.clearManualFib = clearManualFib;
+window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;
 window.pc_renderSidebar = pc_renderSidebar;

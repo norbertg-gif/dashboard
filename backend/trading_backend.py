@@ -3025,11 +3025,15 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         daily_candles     = []
         daily_indicators  = {}
         daily_buy_signals = []
+        signal_outcome_summary = {}
+        signal_outcome_segments = {}
         weekly_bias       = {}
         today_score       = 0
 
         try:
-            raw_d = yf.download(ticker, period="6mo", interval="1d",
+            # Dva roky dávajú priestor na vyhodnotenie 30/60/90 obchodných
+            # sviečok aj pre staršie signály. Do grafu sa naďalej posiela len tail.
+            raw_d = yf.download(ticker, period="2y", interval="1d",
                                 auto_adjust=True, progress=False)
             if isinstance(raw_d.columns, pd.MultiIndex):
                 raw_d.columns = raw_d.columns.get_level_values(0)
@@ -3131,6 +3135,9 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                             "close": sig["close"],
                         })
                 daily_buy_signals.sort(key=lambda x: x["time"])
+                daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
+                    df_d, daily_buy_signals
+                )
 
                 # All candles for chart (last 90 days)
                 for ts, row in df_d.iloc[-90:].iterrows():
@@ -3216,6 +3223,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "daily_signal":       round(daily_signal, 3),
             "daily_indicators":   daily_indicators,
             "daily_buy_signals":  daily_buy_signals,
+            "signal_outcome_summary": signal_outcome_summary,
+            "signal_outcome_segments": signal_outcome_segments,
             "weekly_bias":        weekly_bias,
             "today_score":        today_score,
             "earnings_dates": sorted(earnings_dates),
@@ -3393,6 +3402,8 @@ SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je 
 DIP_STRONG_THRESHOLD = 90
 DIP_VERY_STRONG_THRESHOLD = 100
 SIGNAL_BUY_THRESHOLD = 3   # 3/4+ = plný buy signál, 2/4 = watch
+SIGNAL_OUTCOME_HORIZONS = (30, 60, 90)
+SIGNAL_OUTCOME_MOVE_THRESHOLD = 1.5
 
 
 def rolling_zscore(close_series):
@@ -3446,6 +3457,152 @@ def signal_tier(score: int, trend: str = "side") -> str:
     if trend == "down":
         return "counter"
     return "watch"
+
+
+def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) -> tuple[list[dict], dict, dict]:
+    """Pridá k signálom forward výsledky po 30/60/90 obchodných sviečkach.
+
+    Výpočet je čisto analytický a nemení signal score ani tier. MFE/MAE sa merajú
+    od close signálnej sviečky po high/low nasledujúcich sviečok.
+    """
+    if df_daily is None or df_daily.empty:
+        return signals, {}, {}
+
+    frame = df_daily.copy()
+    today = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    frame = frame.loc[
+        [
+            (pd.Timestamp(value).tz_localize(None) if pd.Timestamp(value).tzinfo else pd.Timestamp(value)).normalize() < today
+            for value in frame.index
+        ]
+    ]
+    if frame.empty:
+        return signals, {}, {}
+    normalized_dates = []
+    for value in frame.index:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        normalized_dates.append(ts.normalize())
+    date_to_index = {str(ts.date()): idx for idx, ts in enumerate(normalized_dates)}
+
+    enriched = []
+    for signal in signals:
+        item = dict(signal)
+        signal_date = str(pd.Timestamp(int(signal["time"]), unit="s").date())
+        idx = date_to_index.get(signal_date)
+        entry = safe_float(signal.get("close"))
+        outcomes = {}
+
+        for horizon in SIGNAL_OUTCOME_HORIZONS:
+            result = {
+                "horizon": horizon,
+                "status": "unavailable",
+                "days_available": 0,
+            }
+            if idx is None or entry is None or entry <= 0:
+                outcomes[str(horizon)] = result
+                continue
+
+            available = max(0, len(frame) - idx - 1)
+            result["days_available"] = min(available, horizon)
+            if available < horizon:
+                result["status"] = "pending"
+                outcomes[str(horizon)] = result
+                continue
+
+            future = frame.iloc[idx + 1:idx + horizon + 1]
+            end_close = safe_float(future.iloc[-1].get("Close"))
+            max_high = safe_float(future["High"].max())
+            min_low = safe_float(future["Low"].min())
+            if None in (end_close, max_high, min_low):
+                outcomes[str(horizon)] = result
+                continue
+
+            return_pct = (end_close - entry) / entry * 100
+            mfe_pct = (max_high - entry) / entry * 100
+            mae_pct = (min_low - entry) / entry * 100
+            high_pos = int(np.argmax(future["High"].to_numpy(dtype=float))) + 1
+            low_pos = int(np.argmin(future["Low"].to_numpy(dtype=float))) + 1
+            outcome = (
+                "win" if return_pct >= SIGNAL_OUTCOME_MOVE_THRESHOLD
+                else "loss" if return_pct <= -SIGNAL_OUTCOME_MOVE_THRESHOLD
+                else "flat"
+            )
+            outcomes[str(horizon)] = {
+                "horizon": horizon,
+                "status": "complete",
+                "outcome": outcome,
+                "return_pct": round(return_pct, 2),
+                "mfe_pct": round(mfe_pct, 2),
+                "mae_pct": round(mae_pct, 2),
+                "days_to_mfe": high_pos,
+                "days_to_mae": low_pos,
+                "days_available": horizon,
+            }
+
+        item["outcomes"] = outcomes
+        enriched.append(item)
+
+    def summarize(rows: list[dict], horizon: int) -> dict:
+        key = str(horizon)
+        completed = [
+            signal["outcomes"][key]
+            for signal in rows
+            if signal.get("outcomes", {}).get(key, {}).get("status") == "complete"
+        ]
+        pending = sum(
+            1 for signal in rows
+            if signal.get("outcomes", {}).get(key, {}).get("status") == "pending"
+        )
+        returns = [row["return_pct"] for row in completed]
+        mfes = [row["mfe_pct"] for row in completed]
+        maes = [row["mae_pct"] for row in completed]
+        wins = sum(row.get("outcome") == "win" for row in completed)
+        losses = sum(row.get("outcome") == "loss" for row in completed)
+        flats = sum(row.get("outcome") == "flat" for row in completed)
+        return {
+            "horizon": horizon,
+            "completed": len(completed),
+            "pending": pending,
+            "unavailable": len(rows) - len(completed) - pending,
+            "wins": wins,
+            "losses": losses,
+            "flats": flats,
+            "win_rate": round(wins / len(completed) * 100, 1) if completed else None,
+            "avg_return_pct": round(float(np.mean(returns)), 2) if returns else None,
+            "median_return_pct": round(float(np.median(returns)), 2) if returns else None,
+            "avg_mfe_pct": round(float(np.mean(mfes)), 2) if mfes else None,
+            "avg_mae_pct": round(float(np.mean(maes)), 2) if maes else None,
+        }
+
+    summary = {}
+    for horizon in SIGNAL_OUTCOME_HORIZONS:
+        summary[str(horizon)] = summarize(enriched, horizon)
+
+    segment_groups = {
+        "tier": [
+            ("buy", "Buy", [signal for signal in enriched if signal.get("tier") == "buy"]),
+            ("watch", "Watch", [signal for signal in enriched if signal.get("tier") == "watch"]),
+            ("counter", "Counter", [signal for signal in enriched if signal.get("tier") == "counter"]),
+        ],
+        "score": [
+            (str(score), f"{score}/4", [signal for signal in enriched if int(signal.get("score", 0)) == score])
+            for score in (2, 3, 4)
+        ],
+    }
+    segments = {}
+    for group_name, groups in segment_groups.items():
+        segments[group_name] = {}
+        for horizon in SIGNAL_OUTCOME_HORIZONS:
+            rows = []
+            for key, label, group_signals in groups:
+                row = summarize(group_signals, horizon)
+                row.update({"key": key, "label": label, "total": len(group_signals)})
+                rows.append(row)
+            segments[group_name][str(horizon)] = rows
+
+    return enriched, summary, segments
 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
