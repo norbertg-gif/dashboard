@@ -2318,7 +2318,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .signal-segment-tables {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin-top: 8px;
 }
@@ -2338,13 +2338,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .signal-segment-row {
   display: grid;
-  grid-template-columns: minmax(48px, 1.25fr) repeat(5, minmax(30px, 1fr));
-  gap: 3px;
+  grid-template-columns: minmax(58px, 1.4fr) 28px repeat(4, minmax(38px, 1fr));
+  gap: 5px;
   align-items: center;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 8.5px;
   padding: 5px 6px;
   text-align: right;
 }
