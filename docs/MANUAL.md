@@ -95,6 +95,9 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **Ticker** — zadaj symbol alebo názov (s automatickým doplňovaním).
 - **Obdobie** — 1 rok / 2 roky histórie.
 - **Načítať** — spustí výpočet.
+- **Decision Bar** — okamžité zhrnutie pre aktuálny ticker: rozhodnutie
+  Buy / Watch / Counter / No signal, sila setupu, weekly bias, regime a
+  vzdialenosť od posledného signálu.
 - **Backtest overlay** — prekryje historickú predikciu na graf (hit/miss).
 - **Export snapshot** — uloží HTML snapshot aktuálneho stavu.
 - **Checklist** — rýchla kontrola viacerých tickerov na čerstvé signály.
@@ -130,7 +133,8 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   červená = v strate, odlíšené podľa účtu).
 - Spodný **Prediktívny chart** ukazuje predikciu ďalšej sviečky (+1 prognóza) a
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
-  hlavného grafu** (pomer 2:1).
+  hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
+  hlavný graf.
 
 ### Pravý panel (sidebar)
 
@@ -159,7 +163,10 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 
 ### Ľavý signálový panel
 
-- Celá výška ľavého stĺpca je vyhradená pre históriu a analytiku signálov.
+- Celá výška ľavého stĺpca je vyhradená pre dôkazy signálu: aktuálny setup,
+  históriu a analytiku.
+- **Aktuálny setup** — C1 až C4, trend, weekly bias a vysvetlenie, čo ešte
+  chýba k novému signálu.
 - **HISTÓRIA SIGNÁLOV** — časová os signálov s úspešnosťou.
 - **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
   horizonty zostávajú `pending`.
