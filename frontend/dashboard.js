@@ -7222,9 +7222,11 @@ async function renderScannerView() {
     else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
-  await loadFinvizHtmlPreview();
-  await refreshOpportunities(true);
+  // Posledný scan ide z cache — načítaj okamžite a nezávisle od pomalých sekcií
   await loadNasdaqScannerResults();
+  // Opportunities (prepočet) a Finviz preview bežia na pozadí, neblokujú scan
+  loadFinvizHtmlPreview();
+  refreshOpportunities(true);
 }
 
 function renderNasdaqScanner(payload) {
