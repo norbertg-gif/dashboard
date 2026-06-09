@@ -102,6 +102,19 @@
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
 
+  <h3>Glosár a vizuálna priorita</h3>
+  <table>
+    <tr><th>Pojem</th><th>Význam</th></tr>
+    <tr><td><strong>Rozhodnutie (tier)</strong></td><td>Buy / Watch / Counter. Určuje ho trendový kontext a v UI ho vyjadruje farba.</td></tr>
+    <tr><td><strong>Sila</strong></td><td>Hodnota 0/4 až 4/4: počet splnených podmienok C1–C4.</td></tr>
+    <tr><td><strong>Trend</strong></td><td>Uptrend / sideways / downtrend. Určuje, či je dip kupovateľný alebo proti trendu.</td></tr>
+    <tr><td><strong>Výsledok</strong></td><td>Úspešný / neúspešný / neutrálny / čaká na vyhodnotenie.</td></tr>
+    <tr><td><strong>Horizont</strong></td><td>30D / 60D / 90D obchodných dní použitých na validáciu.</td></tr>
+    <tr><td><strong>DIP kvalita</strong></td><td>Externý Finviz ranking, samostatný od technického signálu.</td></tr>
+    <tr><td><strong>Setup score 0–100</strong></td><td>Interné pomocné skóre na radenie kandidátov; nie je hlavným obchodným rozhodnutím.</td></tr>
+  </table>
+  <p>Poradie významu je <strong>rozhodnutie → sila → trend → historický výsledok</strong>. Farba vždy vyjadruje rozhodnutie a číslo x/4 vždy silu.</p>
+
   <h3>Ovládanie</h3>
   <table>
     <tr><th>Prvok</th><th>Funkcia</th></tr>
@@ -128,10 +141,10 @@
 
   <h3>Pravý panel</h3>
   <ul>
-    <li><strong>Daily buy signál</strong>
+    <li><strong>Aktuálny setup</strong>
       <ul>
         <li><strong>Weekly bias</strong> — BULLISH / BEARISH-NEUTRÁLNY: composite &gt; 5 %, cena nad Kumo, EMA10 &gt; EMA20.</li>
-        <li><strong>Dnešné skóre 0–4</strong> — počet splnených denných podmienok. Dnešný signál je aktívny len pri bullish weekly bias.</li>
+        <li><strong>Sila signálu 0–4</strong> — počet splnených denných podmienok. Rozhodnutie Buy/Watch/Counter určuje trendový kontext.</li>
         <li><strong>História signálov</strong> — minulé signály a výsledok voči aktuálnej cene (win/loss/flat/pending). Farba skóre = tier.</li>
       </ul>
     </li>
@@ -145,8 +158,8 @@
   <h3>Ľavý signálový panel</h3>
   <ul>
     <li>Celá výška ľavého stĺpca je vyhradená pre históriu a analytiku signálov.</li>
-    <li><strong>SIGNAL HISTORY</strong> — časová os signálov s win rate.</li>
-    <li><strong>TIMEFRAME ALIGNMENT</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
+    <li><strong>HISTÓRIA SIGNÁLOV</strong> — časová os signálov s úspešnosťou.</li>
+    <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
   </ul>
 
   <h3>Farby signálov (tier)</h3>
