@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260609-predictive-phase-b">
+<link rel="stylesheet" href="/dashboard.css?v=20260609-scanner-phase-c">
 </head>
 <body>
 
@@ -181,7 +181,6 @@
   <button class="btn" id="loadBtn" onclick="loadData()">Načítať</button>
   <button class="toggle-btn active" id="btToggle" onclick="toggleBacktest()">Backtest overlay</button>
   <button class="toggle-btn" id="exportBtn" onclick="exportSnapshot()" title="Ulozit staticky HTML snapshot">&#128190; Export snapshot</button>
-  <button class="toggle-btn" onclick="openChecklist()" style="border-color:var(--accent);color:var(--accent);">&#9776; Checklist</button>
   <button class="toggle-btn" id="reoptBtn" onclick="loadData(true)" title="Prepocitat optimalizovane vahy">&#9881; Prepočítať váhy</button>
   <span id="statusMsg" style="color:var(--muted); font-size:12px;"></span>
 </div>
@@ -245,14 +244,6 @@
   </div>
 
   <div class="pc-sidebar" id="pcSidebar">
-    <div class="card" id="opportunitiesCard">
-      <div class="opp-toolbar">
-        <div class="card-title">Opportunities</div>
-        <button class="opp-refresh" onclick="refreshOpportunities(true)" title="Prepočítať radar">⟳</button>
-      </div>
-      <div id="opportunitiesInfo" class="opp-empty">Radar sa načíta z watchlistu a eToro pozícií.</div>
-    </div>
-
     <div class="card">
       <div class="card-title">Prognóza nasledujúcej sviečky</div>
       <div id="predInfo" style="color:var(--muted); font-size:12px;">Načítaj ticker…</div>
@@ -382,7 +373,7 @@
 <div id="checklistTab" style="display:none;">
   <div class="cl-header">
     <button class="btn" onclick="closeChecklist()" style="background:var(--bg3);color:var(--text);">&#8592; Späť</button>
-    <span class="cl-title">Checklist — Buy Signály</span>
+    <span class="cl-title">Checklist watchlistu</span>
     <div class="cl-actions">
       <span style="font-size:12px;color:var(--muted);">Posledných</span>
       <input type="number" id="clDays" value="10" min="1" max="60" class="cl-input" style="width:60px;">
@@ -426,6 +417,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260609-predictive-phase-b"></script>
+  <script src="/dashboard.js?v=20260609-scanner-phase-c"></script>
 </body>
 </html>
