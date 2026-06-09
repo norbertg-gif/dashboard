@@ -64,9 +64,11 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **📊 Portfólio** — aktuálne eToro pozície, summary (Cash / Invested / P&L / **Dnes P/L** / Equity).
 - **História** — uzavreté obchody a journal.
 - **Risk** — riziková analýza portfólia.
-- **📈 Prediktívny** — predikcia ďalšej sviečky + denné/týždenné buy signály
+- **📈 Prediktívny** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
+  história, validácia a predikcia ďalšej sviečky
   (viď [sekcia 4](#4-prediktívny-tab--ako-čítať-signály)).
-- **Scanner** — Nasdaq skener s DIP crossover stratégiou
+- **Scanner** — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu
+  a Nasdaq skener s DIP crossover stratégiou
   (viď [sekcia 5](#5-scanner--dip-stratégia)).
 
 ---
@@ -100,7 +102,6 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   vzdialenosť od posledného signálu.
 - **Backtest overlay** — prekryje historickú predikciu na graf (hit/miss).
 - **Export snapshot** — uloží HTML snapshot aktuálneho stavu.
-- **Checklist** — rýchla kontrola viacerých tickerov na čerstvé signály.
 - **Prepočítať váhy** — preučí váhy indikátorov pre daný ticker.
 - **Fibonacci interactive** — pri prvom zapnutí automaticky vyberie posledný
   významný swing a vykreslí retracement aj extension úrovne. Farebné body
@@ -146,8 +147,6 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
     weekly bias bullish.
   - **História signálov** — minulé signály a ich výsledok voči aktuálnej cene
     (win / loss / flat / pending). Farba skóre = tier signálu (legenda nižšie).
-- **Opportunities** — najsľubnejšie tickery z watchlistu/portfólia podľa setup
-  skóre.
 - **Prognóza nasledujúcej sviečky**
   - **Smer** — BULLISH / BEARISH + očakávaná % zmena.
   - **Regime** — režim trhu z HMM modelu (Bull / Bear / Sideways / High
@@ -193,11 +192,17 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 
 ## 5. Scanner + DIP stratégia
 
-Záložka **Scanner** prechádza Nasdaq-100 a hľadá denné buy signály, ktoré
-kombinuje s externým **DIP rankingom** (importovaný Excel).
+Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. Horný blok
+**Kandidáti** obsahuje Opportunities z watchlistu/eToro pozícií a vstup do
+Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály
+s externým **DIP rankingom**. Klik na kandidáta otvorí jeho detail v Predikcii.
 
 ### Ovládanie
 
+- **Opportunities** — kompaktný radar najzaujímavejších titulov z watchlistu
+  a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.
+- **Checklist watchlistu** — kontrola tickerov z watchlistu za zvolený počet
+  dní. Výsledok je samostatná fullscreen tabuľka; klik otvorí detail v Predikcii.
 - **Vybrať súbor → Import DIP Excel** — nahrá DIP ranking (FA/TA skóre) z XLSX.
 - **Import Finviz HTML folder** — vyberie priečinok so stránkami uloženými cez
   Save Page WE. Backend spojí tabuľky `screener_table`, odstráni duplicity,
@@ -222,7 +227,8 @@ kombinuje s externým **DIP rankingom** (importovaný Excel).
 | Stĺpec | Význam |
 |---|---|
 | **Ticker** | Symbol (klik otvorí v prediktívnom tabe). |
-| **Tech** | Technické setup skóre (0–100). |
+| **Rozhodnutie** | Buy / Watch / Counter podľa trendového kontextu. |
+| **Sila** | Počet splnených podmienok C1–C4 (`x/4`). |
 | **DIP** | Celkové DIP skóre z importu. |
 | **FA** | Fundamentálna časť DIP skóre. |
 | **TA** | Technická časť DIP skóre. |
