@@ -122,6 +122,7 @@ function switchMainTab(tab) {
         restorePredictiveTicker();
         initCharts();
         initPredictiveCollapsibles();
+        initPredictiveModelChartToggle();
         wlRender();
         loadData();
         refreshOpportunities();
@@ -130,6 +131,7 @@ function switchMainTab(tab) {
       setTimeout(() => tryInit(20), 200);
     } else {
       initPredictiveCollapsibles();
+      initPredictiveModelChartToggle();
       setTimeout(() => {
         const rc = document.getElementById('realChart');
         if (window.pc_realChartInst && rc && rc.offsetWidth > 0)
@@ -306,7 +308,51 @@ function sigTierLabel(tier, score) {
 }
 
 const PC_COLLAPSE_KEY = 'td_predictive_sidebar_collapsed';
+const PC_MODEL_CHART_COLLAPSED_KEY = 'td_predictive_model_chart_collapsed';
 let pcCollapseObserverStarted = false;
+
+function predictiveDecisionMeta(decision) {
+  if (decision === 'buy') return { label: 'BUY', cls: 'buy' };
+  if (decision === 'watch') return { label: 'WATCH', cls: 'watch' };
+  if (decision === 'counter') return { label: 'COUNTER', cls: 'counter' };
+  return { label: 'NO SIGNAL', cls: 'no-signal' };
+}
+
+function predictiveDecisionFromData(data) {
+  const wb = data?.weekly_bias || {};
+  const details = data?.today_details || {};
+  const rawScore = Number(data?.today_raw_score ?? data?.today_score ?? 0) || 0;
+  if (!wb.bullish || rawScore < 2) return 'no-signal';
+  if (details.trend === 'up') return 'buy';
+  if (details.trend === 'down') return 'counter';
+  return 'watch';
+}
+
+function predictiveMissingSetup(details) {
+  if (!details) return [];
+  const labels = [
+    ['ema_kijun_touch', 'C1 EMA/Kijun touch'],
+    ['rsi_pullback', 'C2 RSI pullback'],
+    ['bull_volume', 'C3 bull volume'],
+    ['zscore_dip', 'C4 z-score dip'],
+  ];
+  return labels.filter(([key]) => !details[key]).map(([, label]) => label);
+}
+
+function predictiveSignalReturn(data, signal) {
+  const latestClose = Number(data?.daily_candles?.length ? data.daily_candles[data.daily_candles.length - 1].close : null);
+  const entry = Number(signal?.close);
+  if (!Number.isFinite(latestClose) || !Number.isFinite(entry) || !entry) return null;
+  return ((latestClose - entry) / entry) * 100;
+}
+
+function predictiveSignalAgeLabel(signal) {
+  if (!signal?.time) return 'bez signálu';
+  const days = Math.max(0, Math.floor((Date.now() / 1000 - Number(signal.time)) / 86400));
+  if (days === 0) return 'dnes';
+  if (days === 1) return 'pred 1 dňom';
+  return `pred ${days} dňami`;
+}
 
 function pcCollapseMap() {
   try { return JSON.parse(localStorage.getItem(PC_COLLAPSE_KEY) || '{}') || {}; }
@@ -388,6 +434,35 @@ function togglePredictiveSection(card) {
   map[cid] = !card.classList.contains('collapsed');
   pcSaveCollapseMap(map);
   initPredictiveCollapsibles();
+}
+
+function applyPredictiveModelChartCollapsed(collapsed) {
+  const block = document.getElementById('predictiveModelBlock');
+  const btn = document.getElementById('predictiveModelToggle');
+  if (!block || !btn) return;
+  block.classList.toggle('collapsed', !!collapsed);
+  btn.textContent = collapsed ? '+' : '−';
+  btn.title = collapsed ? 'Rozbaliť modelový chart' : 'Zbaliť modelový chart';
+  try { localStorage.setItem(PC_MODEL_CHART_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch(e) {}
+  if (!collapsed) {
+    setTimeout(() => {
+      const el = document.getElementById('predChart');
+      if (window.pc_predChartInst && el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+        window.pc_predChartInst.applyOptions({ width: el.offsetWidth, height: el.offsetHeight });
+        window.pc_predChartInst.timeScale().fitContent();
+      }
+    }, 80);
+  }
+}
+
+function initPredictiveModelChartToggle() {
+  applyPredictiveModelChartCollapsed(localStorage.getItem(PC_MODEL_CHART_COLLAPSED_KEY) === '1');
+}
+
+function togglePredictiveModelChart() {
+  const block = document.getElementById('predictiveModelBlock');
+  if (!block) return;
+  applyPredictiveModelChartCollapsed(!block.classList.contains('collapsed'));
 }
 
 function fmtMoney(v) {
@@ -5294,6 +5369,22 @@ function pc_renderDailyExtra(data) {
   const outcomeSummary = data.signal_outcome_summary || {};
   const outcomeSegments = data.signal_outcome_segments || {};
   const daily   = data.daily_candles    || [];
+  const details = data.today_details || {};
+  const rawScore = Number(data.today_raw_score ?? data.today_score ?? 0) || 0;
+  const decision = predictiveDecisionFromData(data);
+  const decisionMeta = predictiveDecisionMeta(decision);
+  const missing = predictiveMissingSetup(details);
+  const latestSignal = signals.length ? signals[signals.length - 1] : null;
+  const latestSignalReturn = predictiveSignalReturn(data, latestSignal);
+  const currentNote = (() => {
+    if (!data.weekly_bias?.bullish) {
+      return `Weekly bias zatiaľ setup nepotvrdzuje. Technická sila je <strong>${rawScore}/4</strong>${missing.length ? `, chýba ešte: ${missing.join(', ')}.` : '.'}`;
+    }
+    if (rawScore >= 2) {
+      return `Aktuálny setup má rozhodnutie <strong>${decisionMeta.label}</strong> a silu <strong>${rawScore}/4</strong>.`;
+    }
+    return `Aktuálne nie je nový signál. Sila je <strong>${rawScore}/4</strong>${missing.length ? `, chýba ešte: ${missing.join(', ')}.` : '.'}`;
+  })();
   const fmtSigned = value => {
     const number = Number(value);
     return Number.isFinite(number) ? `${number >= 0 ? '+' : ''}${number.toFixed(1)}%` : '--';
@@ -5466,10 +5557,33 @@ function pc_renderDailyExtra(data) {
       </div>
     </div>`;
   }).join('');
+  const setupChecks = [
+    { key: 'ema_kijun_touch', label: 'C1 EMA/Kijun touch' },
+    { key: 'rsi_pullback', label: 'C2 RSI pullback' },
+    { key: 'bull_volume', label: 'C3 bull volume' },
+    { key: 'zscore_dip', label: 'C4 z-score dip' },
+  ].map(item => {
+    const active = !!details[item.key];
+    return `<div class="signal-check ${active ? 'active' : 'inactive'}">
+      <span class="signal-check-label">${item.label}</span>
+      <span class="signal-check-value">${active ? 'splnené' : 'chýba'}</span>
+    </div>`;
+  }).join('');
 
   el.innerHTML = `
     <div style="padding:10px 12px;border-top:1px solid var(--border);height:100%;
                 display:flex;flex-direction:column;gap:12px;overflow:auto;">
+
+      <div class="signal-current-box">
+        <div class="signal-current-top">
+          <span class="signal-current-title">Aktuálny setup</span>
+          <span class="pc-decision-badge ${decisionMeta.cls}">${decisionMeta.label}</span>
+        </div>
+        <div class="signal-current-status">Sila ${rawScore}/4 · Trend ${details.trend || 'n/a'} · Weekly bias ${data.weekly_bias?.bullish ? 'bullish' : 'nepotvrdený'}</div>
+        <div class="signal-check-grid">${setupChecks}</div>
+        <div class="signal-current-note">${currentNote}</div>
+        ${latestSignal ? `<div class="signal-current-note">Posledný uzavretý signál: <strong>${new Date(latestSignal.time * 1000).toLocaleDateString('sk-SK')}</strong> · ${sigTierLabel(latestSignal.tier, latestSignal.score)} ${latestSignal.score}/4${latestSignalReturn != null ? ` · voči aktuálnej cene ${fmtSigned(latestSignalReturn)}` : ''}</div>` : ''}
+      </div>
 
       <!-- ── SIGNAL HISTORY ─────────────────────────────────────── -->
       <div>
@@ -5603,6 +5717,7 @@ function pc_renderSidebar(data) {
 
   document.getElementById('realBadge').textContent =
     `${data.candles.length} sviečok · posledná: ${prev.toLocaleString('sk-SK', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+  pc_renderDecisionBar(data);
 
   // Prediction card
   const pc = data.pred_candle;
@@ -5833,6 +5948,43 @@ function onTickerKeydown(e) {
   } else if (e.key === 'Escape') {
     pc_closeDropdown();
   }
+}
+
+function pc_renderDecisionBar(data) {
+  const el = document.getElementById('pcDecisionBar');
+  if (!el || !data) return;
+  const ticker = (document.getElementById('tickerInput')?.value || '').trim().toUpperCase() || '—';
+  const rawScore = Number(data.today_raw_score ?? data.today_score ?? 0) || 0;
+  const wb = data.weekly_bias || {};
+  const details = data.today_details || {};
+  const decision = predictiveDecisionFromData(data);
+  const meta = predictiveDecisionMeta(decision);
+  const regime = data.regime || {};
+  const latestSignal = (data.daily_buy_signals || []).length ? data.daily_buy_signals[data.daily_buy_signals.length - 1] : null;
+  const latestReturn = predictiveSignalReturn(data, latestSignal);
+  const missing = predictiveMissingSetup(details);
+  const regimeText = regime.regime
+    ? `${regime.regime}${regime.confidence != null ? ` ${Math.round(regime.confidence * 100)}%` : ''}`
+    : 'n/a';
+  let summary = '';
+  if (!wb.bullish) {
+    summary = `Weekly bias zatiaľ nepotvrdzuje nový vstup. Technická sila je ${rawScore}/4${missing.length ? `, chýba ešte ${missing.join(', ')}.` : '.'}`;
+  } else if (rawScore < 2) {
+    summary = `Nový signál ešte nevznikol. Aktuálna sila je ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
+  } else {
+    summary = `${meta.label} setup je aktívny. Trend je ${details.trend || 'n/a'} a ${latestSignal ? `posledný uzavretý signál bol ${predictiveSignalAgeLabel(latestSignal)}.` : 'zatiaľ bez staršieho uzavretého signálu.'}`;
+  }
+  el.innerHTML = `
+    <span class="pc-decision-symbol">${ticker}</span>
+    <span class="pc-decision-badge ${meta.cls}">${meta.label}</span>
+    <span class="pc-decision-chip">Sila <strong>${rawScore}/4</strong></span>
+    <span class="pc-decision-chip">Trend <strong>${details.trend || 'n/a'}</strong></span>
+    <span class="pc-decision-chip">Weekly <strong>${wb.bullish ? 'bullish' : 'off'}</strong></span>
+    <span class="pc-decision-chip">Regime <strong>${regimeText}</strong></span>
+    <span class="pc-decision-chip">Posledný <strong>${predictiveSignalAgeLabel(latestSignal)}</strong></span>
+    ${latestReturn != null ? `<span class="pc-decision-chip">Od signálu <strong>${latestReturn >= 0 ? '+' : ''}${latestReturn.toFixed(1)}%</strong></span>` : ''}
+    <div class="pc-decision-summary">${summary}</div>
+  `;
 }
 
 // close dropdown on outside click
@@ -6609,8 +6761,6 @@ function switchView(view) {
   const markerControls = document.getElementById('dailyMarkerModeControls');
   if (markerControls) markerControls.style.display = view === 'daily' ? 'flex' : 'none';
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
-  const dsp = document.getElementById('dailySignalPanel');
-  if (dsp) dsp.style.display = view === 'daily' ? '' : 'none';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
   setManualFibInputs();
   pc_applyOverlays();
@@ -6701,70 +6851,7 @@ function renderDailyMain(data) {
     pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
     pc_dailyMainInst.timeScale().fitContent();
   });
-  renderDailySidebar(data);
   setDailyMarkerModeButtons();
-}
-
-function renderDailySidebar(data) {
-  const panel = document.getElementById('dailySignalPanel');
-  if (!panel) return;
-  const wb    = data.weekly_bias || {};
-  const score = data.today_score || 0;
-  const sigs  = data.daily_buy_signals || [];
-  const daily = data.daily_candles || [];
-  const latestClose = daily.length ? Number(daily[daily.length - 1].close) : null;
-  const lastSig = sigs.length ? sigs[sigs.length - 1] : null;
-  const biasColor  = wb.bullish ? '#26a69a' : '#ef5350';
-  const biasText   = wb.bullish ? '▲ BULLISH' : '▼ BEARISH/NEUTRÁLNY';
-  const scoreColor = score >= 3 ? '#26a69a' : score === 2 ? '#f59e0b' : 'var(--muted)';
-  const scoreLabel = score >= 3 ? 'Buy signál' : score === 2 ? 'Watch' : 'Žiadny signál';
-  const signalOutcome = (s) => {
-    const entry = Number(s.close);
-    if (!Number.isFinite(entry) || !Number.isFinite(latestClose) || !entry) {
-      return { cls:'pending', label:'pending', pct:'--' };
-    }
-    const pct = ((latestClose - entry) / entry) * 100;
-    const cls = pct > 1.5 ? 'good' : pct < -1.5 ? 'bad' : 'flat';
-    const label = cls === 'good' ? 'win' : cls === 'bad' ? 'loss' : 'flat';
-    return { cls, label, pct:(pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' };
-  };
-
-  panel.innerHTML =
-    '<div class="card-title">Aktuálny setup</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Weekly trend bias - composite > 5%, cena nad Kumo, EMA10 > EMA20.">Weekly bias <span class="tt-icon">ⓘ</span></span>' +
-      '<span class="val" style="color:' + biasColor + '">' + biasText + '</span></div>' +
-    '<div style="padding:2px 0 6px 0;font-size:10px;color:var(--muted);">' +
-      'Composite: ' + (wb.composite || 0) + '% | Nad Kumo: ' + (wb.above_kumo ? '✓' : '✗') + ' | EMA bull: ' + (wb.ema_bull ? '✓' : '✗') +
-    '</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Sila 0-4: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer, +1 z-score ≤ -1.5 (štatistický dip). Rozhodnutie Buy/Watch/Counter určuje trendový kontext, nie samotné číslo.">Sila signálu <span class="tt-icon">ⓘ</span></span>' +
-      '<span class="val" style="color:' + scoreColor + '">' + score + '/4 - ' + scoreLabel + '</span></div>' +
-    (lastSig ? '<div class="pred-row"><span class="key">Posledný signál</span>' +
-      '<span class="val">' + new Date(lastSig.time * 1000).toLocaleDateString("sk-SK") + ' (' + lastSig.score + '/4)</span></div>' : '') +
-    (!wb.bullish ? '<div style="margin-top:8px;padding:6px 8px;background:rgba(239,83,80,0.08);border-radius:4px;font-size:11px;color:#ef5350;">Weekly trend nie je bullish - nové signály nie sú aktívne.</div>' : '') +
-    '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
-        '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;color:var(--muted);text-transform:uppercase;">História signálov</div>' +
-        '<div style="font-size:10px;color:var(--muted);">voči aktuálnej cene</div>' +
-      '</div>' +
-      '<div style="display:flex;gap:10px;font-size:9px;color:var(--muted);margin-bottom:5px;">' +
-        '<span style="color:#26a69a">● Buy</span>' +
-        '<span style="color:#f59e0b">● Watch</span>' +
-        '<span style="color:#ef5350">● Counter (downtrend)</span>' +
-      '</div>' +
-      '<div class="sig-history-list">' +
-      (sigs.slice().reverse().slice(0, 8).map(s => {
-        const d   = new Date(s.time * 1000).toLocaleDateString("sk-SK");
-        const col = sigTierColor(s.tier, s.score);
-        const out = signalOutcome(s);
-        return '<div class="sig-history-row ' + out.cls + '">' +
-          '<span class="sig-history-date">' + d + '</span>' +
-          '<span class="sig-history-score" style="color:' + col + '" title="' + sigTierLabel(s.tier, s.score) + '">' + s.score + '/4</span>' +
-          '<span class="sig-history-price">' + s.close + '</span>' +
-          '<span class="sig-history-result">' + out.label + ' ' + out.pct + '</span>' +
-        '</div>';
-      }).join('') || '<span style="color:var(--muted);font-size:11px;">Žiadne historické signály</span>') +
-      '</div>' +
-    '</div>';
 }
 function isStockAsset(item) {
   if (!item || typeof item === 'string') return true;
@@ -7420,6 +7507,8 @@ async function loadData(reoptimize = false) {
   const status = document.getElementById('statusMsg');
   if (btn) btn.disabled = true;
   if (status) status.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><span class="spinner"></span> Načítavam…</span>';
+  const decisionBar = document.getElementById('pcDecisionBar');
+  if (decisionBar) decisionBar.innerHTML = '<div class="pc-decision-empty">Načítavam rozhodnutie, kontext a analytiku signálu…</div>';
 
   // initCharts() called once on tab init, not on every load
   document.getElementById('predInfo').innerHTML = '<div class="loading"><div class="spinner"></div>Počítam prognózu…</div>';
@@ -7454,6 +7543,7 @@ async function loadData(reoptimize = false) {
     document.getElementById('btBadge').style.display = pc_showBacktest ? '' : 'none';
   } catch (e) {
     if (status) status.innerHTML = `<span style="color:var(--bear)">✗ ${e.message}</span>`;
+    if (decisionBar) decisionBar.innerHTML = `<div class="pc-decision-empty">Ticker sa nepodarilo vyhodnotiť: ${escHtml(e.message)}</div>`;
     document.getElementById('predInfo').innerHTML = `<div class="error-msg">${e.message}</div>`;
     document.getElementById('btInfo').innerHTML   = '—';
     document.getElementById('indInfo').innerHTML  = '—';
@@ -7668,6 +7758,7 @@ window.pc_renderSidebar = pc_renderSidebar;
 window.pc_selectTicker = pc_selectTicker;
 window.loadData = loadData;
 window.toggleBacktest = toggleBacktest;
+window.togglePredictiveModelChart = togglePredictiveModelChart;
 window.exportSnapshot = exportSnapshot;
 window.switchView = switchView;
 window.pc_applyOverlays = pc_applyOverlays;
