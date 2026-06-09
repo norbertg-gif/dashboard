@@ -121,6 +121,7 @@
     <tr><td><strong>Ticker</strong></td><td>Symbol alebo názov (s autodoplňovaním).</td></tr>
     <tr><td><strong>Obdobie</strong></td><td>1 rok / 2 roky histórie.</td></tr>
     <tr><td><strong>Načítať</strong></td><td>Spustí výpočet.</td></tr>
+    <tr><td><strong>Decision Bar</strong></td><td>Rýchle rozhodnutie pre aktuálny ticker: Buy / Watch / Counter / No signal, sila setupu, weekly bias, regime a vzdialenosť od posledného signálu.</td></tr>
     <tr><td><strong>Backtest overlay</strong></td><td>Prekryje historickú predikciu (hit/miss).</td></tr>
     <tr><td><strong>Export snapshot</strong></td><td>Uloží HTML snapshot stavu.</td></tr>
     <tr><td><strong>Checklist</strong></td><td>Rýchla kontrola viacerých tickerov.</td></tr>
@@ -136,7 +137,7 @@
     <li>Hlavný graf prepína <strong>Weekly / Daily</strong>. V režime Daily možno markery prepnúť medzi <strong>Sila</strong> (2/4 až 4/4) a <strong>Výnos %</strong> voči aktuálnej cene.</li>
     <li><strong>Buy signál markery</strong> (šípky pod sviečkami) — farba podľa tieru (viď nižšie).</li>
     <li><strong>eToro kolieska</strong> — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa malé krúžky pod sviečkou, kde bola pozícia otvorená (zelená = v zisku, červená = v strate, odlíšené podľa účtu).</li>
-    <li>Spodný <strong>Prediktívny chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1) — ukazuje predikciu ďalšej sviečky a voliteľne backtest overlay.</li>
+    <li>Spodný <strong>Prediktívny chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1), ukazuje predikciu ďalšej sviečky a dá sa zbaliť, keď chceš viac priestoru pre hlavný graf.</li>
   </ul>
 
   <h3>Pravý panel</h3>
@@ -157,7 +158,8 @@
 
   <h3>Ľavý signálový panel</h3>
   <ul>
-    <li>Celá výška ľavého stĺpca je vyhradená pre históriu a analytiku signálov.</li>
+    <li>Celá výška ľavého stĺpca je vyhradená pre dôkazy signálu: aktuálny setup, históriu a analytiku.</li>
+    <li><strong>Aktuálny setup</strong> — C1 až C4, trend, weekly bias a vysvetlenie, čo ešte chýba k novému signálu.</li>
     <li><strong>HISTÓRIA SIGNÁLOV</strong> — časová os signálov s úspešnosťou.</li>
     <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
   </ul>
