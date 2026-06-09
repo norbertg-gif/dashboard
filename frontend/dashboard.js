@@ -5439,7 +5439,7 @@ function pc_renderDailyExtra(data) {
   ).join('');
   const segmentTable = group => `
     <div class="signal-segment-table">
-      <div class="signal-segment-title">${group === 'tier' ? 'Podľa tieru' : 'Podľa skóre'}</div>
+      <div class="signal-segment-title">${group === 'tier' ? 'Podľa rozhodnutia' : 'Podľa sily'}</div>
       <div class="signal-segment-row header">
         <span>Segment</span><span>N</span><span>Win</span><span>Medián</span><span>MFE</span><span>MAE</span>
       </div>
@@ -5476,18 +5476,18 @@ function pc_renderDailyExtra(data) {
         <div style="display:flex;align-items:center;justify-content:space-between;
                     margin-bottom:6px;">
           <span style="font-size:10.5px;font-weight:700;color:var(--text);
-                       letter-spacing:0.06em;">SIGNAL HISTORY</span>
+                       letter-spacing:0.06em;">HISTÓRIA SIGNÁLOV</span>
           <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono);">
-            ${total} signálov · ${winRate}% win rate
+            ${total} signálov · ${winRate}% úspešnosť
           </span>
         </div>
 
         <div style="display:flex;gap:4px;font-size:9px;color:var(--muted2);
                     margin-bottom:6px;">
-          <span style="color:#26a69a">●${win} win</span>
-          <span style="color:#ef5350">●${loss} loss</span>
-          <span style="color:#94a3b8">●${flat} flat</span>
-          ${pending > 0 ? `<span style="color:#f59e0b">●${pending} pending</span>` : ''}
+          <span style="color:#26a69a">●${win} úspešné</span>
+          <span style="color:#ef5350">●${loss} neúspešné</span>
+          <span style="color:#94a3b8">●${flat} neutrálne</span>
+          ${pending > 0 ? `<span style="color:#f59e0b">●${pending} čaká</span>` : ''}
         </div>
 
         <div style="position:relative;height:14px;background:var(--bg);
@@ -5517,7 +5517,7 @@ function pc_renderDailyExtra(data) {
 
       <details class="signal-segments" open>
         <summary>
-          <span>SIGNAL ANALYTICS</span>
+          <span>ANALYTIKA SIGNÁLOV</span>
           <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>
         </summary>
         <div class="signal-segment-tables">
@@ -5531,7 +5531,7 @@ function pc_renderDailyExtra(data) {
       <div>
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
                     letter-spacing:0.06em;margin-bottom:6px;">
-          TIMEFRAME ALIGNMENT
+          ZHODA ČASOVÝCH RÁMCOV
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;
                     font-size:11px;font-family:var(--font-mono);">
@@ -6730,13 +6730,13 @@ function renderDailySidebar(data) {
   };
 
   panel.innerHTML =
-    '<div class="card-title">Daily buy signál</div>' +
+    '<div class="card-title">Aktuálny setup</div>' +
     '<div class="pred-row"><span class="tt key" data-tip="Weekly trend bias - composite > 5%, cena nad Kumo, EMA10 > EMA20.">Weekly bias <span class="tt-icon">ⓘ</span></span>' +
       '<span class="val" style="color:' + biasColor + '">' + biasText + '</span></div>' +
     '<div style="padding:2px 0 6px 0;font-size:10px;color:var(--muted);">' +
       'Composite: ' + (wb.composite || 0) + '% | Nad Kumo: ' + (wb.above_kumo ? '✓' : '✗') + ' | EMA bull: ' + (wb.ema_bull ? '✓' : '✗') +
     '</div>' +
-    '<div class="pred-row"><span class="tt key" data-tip="Skóre 0-4: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer, +1 z-score ≤ -1.5 (štatistický dip). 3/4+ = buy, 2/4 = watch.">Dnešné skóre <span class="tt-icon">ⓘ</span></span>' +
+    '<div class="pred-row"><span class="tt key" data-tip="Sila 0-4: +1 dotyk EMA20/Kijun (±0.5%), +1 RSI < 45, +1 bullish sviečka s objemom > 1.2x priemer, +1 z-score ≤ -1.5 (štatistický dip). Rozhodnutie Buy/Watch/Counter určuje trendový kontext, nie samotné číslo.">Sila signálu <span class="tt-icon">ⓘ</span></span>' +
       '<span class="val" style="color:' + scoreColor + '">' + score + '/4 - ' + scoreLabel + '</span></div>' +
     (lastSig ? '<div class="pred-row"><span class="key">Posledný signál</span>' +
       '<span class="val">' + new Date(lastSig.time * 1000).toLocaleDateString("sk-SK") + ' (' + lastSig.score + '/4)</span></div>' : '') +
@@ -6874,8 +6874,6 @@ function renderOpportunities(rows, days) {
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
     const sigTxt = sig ? `${sigTierLabel(sig.tier, sig.score)} ${sig.score}/4 ${sig.date}` : `bez signálu ${days}d`;
     const posTxt = pos ? `${pos.count}x eToro ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(0)}` : 'mimo portf.';
-    const grade = r.setup_grade || (r._score >= 78 ? 'A' : r._score >= 62 ? 'B' : r._score >= 45 ? 'Watch' : 'Risky');
-    const gradeCls = grade === 'A' || grade === 'B' ? 'good' : grade === 'Watch' ? 'warn' : 'bad';
     const metrics = r.metrics ? `RSI ${r.metrics.rsi ?? '-'} | ATR ${r.metrics.atr_pct ?? '-'}%` : '';
     const reasons = opportunityReasons(r, pos, days).map(reason =>
       `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${reason.text}</span>`
@@ -6884,10 +6882,8 @@ function renderOpportunities(rows, days) {
       <div class="opp-top">
         <span class="opp-sym">${r.ticker}</span>
         <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
-        <span class="opp-score-wrap"><span class="opp-score-label">score</span><span class="opp-score">${r._score}</span></span>
       </div>
       <div class="opp-meta">
-        <span class="opp-pill ${gradeCls}">${grade}</span>
         <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
         <span class="opp-pill ${sigCls}">${sigTxt}</span>
         <span class="opp-pill ${posCls}">${posTxt}</span>
