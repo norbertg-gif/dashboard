@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Trading Dashboard Backend — port 8766
 pip install fastapi uvicorn yfinance pandas requests
@@ -3073,6 +3073,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         signal_outcome_segments = {}
         weekly_bias       = {}
         today_score       = 0
+        today_raw_score   = 0
+        today_details     = {}
 
         try:
             # Dva roky dávajú priestor na vyhodnotenie 30/60/90 obchodných
@@ -3170,9 +3172,12 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                 try:
                     today_z = float(_zscore_series_d.iloc[-1]) if len(_zscore_series_d) else 0.0
                     today_sc, today_details = score_signal_day(df_d.iloc[-1], today_z)
+                    today_raw_score = int(today_sc)
                     today_score = int(today_sc) if weekly_bullish else 0
                 except Exception:
                     today_score = 0
+                    today_raw_score = 0
+                    today_details = {}
 
                 # Also show older saved signals (beyond 90 days) if any
                 for date_key, sig in ticker_slog.items():
@@ -3277,6 +3282,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "signal_outcome_segments": signal_outcome_segments,
             "weekly_bias":        weekly_bias,
             "today_score":        today_score,
+            "today_raw_score":    today_raw_score,
+            "today_details":      today_details,
             "earnings_dates": sorted(earnings_dates),
             "regime":             regime_info,
             "candles":     candles,
