@@ -1611,31 +1611,39 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             or unrealized.get("currentRate")
         )
         current_rate = raw_current_rate if (isinstance(raw_current_rate, (int, float)) and raw_current_rate > 0) else None
+        units_val = pos.get("units") or 0
+        is_buy = pos.get("isBuy", True)
         if current_rate is None:
             # Fallback: odhad z openRate + PnL + units (BUY/SELL)
             try:
                 open_rate = float(pos.get("openRate") or 0)
-                units = float(pos.get("units") or 0)
-                if open_rate > 0 and units > 0 and pnl is not None:
-                    delta = float(pnl) / units
-                    current_rate = open_rate + delta if pos.get("isBuy", True) else open_rate - delta
+                u = float(units_val)
+                if open_rate > 0 and u > 0 and pnl is not None:
+                    delta = float(pnl) / u
+                    current_rate = open_rate + delta if is_buy else open_rate - delta
                     if current_rate <= 0:
                         current_rate = None
             except Exception:
                 current_rate = None
+        prev_close = _get_prev_close(sym) if sym and not sym.isdigit() else None
+        if prev_close and current_rate and units_val:
+            daily_pnl = round((current_rate - prev_close) * float(units_val) * (1 if is_buy else -1), 2)
+        else:
+            daily_pnl = 0.0
+
         result.append({
             "positionId":   pos.get("positionID"),
             "instrumentId": iid,
             "symbol":       sym,
             "name":         name,
             "type":         asset_type,
-            "isBuy":        pos.get("isBuy", True),
+            "isBuy":        is_buy,
             "openDateTime": pos.get("openDateTime", ""),
             "amount":       round(amount, 2),
-            "units":        pos.get("units"),
+            "units":        units_val,
             "openRate":     pos.get("openRate"),
             "currentRate":  current_rate,
-            "dailyPnl":     round(pos.get("dailyPnL") or 0, 2),
+            "dailyPnl":     daily_pnl,
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
             "fees":         round(pos.get("totalFees") or pos.get("fees") or 0, 2),
@@ -2217,6 +2225,26 @@ def _flatten_ohlcv(raw: dict) -> list:
     for group in raw.get("candles", []):
         candles.extend(group.get("candles", []))
     return candles
+
+
+def _get_prev_close(sym: str) -> float | None:
+    """Vráti close predchádzajúcej dennej sviečky z OHLCV cache (nie dnešnej)."""
+    try:
+        cache_path = CACHE_DIR / "ohlcv" / f"{sym}_OneDay"
+        raw = cache_read(cache_path)
+        if not raw:
+            return None
+        candles = _flatten_ohlcv(raw)
+        if len(candles) < 2:
+            return None
+        # Posledná sviečka môže byť dnešná (neuzavretá) — vezmi predposlednú
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        closed = [c for c in candles if (c.get("fromDate") or "")[:10] < today_str]
+        if not closed:
+            return None
+        return float(closed[-1].get("close") or closed[-1].get("c") or 0) or None
+    except Exception:
+        return None
 
 
 def _merge_ohlcv_tail(cached: dict, new_data: dict, interval: str, max_candles: int = 1000) -> dict:
