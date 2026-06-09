@@ -722,8 +722,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as _SR
 
 class _BasicAuth(BaseHTTPMiddleware):
-    _user = os.getenv("DASH_USER", "")
-    _pass = os.getenv("DASH_PASS", "")
+    def __init__(self, app):
+        super().__init__(app)
+        # Render values are read when the middleware instance is created.
+        # Strip accidental spaces/newlines added while editing secret env vars.
+        self._user = os.getenv("DASH_USER", "").strip()
+        self._pass = os.getenv("DASH_PASS", "").strip()
+        print(
+            "  Basic Auth middleware: "
+            f"{'zapnuta' if self._user else 'vypnuta'} "
+            f"(user_len={len(self._user)}, pass_len={len(self._pass)})"
+        )
 
     async def dispatch(self, request, call_next):
         # Verejné endpointy — preskočiť Basic Auth (chránené vlastným tokenom)
@@ -732,9 +741,10 @@ class _BasicAuth(BaseHTTPMiddleware):
         if not self._user:          # Auth vypnutá ak DASH_USER nie je nastavený
             return await call_next(request)
         auth = request.headers.get("Authorization", "")
-        if auth.startswith("Basic "):
+        scheme, _, encoded = auth.partition(" ")
+        if scheme.lower() == "basic" and encoded:
             try:
-                u, p = _b64.b64decode(auth[6:]).decode().split(":", 1)
+                u, p = _b64.b64decode(encoded, validate=True).decode("utf-8").split(":", 1)
                 if (_secrets.compare_digest(u, self._user) and
                         _secrets.compare_digest(p, self._pass)):
                     return await call_next(request)
