@@ -1145,7 +1145,7 @@ const PORT_COLS = [
   { key:'units',       label:'Jednotky',     def:false, fmt:'num4'   },
   { key:'openRate',    label:'Vstup',        def:true,  fmt:'price'  },
   { key:'currentRate', label:'Aktuálna',     def:false, fmt:'price'  },
-  { key:'dailyPnl',    label:'Denný P/L',    def:false, fmt:'pnl'    },
+  { key:'dailyPnl',    label:'Denný P/L',    def:true,  fmt:'pnl'    },
   { key:'pnl',         label:'P/L ($)',      def:true,  fmt:'pnl'    },
   { key:'pnlPct',      label:'P/L (%)',      def:true,  fmt:'pct'    },
   { key:'fees',        label:'Poplatky',     def:false, fmt:'usd'    },
@@ -1578,10 +1578,12 @@ function renderPortPanel(pid) {
   // Summary bar
   const liveSummaryPnl = Number(sum._liveTotalPnl ?? sum.total_pnl ?? 0);
   const liveSummaryEquity = Number(sum._liveEquity ?? sum.equity ?? 0);
+  const dailyPnlSum = Number(sum.daily_pnl ?? 0);
   html += `<div class="port-summary">
     <div class="port-sum-item"><div class="port-sum-label">Cash</div><div class="port-sum-val" style="color:var(--green);">$${(sum.cash||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Invested</div><div class="port-sum-val">$${(sum.invested||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">P/L</div><div id="port-sum-${pid}-pnl" class="port-sum-val ${liveSummaryPnl>=0?'port-pos':'port-neg'}">${liveSummaryPnl>=0?'+':''}$${liveSummaryPnl.toFixed(2)}</div></div>
+    <div class="port-sum-item"><div class="port-sum-label">Dnes P/L</div><div id="port-sum-${pid}-daily" class="port-sum-val ${dailyPnlSum>=0?'port-pos':'port-neg'}">${dailyPnlSum>=0?'+':''}$${dailyPnlSum.toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
