@@ -239,7 +239,7 @@
     <li><strong>Watchlist</strong> — sledované tickery (Grafy, Opportunities, prefetch).</li>
     <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>
     <li><strong>eToro pozície</strong> — Portfólio tab ukazuje živé pozície a P&amp;L. Equity sa počíta jednotne ako <code>cash + invested + total_pnl</code>.</li>
-    <li><strong>Dnes P/L</strong> — denný pohyb v USD v summary bare aj ako stĺpec v tabuľke pozícií. Vypočítané z OHLCV cache <code>(currentRate − prevClose) × units × direction</code>. Aproximácia — eToro API toto pole neposkytuje, pre 24/5 tituly sa môže mierne líšiť od hodnoty v appke.</li>
+    <li><strong>Dnes P/L</strong> — live odhad denného pohybu v USD v summary bare aj ako stĺpec v tabuľke pozícií. Vypočítané z OHLCV cache <code>(currentRate − prevClose) × units × direction</code>. Zahŕňa priame pozície; Smart/Copy denný pohyb bez spoľahlivého eToro baseline nie je dopočítaný.</li>
   </ul>
 
   <h2 id="trouble">8. Troubleshooting</h2>

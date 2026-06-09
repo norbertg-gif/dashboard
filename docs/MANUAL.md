@@ -288,7 +288,9 @@ jazykom.
   z OHLCV cache: `(currentRate − prevClose) × units × direction`. eToro
   public API toto pole neposkytuje, ide teda o aproximáciu; pre akcie
   obchodované 24/5 sa môže líšiť od hodnoty v eToro appke. Stĺpec
-  „Denný P/L" je viditeľný aj priamo v tabuľke pozícií.
+  „Denný P/L" je viditeľný aj priamo v tabuľke pozícií a prepočítava sa
+  z live ceny. Súhrn zahŕňa priame pozície; Smart/Copy denný pohyb bez
+  spoľahlivého eToro baseline nie je dopočítaný.
 
 ---
 

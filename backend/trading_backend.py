@@ -1643,6 +1643,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "units":        units_val,
             "openRate":     pos.get("openRate"),
             "currentRate":  current_rate,
+            "previousClose": prev_close,
             "dailyPnl":     daily_pnl,
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
@@ -1683,7 +1684,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
     mir_closed  = sum(m.get("closedPositionsNetProfit") or 0 for m in mirrors_raw)
     total_pnl   = pos_pnl + mir_pnl_t + mir_closed
     equity      = cash + invested + total_pnl
-    daily_pnl   = sum(p.get("dailyPnL") or 0 for p in positions_raw)
+    daily_pnl   = sum(p.get("dailyPnl") or 0 for p in result)
     summary = {
         "cash": round(cash, 2), "invested": round(invested, 2),
         "total_pnl": round(total_pnl, 2), "equity": round(equity, 2),
