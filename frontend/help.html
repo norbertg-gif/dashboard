@@ -96,8 +96,8 @@
     <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody a journal.</li>
     <li><strong>Risk</strong> — riziková analýza portfólia.</li>
-    <li><strong>📈 Prediktívny</strong> — predikcia ďalšej sviečky + denné/týždenné buy signály.</li>
-    <li><strong>Scanner</strong> — Nasdaq skener s DIP crossover stratégiou.</li>
+    <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
+    <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -124,7 +124,6 @@
     <tr><td><strong>Decision Bar</strong></td><td>Rýchle rozhodnutie pre aktuálny ticker: Buy / Watch / Counter / No signal, sila setupu, weekly bias, regime a vzdialenosť od posledného signálu.</td></tr>
     <tr><td><strong>Backtest overlay</strong></td><td>Prekryje historickú predikciu (hit/miss).</td></tr>
     <tr><td><strong>Export snapshot</strong></td><td>Uloží HTML snapshot stavu.</td></tr>
-    <tr><td><strong>Checklist</strong></td><td>Rýchla kontrola viacerých tickerov.</td></tr>
     <tr><td><strong>Prepočítať váhy</strong></td><td>Preučí váhy indikátorov pre ticker.</td></tr>
     <tr><td><strong>Fibonacci interactive</strong></td><td>Automaticky vyberie posledný swing. Oba kotevné body (low = cyan, high = oranžová) možno ťahať myšou. Línie sa tiahnu po pravý okraj grafu — vždy viditeľné aj pri scrollovaní. Labely s cenou sú pri pravom okraji s tmavým pozadím. Manuálne zadanie cez <em>Swing low / Swing high → Draw</em> nájde najbližšiu sviečku k zadanej cene. Uložené per ticker + timeframe.</td></tr>
     <tr><td><strong>30D / 60D / 90D validácia</strong></td><td>Výnos, win rate, MFE a MAE historických signálov po obchodných sviečkach; nemení scoring.</td></tr>
@@ -149,7 +148,6 @@
         <li><strong>História signálov</strong> — minulé signály a výsledok voči aktuálnej cene (win/loss/flat/pending). Farba skóre = tier.</li>
       </ul>
     </li>
-    <li><strong>Opportunities</strong> — najsľubnejšie tickery podľa setup skóre.</li>
     <li><strong>Prognóza nasledujúcej sviečky</strong> — Smer (BULLISH/BEARISH + % zmena), <strong>Regime</strong> (HMM: Bull/Bear/Sideways/High volatility — diagnostika, nezasahuje do ML), Open/High/Low/Close, Composite signal, ML bull prob, ML accuracy.</li>
     <li><strong>Technická vstupná zóna</strong> — len technický odhad vstupu.</li>
     <li><strong>Backtesting</strong> — celková správnosť, priemerná chyba, vs. default váhy.</li>
@@ -176,10 +174,12 @@
   <blockquote><p>Historické signály sa neprepisujú — staré záznamy bez tieru sa dočasne zobrazia ako watch a prefarbia sa po novom vyhodnotení tickera.</p></blockquote>
 
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
-  <p>Záložka <strong>Scanner</strong> prechádza Nasdaq-100 a hľadá denné buy signály, ktoré kombinuje s externým <strong>DIP rankingom</strong> (importovaný Excel).</p>
+  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. Horný blok <strong>Kandidáti</strong> obsahuje Opportunities z watchlistu/eToro pozícií a vstup do Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály s externým <strong>DIP rankingom</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
 
   <h3>Ovládanie</h3>
   <ul>
+    <li><strong>Opportunities</strong> — kompaktný radar titulov z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.</li>
+    <li><strong>Checklist watchlistu</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
     <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX.</li>
     <li><strong>Import Finviz HTML folder</strong> — vyberie priečinok so stránkami uloženými cez Save Page WE, spojí Finviz tabuľky, odstráni duplicity a vypočíta rovnaké FA/TA/TOTAL skóre ako Excel.</li>
     <li>Kontrolná tabuľka pod importom zobrazuje raw Finviz hodnoty aj výsledný ranking. XLSX a HTML cesta aktualizujú rovnakú DIP cache.</li>
@@ -199,7 +199,8 @@
   <table>
     <tr><th>Stĺpec</th><th>Význam</th></tr>
     <tr><td><strong>Ticker</strong></td><td>Symbol (klik otvorí v prediktívnom tabe).</td></tr>
-    <tr><td><strong>Tech</strong></td><td>Technické setup skóre (0–100).</td></tr>
+    <tr><td><strong>Rozhodnutie</strong></td><td>Buy / Watch / Counter podľa trendového kontextu.</td></tr>
+    <tr><td><strong>Sila</strong></td><td>Počet splnených podmienok C1–C4 (<code>x/4</code>).</td></tr>
     <tr><td><strong>DIP</strong></td><td>Celkové DIP skóre z importu.</td></tr>
     <tr><td><strong>FA / TA</strong></td><td>Fundamentálna / technická časť DIP skóre.</td></tr>
     <tr><td><strong>Rank</strong></td><td>Poradie v DIP rankingu.</td></tr>
