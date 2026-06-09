@@ -6934,15 +6934,22 @@ function opportunityReasons(row, pos, days) {
   return reasons.slice(0, 4);
 }
 
+const OPP_DEFAULT_LIMIT = 6;
+let _oppExpanded = false;
+let _oppLastRows = null;
+let _oppLastDays = null;
+
 function renderOpportunities(rows, days) {
   const el = document.getElementById('opportunitiesInfo');
   if (!el) return;
+  _oppLastRows = rows;
+  _oppLastDays = days;
   const clean = (rows || []).filter(r => !r.error);
   const errorCount = (rows || []).length - clean.length;
-  const ranked = clean
+  const all = clean
     .map(r => ({...r, _score: scoreOpportunity(r), _pos: opportunityPositionInfo(r.ticker)}))
-    .sort((a, b) => b._score - a._score || a.ticker.localeCompare(b.ticker))
-    .slice(0, 6);
+    .sort((a, b) => b._score - a._score || a.ticker.localeCompare(b.ticker));
+  const ranked = _oppExpanded ? all : all.slice(0, OPP_DEFAULT_LIMIT);
 
   if (!ranked.length) {
     el.className = 'opp-empty';
@@ -6950,8 +6957,7 @@ function renderOpportunities(rows, days) {
     return;
   }
 
-  el.className = 'opp-list';
-  el.innerHTML = ranked.map(r => {
+  const renderItem = r => {
     const sig = r.recent_signal;
     const pos = r._pos;
     const biasCls = r.weekly_bullish ? 'good' : 'bad';
@@ -6977,7 +6983,21 @@ function renderOpportunities(rows, days) {
       ${metrics ? `<div style="font-family:var(--font-mono);font-size:10px;color:var(--muted2);padding:2px 0 0;">${metrics}</div>` : ''}
       <div class="opp-reasons">${reasons}</div>
     </div>`;
-  }).join('') + `<div class="opp-empty" style="font-size:10px;padding-top:2px;">Zobrazené top ${ranked.length} z ${clean.length} tickerov${errorCount ? `, ${errorCount} s chybou dát` : ''}.</div>`;
+  };
+
+  const hasMore = all.length > OPP_DEFAULT_LIMIT;
+  const toggleBtn = hasMore
+    ? `<button class="opp-toggle-btn" onclick="toggleOppExpanded()">${_oppExpanded ? '▲ Zobraziť menej' : `▼ Zobraziť všetky (${all.length})`}</button>`
+    : '';
+
+  el.className = 'opp-list';
+  el.innerHTML = ranked.map(renderItem).join('')
+    + `<div class="opp-empty" style="font-size:10px;padding-top:2px;">Zobrazené ${ranked.length} z ${clean.length} tickerov${errorCount ? `, ${errorCount} s chybou dát` : ''}.${toggleBtn}</div>`;
+}
+
+function toggleOppExpanded() {
+  _oppExpanded = !_oppExpanded;
+  if (_oppLastRows !== null) renderOpportunities(_oppLastRows, _oppLastDays);
 }
 async function refreshOpportunities(force = false) {
   const el = document.getElementById('opportunitiesInfo');

@@ -2396,6 +2396,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 10px;
   padding: 8px 0;
 }
+.opp-toggle-btn {
+  display: inline-block;
+  margin-left: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.opp-toggle-btn:hover { color: var(--fg); border-color: var(--muted); }
 .scanner-actions {
   margin-left: auto;
   display: flex;
