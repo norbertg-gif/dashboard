@@ -2285,8 +2285,116 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .scanner-page {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  padding: 12px;
   min-height: 0;
   height: 100%;
+  overflow: auto;
+}
+.scanner-page > .tool-panel.fill {
+  flex: 1 0 auto;
+  min-height: 520px;
+}
+.scanner-candidate-radar {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 12px;
+}
+.scanner-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scanner-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scanner-section-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.scanner-section-note {
+  color: var(--muted2);
+  font-size: 10px;
+  margin: 7px 0 10px;
+}
+#main-scanner .opp-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+#main-scanner .opp-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  padding: 9px;
+  cursor: pointer;
+  transition: var(--transition);
+  min-width: 0;
+}
+#main-scanner .opp-item:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-input));
+}
+#main-scanner .opp-top,
+#main-scanner .opp-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+#main-scanner .opp-sym {
+  color: var(--text);
+  font: 800 12px var(--font-mono);
+}
+#main-scanner .opp-pill {
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 2px 6px;
+  font-size: 8px;
+  font-weight: 800;
+}
+#main-scanner .opp-pill.good { color: var(--up); border-color: var(--up); background: var(--up-soft); }
+#main-scanner .opp-pill.warn { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-soft); }
+#main-scanner .opp-pill.bad { color: var(--down); border-color: var(--down); background: var(--down-soft); }
+#main-scanner .opp-reasons {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid var(--border);
+  margin-top: 7px;
+  padding-top: 7px;
+}
+#main-scanner .opp-reason {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+#main-scanner .opp-reason-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+#main-scanner .opp-reason.good { color: var(--up); }
+#main-scanner .opp-reason.warn { color: var(--yellow); }
+#main-scanner .opp-reason.bad { color: var(--down); }
+#main-scanner .opp-empty {
+  color: var(--muted2);
+  font-size: 10px;
+  padding: 8px 0;
 }
 .scanner-actions {
   margin-left: auto;
