@@ -125,7 +125,6 @@ function switchMainTab(tab) {
         initPredictiveModelChartToggle();
         wlRender();
         loadData();
-        refreshOpportunities();
         loadNasdaqScannerResults();
       };
       setTimeout(() => tryInit(20), 200);
@@ -6965,7 +6964,7 @@ function renderOpportunities(rows, days) {
     const reasons = opportunityReasons(r, pos, days).map(reason =>
       `<span class="opp-reason ${reason.cls}"><span class="opp-reason-dot"></span>${reason.text}</span>`
     ).join('');
-    return `<div class="opp-item" onclick="pc_selectTicker('${r.ticker}')">
+    return `<div class="opp-item" onclick="openScannerTicker('${r.ticker}')">
       <div class="opp-top">
         <span class="opp-sym">${r.ticker}</span>
         <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
@@ -7180,9 +7179,26 @@ async function renderScannerView() {
   if (!el) return;
   el.innerHTML = `
     <div class="scanner-page">
+      <section class="scanner-candidate-radar">
+        <div class="scanner-section-head">
+          <div>
+            <div class="scanner-section-kicker">Čo pozrieť</div>
+            <div class="tool-title">Kandidáti</div>
+          </div>
+          <div class="scanner-section-actions">
+            <button class="btn" onclick="openChecklist()">☰ Checklist watchlistu</button>
+            <button class="btn" onclick="refreshOpportunities(true)">⟳ Obnoviť Opportunities</button>
+          </div>
+        </div>
+        <div class="scanner-section-note">Opportunities vyberá kandidátov z watchlistu a eToro pozícií. Klik otvorí vysvetlenie v Prediktívnom tabe.</div>
+        <div id="opportunitiesInfo" class="opp-empty">Načítavam Opportunities...</div>
+      </section>
       <div class="tool-panel fill">
         <div class="tool-toolbar">
-          <div class="tool-title">Nasdaq Scanner + DIP crossover</div>
+          <div>
+            <div class="scanner-section-kicker">Širší trh</div>
+            <div class="tool-title">Nasdaq Scanner + DIP crossover</div>
+          </div>
           <div class="scanner-actions">
             <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
             <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
@@ -7207,6 +7223,7 @@ async function renderScannerView() {
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
   await loadFinvizHtmlPreview();
+  await refreshOpportunities(true);
   await loadNasdaqScannerResults();
 }
 
@@ -7277,7 +7294,7 @@ ${escHtml(copyText)}</textarea>
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Tech</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Sig</th><th>Last</th><th>Reason</th>
+          <th>Ticker</th><th>Rozhodnutie</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -7288,16 +7305,19 @@ ${escHtml(copyText)}</textarea>
     const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
     const label = r.dip_label || 'TECH ONLY';
     const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';
+    const tier = sig.date ? sigTier(sig.tier, sig.score) : '';
+    const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'No signal';
+    const decisionCls = tier === 'buy' ? 'strong' : tier === 'counter' ? 'weak' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b></td>
-      <td class="r">${score}</td>
+      <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
+      <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
       <td class="r">${dip.fa ?? '-'}</td>
       <td class="r">${dip.ta ?? '-'}</td>
       <td class="r">${r.dip_rank ?? '-'}</td>
       <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
-      <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}" title="${sigTierLabel(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${price}</td>
       <td>${escHtml(reason)}</td>
     </tr>`;
@@ -7742,9 +7762,8 @@ async function runChecklist() {
 
 function loadTickerFromChecklist(ticker) {
   closeChecklist();
-  document.getElementById('tickerInput').value = ticker;
-  rememberPredictiveTicker(ticker);
-  loadData();
+  switchMainTab('predictive');
+  setTimeout(() => pc_selectTicker(ticker), 120);
 }
 
 // Expose predictive functions globally for HTML onclick
