@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260609-daily-pnl-live">
+<link rel="stylesheet" href="/dashboard.css?v=20260609-predictive-phase-b">
 </head>
 <body>
 
@@ -191,6 +191,10 @@
   <div class="watchlist" id="watchlistChips"></div>
 </div>
 
+<div id="pcDecisionBar" class="predictive-decision-bar">
+  <div class="pc-decision-empty">Načítaj ticker a zobrazí sa rýchle rozhodnutie, sila setupu a kontext signálu.</div>
+</div>
+
 <div class="layout">
   <div class="daily-col signal-col" id="dailyCol">
     <div class="daily-resizer" id="dailyResizer"></div>
@@ -221,11 +225,12 @@
       </div>
     </div>
 
-    <div class="chart-block chart-block-sub">
+    <div class="chart-block chart-block-sub" id="predictiveModelBlock">
       <div class="chart-header">
         <span class="label">Prediktívny chart</span>
         <span class="badge badge-pred">+1 prognóza</span>
         <span class="badge badge-bt" id="btBadge" style="display:none;">backtest overlay</span>
+        <button class="pc-inline-toggle" id="predictiveModelToggle" onclick="togglePredictiveModelChart()" title="Zbaliť alebo rozbaliť modelový chart">−</button>
       </div>
       <div class="chart-body"><div id="predChart"></div></div>
     </div>
@@ -240,9 +245,6 @@
   </div>
 
   <div class="pc-sidebar" id="pcSidebar">
-    <div class="card" id="dailySignalPanel" style="display:none;">
-    </div>
-
     <div class="card" id="opportunitiesCard">
       <div class="opp-toolbar">
         <div class="card-title">Opportunities</div>
@@ -424,6 +426,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260609-signal-terminology"></script>
+  <script src="/dashboard.js?v=20260609-predictive-phase-b"></script>
 </body>
 </html>
