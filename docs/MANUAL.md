@@ -73,6 +73,23 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 ## 4. Prediktívny tab — ako čítať signály
 
+### Glosár a vizuálna priorita
+
+Dashboard používa pri signáloch tieto pojmy jednotne:
+
+| Pojem | Význam |
+|---|---|
+| **Rozhodnutie (tier)** | **Buy / Watch / Counter**. Určuje ho trendový kontext a v UI ho vyjadruje farba. |
+| **Sila** | Hodnota `0/4` až `4/4`: počet splnených denných podmienok C1–C4. |
+| **Trend** | Uptrend / sideways / downtrend. Rozhoduje, či je dip kupovateľný alebo proti trendu. |
+| **Výsledok** | Úspešný / neúspešný / neutrálny / čaká na vyhodnotenie. |
+| **Horizont** | Počet obchodných dní použitý na validáciu výsledku: 30D / 60D / 90D. |
+| **DIP kvalita** | Externý Finviz ranking. Je to samostatná os, nie sila technického signálu. |
+| **Setup score 0–100** | Interné pomocné skóre na radenie kandidátov. Nie je hlavným obchodným rozhodnutím a v kompaktnom UI sa nezobrazuje. |
+
+Poradie významu v UI je: **rozhodnutie → sila → trend → historický výsledok**.
+Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
+
 ### Ovládanie
 
 - **Ticker** — zadaj symbol alebo názov (s automatickým doplňovaním).
@@ -117,10 +134,10 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 ### Pravý panel (sidebar)
 
-- **Daily buy signál**
+- **Aktuálny setup**
   - **Weekly bias** — BULLISH / BEARISH-NEUTRÁLNY. Skladá sa z: composite > 5 %,
     cena nad Kumo (Ichimoku oblak), EMA10 > EMA20.
-  - **Dnešné skóre 0–4** — koľko denných podmienok je práve splnených (viď
+  - **Sila signálu 0–4** — koľko denných podmienok je práve splnených (viď
     [sekcia 6](#6-filozofia-signálov)). Dnešný signál je aktívny len ak je
     weekly bias bullish.
   - **História signálov** — minulé signály a ich výsledok voči aktuálnej cene
@@ -143,10 +160,10 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 ### Ľavý signálový panel
 
 - Celá výška ľavého stĺpca je vyhradená pre históriu a analytiku signálov.
-- **SIGNAL HISTORY** — časová os signálov s win rate.
+- **HISTÓRIA SIGNÁLOV** — časová os signálov s úspešnosťou.
 - **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
   horizonty zostávajú `pending`.
-- **TIMEFRAME ALIGNMENT** — zhoda timeframeov: Weekly bias, Weekly trend, Daily
+- **ZHODA ČASOVÝCH RÁMCOV** — zhoda timeframeov: Weekly bias, Weekly trend, Daily
   trend, Daily signal → súhrn **PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ**.
 
 ### Farby signálov (tier)
