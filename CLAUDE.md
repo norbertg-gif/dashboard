@@ -68,6 +68,7 @@ These were already in the codebase and need to stay fixed:
 - **Currency conversion.** `estimatePositionLivePnl` (JS) and `currentRate` fallback (Python) ignore that non-USD instruments report `units × price_delta` in instrument currency, while eToro `pnL` is USD. Fine for US stocks/ETF, wrong for European tickers. If touching this, use `conversionRateBid/Ask` from rates.
 - **Fibonacci primitive draws full-width lines.** `FibonacciPrimitive.draw()` intentionally draws lines from the left anchor (`xAnchorLeft`) to the chart right edge (`width`), NOT between x1–x2. Shaded zones stay within anchor bounds. Labels are pinned to the right edge with a dark pill background. `drawManualFibFromInputs()` resolves times by finding the nearest candle by price — do NOT use `automatic?.lowTime/highTime` when the user has entered custom prices.
 - **Scanner memory limits.** `SCANNER_MAX_WORKERS` default is 3 (not 8) — 8 concurrent workers caused OOM restarts on Render free tier. `_CACHE_MEM_MAX` is 75 (not 200). Scanner worker explicitly `del`s DataFrames before returning; `gc.collect()` runs after full scan.
+- **`dailyPnL` does not exist in eToro API.** `/pnl/real` positions schema has no `dailyPnL` field — `pos.get("dailyPnL")` always returns `None`. Daily P/L is computed via `_get_prev_close(sym)` which reads the previous closed daily candle from OHLCV cache: `(currentRate − prevClose) × units × direction`. This is an approximation; eToro's own calculation includes spread and internal factors and references their own day boundary (not market open), especially for 24/5 instruments.
 
 ## Backlog (priority order)
 
@@ -157,6 +158,7 @@ These were already in the codebase and need to stay fixed:
 - **InstrumentTypeID:** eToro uses 5=Stocks, 6=ETF, 10=Crypto, 1=Currencies, 2=Commodities, 4=Indices. `ALLOWED_INSTRUMENT_TYPES` and `type_map` in `get_portfolio` must agree. Verify against live data before changing.
 - **Currency conversion.** `estimatePositionLivePnl` (JS) and `currentRate` fallback (Python) ignore that non-USD instruments report `units × price_delta` in instrument currency, while eToro `pnL` is USD. Fine for US stocks/ETF, wrong for European tickers. If touching this, use `conversionRateBid/Ask` from rates.
 - **Fibonacci primitive draws full-width lines.** `FibonacciPrimitive.draw()` intentionally draws lines from the left anchor (`xAnchorLeft`) to the chart right edge (`width`), NOT between x1–x2. Shaded zones stay within anchor bounds. Labels are pinned to the right edge with a dark pill background. `drawManualFibFromInputs()` resolves times by finding the nearest candle by price — do NOT use `automatic?.lowTime/highTime` when the user has entered custom prices.
+- **`dailyPnL` does not exist in eToro API.** `/pnl/real` positions schema has no `dailyPnL` field — `pos.get("dailyPnL")` always returns `None`. Daily P/L is computed via `_get_prev_close(sym)` which reads the previous closed daily candle from OHLCV cache: `(currentRate − prevClose) × units × direction`. Approximation only — eToro's own value includes spread/internal factors and a different day boundary.
 
 ## Backlog (priority order)
 

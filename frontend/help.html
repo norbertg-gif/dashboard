@@ -93,7 +93,7 @@
   <h2 id="tabs">3. Záložky</h2>
   <ul>
     <li><strong>📈 Grafy</strong> — mriežka panelov s grafmi tickerov z watchlistu. Klik aktivuje panel.</li>
-    <li><strong>📊 Portfólio</strong> — eToro pozície, summary (invested / equity / P&amp;L).</li>
+    <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody a journal.</li>
     <li><strong>Risk</strong> — riziková analýza portfólia.</li>
     <li><strong>📈 Prediktívny</strong> — predikcia ďalšej sviečky + denné/týždenné buy signály.</li>
@@ -239,6 +239,7 @@
     <li><strong>Watchlist</strong> — sledované tickery (Grafy, Opportunities, prefetch).</li>
     <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>
     <li><strong>eToro pozície</strong> — Portfólio tab ukazuje živé pozície a P&amp;L. Equity sa počíta jednotne ako <code>cash + invested + total_pnl</code>.</li>
+    <li><strong>Dnes P/L</strong> — denný pohyb v USD v summary bare aj ako stĺpec v tabuľke pozícií. Vypočítané z OHLCV cache <code>(currentRate − prevClose) × units × direction</code>. Aproximácia — eToro API toto pole neposkytuje, pre 24/5 tituly sa môže mierne líšiť od hodnoty v appke.</li>
   </ul>
 
   <h2 id="trouble">8. Troubleshooting</h2>

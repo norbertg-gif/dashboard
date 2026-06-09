@@ -61,7 +61,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 - **📈 Grafy** — mriežka panelov s grafmi tickerov z watchlistu. Klik na panel
   ho aktivuje, dvojklik otvára detail.
-- **📊 Portfólio** — aktuálne eToro pozície, summary (invested / equity / P&L).
+- **📊 Portfólio** — aktuálne eToro pozície, summary (Cash / Invested / P&L / **Dnes P/L** / Equity).
 - **História** — uzavreté obchody a journal.
 - **Risk** — riziková analýza portfólia.
 - **📈 Prediktívny** — predikcia ďalšej sviečky + denné/týždenné buy signály
@@ -284,6 +284,11 @@ jazykom.
 - **eToro pozície** — Portfólio tab ukazuje živé pozície a P&L. Sidebar a
   Portfólio počítajú equity rovnako (jednotný výpočet `cash + invested +
   total_pnl`).
+- **Dnes P/L** — súhrn denného pohybu v USD v summary bare. Vypočítané
+  z OHLCV cache: `(currentRate − prevClose) × units × direction`. eToro
+  public API toto pole neposkytuje, ide teda o aproximáciu; pre akcie
+  obchodované 24/5 sa môže líšiť od hodnoty v eToro appke. Stĺpec
+  „Denný P/L" je viditeľný aj priamo v tabuľke pozícií.
 
 ---
 
