@@ -139,14 +139,6 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 
 ### Pravý panel (sidebar)
 
-- **Aktuálny setup**
-  - **Weekly bias** — BULLISH / BEARISH-NEUTRÁLNY. Skladá sa z: composite > 5 %,
-    cena nad Kumo (Ichimoku oblak), EMA10 > EMA20.
-  - **Sila signálu 0–4** — koľko denných podmienok je práve splnených (viď
-    [sekcia 6](#6-filozofia-signálov)). Dnešný signál je aktívny len ak je
-    weekly bias bullish.
-  - **História signálov** — minulé signály a ich výsledok voči aktuálnej cene
-    (win / loss / flat / pending). Farba skóre = tier signálu (legenda nižšie).
 - **Prognóza nasledujúcej sviečky**
   - **Smer** — BULLISH / BEARISH + očakávaná % zmena.
   - **Regime** — režim trhu z HMM modelu (Bull / Bear / Sideways / High
