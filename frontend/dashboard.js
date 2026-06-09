@@ -7306,8 +7306,8 @@ ${escHtml(copyText)}</textarea>
     const label = r.dip_label || 'TECH ONLY';
     const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';
     const tier = sig.date ? sigTier(sig.tier, sig.score) : '';
-    const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'No signal';
-    const decisionCls = tier === 'buy' ? 'strong' : tier === 'counter' ? 'weak' : tier === 'watch' ? 'watch' : 'tech';
+    const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
+    const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span></td>

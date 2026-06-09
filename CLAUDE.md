@@ -94,17 +94,32 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
 
 ## Predictive tab — key architecture
 
+**Role:** Detail one ticker — "prečo áno/nie?"
+
+- **Decision Bar** (top): `predictiveDecisionFromData()` → Buy/Watch/Counter/No signal badge + sila x/4 + weekly bias + regime + vek signálu. Rendered above charts via `#pcDecisionBar`.
+- **Left column (Dôkazy):** C1–C4 aktuálny setup, história signálov, 30D/60D/90D validácia, Signal Analytics, Timeframe alignment. Collapsed by default on narrow screens.
 - **Main chart** (weekly/daily): `pc_realChartInst` / `pc_realSeries`. eToro open-position markers (circles) injected in `renderCharts()` alongside buy signal arrows.
-- **Predictive chart** (bottom): `flex:1` vs main chart `flex:2` → 2:1 height ratio.
+- **Predictive chart** (bottom, collapsible): `flex:1` vs main chart `flex:2` → 2:1 height ratio. Collapsed via `PC_MODEL_CHART_COLLAPSED_KEY` in localStorage.
 - **Subpanel** (RSI/MACD/ADX/StochRSI): `pc_subChartInst`, synced timescale with main chart.
 - **Fibonacci**: `FibonacciPrimitive` canvas primitive attached via `series.attachPrimitive()`. Draggable anchor dots, auto-detects swing via `findFibImpulse()`. Stored per `ticker:timeframe` in localStorage.
 - **HMM regime**: `detect_market_regime(df)` called from `/api/chart` — 3-state GaussianHMM (bull/bear/sideways) + high_volatility override. Diagnostic only, does not affect ML prediction.
+- **Color consistency**: tier colors use CSS variables (`var(--up)`, `var(--down)`, `var(--yellow)`) everywhere — both `.pc-decision-badge` and `.scanner-label`. `sigTierColor()` returns hardcoded hex matching these vars; `sigTierLabel()` returns 'Buy'/'Watch'/'Counter'.
 
 ## Scanner tab — key architecture
+
+**Role:** Candidate discovery — "čo si mám pozrieť?"
+
+Three source sections:
+1. **Opportunities** (Watchlist + portfólio candidates) — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, DIP kvalita, dôvody. Setup score hidden from UI (internal sort only).
+2. **Checklist** — batch-check custom ticker list or CSV import. Same data as Opportunities.
+3. **Nasdaq DIP scanner** — `loadNasdaqScannerResults()`, `/api/scanner/nasdaq/results`. DIP crossover + Finviz ranking.
+
+Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predictive')`.
 
 - **`/api/scanner/notes`** — GET/POST global notes panel content → `/data/scanner_notes.json`. Single HTML blob, not per-ticker.
 - **Export/kopírovanie** block is above KPI tiles (collapsed by default).
 - **Notes panel** sits to the right of the results table (flex row), resizable horizontally. Below 1100px flips to column layout.
+- **Scanner decision CSS**: `.scanner-label.buy` / `.scanner-label.counter` / `.scanner-label.watch` — aligned with `.pc-decision-badge.*` in Predictive. DIP quality still uses `.scanner-label.strong` / `.scanner-label.weak` (separate meaning).
 
 ## Data flow worth knowing
 

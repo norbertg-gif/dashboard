@@ -1762,19 +1762,19 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   text-transform: uppercase;
 }
 #predictiveTab .pc-decision-badge.buy {
-  color: #26a69a;
-  background: rgba(38,166,154,0.12);
-  border-color: rgba(38,166,154,0.35);
+  color: var(--up);
+  background: var(--up-soft);
+  border-color: color-mix(in oklch, var(--up) 35%, transparent);
 }
 #predictiveTab .pc-decision-badge.watch {
-  color: #f59e0b;
-  background: rgba(245,158,11,0.12);
-  border-color: rgba(245,158,11,0.35);
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: color-mix(in oklch, var(--yellow) 35%, transparent);
 }
 #predictiveTab .pc-decision-badge.counter {
-  color: #ef5350;
-  background: rgba(239,83,80,0.12);
-  border-color: rgba(239,83,80,0.35);
+  color: var(--down);
+  background: var(--down-soft);
+  border-color: color-mix(in oklch, var(--down) 35%, transparent);
 }
 #predictiveTab .pc-decision-badge.no-signal {
   color: var(--muted2);
@@ -2503,7 +2503,8 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 9px;
   font-weight: 800;
 }
-.scanner-label.strong {
+.scanner-label.strong,
+.scanner-label.buy {
   color: var(--up);
   border-color: var(--up);
   background: var(--up-soft);
@@ -2513,7 +2514,8 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border-color: var(--yellow);
   background: var(--yellow-soft);
 }
-.scanner-label.weak {
+.scanner-label.weak,
+.scanner-label.counter {
   color: var(--down);
   border-color: var(--down);
   background: var(--down-soft);
