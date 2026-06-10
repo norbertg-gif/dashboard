@@ -154,6 +154,9 @@ function switchMainTab(tab) {
   });
   if (tab === 'portfolio') {
     renderPortMainView();
+  } else if (tab === 'charts') {
+    // Grafy vytvorené so skrytým tabom môžu mať šírku 0 → po zobrazení doraz veľkosti
+    setTimeout(fixupChartSizes, 60);
   } else if (tab === 'history') {
     renderHistoryView();
   } else if (tab === 'risk') {
@@ -3418,6 +3421,24 @@ function getChartTheme() {
   };
 }
 
+// Doraz veľkosti všetkých dashboard grafov podľa aktuálnej šírky panelov.
+// Volá sa pri prepnutí na záložku Grafy — rieši grafy vytvorené so šírkou 0.
+function fixupChartSizes() {
+  for (const id of Object.keys(registry)) {
+    const r = registry[id];
+    const panel = document.getElementById(id);
+    if (!r || !panel) continue;
+    const w = panel.clientWidth;
+    if (w <= 0) continue;
+    try {
+      r.mainChart?.applyOptions({ width: w });
+      r.rsiChart?.applyOptions({ width: w });
+      r.adxChart?.applyOptions({ width: w });
+      r.macdChart?.applyOptions({ width: w });
+    } catch (e) {}
+  }
+}
+
 function makeChart(container, height, opts={}) {
   const t = getChartTheme();
   return LightweightCharts.createChart(container, {
@@ -3556,6 +3577,17 @@ function createPanel(cfg) {
   const mainCont  = document.getElementById('chart-' + id);
   if (initialChartHeight) mainCont.style.height = initialChartHeight + 'px';
   const mainChart = makeChart(mainCont, initialChartHeight || 240);
+  // Panel mohol byť vytvorený so skrytým/neusadeným layoutom (šírka 0) — LWC potom
+  // nevykreslí nič, kým nepríde resize. Retry kým sa šírka neusadí.
+  if (mainCont.clientWidth === 0) {
+    let _tries = 25;
+    const _fixW = () => {
+      const w = mainCont.clientWidth;
+      if (w > 0) mainChart.applyOptions({ width: w });
+      else if (--_tries > 0) setTimeout(_fixW, 120);
+    };
+    setTimeout(_fixW, 120);
+  }
   const candleSeries = mainChart.addCandlestickSeries({ upColor:'#00c99a', downColor:'#ff4560', borderVisible:false, wickUpColor:'#00c99a', wickDownColor:'#ff4560' });
   const volSeries    = mainChart.addHistogramSeries({ color:'#00c99a22', priceFormat:{type:'volume'}, priceScaleId:'vol' });
   mainChart.priceScale('vol').applyOptions({ scaleMargins:{top:0.85,bottom:0} });
