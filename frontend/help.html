@@ -61,6 +61,7 @@
       <li><a href="#tabs">Záložky</a></li>
       <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
+      <li><a href="#bot">Virtuálny obchodný bot</a></li>
       <li><a href="#philosophy">Filozofia signálov</a></li>
       <li><a href="#presets">Presety, watchlist, eToro</a></li>
       <li><a href="#trouble">Troubleshooting</a></li>
@@ -98,6 +99,7 @@
     <li><strong>Risk</strong> — riziková analýza portfólia.</li>
     <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
     <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
+    <li><strong>Bot</strong> — virtuálny paper-trading bot na testovanie signálov bez rizika skutočného kapitálu.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -219,7 +221,61 @@
   <h3>Watch vs. Buy</h3>
   <p>Signál sa zaznamenáva od <strong>2/4</strong> podmienok. Či je buy/watch/counter rozhoduje trendový kontext (viď farby vyššie), nie len počet podmienok.</p>
 
-  <h2 id="philosophy">6. Filozofia signálov</h2>
+  <h2 id="bot">6. Virtuálny obchodný bot</h2>
+  <p>Záložka <strong>Bot</strong> simuluje paper-trading na live dátach — overuje, ako by si sa obchodoval na základe technických signálov, bez rizika skutočného kapitálu.</p>
+
+  <h3>Spustenie a tok dát</h3>
+  <ul>
+    <li>Klikni <strong>▶ Spustiť kolo</strong> — bot stiahne denné dáta z yfinance sám. <strong>Scanner pred spustením spúšťať netreba.</strong></li>
+    <li>Bot prechádza: <strong>watchlist + eToro portfólio (oba účty) + celý Nasdaq 100</strong> (~160 tickerov, duplikáty odfiltrované).</li>
+    <li>Ideálny čas: večer po <strong>22:00 SK</strong> keď je US daily sviečka uzavretá. Spustenie cez deň hodnotí rozpracovanú sviečku — menej spoľahlivé.</li>
+    <li>Prvé kolo po dlhšej nečinnosti trvá 2–3 min. Ďalšie kolá v ten istý deň sú rýchlejšie vďaka 30-minútovej yfinance cache.</li>
+  </ul>
+
+  <h3>Vstupná logika</h3>
+  <p>Bot otvorí novú pozíciu ak sú splnené všetky podmienky:</p>
+  <ol>
+    <li>Technický score ≥ <strong>Min. score</strong> (konfigurovateľné, default 3/4)</li>
+    <li>Tier = <strong>buy</strong> (uptrend: EMA10 &gt; EMA20)</li>
+    <li>Ticker <strong>nie je</strong> v otvorených pozíciách — alebo je tam, ale v strate <strong>≥ 15 %</strong> (averaging down výnimka)</li>
+    <li>Je dostatok voľného cash a max. počet pozícií nie je dosiahnutý (default 20)</li>
+    <li>Ak je zapnutý <strong>Finviz filter</strong> — ticker musí mať importované DIP skóre ≥ min. Ticker bez Finviz dát = skip.</li>
+  </ol>
+
+  <h3>Výstupná logika</h3>
+  <p>Pozícia sa zavrie ak nastane jedno z:</p>
+  <ul>
+    <li><strong>Stop-loss</strong> — cena klesla pod prah</li>
+    <li><strong>Take-profit</strong> — cena stúpla nad prah</li>
+    <li><strong>Counter signál</strong> — score ≥ 3 a tier = counter (downtrend)</li>
+    <li><strong>Manuálne</strong> — tlačidlo <strong>Zavri</strong> v tabuľke otvorených pozícií</li>
+  </ul>
+
+  <h3>Nastavenia (⚙️ Exit nastavenia)</h3>
+  <table>
+    <tr><th>Nastavenie</th><th>Popis</th><th>Default</th></tr>
+    <tr><td><strong>Režim</strong></td><td>ATR násobky = prahy relatívne k volatilite; Fixné % = pevné percentá</td><td>ATR násobky</td></tr>
+    <tr><td><strong>Stop-loss (×ATR)</strong></td><td>Koľko ATR pod vstupom sa zavrie</td><td>1.5</td></tr>
+    <tr><td><strong>Take-profit (×ATR)</strong></td><td>Koľko ATR nad vstupom sa zavrie</td><td>2.5</td></tr>
+    <tr><td><strong>Stop-loss (%)</strong></td><td>Fixný stop (aj fallback keď ATR chýba)</td><td>7 %</td></tr>
+    <tr><td><strong>Take-profit (%)</strong></td><td>Fixný take-profit</td><td>12 %</td></tr>
+    <tr><td><strong>Vstup (% kapitálu)</strong></td><td>Koľko % počiatočného kapitálu na jeden obchod</td><td>5 %</td></tr>
+    <tr><td><strong>Min. score (x/4)</strong></td><td>Minimálne technické skóre pre vstup</td><td>3/4</td></tr>
+    <tr><td><strong>Finviz filter</strong></td><td>Zapnúť/vypnúť filter podľa DIP skóre</td><td>vypnuté</td></tr>
+    <tr><td><strong>Min. DIP skóre</strong></td><td>Minimálna hodnota DIP total (STRONG = 90, VERY STRONG = 100)</td><td>90</td></tr>
+  </table>
+  <p><strong>ATR režim</strong> — stop a take-profit sa vypočítajú z ATR uloženého pri otvorení pozície. Fixné % slúžia ako fallback keď ATR chýba. Nastavenia prežívajú aj Reset bota (reset maže len pozície a históriu).</p>
+  <p><strong>Finviz filter</strong> — keď zapnutý, pred spustením kola importuj čerstvý Finviz export v Scanner tabe.</p>
+
+  <h3>KPI a história</h3>
+  <ul>
+    <li><strong>KPI dlaždice</strong> — equity, cash, otvorené pozície, closed trades, win rate, max drawdown.</li>
+    <li><strong>Otvorené pozície</strong> — tabuľka s aktuálnou cenou, P/L a tlačidlom <strong>Zavri</strong>. Klik na ticker otvorí detail v Prediktívnom tabe.</li>
+    <li><strong>História</strong> — posledných 40 uzavretých obchodov s dôvodom (Stop-loss / Take-profit / Counter / Manuálne).</li>
+    <li><strong>Equity krivka</strong> — vývoj hodnoty portfólia po jednotlivých obchodoch.</li>
+  </ul>
+
+  <h2 id="philosophy">7. Filozofia signálov</h2>
 
   <h3>Štyri denné podmienky (c1–c4)</h3>
   <table>
@@ -243,7 +299,7 @@
   <p>Scanner aj prediktívny graf používajú <strong>tú istú</strong> funkciu skórovania — pre ten istý ticker ukazujú rovnaké hodnoty.</p>
   <blockquote><p>Nie je to „falling-knife" lovenie dna — systém zámerne odlišuje dipy v uptrende (kupovať) od dipov v páde (vyhnúť sa).</p></blockquote>
 
-  <h2 id="presets">7. Presety, watchlist, eToro</h2>
+  <h2 id="presets">8. Presety, watchlist, eToro</h2>
   <ul>
     <li><strong>Watchlist</strong> — sledované tickery (Grafy, Opportunities, prefetch).</li>
     <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>
@@ -251,7 +307,7 @@
     <li><strong>Dnes P/L</strong> — live odhad denného pohybu v USD v summary bare aj ako stĺpec v tabuľke pozícií. Vypočítané z OHLCV cache <code>(currentRate − prevClose) × units × direction</code>. Zahŕňa priame pozície; Smart/Copy denný pohyb bez spoľahlivého eToro baseline nie je dopočítaný.</li>
   </ul>
 
-  <h2 id="trouble">8. Troubleshooting</h2>
+  <h2 id="trouble">9. Troubleshooting</h2>
   <table>
     <tr><th>Príznak</th><th>Príčina / riešenie</th></tr>
     <tr><td>Prázdny graf / žiadne dáta</td><td>yfinance rate-limit alebo timeout. Skús znova o chvíľu.</td></tr>
@@ -262,7 +318,7 @@
     <tr><td>Staré signály majú zlú farbu</td><td>Log sa neprepisuje; prefarbia sa po novom vyhodnotení.</td></tr>
   </table>
 
-  <h2 id="tech">9. Technická príloha</h2>
+  <h2 id="tech">10. Technická príloha</h2>
   <blockquote><p>Pre údržbu. Detailné pravidlá a pasce sú v <code>CLAUDE.md</code>.</p></blockquote>
 
   <h3>Stack</h3>
@@ -270,7 +326,7 @@
     <li><strong>Backend:</strong> FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn.</li>
     <li><strong>eToro proxy:</strong> stdlib HTTPServer na <code>localhost:8765</code>, background thread (nie samostatný proces v produkcii).</li>
     <li><strong>Frontend:</strong> vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS — bez build kroku.</li>
-    <li><strong>Storage:</strong> <code>/data</code> (Render disk) — presets, journal, signal/weights logy, <code>cache/{ohlcv,portfolio,instruments}</code>.</li>
+    <li><strong>Storage:</strong> <code>/data</code> (Render disk) — presets, journal, signal/weights logy, <code>bot_portfolio.json</code>, <code>cache/{ohlcv,portfolio,instruments}</code>.</li>
   </ul>
 
   <h3>Rozloženie</h3>
