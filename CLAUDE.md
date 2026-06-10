@@ -73,7 +73,7 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
-1. **Predictive chart accuracy → 60%+ directional.** Current: AAPL 55.4%, TSLA 51.4%. Planned: walk-forward validation, ROC (4-week), 52-week high/low position feature.
+1. **Predictive chart accuracy → 60%+ directional.** Walk-forward validation done (3 expanding-window folds, accuracy = fold mean). Still planned: ROC (4-week), 52-week high/low position feature.
 2. **Regime-aware signal analytics.** In progress — user is adding regime context snapshot (HMM regime, confidence, weekly bias, ATR, C1–C4) to new signals. Next: Signal Analytics table per regime. Backfill historical signals via one-off script (download OHLCV per ticker, slice at signal date, recompute context — no look-ahead bias). Minimum ~20–30 evaluated signals per regime before adjusting scoring.
 3. **Hover tooltip for eToro markers.** Crosshair tooltip works; native hover on markers not resolved. → Blocked on LWC v4 API; **LWC v5 `hoveredItem` hit-testing solves this cleanly** (see item 4).
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Breaking changes are mechanical (find-replace friendly): `chart.addLineSeries()` → `chart.addSeries(LineSeries, opts)`, `series.setMarkers()` → `createSeriesMarkers()`. Gains: MagnetOHLC crosshair, data conflation (zoom-out perf), `hoveredItem` hit-testing (fixes item 3), `setSeriesOrder()`, −16% bundle. Multi-pane support simplifies subpanel. Est. effort: half-day. **Do not rush — test locally first.**
@@ -84,11 +84,13 @@ These were already in the codebase and need to stay fixed:
 
 `score_signal_day(row, zscore)` + `rolling_zscore()` + `signal_tier()` are module-level functions in `trading_backend.py`, called by both the scanner (`_scan_buy_signal_for_ticker`) and the predictive endpoint. Same ticker shows same x/4 score in both places.
 
-Four conditions (c1–c4):
-- **c1** — close within 0.5% of EMA20 or Kijun
+Four conditions (c1–c4), **rules v2** (`SIGNAL_RULES_VERSION = 2`, ATR-scaled):
+- **c1** — close within 0.35×ATR% of EMA20 or Kijun (clamped 0.3–1.2%; fallback 0.5% when ATR missing)
 - **c2** — RSI < 45
 - **c3** — bullish candle with volume > 1.2× average
 - **c4** — rolling 60-period z-score ≤ −1.5
+
+New signal log entries carry `rules_version` — don't mix v1/v2 populations when computing win rates. Outcome win/loss threshold is also ATR-scaled (1×ATR% at signal date, clamped 1–3%; fallback 1.5%), recorded per-outcome as `move_threshold_pct`. Signals pruned from `predictive_signals_log.json` (>90 days) are archived to `predictive_signals_archive.json`, never deleted — per-regime analytics needs the history.
 
 Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 < EMA20 AND close < EMA20) → **counter** (red), `side` → **watch** (orange). Score = strength, tier = context.
 

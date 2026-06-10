@@ -241,8 +241,10 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
                "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio"]
 
 def train_ml_model(df):
-    """Train RandomForest classifier on training set (70%).
-    Returns (model, test_accuracy, bull_prob_for_last_row)."""
+    """Walk-forward validácia: 3 expanding-window foldy namiesto jedného 70/30
+    splitu — accuracy je priemer cez foldy, takže nezávisí od toho, ktorý režim
+    padol do test setu. Finálny model sa trénuje na všetkých dátach.
+    Returns (model, mean_test_accuracy, bull_prob_for_last_row)."""
     df_ml = df.copy()
     df_ml["target"] = (df_ml["Close"].shift(-1) > df_ml["Close"]).astype(int)
     df_ml = df_ml.dropna(subset=ML_FEATURES + ["target"])
@@ -250,28 +252,40 @@ def train_ml_model(df):
     if len(df_ml) < 40:
         return None, None, 0.5
 
-    split = int(len(df_ml) * 0.70)
-    train = df_ml.iloc[:split]
-    test  = df_ml.iloc[split:-1]  # exclude last (no future close)
+    usable = df_ml.iloc[:-1]  # last row has no future close
+    X_all = usable[ML_FEATURES].values
+    y_all = usable["target"].values
+    n = len(usable)
 
-    if len(train) < 20 or len(test) < 5:
+    def make_model():
+        base = RandomForestClassifier(
+            n_estimators=50, max_depth=4,
+            min_samples_leaf=5, random_state=42, n_jobs=1
+        )
+        return CalibratedClassifierCV(base, cv=2)
+
+    # Walk-forward foldy: train na [0:60%/70%/80%], test na nasledujúcich 10 %
+    fold_accs = []
+    for train_frac in (0.60, 0.70, 0.80):
+        split = int(n * train_frac)
+        test_end = int(n * (train_frac + 0.10))
+        if split < 20 or test_end - split < 5:
+            continue
+        m = make_model()
+        try:
+            m.fit(X_all[:split], y_all[:split])
+            fold_accs.append(m.score(X_all[split:test_end], y_all[split:test_end]))
+        except Exception:
+            continue
+
+    if not fold_accs:
         return None, None, 0.5
 
-    X_train = train[ML_FEATURES].values
-    y_train = train["target"].values
-    X_test  = test[ML_FEATURES].values
-    y_test  = test["target"].values
+    acc = float(np.mean(fold_accs)) * 100
 
-    base = RandomForestClassifier(
-        n_estimators=50, max_depth=4,
-        min_samples_leaf=5, random_state=42, n_jobs=1
-    )
-    model = CalibratedClassifierCV(base, cv=2)
-    model.fit(X_train, y_train)
-
-    acc = model.score(X_test, y_test) * 100
-
-    # Predict probability for last available row
+    # Finálny model na všetkých dátach → predikcia pre posledný riadok
+    model = make_model()
+    model.fit(X_all, y_all)
     last_row = df_ml.iloc[-1][ML_FEATURES].values.reshape(1, -1)
     bull_prob = float(model.predict_proba(last_row)[0][1])
 
@@ -3193,6 +3207,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                                 "tier":    tier,
                                 "close":   round(float(row["Close"]), 2),
                                 "details": details,
+                                "rules_version": SIGNAL_RULES_VERSION,
                             }
                             if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
                                 entry["context"] = build_signal_context(
@@ -3498,7 +3513,7 @@ SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
 SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "30"))
 SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "15"))
 SCANNER_DEFAULT_DAYS = 3
-SIGNAL_PROXIMITY_TOL = 0.005
+SIGNAL_PROXIMITY_TOL = 0.005     # fallback keď ATR nie je k dispozícii
 SIGNAL_RSI_PULLBACK = 45
 SIGNAL_VOLUME_MULT = 1.2
 SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je štatisticky lacná
@@ -3506,7 +3521,16 @@ DIP_STRONG_THRESHOLD = 90
 DIP_VERY_STRONG_THRESHOLD = 100
 SIGNAL_BUY_THRESHOLD = 3   # 3/4+ = plný buy signál, 2/4 = watch
 SIGNAL_OUTCOME_HORIZONS = (30, 60, 90)
-SIGNAL_OUTCOME_MOVE_THRESHOLD = 1.5
+SIGNAL_OUTCOME_MOVE_THRESHOLD = 1.5  # fallback keď ATR nie je k dispozícii
+# rules v2: prahy škálujú s volatilitou (ATR%) — fixné % znamenalo pre TSLA niečo
+# iné než pre MSFT. Signály v logu nesú rules_version pre porovnateľnosť.
+SIGNAL_RULES_VERSION = 2
+SIGNAL_PROXIMITY_ATR_MULT = 0.35     # tolerancia C1 = 0.35×ATR%, clamp 0.3–1.2 %
+SIGNAL_PROXIMITY_MIN = 0.003
+SIGNAL_PROXIMITY_MAX = 0.012
+SIGNAL_OUTCOME_ATR_MULT = 1.0        # win/loss prah = 1×ATR%, clamp 1.0–3.0 %
+SIGNAL_OUTCOME_MIN = 1.0
+SIGNAL_OUTCOME_MAX = 3.0
 
 
 def rolling_zscore(close_series):
@@ -3526,7 +3550,15 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     vol = float(row["Volume"])
     vol_ma = float(row["vol_ma"]) if not math.isnan(float(row["vol_ma"])) else vol
     ema10 = float(row["ema10"]) if not math.isnan(float(row["ema10"])) else ema20
-    c1 = abs(close - ema20) / close < SIGNAL_PROXIMITY_TOL or abs(close - kijun) / close < SIGNAL_PROXIMITY_TOL
+    # rules v2: C1 tolerancia škáluje s ATR% (volatilnejší titul = širšia zóna "dotyku")
+    prox_tol = SIGNAL_PROXIMITY_TOL
+    try:
+        atr = float(row["atr"])
+        if not math.isnan(atr) and atr > 0 and close > 0:
+            prox_tol = min(SIGNAL_PROXIMITY_MAX, max(SIGNAL_PROXIMITY_MIN, SIGNAL_PROXIMITY_ATR_MULT * atr / close))
+    except (KeyError, TypeError, ValueError):
+        pass
+    c1 = abs(close - ema20) / close < prox_tol or abs(close - kijun) / close < prox_tol
     c2 = rsi < SIGNAL_RSI_PULLBACK
     c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
     c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
@@ -3731,15 +3763,22 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
             mae_pct = (min_low - entry) / entry * 100
             high_pos = int(np.argmax(future["High"].to_numpy(dtype=float))) + 1
             low_pos = int(np.argmin(future["Low"].to_numpy(dtype=float))) + 1
+            # rules v2: win/loss prah škáluje s ATR% pri dátume signálu (clamp 1–3 %)
+            move_threshold = SIGNAL_OUTCOME_MOVE_THRESHOLD
+            if "atr" in frame.columns:
+                atr_at_signal = safe_float(frame.iloc[idx].get("atr"))
+                if atr_at_signal and atr_at_signal > 0:
+                    move_threshold = min(SIGNAL_OUTCOME_MAX, max(SIGNAL_OUTCOME_MIN, SIGNAL_OUTCOME_ATR_MULT * atr_at_signal / entry * 100))
             outcome = (
-                "win" if return_pct >= SIGNAL_OUTCOME_MOVE_THRESHOLD
-                else "loss" if return_pct <= -SIGNAL_OUTCOME_MOVE_THRESHOLD
+                "win" if return_pct >= move_threshold
+                else "loss" if return_pct <= -move_threshold
                 else "flat"
             )
             outcomes[str(horizon)] = {
                 "horizon": horizon,
                 "status": "complete",
                 "outcome": outcome,
+                "move_threshold_pct": round(move_threshold, 2),
                 "return_pct": round(return_pct, 2),
                 "mfe_pct": round(mfe_pct, 2),
                 "mae_pct": round(mae_pct, 2),
@@ -4247,6 +4286,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
                     "tier": tier,
                     "close": round(close, 2),
                     "details": details,
+                    "rules_version": SIGNAL_RULES_VERSION,
                 }
                 if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
                     entry["context"] = build_signal_context(
@@ -4558,6 +4598,7 @@ def run_checklist(tickers: str = "", days: int = 10):
                             "tier": tier,
                             "close": round(close, 2),
                             "details": details,
+                            "rules_version": SIGNAL_RULES_VERSION,
                         }
                         if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
                             entry["context"] = build_signal_context(
