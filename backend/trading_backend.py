@@ -4640,6 +4640,130 @@ def get_news_clientkey():
     return {"key": key}
 
 
+@app.get("/api/news/summary")
+def get_news_summary(tickers: str = Query("")):
+    """Agregovaný sentiment z disk cache — žiadne AV requesty, len prečíta
+    čo už bolo stiahnuté cez 📰. Relevance-weighted priemer sentiment skóre."""
+    out = {}
+    for t in tickers.split(","):
+        t = t.strip().upper()
+        if not t or len(t) > 12:
+            continue
+        cached = _news_cache_read(t)
+        items = (cached or {}).get("items") or []
+        scored = [(i.get("sentiment_score"), i.get("relevance") or 0.0)
+                  for i in items if i.get("sentiment_score") is not None]
+        if not scored:
+            continue
+        wsum = sum(r for _, r in scored) or 1.0
+        avg = sum(s * r for s, r in scored) / wsum
+        out[t] = {"avg": round(avg, 3), "n": len(items),
+                  "fetched_at": cached.get("fetched_at")}
+    return {"summary": out}
+
+
+# ── Earnings calendar (Alpha Vantage EARNINGS_CALENDAR, 1 request pre celý trh) ──
+
+EARNINGS_CACHE_FILE = NEWS_CACHE_DIR / "_earnings_calendar.json"
+EARNINGS_CACHE_TTL_H = 24
+
+
+def _earnings_parse_csv(text: str) -> dict:
+    """CSV: symbol,name,reportDate,... → {SYMBOL: najbližší reportDate}."""
+    if not text or text.lstrip().startswith("{"):
+        # AV vracia JSON namiesto CSV pri chybe/rate-limite
+        try:
+            data = json.loads(text)
+            msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
+        except Exception:
+            msg = "unexpected response"
+        raise RuntimeError(_news_scrub_error(msg))
+    dates: dict = {}
+    lines = text.strip().splitlines()
+    if not lines or "symbol" not in lines[0].lower():
+        raise RuntimeError("unexpected CSV format")
+    for line in lines[1:]:
+        parts = line.split(",")
+        if len(parts) < 3:
+            continue
+        sym, report = parts[0].strip().upper(), parts[2].strip()
+        if not sym or not report:
+            continue
+        if sym not in dates or report < dates[sym]:
+            dates[sym] = report
+    if not dates:
+        raise RuntimeError("empty earnings calendar")
+    return dates
+
+
+def _earnings_cache_read() -> dict | None:
+    if EARNINGS_CACHE_FILE.exists():
+        try:
+            return json.loads(EARNINGS_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _earnings_save_cache(dates: dict) -> dict:
+    payload = {"fetched_at": datetime.now(timezone.utc).isoformat(), "dates": dates}
+    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    EARNINGS_CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+@app.get("/api/earnings")
+def get_earnings_calendar(refresh: int = Query(0)):
+    cached = _earnings_cache_read()
+    if cached and not refresh:
+        try:
+            fetched = datetime.fromisoformat(cached["fetched_at"])
+            age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
+            ttl = 1 if cached.get("error") else EARNINGS_CACHE_TTL_H
+            if age_h < ttl:
+                return {**cached, "stale": False}
+        except Exception:
+            pass
+    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    try:
+        if not api_key:
+            raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
+        resp = requests.get(
+            "https://www.alphavantage.co/query",
+            params={"function": "EARNINGS_CALENDAR", "horizon": "3month", "apikey": api_key},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        payload = _earnings_save_cache(_earnings_parse_csv(resp.text))
+        return {**payload, "stale": False}
+    except Exception as e:
+        err = _news_scrub_error(str(e))
+        if cached and cached.get("dates"):
+            return {**cached, "stale": True, "error": err}
+        payload = {"fetched_at": datetime.now(timezone.utc).isoformat(),
+                   "dates": {}, "error": err}
+        try:
+            NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            EARNINGS_CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+        except Exception:
+            pass
+        return {**payload, "stale": False}
+
+
+@app.post("/api/earnings/ingest")
+async def ingest_earnings_calendar(request: Request):
+    """Surové CSV stiahnuté prehliadačom (browser-direct fallback ako pri news)."""
+    text = (await request.body()).decode("utf-8", errors="replace")
+    try:
+        dates = _earnings_parse_csv(text)
+    except Exception as e:
+        return {"dates": {}, "stale": False,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "error": _news_scrub_error(str(e))}
+    payload = _earnings_save_cache(dates)
+    return {**payload, "stale": False}
+
+
 @app.post("/api/news/{ticker}/ingest")
 async def ingest_ticker_news(ticker: str, request: Request):
     """Prijme surovú AV odpoveď stiahnutú prehliadačom (klientova IP obchádza

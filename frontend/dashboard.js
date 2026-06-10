@@ -7427,7 +7427,7 @@ ${escHtml(copyText)}</textarea>
     const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
@@ -7459,6 +7459,98 @@ ${escHtml(copyText)}</textarea>
   </div>`;
   attachScannerExportResize();
   attachScannerNotesPanel();
+  applyScannerBadges();
+  ensureScannerMetaLoaded(ranked.map(r => r.ticker));
+}
+
+// ── Earnings warning + agregovaný sentiment v scanner riadkoch ──────────────
+
+let _earningsDates = null;     // {TICKER: 'YYYY-MM-DD'}
+let _newsSummary = {};         // {TICKER: {avg, n}}
+let _scannerMetaLoading = false;
+
+const EARNINGS_WARN_DAYS = 7;
+
+async function ensureScannerMetaLoaded(tickers) {
+  if (_scannerMetaLoading) return;
+  _scannerMetaLoading = true;
+  try {
+    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers)]);
+    applyScannerBadges();
+  } finally {
+    _scannerMetaLoading = false;
+  }
+}
+
+async function loadEarningsCalendar() {
+  if (_earningsDates) return;
+  try {
+    const r = await fetch('/api/earnings');
+    if (!r.ok) return;
+    let data = await r.json();
+    // rate-limit na Render IP → stiahni CSV priamo z prehliadača (per-IP limit)
+    if (data.error && !Object.keys(data.dates || {}).length) {
+      const direct = await fetchEarningsDirect();
+      if (direct) data = direct;
+    }
+    if (Object.keys(data.dates || {}).length) _earningsDates = data.dates;
+  } catch (e) { /* non-critical */ }
+}
+
+async function fetchEarningsDirect() {
+  try {
+    const kr = await fetch('/api/news/clientkey');
+    if (!kr.ok) return null;
+    const { key } = await kr.json();
+    if (!key) return null;
+    const av = await fetch(`https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=3month&apikey=${encodeURIComponent(key)}`);
+    if (!av.ok) return null;
+    const csv = await av.text();
+    const ir = await fetch('/api/earnings/ingest', { method: 'POST', body: csv });
+    if (!ir.ok) return null;
+    const data = await ir.json();
+    if (data.error && !Object.keys(data.dates || {}).length) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function loadNewsSummary(tickers) {
+  if (!tickers || !tickers.length) return;
+  try {
+    const r = await fetch(`/api/news/summary?tickers=${encodeURIComponent(tickers.join(','))}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    Object.assign(_newsSummary, data.summary || {});
+  } catch (e) { /* non-critical */ }
+}
+
+function newsSummaryFromItems(items) {
+  const scored = (items || []).filter(i => Number.isFinite(i.sentiment_score));
+  if (!scored.length) return null;
+  const wsum = scored.reduce((s, i) => s + (i.relevance || 0), 0) || 1;
+  const avg = scored.reduce((s, i) => s + i.sentiment_score * (i.relevance || 0), 0) / wsum;
+  return { avg: Math.round(avg * 1000) / 1000, n: (items || []).length };
+}
+
+function applyScannerBadges() {
+  document.querySelectorAll('[data-newssum]').forEach(el => {
+    const s = _newsSummary[el.dataset.newssum];
+    if (!s || !s.n) { el.innerHTML = ''; return; }
+    const cls = s.avg >= 0.15 ? 'bull' : s.avg <= -0.15 ? 'bear' : 'neutral';
+    el.innerHTML = `<span class="news-badge ${cls}" title="Priemerný sentiment z ${s.n} článkov (vážený relevanciou)">${s.avg >= 0 ? '+' : ''}${s.avg.toFixed(2)}</span>`;
+  });
+  if (!_earningsDates) return;
+  const now = new Date();
+  document.querySelectorAll('[data-earn]').forEach(el => {
+    const d = _earningsDates[el.dataset.earn];
+    if (!d) { el.innerHTML = ''; return; }
+    const days = Math.ceil((new Date(d + 'T00:00:00') - now) / 86400000);
+    if (days < 0 || days > EARNINGS_WARN_DAYS) { el.innerHTML = ''; return; }
+    const dt = new Date(d + 'T00:00:00');
+    el.innerHTML = `<span class="earn-warn" title="Earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} d.) — zvýšená volatilita, čísla pred reportom nemusia platiť">⚠ ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
+  });
 }
 
 let _scannerNotesContent = '';
@@ -7578,6 +7670,8 @@ async function fetchTickerNews(ticker, refresh) {
     }
     _newsCache[ticker] = data;
     if (cell) cell.innerHTML = renderNewsBlock(data);
+    const sum = newsSummaryFromItems(data.items);
+    if (sum) { _newsSummary[ticker] = sum; applyScannerBadges(); }
   } catch (e) {
     if (cell) cell.innerHTML = `<div class="news-empty">Chyba načítania správ: ${escHtml(e.message)}</div>`;
   }

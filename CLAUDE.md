@@ -132,7 +132,9 @@ Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predicti
 - **Cache:** `/data/news_cache/{TICKER}.json`, 12h TTL for data, **1h negative cache** for errors (rate-limit) — repeated clicks must not burn requests. Stale fallback: on fetch error return old cache with `stale: true`; never overwrite a cache that has items with an error payload.
 - **API key scrubbing:** AV injects the API key literally into rate-limit error messages. `_news_scrub_error()` masks it before anything reaches UI or disk cache. Don't remove.
 - **Browser-direct fallback (Render shared-IP workaround):** AV rate limit is per-IP; Render free tier shares outbound IP across apps, so the server-side limit is often exhausted by strangers. When `/api/news/{ticker}` returns an error with no items, frontend gets the key via `GET /api/news/clientkey` (basic-auth protected), fetches AV directly from the client IP (AV supports CORS), and POSTs the raw JSON to `/api/news/{ticker}/ingest`, which parses + caches it. The key is intentionally exposed to the (single, authenticated) user's browser — accepted trade-off.
-- **Route order matters:** `/api/news/clientkey` is defined before `/api/news/{ticker}`, otherwise FastAPI matches "clientkey" as a ticker.
+- **Route order matters:** `/api/news/clientkey` and `/api/news/summary` are defined before `/api/news/{ticker}`, otherwise FastAPI matches them as tickers.
+- **Aggregated sentiment badge** (`GET /api/news/summary?tickers=...`): relevance-weighted avg of `sentiment_score` computed purely from disk cache — never triggers AV requests. Rendered in scanner rows via `applyScannerBadges()`; updated client-side after each 📰 fetch (`newsSummaryFromItems`).
+- **Earnings calendar** (`GET /api/earnings`): AV `EARNINGS_CALENDAR` CSV (horizon=3month), 1 request covers all tickers; 24h cache in `_earnings_calendar.json` (same dir), 1h negative cache, browser-direct CSV fallback via `POST /api/earnings/ingest`. Scanner shows ⚠ badge when earnings ≤ 7 days away (`EARNINGS_WARN_DAYS`). AV returns JSON instead of CSV on errors — `_earnings_parse_csv` detects leading `{`.
 
 ## Virtual trading bot — key architecture
 

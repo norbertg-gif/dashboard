@@ -256,6 +256,19 @@ NEWS_SENTIMENT).
   iracionálna — žaloby, profit warningy, sektorové správy. News blok
   pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.
 
+### Earnings warning (⚠) a sentiment badge
+
+Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:
+
+- **⚠ + dátum** (oranžový) — ticker má **earnings do 7 dní**. Zdroj: Alpha
+  Vantage EARNINGS_CALENDAR — jeden request pre celý trh, cache 24 h.
+  Najčastejší dôvod, prečo „top kôň" sklame, je report o pár dní — čísla
+  pred earnings nemusia platiť.
+- **Sentiment badge** (zelený/červený/sivý, napr. `+0.21`) — relevanciou
+  vážený priemer sentimentu článkov z news cache. Zobrazuje sa **len pre
+  tickery, ktoré už majú stiahnuté správy** (cez 📰) — žiadne API requesty
+  navyše; cache sa časom zaplní sama.
+
 ### Poznámky (bočný panel)
 
 Vpravo od tabuľky je **resizovateľný panel s poznámkami** (globálne, nezávislé od

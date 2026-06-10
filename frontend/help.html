@@ -216,6 +216,13 @@
     <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.</li>
   </ul>
 
+  <h3>Earnings warning (⚠) a sentiment badge</h3>
+  <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:</p>
+  <ul>
+    <li><strong>⚠ + dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Alpha Vantage EARNINGS_CALENDAR — jeden request pre celý trh, cache 24 h. Najčastejší dôvod, prečo „top kôň" sklame, je report o pár dní — čísla pred earnings nemusia platiť.</li>
+    <li><strong>Sentiment badge</strong> (zelený/červený/sivý, napr. <code>+0.21</code>) — relevanciou vážený priemer sentimentu článkov z news cache. Zobrazuje sa len pre tickery, ktoré už majú stiahnuté správy (cez 📰) — žiadne API requesty navyše; cache sa časom zaplní sama.</li>
+  </ul>
+
   <h3>Poznámky (bočný panel)</h3>
   <p>Vpravo od tabuľky je <strong>resizovateľný panel s poznámkami</strong> — globálny, nezávislý od tickerov (jeden zdieľaný blok textu).</p>
   <ul>
