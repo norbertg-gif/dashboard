@@ -8045,6 +8045,12 @@ function botRenderEquityCurve(curve, initial) {
   </svg>`;
 }
 
+function botCfgFinvizChanged() {
+  const on = !!document.getElementById('bot-cfg-use-finviz')?.checked;
+  const wrap = document.getElementById('bot-cfg-finviz-min-wrap');
+  if (wrap) wrap.style.display = on ? '' : 'none';
+}
+
 function botCfgModeChanged() {
   const mode = document.getElementById('bot-cfg-mode')?.value || 'atr';
   document.querySelectorAll('[data-cfg-mode]').forEach(el => {
@@ -8062,7 +8068,11 @@ function botCfgFill(cfg) {
   set('bot-cfg-tp',     cfg.tp_pct);
   set('bot-cfg-pos-size', cfg.pos_size_pct);
   set('bot-cfg-score-min', cfg.entry_score_min);
+  const fv = document.getElementById('bot-cfg-use-finviz');
+  if (fv) fv.checked = !!cfg.use_finviz;
+  set('bot-cfg-finviz-min', cfg.finviz_min_score);
   botCfgModeChanged();
+  botCfgFinvizChanged();
 }
 
 async function botCfgSave() {
@@ -8076,6 +8086,8 @@ async function botCfgSave() {
     tp_pct:      num('bot-cfg-tp'),
     pos_size_pct: num('bot-cfg-pos-size'),
     entry_score_min: parseInt(document.getElementById('bot-cfg-score-min')?.value, 10),
+    use_finviz: !!document.getElementById('bot-cfg-use-finviz')?.checked,
+    finviz_min_score: num('bot-cfg-finviz-min'),
   };
   try {
     const r = await fetch('/api/bot/config', {

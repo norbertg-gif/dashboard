@@ -4740,6 +4740,8 @@ BOT_DEFAULT_CONFIG = {
     "tp_pct":      12.0,    # fixný take-profit %
     "pos_size_pct": 5.0,    # % počiatočného kapitálu na jeden obchod
     "entry_score_min": 3,   # min score (x/4) na otvorenie pozície
+    "use_finviz": False,    # filtrovať vstupy podľa importovaného Finviz/DIP skóre
+    "finviz_min_score": 90.0,  # min DIP total (STRONG=90, VERY STRONG=100)
 }
 
 
@@ -4904,6 +4906,8 @@ def bot_set_config(body: dict):
         cfg["tp_pct"]      = min(50.0, max(0.5, float(cfg["tp_pct"])))
         cfg["pos_size_pct"] = min(50.0, max(1.0, float(cfg["pos_size_pct"])))
         cfg["entry_score_min"] = min(4, max(1, int(cfg["entry_score_min"])))
+        cfg["use_finviz"] = bool(cfg["use_finviz"])
+        cfg["finviz_min_score"] = min(200.0, max(0.0, float(cfg["finviz_min_score"])))
     except (TypeError, ValueError):
         raise HTTPException(400, "Neplatné číselné hodnoty")
     portfolio = _bot_load()
@@ -4948,6 +4952,9 @@ def bot_run():
     cash      = float(portfolio["cash"])
     initial   = float(portfolio["initial_capital"])
     pos_size  = initial * float(cfg["pos_size_pct"]) / 100.0
+    dip_scores = {}
+    if cfg["use_finviz"]:
+        dip_scores = {k.upper(): v for k, v in load_dip_scores().items() if not k.startswith("_")}
 
     today_str    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     current_prices: dict = {}
@@ -5010,6 +5017,11 @@ def bot_run():
                 existing_entry = open_pos[ticker]["entry_price"]
                 existing_pnl   = (price / existing_entry - 1) * 100 if existing_entry > 0 else 0.0
                 if existing_pnl > -15.0:
+                    continue
+            if cfg["use_finviz"]:
+                # Ticker bez Finviz dát neprejde — filter má zmysel len keď je striktný
+                dip_total = _num_or_none((dip_scores.get(ticker.upper()) or {}).get("total"))
+                if dip_total is None or dip_total < float(cfg["finviz_min_score"]):
                     continue
             if len(open_pos) >= BOT_MAX_POSITIONS:
                 continue
