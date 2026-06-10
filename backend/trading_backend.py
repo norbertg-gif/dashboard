@@ -4725,6 +4725,304 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 
 # ══ END PREDICTIVE CHART routes ══════════════════════════
 
+# ══ VIRTUAL TRADING BOT ═══════════════════════════════════════════════════════
+
+BOT_FILE = DATA_ROOT / "bot_portfolio.json"
+BOT_INITIAL_CAPITAL  = 10_000.0
+BOT_POSITION_SIZE_PCT = 0.10    # 10% initial capital per trade → max $1 000
+BOT_MAX_POSITIONS     = 8
+BOT_STOP_LOSS_PCT     = 0.07    # −7 % od vstupu
+BOT_TAKE_PROFIT_PCT   = 0.12   # +12 % od vstupu
+BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
+
+
+def _bot_load() -> dict:
+    try:
+        if BOT_FILE.exists():
+            return json.loads(BOT_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  BOT load error: {e}")
+    return {
+        "cash": BOT_INITIAL_CAPITAL,
+        "initial_capital": BOT_INITIAL_CAPITAL,
+        "open_positions": {},
+        "closed_trades": [],
+        "equity_curve": [],
+        "last_run": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _bot_save(portfolio: dict):
+    try:
+        tmp = BOT_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(portfolio, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(BOT_FILE)
+    except Exception as e:
+        print(f"  BOT save error: {e}")
+
+
+def _bot_kpis(portfolio: dict, current_prices: dict) -> dict:
+    open_pos = portfolio.get("open_positions", {})
+    closed    = portfolio.get("closed_trades", [])
+    cash      = float(portfolio.get("cash", 0))
+    initial   = float(portfolio.get("initial_capital", BOT_INITIAL_CAPITAL))
+
+    pos_value = sum(
+        current_prices.get(t, p["entry_price"]) * p["shares"]
+        for t, p in open_pos.items()
+    )
+    equity = cash + pos_value
+    total_return_pct = (equity / initial - 1) * 100 if initial > 0 else 0.0
+
+    wins   = [t for t in closed if t.get("pnl", 0) > 0]
+    losses = [t for t in closed if t.get("pnl", 0) <= 0]
+    win_rate = len(wins) / len(closed) * 100 if closed else 0.0
+    avg_win  = sum(t["pnl_pct"] for t in wins)   / len(wins)   if wins   else 0.0
+    avg_loss = sum(t["pnl_pct"] for t in losses)  / len(losses) if losses else 0.0
+
+    max_dd = 0.0
+    peak = initial
+    for pt in portfolio.get("equity_curve", []):
+        eq = pt.get("equity", initial)
+        if eq > peak:
+            peak = eq
+        dd = (peak - eq) / peak * 100 if peak > 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+
+    return {
+        "equity":           round(equity, 2),
+        "cash":             round(cash, 2),
+        "invested":         round(pos_value, 2),
+        "total_return_pct": round(total_return_pct, 2),
+        "win_rate":         round(win_rate, 1),
+        "total_trades":     len(closed),
+        "wins":             len(wins),
+        "losses":           len(losses),
+        "avg_win_pct":      round(avg_win, 2),
+        "avg_loss_pct":     round(avg_loss, 2),
+        "max_drawdown_pct": round(max_dd, 2),
+        "open_count":       len(open_pos),
+    }
+
+
+def _bot_score_ticker(ticker: str) -> dict | None:
+    """Vráti score, tier a poslednú cenu. None ak chyba alebo málo dát."""
+    try:
+        raw = _yf_download_cached(ticker, "6mo", "1d")
+        if len(raw) < 20:
+            return None
+        df = add_indicators(raw)
+        price = float(df.iloc[-1]["Close"])
+        zscore = float(rolling_zscore(df["Close"]).iloc[-1])
+        sc, details = score_signal_day(df.iloc[-1], zscore)
+        tier = signal_tier(sc, details["trend"])
+        return {"score": sc, "tier": tier, "price": price, "details": details}
+    except Exception as e:
+        print(f"  BOT score error {ticker}: {e}")
+        return None
+
+
+@app.get("/api/bot/status")
+def bot_status():
+    portfolio = _bot_load()
+    open_pos  = portfolio.get("open_positions", {})
+
+    current_prices: dict = {}
+    for ticker, pos in open_pos.items():
+        try:
+            raw = _yf_download_cached(ticker, "5d", "1d")
+            current_prices[ticker] = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
+        except Exception:
+            current_prices[ticker] = pos["entry_price"]
+
+    kpis = _bot_kpis(portfolio, current_prices)
+
+    open_enriched = []
+    for ticker, pos in open_pos.items():
+        price   = current_prices.get(ticker, pos["entry_price"])
+        pnl     = (price - pos["entry_price"]) * pos["shares"]
+        pnl_pct = (price / pos["entry_price"] - 1) * 100 if pos["entry_price"] > 0 else 0.0
+        open_enriched.append({**pos,
+            "current_price": round(price, 2),
+            "pnl":           round(pnl, 2),
+            "pnl_pct":       round(pnl_pct, 2),
+        })
+    open_enriched.sort(key=lambda x: x.get("pnl_pct", 0), reverse=True)
+
+    return {
+        "kpis":            kpis,
+        "open_positions":  open_enriched,
+        "closed_trades":   list(reversed(portfolio.get("closed_trades", [])))[:50],
+        "equity_curve":    portfolio.get("equity_curve", []),
+        "last_run":        portfolio.get("last_run"),
+        "initial_capital": portfolio.get("initial_capital", BOT_INITIAL_CAPITAL),
+    }
+
+
+@app.post("/api/bot/run")
+def bot_run():
+    """Jedno kolo bota: skenuj watchlist, otvori/zavri virtuálne pozície."""
+    watchlist = _read_watchlist_file()
+    tickers = [w["symbol"] for w in watchlist if isinstance(w, dict) and w.get("symbol")]
+    if not tickers:
+        raise HTTPException(400, "Watchlist je prázdny")
+
+    portfolio = _bot_load()
+    open_pos  = portfolio["open_positions"]
+    closed    = portfolio["closed_trades"]
+    cash      = float(portfolio["cash"])
+    initial   = float(portfolio["initial_capital"])
+    pos_size  = initial * BOT_POSITION_SIZE_PCT
+
+    today_str    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    current_prices: dict = {}
+    actions: list = []
+
+    for ticker in tickers:
+        sig = _bot_score_ticker(ticker)
+        if sig is None:
+            continue
+        score = sig["score"]
+        tier  = sig["tier"]
+        price = sig["price"]
+        current_prices[ticker] = price
+
+        if ticker in open_pos:
+            # ── Kontrola výstupu ─────────────────────────────────────────────
+            pos     = open_pos[ticker]
+            entry   = pos["entry_price"]
+            pnl_pct = (price / entry - 1) * 100 if entry > 0 else 0.0
+
+            exit_reason = None
+            if pnl_pct <= -(BOT_STOP_LOSS_PCT * 100):
+                exit_reason = "stop_loss"
+            elif pnl_pct >= (BOT_TAKE_PROFIT_PCT * 100):
+                exit_reason = "take_profit"
+            elif tier == "counter" and score >= 3:
+                exit_reason = "counter_signal"
+
+            if exit_reason:
+                pnl  = (price - entry) * pos["shares"]
+                cash += price * pos["shares"]
+                closed.append({
+                    "ticker":       ticker,
+                    "entry_date":   pos["entry_date"],
+                    "exit_date":    today_str,
+                    "entry_price":  round(entry, 4),
+                    "exit_price":   round(price, 4),
+                    "shares":       round(pos["shares"], 4),
+                    "pnl":          round(pnl, 2),
+                    "pnl_pct":      round(pnl_pct, 2),
+                    "exit_reason":  exit_reason,
+                })
+                del open_pos[ticker]
+                actions.append({"action": "close", "ticker": ticker,
+                                 "reason": exit_reason, "pnl_pct": round(pnl_pct, 2)})
+
+        elif score >= BOT_ENTRY_SCORE_MIN and tier == "buy":
+            # ── Otvorenie novej pozície ──────────────────────────────────────
+            if len(open_pos) >= BOT_MAX_POSITIONS:
+                continue
+            if cash < pos_size * 0.5:
+                continue
+            alloc  = min(pos_size, cash)
+            shares = alloc / price
+            cash  -= alloc
+            open_pos[ticker] = {
+                "ticker":      ticker,
+                "entry_price": round(price, 4),
+                "entry_date":  today_str,
+                "shares":      round(shares, 6),
+                "entry_score": score,
+                "entry_tier":  tier,
+                "alloc":       round(alloc, 2),
+            }
+            actions.append({"action": "open", "ticker": ticker,
+                             "price": round(price, 2), "alloc": round(alloc, 2)})
+
+    # ── Equity snapshot ──────────────────────────────────────────────────────
+    pos_value = sum(
+        current_prices.get(t, p["entry_price"]) * p["shares"]
+        for t, p in open_pos.items()
+    )
+    equity_val = round(cash + pos_value, 2)
+    equity_curve = portfolio.get("equity_curve", [])
+    # Jeden bod na deň — prepíš ak dnes už máme
+    if equity_curve and equity_curve[-1].get("date") == today_str:
+        equity_curve[-1]["equity"] = equity_val
+    else:
+        equity_curve.append({"date": today_str, "equity": equity_val})
+    if len(equity_curve) > 365:
+        equity_curve = equity_curve[-365:]
+
+    portfolio["cash"]          = round(cash, 2)
+    portfolio["open_positions"] = open_pos
+    portfolio["closed_trades"] = closed
+    portfolio["equity_curve"]  = equity_curve
+    portfolio["last_run"]      = datetime.now(timezone.utc).isoformat()
+    _bot_save(portfolio)
+
+    return {
+        "actions":        actions,
+        "equity":         equity_val,
+        "open_count":     len(open_pos),
+        "cash":           round(cash, 2),
+        "tickers_scanned": len(tickers),
+    }
+
+
+@app.post("/api/bot/close/{ticker}")
+def bot_close_position(ticker: str):
+    ticker = ticker.upper()
+    portfolio = _bot_load()
+    if ticker not in portfolio["open_positions"]:
+        raise HTTPException(404, f"{ticker} nie je v otvorených pozíciách")
+
+    pos = portfolio["open_positions"][ticker]
+    try:
+        raw   = _yf_download_cached(ticker, "5d", "1d")
+        price = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
+    except Exception:
+        price = pos["entry_price"]
+
+    pnl     = (price - pos["entry_price"]) * pos["shares"]
+    pnl_pct = (price / pos["entry_price"] - 1) * 100 if pos["entry_price"] > 0 else 0.0
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    portfolio["closed_trades"].append({
+        "ticker":      ticker,
+        "entry_date":  pos["entry_date"],
+        "exit_date":   today_str,
+        "entry_price": round(pos["entry_price"], 4),
+        "exit_price":  round(price, 4),
+        "shares":      round(pos["shares"], 6),
+        "pnl":         round(pnl, 2),
+        "pnl_pct":     round(pnl_pct, 2),
+        "exit_reason": "manual",
+    })
+    portfolio["cash"] = round(portfolio["cash"] + price * pos["shares"], 2)
+    del portfolio["open_positions"][ticker]
+    _bot_save(portfolio)
+    return {"ok": True, "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2)}
+
+
+@app.post("/api/bot/reset")
+def bot_reset():
+    _bot_save({
+        "cash":             BOT_INITIAL_CAPITAL,
+        "initial_capital":  BOT_INITIAL_CAPITAL,
+        "open_positions":   {},
+        "closed_trades":    [],
+        "equity_curve":     [],
+        "last_run":         None,
+        "created_at":       datetime.now(timezone.utc).isoformat(),
+    })
+    return {"ok": True}
+
+# ══ END VIRTUAL TRADING BOT ════════════════════════════════════════════════════
+
 @app.get("/api/health")
 def health():
     return {
