@@ -16,10 +16,11 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 3. [Záložky](#3-záložky)
 4. [Prediktívny tab — ako čítať signály](#4-prediktívny-tab--ako-čítať-signály)
 5. [Scanner + DIP stratégia](#5-scanner--dip-stratégia)
-6. [Filozofia signálov](#6-filozofia-signálov)
-7. [Presety, watchlist, eToro](#7-presety-watchlist-etoro)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Technická príloha](#9-technická-príloha)
+6. [Virtuálny obchodný bot](#6-virtuálny-obchodný-bot)
+7. [Filozofia signálov](#7-filozofia-signálov)
+8. [Presety, watchlist, eToro](#8-presety-watchlist-etoro)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Technická príloha](#10-technická-príloha)
 
 ---
 
@@ -70,6 +71,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Scanner** — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu
   a Nasdaq skener s DIP crossover stratégiou
   (viď [sekcia 5](#5-scanner--dip-stratégia)).
+- **Bot** — virtuálny paper-trading bot na testovanie signálov bez rizika
+  (viď [sekcia 6](#6-virtuálny-obchodný-bot)).
 
 ---
 
@@ -258,7 +261,78 @@ formát pripravený na vloženie do Excelu / Google Sheets.
 
 ---
 
-## 6. Filozofia signálov
+## 6. Virtuálny obchodný bot
+
+Záložka **Bot** simuluje paper-trading na live dátach — overuje, ako by si sa
+obchodoval na základe technických signálov, bez rizika skutočného kapitálu.
+
+### Spustenie a tok dát
+
+- Klikni **▶ Spustiť kolo** — bot si sám stiahne denné dáta z yfinance pre každý
+  ticker. **Scanner pred spustením spúšťať netreba.**
+- Bot prechádza: **watchlist + eToro portfólio (oba účty) + celý Nasdaq 100**
+  (~160 tickerov, duplikáty sa odfiltrujú).
+- Ideálny čas spustenia: večer po **22:00 SK** keď je US daily sviečka uzavretá.
+  Spustenie cez deň hodnotí rozpracovanú sviečku — menej spoľahlivé.
+- Prvé kolo po dlhšej nečinnosti trvá 2–3 min (sťahovanie dát). Ďalšie kolá
+  v ten istý deň sú rýchlejšie vďaka 30-minútovej yfinance cache.
+
+### Vstupná logika
+
+Bot otvorí novú pozíciu ak:
+1. Technický score ≥ **Min. score** (konfigurovateľné, default 3/4)
+2. Tier = **buy** (uptrend: EMA10 > EMA20)
+3. Ticker **nie je** v otvorených pozíciách — alebo je tam, ale v strate **≥ 15 %**
+   (averaging down výnimka)
+4. Je dostatok voľného cash a max. počet pozícií nie je dosiahnutý
+5. Ak je zapnutý **Finviz filter** — ticker musí mať importované DIP skóre ≥ min.
+   (ticker bez Finviz dát = skip)
+
+### Výstupná logika
+
+Pozícia sa zavrie ak nastane jedno z:
+- **Stop-loss** — cena klesla pod prah
+- **Take-profit** — cena stúpla nad prah
+- **Counter signál** — score ≥ 3 a tier = counter (downtrend)
+- **Manuálne** — tlačidlo **Zavri** v tabuľke otvorených pozícií
+
+### Nastavenia (⚙️ Exit nastavenia)
+
+| Nastavenie | Popis | Default |
+|---|---|---|
+| **Režim** | `ATR násobky` = prahy relatívne k volatilite; `Fixné %` = pevné percentá | ATR násobky |
+| **Stop-loss (×ATR)** | Koľko ATR pod vstupom sa zavrie | 1.5 |
+| **Take-profit (×ATR)** | Koľko ATR nad vstupom sa zavrie | 2.5 |
+| **Stop-loss (%)** | Fixný stop (aj fallback keď ATR chýba) | 7 % |
+| **Take-profit (%)** | Fixný take-profit | 12 % |
+| **Vstup (% kapitálu)** | Koľko % počiatočného kapitálu na jeden obchod | 5 % |
+| **Min. score (x/4)** | Minimálne technické skóre pre vstup | 3/4 |
+| **Finviz filter** | Zapnúť/vypnúť filter podľa DIP skóre | vypnuté |
+| **Min. DIP skóre** | Minimálna hodnota DIP total (STRONG = 90, VERY STRONG = 100) | 90 |
+
+**ATR režim** — stop a take-profit sa vypočítajú z ATR uloženého pri otvorení
+pozície, takže na volatilnejší titul vychádza širší stop. Fixné % slúžia ako
+fallback keď ATR pre ticker chýba.
+
+**Finviz filter** — keď zapnutý, pred každým kolom importuj čerstvý Finviz export
+(Scanner tab → Import DIP). Ticker bez Finviz dát pri zapnutom filtri neprejde.
+
+Nastavenia sa ukladajú na disk (`bot_portfolio.json`) a prežívajú aj **Reset bota**.
+Reset vymaže len pozície a históriu, nie konfiguráciu.
+
+### KPI a história
+
+- **KPI dlaždice** — aktuálny stav: equity, cash, otvorené pozície, closed trades,
+  win rate, max drawdown.
+- **Otvorené pozície** — tabuľka s aktuálnou cenou, P/L a tlačidlom **Zavri**.
+  Klik na ticker otvorí detail v Prediktívnom tabe.
+- **História** — posledných 40 uzavretých obchodov s dôvodom výstupu
+  (Stop-loss / Take-profit / Counter / Manuálne).
+- **Equity krivka** — vývoj hodnoty portfólia po jednotlivých obchodoch.
+
+---
+
+## 7. Filozofia signálov
 
 ### Štyri denné podmienky (c1–c4)
 
@@ -297,7 +371,7 @@ jazykom.
 
 ---
 
-## 7. Presety, watchlist, eToro
+## 8. Presety, watchlist, eToro
 
 - **Watchlist** — zoznam sledovaných tickerov, ktoré sa zobrazujú v Grafoch a
   vstupujú do Opportunities a prefetchu.
@@ -316,7 +390,7 @@ jazykom.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Príznak | Príčina / riešenie |
 |---|---|
@@ -329,7 +403,7 @@ jazykom.
 
 ---
 
-## 9. Technická príloha
+## 10. Technická príloha
 
 > Pre údržbu. Detailné pravidlá a pasce sú v `CLAUDE.md` v repozitári.
 
@@ -343,7 +417,7 @@ jazykom.
   import — bez build kroku.
 - **Storage:** `/data` (Render disk) — `presets.json`, `trade_journal.json`,
   `predictive_signals_log.json`, `predictive_weights_log.json`,
-  `cache/{ohlcv,portfolio,instruments}`.
+  `bot_portfolio.json`, `cache/{ohlcv,portfolio,instruments}`.
 
 ### Rozloženie
 
