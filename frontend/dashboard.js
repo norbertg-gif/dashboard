@@ -8045,6 +8045,52 @@ function botRenderEquityCurve(curve, initial) {
   </svg>`;
 }
 
+function botCfgModeChanged() {
+  const mode = document.getElementById('bot-cfg-mode')?.value || 'atr';
+  document.querySelectorAll('[data-cfg-mode]').forEach(el => {
+    el.style.display = el.getAttribute('data-cfg-mode') === mode ? '' : 'none';
+  });
+}
+
+function botCfgFill(cfg) {
+  if (!cfg) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('bot-cfg-mode',   cfg.exit_mode);
+  set('bot-cfg-atr-sl', cfg.atr_sl_mult);
+  set('bot-cfg-atr-tp', cfg.atr_tp_mult);
+  set('bot-cfg-sl',     cfg.sl_pct);
+  set('bot-cfg-tp',     cfg.tp_pct);
+  botCfgModeChanged();
+}
+
+async function botCfgSave() {
+  const msgEl = document.getElementById('bot-cfg-msg');
+  const num = id => parseFloat(document.getElementById(id)?.value);
+  const body = {
+    exit_mode:   document.getElementById('bot-cfg-mode')?.value || 'atr',
+    atr_sl_mult: num('bot-cfg-atr-sl'),
+    atr_tp_mult: num('bot-cfg-atr-tp'),
+    sl_pct:      num('bot-cfg-sl'),
+    tp_pct:      num('bot-cfg-tp'),
+  };
+  try {
+    const r = await fetch('/api/bot/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const cfg = await r.json();
+    botCfgFill(cfg);   // server vracia clamped hodnoty
+    if (msgEl) {
+      msgEl.textContent = '✓ Uložené';
+      setTimeout(() => { msgEl.textContent = ''; }, 3000);
+    }
+  } catch (e) {
+    if (msgEl) msgEl.textContent = 'Chyba: ' + e.message;
+  }
+}
+
 async function botRefresh() {
   const statusEl = document.getElementById('bot-status-msg');
   if (statusEl) statusEl.textContent = 'Načítavam…';
@@ -8056,6 +8102,7 @@ async function botRefresh() {
     botRenderOpenPositions(_botData.open_positions);
     botRenderHistory(_botData.closed_trades);
     botRenderEquityCurve(_botData.equity_curve, _botData.initial_capital);
+    botCfgFill(_botData.config);
     if (statusEl) {
       statusEl.textContent = _botData.last_run
         ? `Posledné spustenie: ${_botData.last_run.slice(0, 16).replace('T', ' ')} UTC`

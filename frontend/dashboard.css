@@ -3080,3 +3080,23 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .pnl-pos { color: var(--up); }
 .pnl-neg { color: var(--down); }
+
+.bot-config-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.bot-cfg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bot-cfg-field > span {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  text-transform: uppercase;
+}

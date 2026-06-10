@@ -4731,11 +4731,26 @@ BOT_FILE = DATA_ROOT / "bot_portfolio.json"
 BOT_INITIAL_CAPITAL   = 10_000.0
 BOT_POSITION_SIZE_PCT = 0.10    # 10% initial capital per trade → max $1 000
 BOT_MAX_POSITIONS     = 8
-BOT_ATR_SL_MULT       = 1.5     # stop-loss = 1.5×ATR od vstupu
-BOT_ATR_TP_MULT       = 2.5     # take-profit = 2.5×ATR od vstupu
-BOT_FALLBACK_SL_PCT   = 0.07    # keď ATR nie je k dispozícii
-BOT_FALLBACK_TP_PCT   = 0.12
 BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
+
+# Default exit konfigurácia — prepísateľná cez /api/bot/config, uložená v bot_portfolio.json
+BOT_DEFAULT_CONFIG = {
+    "exit_mode":   "atr",   # "atr" = násobky ATR, "pct" = fixné percentá
+    "atr_sl_mult": 1.5,     # stop-loss = 1.5×ATR od vstupu
+    "atr_tp_mult": 2.5,     # take-profit = 2.5×ATR od vstupu
+    "sl_pct":      7.0,     # fixný stop-loss % (aj fallback keď ATR chýba)
+    "tp_pct":      12.0,    # fixný take-profit %
+}
+
+
+def _bot_config(portfolio: dict) -> dict:
+    cfg = dict(BOT_DEFAULT_CONFIG)
+    saved = portfolio.get("config")
+    if isinstance(saved, dict):
+        for key in cfg:
+            if key in saved:
+                cfg[key] = saved[key]
+    return cfg
 
 
 def _bot_load() -> dict:
@@ -4867,7 +4882,32 @@ def bot_status():
         "equity_curve":    portfolio.get("equity_curve", []),
         "last_run":        portfolio.get("last_run"),
         "initial_capital": portfolio.get("initial_capital", BOT_INITIAL_CAPITAL),
+        "config":          _bot_config(portfolio),
     }
+
+
+@app.get("/api/bot/config")
+def bot_get_config():
+    return _bot_config(_bot_load())
+
+
+@app.post("/api/bot/config")
+def bot_set_config(body: dict):
+    cfg = _bot_config({"config": body})
+    # Validácia rozsahov — chráni pred preklepmi (SL 50 % a pod.)
+    if cfg["exit_mode"] not in ("atr", "pct"):
+        raise HTTPException(400, "exit_mode musí byť 'atr' alebo 'pct'")
+    try:
+        cfg["atr_sl_mult"] = min(10.0, max(0.5, float(cfg["atr_sl_mult"])))
+        cfg["atr_tp_mult"] = min(10.0, max(0.5, float(cfg["atr_tp_mult"])))
+        cfg["sl_pct"]      = min(30.0, max(0.5, float(cfg["sl_pct"])))
+        cfg["tp_pct"]      = min(50.0, max(0.5, float(cfg["tp_pct"])))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Neplatné číselné hodnoty")
+    portfolio = _bot_load()
+    portfolio["config"] = cfg
+    _bot_save(portfolio)
+    return cfg
 
 
 def _bot_get_tickers() -> list[str]:
@@ -4900,6 +4940,7 @@ def bot_run():
         raise HTTPException(400, "Zdroj tickerov je prázdny")
 
     portfolio = _bot_load()
+    cfg       = _bot_config(portfolio)
     open_pos  = portfolio["open_positions"]
     closed    = portfolio["closed_trades"]
     cash      = float(portfolio["cash"])
@@ -4925,14 +4966,14 @@ def bot_run():
             entry   = pos["entry_price"]
             pnl_pct = (price / entry - 1) * 100 if entry > 0 else 0.0
 
-            # ATR-based prahy (uložené pri otvorení), fallback na fixné %
+            # Exit prahy podľa konfigurácie: ATR násobky alebo fixné %
             entry_atr = pos.get("entry_atr")
-            if entry_atr and entry_atr > 0 and entry > 0:
-                sl_pct = -(BOT_ATR_SL_MULT * entry_atr / entry * 100)
-                tp_pct =  (BOT_ATR_TP_MULT * entry_atr / entry * 100)
+            if cfg["exit_mode"] == "atr" and entry_atr and entry_atr > 0 and entry > 0:
+                sl_pct = -(cfg["atr_sl_mult"] * entry_atr / entry * 100)
+                tp_pct =  (cfg["atr_tp_mult"] * entry_atr / entry * 100)
             else:
-                sl_pct = -(BOT_FALLBACK_SL_PCT * 100)
-                tp_pct =  (BOT_FALLBACK_TP_PCT * 100)
+                sl_pct = -float(cfg["sl_pct"])
+                tp_pct =  float(cfg["tp_pct"])
 
             exit_reason = None
             if pnl_pct <= sl_pct:
@@ -5052,6 +5093,8 @@ def bot_close_position(ticker: str):
 
 @app.post("/api/bot/reset")
 def bot_reset():
+    # Konfigurácia prežíva reset — maže sa len portfólio a história
+    cfg = _bot_config(_bot_load())
     _bot_save({
         "cash":             BOT_INITIAL_CAPITAL,
         "initial_capital":  BOT_INITIAL_CAPITAL,
@@ -5060,6 +5103,7 @@ def bot_reset():
         "equity_curve":     [],
         "last_run":         None,
         "created_at":       datetime.now(timezone.utc).isoformat(),
+        "config":           cfg,
     })
     return {"ok": True}
 
