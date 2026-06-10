@@ -234,6 +234,28 @@ s externým **DIP rankingom**. Klik na kandidáta otvorí jeho detail v Predikci
 | **Last** | Posledná cena. |
 | **Reason** | Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8", „blízko EMA/Kijun zóny"). |
 
+### Správy a sentiment (📰)
+
+Každý riadok Nasdaq DIP scannera má tlačidlo **📰** — rozbalí pod riadkom
+zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage
+NEWS_SENTIMENT).
+
+- **Badge pri článku**: Bullish / Somewhat bullish / Neutral / Somewhat
+  bearish / Bearish + číselné skóre. Sentiment je **ticker-špecifický**
+  (článok môže hodnotiť viacero titulov — zobrazuje sa hodnotenie pre daný
+  ticker, nie celkové vyznenie článku).
+- **Relevancia**: články s relevanciou < 15 % pre ticker sa odfiltrujú;
+  zvyšok je zoradený podľa času a relevancie, max. 10 položiek.
+- **Cache**: výsledky sa držia 12 h na disku — opakované otvorenie neminie
+  API request. **⟳ Obnoviť** vynúti čerstvé načítanie.
+- **Limity**: free API kľúč má 25 requestov/deň. Server beží na zdieľanej
+  IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami —
+  vtedy prehliadač automaticky stiahne dáta **priamo z tvojej IP** a pošle
+  ich serveru do cache (fallback je transparentný, nič netreba robiť).
+- Načo to je: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva
+  iracionálna — žaloby, profit warningy, sektorové správy. News blok
+  pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.
+
 ### Poznámky (bočný panel)
 
 Vpravo od tabuľky je **resizovateľný panel s poznámkami** (globálne, nezávislé od
@@ -450,6 +472,7 @@ render.yaml            # web service + 1GB disk na /data
 | `DASH_USER` / `DASH_PASS` | Basic auth (povinné v produkcii). |
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
+| `ALPHA_VANTAGE_API_KEY` | News sentiment v scanneri (free tier: 25 req/deň). |
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
 | `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |

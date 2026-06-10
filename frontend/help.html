@@ -206,6 +206,16 @@
     <tr><td><strong>Reason</strong></td><td>Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8").</td></tr>
   </table>
 
+  <h3>Správy a sentiment (📰)</h3>
+  <p>Každý riadok Nasdaq DIP scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
+  <ul>
+    <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
+    <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
+    <li><strong>Cache</strong>: výsledky sa držia 12 h na disku — opakované otvorenie neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
+    <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
+    <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.</li>
+  </ul>
+
   <h3>Poznámky (bočný panel)</h3>
   <p>Vpravo od tabuľky je <strong>resizovateľný panel s poznámkami</strong> — globálny, nezávislý od tickerov (jeden zdieľaný blok textu).</p>
   <ul>
@@ -355,6 +365,7 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>DASH_USER</code> / <code>DASH_PASS</code></td><td>Basic auth (povinné v produkcii).</td></tr>
     <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
+    <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v scanneri (free tier: 25 req/deň).</td></tr>
     <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM).</td></tr>
     <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania (default 15 s).</td></tr>
     <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 30 s).</td></tr>

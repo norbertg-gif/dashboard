@@ -7,7 +7,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 - **Backend:** FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS for XLSX import — no build step
-- **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `cache/{ohlcv,portfolio,instruments}`
+- **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
 - **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`).
 
 ## Layout
@@ -122,6 +122,17 @@ Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predicti
 - **Export/kopírovanie** block is above KPI tiles (collapsed by default).
 - **Notes panel** sits to the right of the results table (flex row), resizable horizontally. Below 1100px flips to column layout.
 - **Scanner decision CSS**: `.scanner-label.buy` / `.scanner-label.counter` / `.scanner-label.watch` — aligned with `.pc-decision-badge.*` in Predictive. DIP quality still uses `.scanner-label.strong` / `.scanner-label.weak` (separate meaning).
+
+## News sentiment — key architecture
+
+**Role:** Reality check k číslam — articles + ticker-specific sentiment v Nasdaq DIP scanneri (📰 button per row, lazy load).
+
+- **Source:** Alpha Vantage `NEWS_SENTIMENT`. `ALPHA_VANTAGE_API_KEY` from env only (free tier 25 req/day).
+- **Backend:** `_news_parse_feed(ticker, data)` — shared parsing (relevance filter ≥ 0.15, ticker-specific sentiment not overall, sort by time+relevance, max 10). Called by both `_news_fetch_av` (server fetch) and `POST /api/news/{ticker}/ingest` (browser-fetched raw JSON).
+- **Cache:** `/data/news_cache/{TICKER}.json`, 12h TTL for data, **1h negative cache** for errors (rate-limit) — repeated clicks must not burn requests. Stale fallback: on fetch error return old cache with `stale: true`; never overwrite a cache that has items with an error payload.
+- **API key scrubbing:** AV injects the API key literally into rate-limit error messages. `_news_scrub_error()` masks it before anything reaches UI or disk cache. Don't remove.
+- **Browser-direct fallback (Render shared-IP workaround):** AV rate limit is per-IP; Render free tier shares outbound IP across apps, so the server-side limit is often exhausted by strangers. When `/api/news/{ticker}` returns an error with no items, frontend gets the key via `GET /api/news/clientkey` (basic-auth protected), fetches AV directly from the client IP (AV supports CORS), and POSTs the raw JSON to `/api/news/{ticker}/ingest`, which parses + caches it. The key is intentionally exposed to the (single, authenticated) user's browser — accepted trade-off.
+- **Route order matters:** `/api/news/clientkey` is defined before `/api/news/{ticker}`, otherwise FastAPI matches "clientkey" as a ticker.
 
 ## Virtual trading bot — key architecture
 
