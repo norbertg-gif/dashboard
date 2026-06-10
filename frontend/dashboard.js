@@ -7569,11 +7569,42 @@ async function fetchTickerNews(ticker, refresh) {
   try {
     const r = await fetch(`/api/news/${encodeURIComponent(ticker)}${refresh ? '?refresh=1' : ''}`);
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
+    let data = await r.json();
+    // Backend (Render zdieľaná IP) rate-limitnutý → skús AV priamo z prehliadača
+    // (limit je per-IP, klientova IP je iná) a výsledok pošli backendu do cache.
+    if (data.error && !(data.items || []).length) {
+      const direct = await fetchTickerNewsDirect(ticker);
+      if (direct) data = direct;
+    }
     _newsCache[ticker] = data;
     if (cell) cell.innerHTML = renderNewsBlock(data);
   } catch (e) {
     if (cell) cell.innerHTML = `<div class="news-empty">Chyba načítania správ: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function fetchTickerNewsDirect(ticker) {
+  try {
+    const kr = await fetch('/api/news/clientkey');
+    if (!kr.ok) return null;
+    const { key } = await kr.json();
+    if (!key) return null;
+    const av = await fetch(`https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(ticker)}&limit=50&apikey=${encodeURIComponent(key)}`);
+    if (!av.ok) return null;
+    const raw = await av.json();
+    // parsovanie + cache nechávame na backende — jedna logika pre obe cesty
+    const ir = await fetch(`/api/news/${encodeURIComponent(ticker)}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(raw),
+    });
+    if (!ir.ok) return null;
+    const data = await ir.json();
+    // ak aj priame volanie narazilo na limit (per-key limit), nechaj pôvodnú chybu
+    if (data.error && !(data.items || []).length) return null;
+    return data;
+  } catch (e) {
+    return null;
   }
 }
 

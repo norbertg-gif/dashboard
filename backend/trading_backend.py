@@ -4566,19 +4566,8 @@ def _news_scrub_error(msg: str) -> str:
     return text[:200]
 
 
-def _news_fetch_av(ticker: str) -> list[dict]:
-    """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
-    resp = requests.get(
-        "https://www.alphavantage.co/query",
-        params={"function": "NEWS_SENTIMENT", "tickers": ticker.upper(),
-                "limit": 50, "apikey": api_key},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
+    """Normalizuje surovú AV NEWS_SENTIMENT odpoveď na zoznam položiek."""
     # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
     if "feed" not in data:
         msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
@@ -4614,6 +4603,64 @@ def _news_fetch_av(ticker: str) -> list[dict]:
     return items[:NEWS_MAX_ITEMS]
 
 
+def _news_fetch_av(ticker: str) -> list[dict]:
+    """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
+    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
+    resp = requests.get(
+        "https://www.alphavantage.co/query",
+        params={"function": "NEWS_SENTIMENT", "tickers": ticker.upper(),
+                "limit": 50, "apikey": api_key},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return _news_parse_feed(ticker, resp.json())
+
+
+def _news_save_cache(ticker: str, items: list[dict]) -> dict:
+    payload = {
+        "ticker": ticker,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+    }
+    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _news_cache_path(ticker).write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return payload
+
+
+@app.get("/api/news/clientkey")
+def get_news_clientkey():
+    """Vydá AV kľúč prehliadaču — fallback keď je Render zdieľaná IP rate-limitnutá.
+    Endpoint je za basic auth ako všetko ostatné; kľúč nikdy necachovať na disk."""
+    key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    if not key:
+        raise HTTPException(404, "ALPHA_VANTAGE_API_KEY nie je nastavený")
+    return {"key": key}
+
+
+@app.post("/api/news/{ticker}/ingest")
+async def ingest_ticker_news(ticker: str, request: Request):
+    """Prijme surovú AV odpoveď stiahnutú prehliadačom (klientova IP obchádza
+    rate-limit zdieľanej Render IP), rozparsuje ju rovnakou logikou a uloží do cache."""
+    ticker = ticker.strip().upper()
+    if not ticker or len(ticker) > 12:
+        raise HTTPException(400, "Neplatný ticker")
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Neplatné JSON telo")
+    try:
+        items = _news_parse_feed(ticker, data if isinstance(data, dict) else {})
+    except Exception as e:
+        return {"ticker": ticker, "items": [], "stale": False,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "error": _news_scrub_error(str(e))}
+    payload = _news_save_cache(ticker, items)
+    return {**payload, "stale": False}
+
+
 @app.get("/api/news/{ticker}")
 def get_ticker_news(ticker: str, refresh: int = Query(0)):
     ticker = ticker.strip().upper()
@@ -4636,14 +4683,7 @@ def get_ticker_news(ticker: str, refresh: int = Query(0)):
 
     try:
         items = _news_fetch_av(ticker)
-        payload = {
-            "ticker": ticker,
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
-            "items": items,
-        }
-        NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _news_cache_path(ticker).write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        payload = _news_save_cache(ticker, items)
         return {**payload, "stale": False}
     except Exception as e:
         err = _news_scrub_error(str(e))
