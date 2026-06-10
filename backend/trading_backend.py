@@ -4533,6 +4533,114 @@ async def save_scanner_note(request: Request):
     return {"ok": True}
 
 
+# ── News sentiment (Alpha Vantage) ────────────────────────────────────────────
+# Lazy, cache-first: free tier = 25 req/deň, preto 12h TTL na persistent disku
+# a stale fallback pri chybe/limite. Nikdy nesmie zhodiť scanner.
+
+NEWS_CACHE_DIR = DATA_ROOT / "news_cache"
+NEWS_CACHE_TTL_H = 12
+NEWS_RELEVANCE_MIN = 0.15
+NEWS_MAX_ITEMS = 10
+
+
+def _news_cache_path(ticker: str) -> Path:
+    return NEWS_CACHE_DIR / f"{ticker.upper()}.json"
+
+
+def _news_cache_read(ticker: str) -> dict | None:
+    p = _news_cache_path(ticker)
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _news_fetch_av(ticker: str) -> list[dict]:
+    """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
+    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
+    resp = requests.get(
+        "https://www.alphavantage.co/query",
+        params={"function": "NEWS_SENTIMENT", "tickers": ticker.upper(),
+                "limit": 50, "apikey": api_key},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
+    if "feed" not in data:
+        msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
+        raise RuntimeError(str(msg)[:200])
+
+    items = []
+    for art in data.get("feed", []):
+        # ticker-specific sentiment, nie overall (článok môže hodnotiť iný titul)
+        ts = next((t for t in art.get("ticker_sentiment", [])
+                   if t.get("ticker", "").upper() == ticker.upper()), None)
+        if not ts:
+            continue
+        relevance = _num_or_none(ts.get("relevance_score")) or 0.0
+        if relevance < NEWS_RELEVANCE_MIN:
+            continue
+        # time_published: "20260610T143000" → ISO
+        tp_raw = art.get("time_published", "")
+        try:
+            tp = datetime.strptime(tp_raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc).isoformat()
+        except Exception:
+            tp = None
+        items.append({
+            "title": art.get("title"),
+            "url": art.get("url"),
+            "source": art.get("source"),
+            "time_published": tp,
+            "sentiment_label": ts.get("ticker_sentiment_label"),
+            "sentiment_score": _num_or_none(ts.get("ticker_sentiment_score")),
+            "relevance": round(relevance, 3),
+        })
+    # aktuálnosť + relevancia: novšie a relevantnejšie hore
+    items.sort(key=lambda a: (a.get("time_published") or "", a.get("relevance") or 0), reverse=True)
+    return items[:NEWS_MAX_ITEMS]
+
+
+@app.get("/api/news/{ticker}")
+def get_ticker_news(ticker: str, refresh: int = Query(0)):
+    ticker = ticker.strip().upper()
+    if not ticker or len(ticker) > 12:
+        raise HTTPException(400, "Neplatný ticker")
+
+    cached = _news_cache_read(ticker)
+    if cached and not refresh:
+        age_h = None
+        try:
+            fetched = datetime.fromisoformat(cached["fetched_at"])
+            age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
+        except Exception:
+            pass
+        if age_h is not None and age_h < NEWS_CACHE_TTL_H:
+            return {**cached, "stale": False}
+
+    try:
+        items = _news_fetch_av(ticker)
+        payload = {
+            "ticker": ticker,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "items": items,
+        }
+        NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _news_cache_path(ticker).write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return {**payload, "stale": False}
+    except Exception as e:
+        # stale fallback — radšej staré správy než chyba
+        if cached:
+            return {**cached, "stale": True, "error": str(e)[:200]}
+        return {"ticker": ticker, "items": [], "fetched_at": None,
+                "stale": False, "error": str(e)[:200]}
+
+
 @app.get("/api/checklist")
 def run_checklist(tickers: str = "", days: int = 10):
     """Scan list of tickers for recent buy signals. Fetches live data for each."""

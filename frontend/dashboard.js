@@ -7427,7 +7427,7 @@ ${escHtml(copyText)}</textarea>
     const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
@@ -7438,7 +7438,8 @@ ${escHtml(copyText)}</textarea>
       <td>${escHtml(sig.date || '-')}</td>
       <td class="r">${price}</td>
       <td>${escHtml(reason)}</td>
-    </tr>`;
+    </tr>
+    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="11" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
   }).join('') + `</tbody></table></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">
@@ -7539,6 +7540,82 @@ async function loadNasdaqScannerResults() {
 function scheduleNasdaqScannerPoll() {
   if (pc_scannerPollTimer) clearTimeout(pc_scannerPollTimer);
   pc_scannerPollTimer = setTimeout(loadNasdaqScannerResults, 2500);
+}
+
+// ── News sentiment (Alpha Vantage, lazy + cache-first) ──────────────────────
+
+const _newsCache = {};   // ticker → payload (session-level, server má 12h disk cache)
+
+async function toggleTickerNews(ticker, ev) {
+  if (ev) ev.stopPropagation();
+  const row  = document.getElementById(`news-row-${ticker}`);
+  const cell = document.getElementById(`news-cell-${ticker}`);
+  if (!row || !cell) return;
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  if (_newsCache[ticker]) {
+    cell.innerHTML = renderNewsBlock(_newsCache[ticker]);
+    return;
+  }
+  cell.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Načítavam správy…</div>';
+  await fetchTickerNews(ticker, false);
+}
+
+async function fetchTickerNews(ticker, refresh) {
+  const cell = document.getElementById(`news-cell-${ticker}`);
+  try {
+    const r = await fetch(`/api/news/${encodeURIComponent(ticker)}${refresh ? '?refresh=1' : ''}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    _newsCache[ticker] = data;
+    if (cell) cell.innerHTML = renderNewsBlock(data);
+  } catch (e) {
+    if (cell) cell.innerHTML = `<div class="news-empty">Chyba načítania správ: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function refreshTickerNews(ticker, ev) {
+  if (ev) ev.stopPropagation();
+  const cell = document.getElementById(`news-cell-${ticker}`);
+  if (cell) cell.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Obnovujem…</div>';
+  delete _newsCache[ticker];
+  fetchTickerNews(ticker, true);
+}
+
+function newsSentimentBadge(label, score) {
+  const l = String(label || '').toLowerCase();
+  let cls = 'neutral', txt = 'Neutral';
+  if (l.includes('bullish')) { cls = 'bull'; txt = l.includes('somewhat') ? 'Somewhat bullish' : 'Bullish'; }
+  else if (l.includes('bearish')) { cls = 'bear'; txt = l.includes('somewhat') ? 'Somewhat bearish' : 'Bearish'; }
+  const scoreTxt = Number.isFinite(score) ? ` ${score >= 0 ? '+' : ''}${score.toFixed(2)}` : '';
+  return `<span class="news-badge ${cls}">${txt}${scoreTxt}</span>`;
+}
+
+function renderNewsBlock(data) {
+  const items = data.items || [];
+  const fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '-';
+  const staleNote = data.stale ? ' <span class="news-stale">(staršia cache — refresh zlyhal)</span>' : '';
+  const head = `<div class="news-head">
+    <span>Správy + sentiment (Alpha Vantage) — načítané ${fetched}${staleNote}</span>
+    <button class="btn" style="padding:1px 8px;font-size:11px;" onclick="refreshTickerNews('${escHtml(data.ticker)}', event)">⟳ Obnoviť</button>
+  </div>`;
+  if (!items.length) {
+    const err = data.error ? ` (${escHtml(data.error)})` : '';
+    return head + `<div class="news-empty">Žiadne relevantné správy${err}.</div>`;
+  }
+  const rows = items.map(a => {
+    const t = a.time_published ? new Date(a.time_published).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
+    const rel = Number.isFinite(a.relevance) ? `<span class="news-rel" title="Relevancia článku pre ticker">rel ${(a.relevance*100).toFixed(0)} %</span>` : '';
+    return `<div class="news-item" onclick="event.stopPropagation()">
+      ${newsSentimentBadge(a.sentiment_label, a.sentiment_score)}
+      <a href="${escHtml(a.url || '#')}" target="_blank" rel="noopener" class="news-title">${escHtml(a.title || '(bez titulku)')}</a>
+      <span class="news-meta">${escHtml(a.source || '')} · ${t} ${rel}</span>
+    </div>`;
+  }).join('');
+  return head + `<div class="news-list">${rows}</div>`;
 }
 
 async function runNasdaqScanner() {
