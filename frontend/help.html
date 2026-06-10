@@ -223,6 +223,26 @@
     <li><strong>Sentiment badge</strong> (zelený/červený/sivý, napr. <code>+0.21</code>) — relevanciou vážený priemer sentimentu článkov z news cache. Zobrazuje sa len pre tickery, ktoré už majú stiahnuté správy (cez 📰) — žiadne API requesty navyše; cache sa časom zaplní sama.</li>
   </ul>
 
+  <h3>Interpretácia sentiment hodnôt</h3>
+  <p>Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:</p>
+  <table>
+    <tr><th>Pásmo</th><th>Význam</th></tr>
+    <tr><td>≥ +0.35</td><td>Bullish</td></tr>
+    <tr><td>+0.15 až +0.35</td><td>Somewhat bullish</td></tr>
+    <tr><td>−0.15 až +0.15</td><td>Neutral (sivý badge)</td></tr>
+    <tr><td>−0.35 až −0.15</td><td>Somewhat bearish</td></tr>
+    <tr><td>≤ −0.35</td><td>Bearish</td></tr>
+  </table>
+  <p>Extrémy (±0.5+) sa takmer nevyskytujú — finančné spravodajstvo je opatrne formulované, aj „výrazný" priemer býva okolo ±0.3. Praktické čítanie:</p>
+  <ul>
+    <li><strong>Červený badge = povinné čítanie</strong> — rozklikni 📰 a zisti prečo (žaloby, guidance cut, zlý report). Najcennejší signál je nesúlad: top kandidát zo scannera, ktorý svieti na červeno.</li>
+    <li><strong>Sivý = šum</strong>, žiadny príbeh.</li>
+    <li><strong>Zelený = potvrdenie</strong> čísel zo scannera.</li>
+    <li><strong>Pozor: priemer maskuje rozptyl.</strong> 9 bullish + 1 bearish článok dá pekný priemer — ale ten jeden negatívny môže byť práve podstatný. Pri tituloch, kde zvažuješ vstup, si zoznam vždy prejdi.</li>
+    <li>Váha podľa relevancie znamená, že článok celý o danej firme ovplyvní priemer viac než zmienka v prehľade trhu.</li>
+  </ul>
+  <p>Tip k limitom: AV limit (25 req/deň) je per-IP — ak dashboard používaš z viacerých sietí (domov, práca, mobil), každá má vlastný budget a server cache zdieľa výsledky medzi všetkými zariadeniami.</p>
+
   <h3>Poznámky (bočný panel)</h3>
   <p>Vpravo od tabuľky je <strong>resizovateľný panel s poznámkami</strong> — globálny, nezávislý od tickerov (jeden zdieľaný blok textu).</p>
   <ul>

@@ -269,6 +269,36 @@ Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:
   tickery, ktoré už majú stiahnuté správy** (cez 📰) — žiadne API requesty
   navyše; cache sa časom zaplní sama.
 
+### Interpretácia sentiment hodnôt
+
+Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:
+
+| Pásmo | Význam |
+|---|---|
+| ≥ +0.35 | Bullish |
+| +0.15 až +0.35 | Somewhat bullish |
+| −0.15 až +0.15 | Neutral (sivý badge) |
+| −0.35 až −0.15 | Somewhat bearish |
+| ≤ −0.35 | Bearish |
+
+Extrémy (±0.5+) sa takmer nevyskytujú — finančné spravodajstvo je opatrne
+formulované, aj „výrazný" priemer býva okolo ±0.3. Praktické čítanie:
+
+- **Červený badge = povinné čítanie** — rozklikni 📰 a zisti prečo (žaloby,
+  guidance cut, zlý report). Najcennejší signál je nesúlad: top kandidát zo
+  scannera, ktorý svieti na červeno.
+- **Sivý = šum**, žiadny príbeh.
+- **Zelený = potvrdenie** čísel zo scannera.
+- **Pozor: priemer maskuje rozptyl.** 9 bullish + 1 bearish článok dá pekný
+  priemer — ale ten jeden negatívny môže byť práve podstatný. Pri tituloch,
+  kde zvažuješ vstup, si zoznam vždy prejdi.
+- Váha podľa relevancie znamená, že článok celý o danej firme ovplyvní
+  priemer viac než zmienka v prehľade trhu.
+
+Tip k limitom: AV limit (25 req/deň) je per-IP — ak dashboard používaš
+z viacerých sietí (domov, práca, mobil), každá má vlastný budget a server
+cache zdieľa výsledky medzi všetkými zariadeniami.
+
 ### Poznámky (bočný panel)
 
 Vpravo od tabuľky je **resizovateľný panel s poznámkami** (globálne, nezávislé od
