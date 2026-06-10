@@ -1986,6 +1986,44 @@ _prefetch_log: list = []
 # Všetky intervaly ktoré dashboard používa
 PREFETCH_INTERVALS = ["OneDay", "OneWeek", "OneHour", "FourHours"]
 
+def _get_portfolio_holdings() -> dict:
+    """Agreguje pozície oboch účtov na {YF_SYMBOL: {pnl, amount, pnl_pct}}.
+    Číta z portfolio cache (disk) — žiadne extra eToro volania."""
+    holdings: dict = {}
+    instruments = load_instruments()
+    for acct in ["1", "2"]:
+        try:
+            cached = cache_read(CACHE_DIR / "portfolio" / f"portfolio_{acct}")
+            if not cached:
+                continue
+            for pos in cached.get("clientPortfolio", {}).get("positions", []):
+                iid = pos.get("instrumentID") or pos.get("instrumentId")
+                inst = instruments.get(iid)
+                if not inst or inst.get("typeID") not in ALLOWED_INSTRUMENT_TYPES:
+                    continue
+                sym = etoro_symbol_to_yf(inst.get("symbol"))
+                if not sym:
+                    continue
+                pnl = (pos.get("unrealizedPnL") or {}).get("pnL", 0) or 0
+                amt = pos.get("amount", 0) or 0
+                h = holdings.setdefault(sym, {"pnl": 0.0, "amount": 0.0})
+                h["pnl"] += pnl
+                h["amount"] += amt
+        except Exception as e:
+            print(f"  [holdings] account {acct} error: {e}")
+    for sym, h in holdings.items():
+        h["pnl"] = round(h["pnl"], 2)
+        h["amount"] = round(h["amount"], 2)
+        h["pnl_pct"] = round(h["pnl"] / h["amount"] * 100, 2) if h["amount"] else None
+    return holdings
+
+
+@app.get("/api/portfolio/holdings")
+def get_portfolio_holdings():
+    """Mapa {symbol: {pnl, pnl_pct, amount}} pre scanner badge (V portfóliu + zisk/strata)."""
+    return {"holdings": _get_portfolio_holdings()}
+
+
 def _get_portfolio_symbols() -> set:
     """Načíta symboly zo všetkých portfólií (oba účty)."""
     syms = set()

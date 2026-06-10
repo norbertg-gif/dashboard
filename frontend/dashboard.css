@@ -3128,6 +3128,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .news-badge.bear    { background: rgba(239,83,80,.16);  color: var(--down, #ef5350); }
 .news-badge.neutral { background: rgba(139,148,158,.16); color: var(--muted, #8b949e); }
 .news-loading, .news-empty { font-size: 12px; color: var(--muted); padding: 4px 0; }
+.hold-tag {
+  margin-left: 5px; font-size: 9.5px; font-weight: 700; white-space: nowrap;
+  padding: 1px 6px; border-radius: 9px;
+}
+.hold-tag.profit { background: rgba(38,166,154,.16); color: var(--up, #26a69a); }
+.hold-tag.loss   { background: rgba(239,83,80,.16);  color: var(--down, #ef5350); }
+.hold-tag.flat   { background: rgba(139,148,158,.16); color: var(--muted, #8b949e); }
 .news-sum { margin-left: 4px; }
 .news-sum .news-badge { font-size: 9.5px; padding: 0 5px; }
 .earn-warn {

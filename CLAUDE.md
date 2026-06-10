@@ -118,6 +118,10 @@ Three source sections:
 
 Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predictive')`.
 
+Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
+- **Portfolio holding (●)**: `GET /api/portfolio/holdings` → `_get_portfolio_holdings()` aggregates both accounts' positions from portfolio disk cache into `{symbol: {pnl, pnl_pct, amount}}`. Green/red dot + P/L% → DCA vs fresh entry decision. No extra eToro calls.
+- **Aggregated sentiment + earnings warning** — see News sentiment section.
+
 - **`/api/scanner/notes`** — GET/POST global notes panel content → `/data/scanner_notes.json`. Single HTML blob, not per-ticker.
 - **Export/kopírovanie** block is above KPI tiles (collapsed by default).
 - **Notes panel** sits to the right of the results table (flex row), resizable horizontally. Below 1100px flips to column layout.

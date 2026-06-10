@@ -7427,7 +7427,7 @@ ${escHtml(copyText)}</textarea>
     const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
@@ -7467,6 +7467,7 @@ ${escHtml(copyText)}</textarea>
 
 let _earningsDates = null;     // {TICKER: 'YYYY-MM-DD'}
 let _newsSummary = {};         // {TICKER: {avg, n}}
+let _holdings = null;          // {TICKER: {pnl, pnl_pct, amount}}
 let _scannerMetaLoading = false;
 
 const EARNINGS_WARN_DAYS = 7;
@@ -7475,11 +7476,20 @@ async function ensureScannerMetaLoaded(tickers) {
   if (_scannerMetaLoading) return;
   _scannerMetaLoading = true;
   try {
-    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers)]);
+    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers), loadHoldings()]);
     applyScannerBadges();
   } finally {
     _scannerMetaLoading = false;
   }
+}
+
+async function loadHoldings() {
+  try {
+    const r = await fetch('/api/portfolio/holdings');
+    if (!r.ok) return;
+    const data = await r.json();
+    _holdings = data.holdings || {};
+  } catch (e) { /* non-critical */ }
 }
 
 async function loadEarningsCalendar() {
@@ -7535,6 +7545,16 @@ function newsSummaryFromItems(items) {
 }
 
 function applyScannerBadges() {
+  if (_holdings) {
+    document.querySelectorAll('[data-hold]').forEach(el => {
+      const h = _holdings[el.dataset.hold];
+      if (!h) { el.innerHTML = ''; return; }
+      const pct = h.pnl_pct;
+      const cls = !Number.isFinite(pct) ? 'flat' : pct >= 0 ? 'profit' : 'loss';
+      const pctTxt = Number.isFinite(pct) ? ` ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '';
+      el.innerHTML = `<span class="hold-tag ${cls}" title="V portfóliu — P/L ${Number.isFinite(pct) ? pct.toFixed(2) + ' %' : 'n/a'}">●${pctTxt}</span>`;
+    });
+  }
   document.querySelectorAll('[data-newssum]').forEach(el => {
     const s = _newsSummary[el.dataset.newssum];
     if (!s || !s.n) { el.innerHTML = ''; return; }

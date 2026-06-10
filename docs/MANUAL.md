@@ -256,6 +256,19 @@ NEWS_SENTIMENT).
   iracionálna — žaloby, profit warningy, sektorové správy. News blok
   pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.
 
+### Portfólio príznak (●)
+
+Ak ticker už **držíš v eToro portfóliu** (ktorýkoľvek z dvoch účtov),
+zobrazí sa pri ňom farebná bodka s P/L:
+
+- **zelená ●+5.2%** — pozícia v zisku,
+- **červená ●−3.1%** — v strate,
+- sivá ● — P/L sa nepodarilo vypočítať.
+
+Pomáha okamžite rozhodnúť: nový signál na titule, ktorý už máš → otázka
+DCA (dokúpiť) vs. ignorovať, nie fresh entry. Dáta z portfolio cache,
+žiadne extra eToro volania.
+
 ### Earnings warning (⚠) a sentiment badge
 
 Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:
