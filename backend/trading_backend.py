@@ -4557,6 +4557,15 @@ def _news_cache_read(ticker: str) -> dict | None:
     return None
 
 
+def _news_scrub_error(msg: str) -> str:
+    """AV vkladá API kľúč do rate-limit hlášky — nikdy ho nepustiť do UI/cache."""
+    key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    text = str(msg)
+    if key:
+        text = text.replace(key, "***")
+    return text[:200]
+
+
 def _news_fetch_av(ticker: str) -> list[dict]:
     """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
@@ -4573,7 +4582,7 @@ def _news_fetch_av(ticker: str) -> list[dict]:
     # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
     if "feed" not in data:
         msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
-        raise RuntimeError(str(msg)[:200])
+        raise RuntimeError(_news_scrub_error(msg))
 
     items = []
     for art in data.get("feed", []):
@@ -4619,7 +4628,10 @@ def get_ticker_news(ticker: str, refresh: int = Query(0)):
             age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
         except Exception:
             pass
-        if age_h is not None and age_h < NEWS_CACHE_TTL_H:
+        # error záznam (negatívna cache, napr. rate-limit) drží len 1h,
+        # plnohodnotné dáta 12h — nech reload stránky nepáli requesty do vyčerpaného limitu
+        ttl = 1 if cached.get("error") else NEWS_CACHE_TTL_H
+        if age_h is not None and age_h < ttl:
             return {**cached, "stale": False}
 
     try:
@@ -4634,11 +4646,20 @@ def get_ticker_news(ticker: str, refresh: int = Query(0)):
             json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         return {**payload, "stale": False}
     except Exception as e:
-        # stale fallback — radšej staré správy než chyba
-        if cached:
-            return {**cached, "stale": True, "error": str(e)[:200]}
-        return {"ticker": ticker, "items": [], "fetched_at": None,
-                "stale": False, "error": str(e)[:200]}
+        err = _news_scrub_error(str(e))
+        # stale fallback — radšej staré správy než chyba; cache s dátami neprepisujeme
+        if cached and cached.get("items"):
+            return {**cached, "stale": True, "error": err}
+        # negatívna cache (1h TTL) — nech opakované otvorenie nepáli requesty
+        payload = {"ticker": ticker, "items": [],
+                   "fetched_at": datetime.now(timezone.utc).isoformat(), "error": err}
+        try:
+            NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            _news_cache_path(ticker).write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+        return {**payload, "stale": False}
 
 
 @app.get("/api/checklist")
