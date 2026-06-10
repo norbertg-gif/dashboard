@@ -1154,18 +1154,19 @@ body.sidebar-collapsed #sb-resizer {
 .port-sum-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .port-sum-label {
   color: var(--muted2);
   font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   font-weight: 700;
+  font-family: var(--font-ui);
 }
 .port-sum-val {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .port-table-wrap {
@@ -1188,7 +1189,8 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
+  font-family: var(--font-ui);
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 0 var(--border);
@@ -1201,7 +1203,7 @@ body.sidebar-collapsed #sb-resizer {
   color: var(--text);
 }
 .port-table td, .tool-table td {
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
   white-space: nowrap;
@@ -1416,6 +1418,8 @@ body.sidebar-collapsed #sb-resizer {
   font-weight: 800;
   color: var(--text);
   margin-right: auto;
+  font-family: var(--font-ui);
+  letter-spacing: 0.02em;
 }
 .tool-kpis {
   display: grid;
@@ -2113,10 +2117,10 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   background: var(--bg-card);
   border-radius: var(--radius-sm);
-  padding: 10px;
+  padding: 12px;
   cursor: pointer;
   transition: var(--transition);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 #predictiveTab .opp-item:hover {
   border-color: var(--accent);
@@ -2147,7 +2151,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .opp-pill {
   font-size: 9px;
   font-weight: 700;
-  padding: 2px 6px;
+  padding: 3px 7px;
   border-radius: 99px;
   border: 1px solid var(--border);
 }
@@ -2336,7 +2340,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
-  padding: 9px;
+  padding: 11px;
   cursor: pointer;
   transition: var(--transition);
   min-width: 0;
