@@ -5132,6 +5132,7 @@ function pc_makeChart(containerId) {
 
 function initCharts() {
   removeKumoCanvas();
+  pc__kumoPrimitive = null; // starý chart sa odstraňuje celý, detach netreba
   pc__kumoAreaSeries = [];
   clearSubpanel();
   pc_oEma10 = pc_oEma20 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
@@ -6088,71 +6089,80 @@ function removeKumoCanvas() {
   if (pc__kumoCanvas) { pc__kumoCanvas.remove(); pc__kumoCanvas = null; }
 }
 
-// — drawn as per-bar histogram approximation using area series trick
+// — kumo cloud ako canvas primitive (zOrder bottom = pod sviečkami aj gridom).
+// Pôvodný hack s dvoma AreaSeries (výplň + maska farbou pozadia) premaľovával
+// grid a sviečky pod oblakom a nechával diery v segmentoch.
+class KumoCloudPrimitive {
+  constructor(chart, series, pts) {
+    this.chart = chart;
+    this.series = series;
+    this.pts = pts; // [{time, sa, sb}]
+    this.view = {
+      renderer: () => ({ draw: target => this.draw(target) }),
+      zOrder: () => 'bottom',
+    };
+  }
+  paneViews() { return [this.view]; }
+  draw(target) {
+    if (!target.useBitmapCoordinateSpace) return;
+    target.useBitmapCoordinateSpace(({ context, horizontalPixelRatio, verticalPixelRatio }) => {
+      const ts = this.chart.timeScale();
+      const coords = this.pts.map(p => {
+        const x = ts.timeToCoordinate(p.time);
+        const ya = this.series.priceToCoordinate(p.sa);
+        const yb = this.series.priceToCoordinate(p.sb);
+        if (x == null || ya == null || yb == null) return null;
+        return {
+          x: x * horizontalPixelRatio,
+          ya: ya * verticalPixelRatio,
+          yb: yb * verticalPixelRatio,
+          bull: p.sa >= p.sb,
+        };
+      });
+      context.save();
+      for (let i = 0; i < coords.length - 1; i++) {
+        const a = coords[i], b = coords[i + 1];
+        if (!a || !b) continue;
+        context.fillStyle = (a.bull && b.bull) ? 'rgba(52,211,153,0.16)'
+          : (!a.bull && !b.bull) ? 'rgba(248,113,113,0.16)'
+          : 'rgba(148,163,184,0.10)'; // prechodový segment pri prekrížení A/B
+        context.beginPath();
+        context.moveTo(a.x, a.ya);
+        context.lineTo(b.x, b.ya);
+        context.lineTo(b.x, b.yb);
+        context.lineTo(a.x, a.yb);
+        context.closePath();
+        context.fill();
+      }
+      context.restore();
+    });
+  }
+}
+
+let pc__kumoPrimitive = null;
+
+function detachKumoPrimitive() {
+  if (pc__kumoPrimitive && pc_realSeries && typeof pc_realSeries.detachPrimitive === 'function') {
+    try { pc_realSeries.detachPrimitive(pc__kumoPrimitive); } catch (e) {}
+  }
+  pc__kumoPrimitive = null;
+}
+
 function attachKumoPlugin(chart, saData, sbData) {
-  // Already added pc_oKumoA (Senkou A line) and pc_oKumoB (Senkou B line)
-  // For fill: build merged time array, for each bar create a "band"
-  // We use two area series: one from background up to max(A,B) [transparent top]
-  //   minus one from background up to min(A,B) [opaque] = net fill between A and B
-  // Simpler: use AreaSeries for each segment colored correctly
-
-  const sbMap = {};
-  sbData.forEach(d => sbMap[d.time] = d.value);
-
-  // Split into bullish and bearish segments
-  const segments = [];
-  let seg = null;
-  saData.forEach(p => {
-    const sbVal = sbMap[p.time];
-    if (sbVal === undefined) return;
-    const bull = p.value >= sbVal;
-    if (!seg || seg.bull !== bull) {
-      if (seg) segments.push(seg);
-      seg = { bull, pts: [] };
-    }
-    seg.pts.push({ t: p.time, sa: p.value, sb: sbVal });
-  });
-  if (seg) segments.push(seg);
-
-  // For each segment: add an AreaSeries for top boundary,
-  // add another AreaSeries with bg color for bottom boundary to mask
-  segments.forEach(({ bull, pts }) => {
-    if (pts.length < 1) return;
-    const fillColor = bull ? 'rgba(52,211,153,0.18)' : 'rgba(248,113,113,0.18)';
-    const lineColor = bull ? 'rgba(52,211,153,0.0)' : 'rgba(248,113,113,0.0)';
-
-    // Top area: from min(A,B) up to max(A,B) — filled
-    const topSeries = chart.addAreaSeries({
-      topColor: fillColor,
-      bottomColor: fillColor,
-      lineColor: lineColor,
-      lineWidth: 0,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    // Bottom area: same range but fill with bg color to "cut out" below min
-    const botSeries = chart.addAreaSeries({
-      topColor: getChartTheme().bg,
-      bottomColor: getChartTheme().bg,
-      lineColor: 'rgba(0,0,0,0)',
-      lineWidth: 0,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // Top series data = max(A,B), bot series data = min(A,B)
-    topSeries.setData(pts.map(p => ({ time: p.t, value: Math.max(p.sa, p.sb) })));
-    botSeries.setData(pts.map(p => ({ time: p.t, value: Math.min(p.sa, p.sb) })));
-
-    // Track for cleanup
-    pc__kumoAreaSeries.push(topSeries, botSeries);
-  });
+  detachKumoPrimitive();
+  if (!pc_realSeries || typeof pc_realSeries.attachPrimitive !== 'function') return;
+  const sbMap = new Map(sbData.map(d => [d.time, d.value]));
+  const pts = saData
+    .filter(p => Number.isFinite(p.value) && Number.isFinite(sbMap.get(p.time)))
+    .map(p => ({ time: p.time, sa: p.value, sb: sbMap.get(p.time) }));
+  if (pts.length < 2) return;
+  pc__kumoPrimitive = new KumoCloudPrimitive(chart, pc_realSeries, pts);
+  pc_realSeries.attachPrimitive(pc__kumoPrimitive);
 }
 
 function clearOverlays() {
   removeKumoCanvas();
+  detachKumoPrimitive();
   pc__kumoAreaSeries.forEach(s => { try { pc_realChartInst.removeSeries(s); } catch(e) {} });
   pc__kumoAreaSeries = [];
   clearFibLines();
