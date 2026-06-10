@@ -2264,7 +2264,11 @@ async function wsSubscribeSymbol(sym) {
 
 // Štart WS pri inicializácii
 function initWebSocket() {
-  try { wsConnect(); } catch(e) { console.warn('WS init failed:', e); }
+  setWsStatus('connecting');
+  try { wsConnect(); } catch(e) {
+    console.warn('WS init failed:', e);
+    setWsStatus('down');
+  }
 }
 
 // ── ETORO WATCHLIST SYNC ──────────────────────────────────────────────────────
@@ -4923,6 +4927,7 @@ Sheet: ${sheetName}`);
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 (async function init() {
+  setWsStatus('connecting'); // okamžite — WS sa spustí po async inicializácii
   const cols = localStorage.getItem('td_cols') || '2';
   document.getElementById('grid').style.setProperty('--cols', cols);
   document.getElementById('col-sel').value = cols;
