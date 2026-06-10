@@ -4728,11 +4728,13 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 # ══ VIRTUAL TRADING BOT ═══════════════════════════════════════════════════════
 
 BOT_FILE = DATA_ROOT / "bot_portfolio.json"
-BOT_INITIAL_CAPITAL  = 10_000.0
+BOT_INITIAL_CAPITAL   = 10_000.0
 BOT_POSITION_SIZE_PCT = 0.10    # 10% initial capital per trade → max $1 000
 BOT_MAX_POSITIONS     = 8
-BOT_STOP_LOSS_PCT     = 0.07    # −7 % od vstupu
-BOT_TAKE_PROFIT_PCT   = 0.12   # +12 % od vstupu
+BOT_ATR_SL_MULT       = 1.5     # stop-loss = 1.5×ATR od vstupu
+BOT_ATR_TP_MULT       = 2.5     # take-profit = 2.5×ATR od vstupu
+BOT_FALLBACK_SL_PCT   = 0.07    # keď ATR nie je k dispozícii
+BOT_FALLBACK_TP_PCT   = 0.12
 BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
 
 
@@ -4808,17 +4810,24 @@ def _bot_kpis(portfolio: dict, current_prices: dict) -> dict:
 
 
 def _bot_score_ticker(ticker: str) -> dict | None:
-    """Vráti score, tier a poslednú cenu. None ak chyba alebo málo dát."""
+    """Vráti score, tier, cenu a ATR. None ak chyba alebo málo dát."""
     try:
         raw = _yf_download_cached(ticker, "6mo", "1d")
         if len(raw) < 20:
             return None
         df = add_indicators(raw)
-        price = float(df.iloc[-1]["Close"])
+        last = df.iloc[-1]
+        price = float(last["Close"])
         zscore = float(rolling_zscore(df["Close"]).iloc[-1])
-        sc, details = score_signal_day(df.iloc[-1], zscore)
+        sc, details = score_signal_day(last, zscore)
         tier = signal_tier(sc, details["trend"])
-        return {"score": sc, "tier": tier, "price": price, "details": details}
+        try:
+            atr = float(last["atr"])
+            if math.isnan(atr) or atr <= 0:
+                atr = None
+        except (KeyError, TypeError, ValueError):
+            atr = None
+        return {"score": sc, "tier": tier, "price": price, "atr": atr, "details": details}
     except Exception as e:
         print(f"  BOT score error {ticker}: {e}")
         return None
@@ -4861,13 +4870,34 @@ def bot_status():
     }
 
 
+def _bot_get_tickers() -> list[str]:
+    """Zlúčenie: watchlist + portfóliové pozície + Nasdaq 100."""
+    seen: set = set()
+    result: list = []
+    for item in _read_watchlist_file():
+        sym = (item.get("symbol") or "").strip().upper()
+        if sym and sym not in seen:
+            seen.add(sym)
+            result.append(sym)
+    for sym in _get_portfolio_symbols():
+        sym = sym.strip().upper()
+        if sym and sym not in seen:
+            seen.add(sym)
+            result.append(sym)
+    for sym in NASDAQ100_TICKERS:
+        sym = sym.strip().upper()
+        if sym and sym not in seen:
+            seen.add(sym)
+            result.append(sym)
+    return result
+
+
 @app.post("/api/bot/run")
 def bot_run():
-    """Jedno kolo bota: skenuj watchlist, otvori/zavri virtuálne pozície."""
-    watchlist = _read_watchlist_file()
-    tickers = [w["symbol"] for w in watchlist if isinstance(w, dict) and w.get("symbol")]
+    """Jedno kolo bota: skenuj watchlist+portfólio+Nasdaq, otvori/zavri virtuálne pozície."""
+    tickers = _bot_get_tickers()
     if not tickers:
-        raise HTTPException(400, "Watchlist je prázdny")
+        raise HTTPException(400, "Zdroj tickerov je prázdny")
 
     portfolio = _bot_load()
     open_pos  = portfolio["open_positions"]
@@ -4895,10 +4925,19 @@ def bot_run():
             entry   = pos["entry_price"]
             pnl_pct = (price / entry - 1) * 100 if entry > 0 else 0.0
 
+            # ATR-based prahy (uložené pri otvorení), fallback na fixné %
+            entry_atr = pos.get("entry_atr")
+            if entry_atr and entry_atr > 0 and entry > 0:
+                sl_pct = -(BOT_ATR_SL_MULT * entry_atr / entry * 100)
+                tp_pct =  (BOT_ATR_TP_MULT * entry_atr / entry * 100)
+            else:
+                sl_pct = -(BOT_FALLBACK_SL_PCT * 100)
+                tp_pct =  (BOT_FALLBACK_TP_PCT * 100)
+
             exit_reason = None
-            if pnl_pct <= -(BOT_STOP_LOSS_PCT * 100):
+            if pnl_pct <= sl_pct:
                 exit_reason = "stop_loss"
-            elif pnl_pct >= (BOT_TAKE_PROFIT_PCT * 100):
+            elif pnl_pct >= tp_pct:
                 exit_reason = "take_profit"
             elif tier == "counter" and score >= 3:
                 exit_reason = "counter_signal"
@@ -4930,7 +4969,7 @@ def bot_run():
             alloc  = min(pos_size, cash)
             shares = alloc / price
             cash  -= alloc
-            open_pos[ticker] = {
+            pos_entry: dict = {
                 "ticker":      ticker,
                 "entry_price": round(price, 4),
                 "entry_date":  today_str,
@@ -4939,6 +4978,9 @@ def bot_run():
                 "entry_tier":  tier,
                 "alloc":       round(alloc, 2),
             }
+            if sig.get("atr"):
+                pos_entry["entry_atr"] = round(sig["atr"], 4)
+            open_pos[ticker] = pos_entry
             actions.append({"action": "open", "ticker": ticker,
                              "price": round(price, 2), "alloc": round(alloc, 2)})
 
