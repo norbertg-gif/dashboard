@@ -4729,7 +4729,6 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 
 BOT_FILE = DATA_ROOT / "bot_portfolio.json"
 BOT_INITIAL_CAPITAL   = 10_000.0
-BOT_POSITION_SIZE_PCT = 0.10    # 10% initial capital per trade → max $1 000
 BOT_MAX_POSITIONS     = 8
 BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
 
@@ -4740,6 +4739,7 @@ BOT_DEFAULT_CONFIG = {
     "atr_tp_mult": 2.5,     # take-profit = 2.5×ATR od vstupu
     "sl_pct":      7.0,     # fixný stop-loss % (aj fallback keď ATR chýba)
     "tp_pct":      12.0,    # fixný take-profit %
+    "pos_size_pct": 10.0,   # % počiatočného kapitálu na jeden obchod
 }
 
 
@@ -4902,6 +4902,7 @@ def bot_set_config(body: dict):
         cfg["atr_tp_mult"] = min(10.0, max(0.5, float(cfg["atr_tp_mult"])))
         cfg["sl_pct"]      = min(30.0, max(0.5, float(cfg["sl_pct"])))
         cfg["tp_pct"]      = min(50.0, max(0.5, float(cfg["tp_pct"])))
+        cfg["pos_size_pct"] = min(50.0, max(1.0, float(cfg["pos_size_pct"])))
     except (TypeError, ValueError):
         raise HTTPException(400, "Neplatné číselné hodnoty")
     portfolio = _bot_load()
@@ -4945,7 +4946,7 @@ def bot_run():
     closed    = portfolio["closed_trades"]
     cash      = float(portfolio["cash"])
     initial   = float(portfolio["initial_capital"])
-    pos_size  = initial * BOT_POSITION_SIZE_PCT
+    pos_size  = initial * float(cfg["pos_size_pct"]) / 100.0
 
     today_str    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     current_prices: dict = {}

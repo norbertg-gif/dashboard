@@ -8060,6 +8060,7 @@ function botCfgFill(cfg) {
   set('bot-cfg-atr-tp', cfg.atr_tp_mult);
   set('bot-cfg-sl',     cfg.sl_pct);
   set('bot-cfg-tp',     cfg.tp_pct);
+  set('bot-cfg-pos-size', cfg.pos_size_pct);
   botCfgModeChanged();
 }
 
@@ -8072,6 +8073,7 @@ async function botCfgSave() {
     atr_tp_mult: num('bot-cfg-atr-tp'),
     sl_pct:      num('bot-cfg-sl'),
     tp_pct:      num('bot-cfg-tp'),
+    pos_size_pct: num('bot-cfg-pos-size'),
   };
   try {
     const r = await fetch('/api/bot/config', {
