@@ -7,7 +7,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 - **Backend:** FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS for XLSX import — no build step
-- **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `cache/{ohlcv,portfolio,instruments}`
+- **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `cache/{ohlcv,portfolio,instruments}`
 - **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`).
 
 ## Layout
@@ -123,6 +123,29 @@ Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predicti
 - **Notes panel** sits to the right of the results table (flex row), resizable horizontally. Below 1100px flips to column layout.
 - **Scanner decision CSS**: `.scanner-label.buy` / `.scanner-label.counter` / `.scanner-label.watch` — aligned with `.pc-decision-badge.*` in Predictive. DIP quality still uses `.scanner-label.strong` / `.scanner-label.weak` (separate meaning).
 
+## Virtual trading bot — key architecture
+
+**Role:** Paper-trading simulation — backtesting-lite na live dátach.
+
+- **Spustenie:** manuálne cez ▶ Spustiť kolo v Bot tabe (žiadny scheduler). Ideálny čas: večer po 22:00 SK keď je US daily sviečka uzavretá.
+- **Zdroj tickerov:** watchlist + eToro portfólio (oba účty) + Nasdaq 100 — funkcia `_bot_get_tickers()`, duplikáty odfiltrované. Scanner pred spustením spúšťať netreba — bot stiahne dáta sám cez `_yf_download_cached`.
+- **Vstupná logika:** score ≥ `entry_score_min` (default 3/4) AND tier = `buy`. Nedokupuje existujúci titul pokiaľ strata < 15 % (averaging down len pri ≥ 15 %).
+- **Výstupná logika:** stop-loss a take-profit podľa `exit_mode` — `atr` (násobky ATR pri vstupe) alebo `pct` (fixné percentá). Fallback na fixné % keď ATR chýba. Counter signál (score ≥ 3, tier = counter) tiež zavrie pozíciu.
+- **Finviz filter:** voliteľný (`use_finviz`). Keď zapnutý, vstup len pre tickery s `dip_total ≥ finviz_min_score` v `dip_scores.json`. Ticker bez Finviz dát = skip. Pred kolom importovať čerstvý Finviz export.
+- **Konfigurácia:** uložená v `bot_portfolio.json` pod kľúčom `config`. Prežíva reset bota. Meniteľná cez `GET/POST /api/bot/config` alebo UI panel ⚙️ Exit nastavenia.
+- **Defaultná konfigurácia:**
+  ```
+  exit_mode = "atr"
+  atr_sl_mult = 1.5, atr_tp_mult = 2.5
+  sl_pct = 7.0, tp_pct = 12.0      ← aj fallback keď ATR chýba
+  pos_size_pct = 5.0                ← % počiatočného kapitálu / obchod
+  entry_score_min = 3
+  use_finviz = false, finviz_min_score = 90.0
+  ```
+- **Max pozícií:** `BOT_MAX_POSITIONS = 20`. Pri 5 % vstupe = celý kapitál na 20 pozíciách.
+- **Manuálne uzavretie:** tlačidlo `Zavri` pri každej otvorenej pozícii → `POST /api/bot/close/{ticker}`.
+- **Súbory na disku:** `bot_portfolio.json` — nikdy necommitovať, je v `.renderignore`.
+
 ## Data flow worth knowing
 
 - **OHLCV cache is incremental.** `cache/ohlcv/{SYMBOL}_{INTERVAL}.gz` stores up to 1000 candles. Subsequent fetches request a tail (3–50 candles) and merge by `fromDate` key. Full refetch only on first load.
@@ -132,6 +155,6 @@ Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predicti
 
 ## File touch policy
 
-- **`presets.json`, `trade_journal.json`, `scanner_notes.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them.
+- **`presets.json`, `trade_journal.json`, `scanner_notes.json`, `bot_portfolio.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them.
 - **eToro instrument metadata** — cache it (`cache/instruments`), don't fetch on every request; the response is ~11 MB.
 - **`cache/` directory in repo** — excluded from deploy via `.renderignore`. Local cache is fine to keep but ignore in commits.
