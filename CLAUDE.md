@@ -56,6 +56,7 @@ No test suite. Verify changes by hitting endpoints manually or driving the UI.
 
 These were already in the codebase and need to stay fixed:
 
+- **Bump `?v=` after every `dashboard.js` change.** `trading_dashboard.html` loads the script with a cache-busting query param (`/dashboard.js?v=...`). Forgetting to bump it means browsers keep the old JS while serving new HTML — features silently missing.
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise.
 - **Don't duplicate `/api/search`.** There were two routes with the same path returning different shapes (`list` vs `{results: [...]}`). FastAPI keeps the first; the second is dead, and clients expecting the other shape silently break (predictive autocomplete).
 - **Don't redefine `calc_adx` / `calc_rsi` / `calc_macd` / `calc_ichimoku` / `calc_stoch_rsi`.** The file had two sets — the second `calc_adx` returns a DataFrame, the first returns a tuple. Anything unpacking `_adx, _di, _di2 = calc_adx(df)` will silently get column-name strings → NaN columns → ADX disabled. Keep one definition each, near the top, used by both predictive and `/api/ohlcv`.
