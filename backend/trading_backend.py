@@ -4730,7 +4730,6 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 BOT_FILE = DATA_ROOT / "bot_portfolio.json"
 BOT_INITIAL_CAPITAL   = 10_000.0
 BOT_MAX_POSITIONS     = 20
-BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
 
 # Default exit konfigurácia — prepísateľná cez /api/bot/config, uložená v bot_portfolio.json
 BOT_DEFAULT_CONFIG = {
@@ -4740,6 +4739,7 @@ BOT_DEFAULT_CONFIG = {
     "sl_pct":      7.0,     # fixný stop-loss % (aj fallback keď ATR chýba)
     "tp_pct":      12.0,    # fixný take-profit %
     "pos_size_pct": 5.0,    # % počiatočného kapitálu na jeden obchod
+    "entry_score_min": 3,   # min score (x/4) na otvorenie pozície
 }
 
 
@@ -4903,6 +4903,7 @@ def bot_set_config(body: dict):
         cfg["sl_pct"]      = min(30.0, max(0.5, float(cfg["sl_pct"])))
         cfg["tp_pct"]      = min(50.0, max(0.5, float(cfg["tp_pct"])))
         cfg["pos_size_pct"] = min(50.0, max(1.0, float(cfg["pos_size_pct"])))
+        cfg["entry_score_min"] = min(4, max(1, int(cfg["entry_score_min"])))
     except (TypeError, ValueError):
         raise HTTPException(400, "Neplatné číselné hodnoty")
     portfolio = _bot_load()
@@ -5002,7 +5003,7 @@ def bot_run():
                 actions.append({"action": "close", "ticker": ticker,
                                  "reason": exit_reason, "pnl_pct": round(pnl_pct, 2)})
 
-        elif score >= BOT_ENTRY_SCORE_MIN and tier == "buy":
+        elif score >= int(cfg["entry_score_min"]) and tier == "buy":
             # ── Otvorenie novej pozície ──────────────────────────────────────
             # Nedokupujeme titul, ktorý už máme — pokiaľ nie je strata >= 15 %
             if ticker in open_pos:

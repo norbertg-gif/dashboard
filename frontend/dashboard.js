@@ -8061,6 +8061,7 @@ function botCfgFill(cfg) {
   set('bot-cfg-sl',     cfg.sl_pct);
   set('bot-cfg-tp',     cfg.tp_pct);
   set('bot-cfg-pos-size', cfg.pos_size_pct);
+  set('bot-cfg-score-min', cfg.entry_score_min);
   botCfgModeChanged();
 }
 
@@ -8074,6 +8075,7 @@ async function botCfgSave() {
     sl_pct:      num('bot-cfg-sl'),
     tp_pct:      num('bot-cfg-tp'),
     pos_size_pct: num('bot-cfg-pos-size'),
+    entry_score_min: parseInt(document.getElementById('bot-cfg-score-min')?.value, 10),
   };
   try {
     const r = await fetch('/api/bot/config', {

@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260610-bot-cfg3">
+<link rel="stylesheet" href="/dashboard.css?v=20260610-bot-cfg4">
 </head>
 <body>
 
@@ -206,6 +206,15 @@
         <label class="bot-cfg-field">
           <span>Vstup (% kapitálu)</span>
           <input class="sel" type="number" id="bot-cfg-pos-size" min="1" max="50" step="1" style="width:80px;">
+        </label>
+        <label class="bot-cfg-field">
+          <span>Min. score (x/4)</span>
+          <select class="sel" id="bot-cfg-score-min">
+            <option value="1">1/4</option>
+            <option value="2">2/4</option>
+            <option value="3">3/4</option>
+            <option value="4">4/4</option>
+          </select>
         </label>
         <button class="btn primary" id="bot-cfg-save-btn" onclick="botCfgSave()">Ulož</button>
         <span id="bot-cfg-msg" style="font-size:11px;color:var(--muted);"></span>
@@ -496,6 +505,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260610-bot-cfg3"></script>
+  <script src="/dashboard.js?v=20260610-bot-cfg4"></script>
 </body>
 </html>
