@@ -3271,7 +3271,12 @@ function getCurrentConfig() {
         interval: p.querySelector('.interval-sel')?.value || '1d',
         indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
         view: r?.viewRange || null,
-        chartHeight: p.querySelector('.p-chart')?.offsetHeight || null,
+        // offsetHeight je 0 keď je záložka Grafy skrytá (saveLayout beží aj z
+        // pozadia) — fallback na inline style.height, ktorý prežije display:none
+        chartHeight: (() => {
+          const cEl = p.querySelector('.p-chart');
+          return cEl?.offsetHeight || parseInt(cEl?.style.height) || null;
+        })(),
       };
     }).filter(Boolean);
   } catch(e) { console.error('getCurrentConfig error:', e); return []; }
