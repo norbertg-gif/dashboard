@@ -291,6 +291,13 @@ function escHtml(v) {
   }[ch]));
 }
 
+// Jednotné chybové hlásenie s retry tlačidlom. retryFn je názov globálnej funkcie.
+function renderErrorBox(el, msg, retryFn) {
+  if (!el) return;
+  el.className = 'error-msg';
+  el.innerHTML = `⚠ ${escHtml(msg)}${retryFn ? ` <button class="opp-toggle-btn" onclick="${retryFn}">↻ Skúsiť znova</button>` : ''}`;
+}
+
 // Signal tier → farba/label. Mäkký trend gate: buy (zelená), watch (oranžová),
 // counter = proti-trendový dip počas downtrendu (červená). Fallback pre staré
 // logy bez tier: odvodí z skóre.
@@ -1999,6 +2006,37 @@ let wsSubscribed = new Set();      // instrumentId-y ktoré sledujeme
 const wsLivePrices = {};           // { instrumentId: { bid, ask, last, date } }
 let wsAuthenticated = false;
 
+let _wsLastTickMs = 0;
+let _wsStatusState = '';
+function setWsStatus(state) {
+  // state: 'live' | 'connecting' | 'down'
+  if (state === _wsStatusState && state === 'live') return; // ticky neprepisuju DOM
+  _wsStatusState = state;
+  const dot = document.getElementById('ws-status-dot');
+  const txt = document.getElementById('ws-status-txt');
+  const box = document.getElementById('ws-status');
+  if (!dot || !txt) return;
+  if (state === 'live') {
+    dot.style.background = 'var(--up)';
+    txt.textContent = 'live';
+    if (box) box.title = `eToro WebSocket — live ceny (posledný tick ${new Date(_wsLastTickMs || Date.now()).toLocaleTimeString()})`;
+  } else if (state === 'connecting') {
+    dot.style.background = 'var(--yellow)';
+    txt.textContent = 'WS…';
+    if (box) box.title = 'eToro WebSocket — pripájam';
+  } else {
+    dot.style.background = 'var(--down)';
+    txt.textContent = 'offline';
+    if (box) box.title = 'eToro WebSocket odpojený — ceny len z REST (15s)';
+  }
+}
+// Watchdog: ak 60s nepríde žiadny tick na otvorenom WS, ceny sú podozrivo stale
+setInterval(() => {
+  if (etoroWs && etoroWs.readyState === 1 && wsAuthenticated) {
+    if (wsSubscribed.size > 0 && _wsLastTickMs && Date.now() - _wsLastTickMs > 60000) setWsStatus('connecting');
+  }
+}, 15000);
+
 function wsConnect() {
   if (etoroWs && etoroWs.readyState <= 1) return;
   try {
@@ -2006,6 +2044,7 @@ function wsConnect() {
 
     etoroWs.onopen = () => {
       console.log('eToro WS connected');
+      setWsStatus('connecting');
       wsAuthenticated = false;
       // Autentifikuj s kľúčmi prvého aktívneho účtu
       wsAuth();
@@ -2016,6 +2055,7 @@ function wsConnect() {
         const msg = JSON.parse(evt.data);
         if (msg.operation === 'Authenticate' && msg.success) {
           wsAuthenticated = true;
+          setWsStatus('live');
           console.log('eToro WS authenticated');
           // Subscribe na všetky sledované instrumenty
           if (wsSubscribed.size > 0) wsSubscribeAll();
@@ -2033,6 +2073,8 @@ function wsConnect() {
                 last: parseFloat(c.LastExecution),
                 date: c.Date,
               };
+              _wsLastTickMs = Date.now();
+              setWsStatus('live');
               onLivePriceUpdate(iid);
             }
           }
@@ -2042,6 +2084,7 @@ function wsConnect() {
 
     etoroWs.onclose = () => {
       console.log('eToro WS closed, reconnect in 5s');
+      setWsStatus('down');
       wsAuthenticated = false;
       clearTimeout(wsReconnectTimer);
       wsReconnectTimer = setTimeout(wsConnect, 5000);
@@ -7022,8 +7065,7 @@ async function refreshOpportunities(force = false) {
     renderOpportunities(data.results || [], days);
     pc_oppLoadedAt = Date.now();
   } catch(e) {
-    el.className = 'error-msg';
-    el.textContent = 'Opportunities chyba: ' + e.message;
+    renderErrorBox(el, 'Opportunities chyba: ' + e.message, 'refreshOpportunities(true)');
   } finally {
     pc_oppLoading = false;
   }
@@ -7436,8 +7478,7 @@ async function loadNasdaqScannerResults() {
     renderNasdaqScanner(data);
     if (data?.state?.running) scheduleNasdaqScannerPoll();
   } catch(e) {
-    el.className = 'error-msg';
-    el.textContent = 'Scanner chyba: ' + e.message;
+    renderErrorBox(el, 'Scanner chyba: ' + e.message, 'loadNasdaqScannerResults()');
   }
 }
 
@@ -7459,8 +7500,7 @@ async function runNasdaqScanner() {
     renderNasdaqScanner(data);
     scheduleNasdaqScannerPoll();
   } catch(e) {
-    el.className = 'error-msg';
-    el.textContent = 'Scanner chyba: ' + e.message;
+    renderErrorBox(el, 'Scanner chyba: ' + e.message, 'loadNasdaqScannerResults()');
   } finally {
     pc_scannerLoading = false;
   }

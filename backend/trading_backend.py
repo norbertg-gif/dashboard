@@ -162,6 +162,7 @@ def add_indicators(df):
 
 WEIGHTS_LOG     = DATA_ROOT / "predictive_weights_log.json"
 SIGNALS_LOG     = DATA_ROOT / "predictive_signals_log.json"
+SIGNALS_ARCHIVE = DATA_ROOT / "predictive_signals_archive.json"
 SCANNER_NOTES_FILE = DATA_ROOT / "scanner_notes.json"
 DEFAULT_WEIGHTS = {"ema": 0.20, "rsi": 0.10, "macd": 0.20, "vol": 0.15, "ichi": 0.25, "stoch": 0.10}
 
@@ -189,16 +190,51 @@ def load_signals_log() -> dict:
             pass
     return {}
 
+def _archive_pruned_signals(archived: dict):
+    """Append pruned (>90d) signal entries to the archive file instead of losing them.
+    Archive grows append-only; needed for per-regime analytics (20-30 signals per regime)."""
+    if not archived:
+        return
+    try:
+        existing = {}
+        if SIGNALS_ARCHIVE.exists():
+            try:
+                existing = json.loads(SIGNALS_ARCHIVE.read_text(encoding="utf-8"))
+            except Exception:
+                print("  WARN: signals archive corrupted, starting fresh (old file kept as .bak)")
+                try:
+                    SIGNALS_ARCHIVE.rename(SIGNALS_ARCHIVE.with_suffix(".json.bak"))
+                except Exception:
+                    pass
+        for ticker, entries in archived.items():
+            existing.setdefault(ticker, {}).update(entries)
+        SIGNALS_ARCHIVE.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print(f"  WARN: failed to archive pruned signals: {e}")
+
+def load_signals_archive() -> dict:
+    if SIGNALS_ARCHIVE.exists():
+        try:
+            return json.loads(SIGNALS_ARCHIVE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
 def save_signals_log(log: dict):
-    # Prunovanie: zachovaj len záznamy z posledných 90 dní
+    # Prunovanie: zachovaj len záznamy z posledných 90 dní; staršie presuň do archívu
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date()
     pruned = {}
+    archived = {}
     for ticker, entries in log.items():
         if not isinstance(entries, dict):
             continue
         kept = {d: v for d, v in entries.items() if d >= str(cutoff)}
+        old = {d: v for d, v in entries.items() if d < str(cutoff)}
         if kept:
             pruned[ticker] = kept
+        if old:
+            archived[ticker] = old
+    _archive_pruned_signals(archived)
     SIGNALS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
 
 ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
@@ -4126,20 +4162,41 @@ def get_dip_status():
     return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet"), "filename": meta.get("filename")}
 
 
+# In-process yfinance download cache — scanner aj /api/checklist ťahajú tie isté
+# daily/weekly dáta opakovane. TTL 30 min, capped (Render free tier RAM).
+_YF_CACHE: dict = {}
+_YF_CACHE_LOCK = threading.Lock()
+_YF_CACHE_TTL = 1800   # s
+_YF_CACHE_MAX = 150    # entries (DataFrames sú malé: ~126 riadkov × 6 stĺpcov)
+
+def _yf_download_cached(ticker: str, period: str, interval: str):
+    key = (ticker, period, interval)
+    now = time.time()
+    with _YF_CACHE_LOCK:
+        hit = _YF_CACHE.get(key)
+        if hit and now - hit[0] < _YF_CACHE_TTL:
+            return hit[1].copy()
+    raw = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
+    raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
+    with _YF_CACHE_LOCK:
+        if len(_YF_CACHE) >= _YF_CACHE_MAX:
+            oldest = sorted(_YF_CACHE.items(), key=lambda kv: kv[1][0])[: _YF_CACHE_MAX // 3]
+            for k, _ in oldest:
+                _YF_CACHE.pop(k, None)
+        _YF_CACHE[key] = (now, raw)
+    return raw.copy()
+
+
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
-    raw_d = yf.download(ticker, period="6mo", interval="1d", auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
-    if isinstance(raw_d.columns, pd.MultiIndex):
-        raw_d.columns = raw_d.columns.get_level_values(0)
-    raw_d = raw_d.dropna(subset=["Open", "High", "Low", "Close"])
+    raw_d = _yf_download_cached(ticker, "6mo", "1d")
     if len(raw_d) < 20:
         return {"ticker": ticker, "error": "Nedostatok dat"}
 
     df_d = add_indicators(raw_d)
 
-    raw_w = yf.download(ticker, period="1y", interval="1wk", auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
-    if isinstance(raw_w.columns, pd.MultiIndex):
-        raw_w.columns = raw_w.columns.get_level_values(0)
-    raw_w = raw_w.dropna(subset=["Open", "High", "Low", "Close"])
+    raw_w = _yf_download_cached(ticker, "1y", "1wk")
     weekly_bullish = None
     weekly_status = "insufficient_history"
     if len(raw_w) >= 30:
@@ -4448,11 +4505,7 @@ def run_checklist(tickers: str = "", days: int = 10):
 
     for ticker in ticker_list:
         try:
-            raw_d = yf.download(ticker, period="6mo", interval="1d",
-                                auto_adjust=True, progress=False)
-            if isinstance(raw_d.columns, pd.MultiIndex):
-                raw_d.columns = raw_d.columns.get_level_values(0)
-            raw_d = raw_d.dropna(subset=["Open", "High", "Low", "Close"])
+            raw_d = _yf_download_cached(ticker, "6mo", "1d")
             if len(raw_d) < 20:
                 results.append({"ticker": ticker, "error": "Nedostatok dát"})
                 continue
@@ -4460,11 +4513,7 @@ def run_checklist(tickers: str = "", days: int = 10):
             df_d = add_indicators(raw_d)
 
             # Weekly data for bias
-            raw_w = yf.download(ticker, period="1y", interval="1wk",
-                                auto_adjust=True, progress=False)
-            if isinstance(raw_w.columns, pd.MultiIndex):
-                raw_w.columns = raw_w.columns.get_level_values(0)
-            raw_w = raw_w.dropna(subset=["Open","High","Low","Close"])
+            raw_w = _yf_download_cached(ticker, "1y", "1wk")
             weekly_bullish = False
             if len(raw_w) >= 30:
                 df_w   = add_indicators(raw_w)
