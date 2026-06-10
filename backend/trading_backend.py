@@ -4729,7 +4729,7 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 
 BOT_FILE = DATA_ROOT / "bot_portfolio.json"
 BOT_INITIAL_CAPITAL   = 10_000.0
-BOT_MAX_POSITIONS     = 8
+BOT_MAX_POSITIONS     = 20
 BOT_ENTRY_SCORE_MIN   = 3       # min score (3/4) na otvorenie pozície
 
 # Default exit konfigurácia — prepísateľná cez /api/bot/config, uložená v bot_portfolio.json
@@ -4739,7 +4739,7 @@ BOT_DEFAULT_CONFIG = {
     "atr_tp_mult": 2.5,     # take-profit = 2.5×ATR od vstupu
     "sl_pct":      7.0,     # fixný stop-loss % (aj fallback keď ATR chýba)
     "tp_pct":      12.0,    # fixný take-profit %
-    "pos_size_pct": 10.0,   # % počiatočného kapitálu na jeden obchod
+    "pos_size_pct": 5.0,    # % počiatočného kapitálu na jeden obchod
 }
 
 
@@ -5004,6 +5004,12 @@ def bot_run():
 
         elif score >= BOT_ENTRY_SCORE_MIN and tier == "buy":
             # ── Otvorenie novej pozície ──────────────────────────────────────
+            # Nedokupujeme titul, ktorý už máme — pokiaľ nie je strata >= 15 %
+            if ticker in open_pos:
+                existing_entry = open_pos[ticker]["entry_price"]
+                existing_pnl   = (price / existing_entry - 1) * 100 if existing_entry > 0 else 0.0
+                if existing_pnl > -15.0:
+                    continue
             if len(open_pos) >= BOT_MAX_POSITIONS:
                 continue
             if cash < pos_size * 0.5:
