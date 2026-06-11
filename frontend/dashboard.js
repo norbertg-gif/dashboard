@@ -5139,7 +5139,7 @@ function pc_makeChart(containerId) {
   return chart;
 }
 
-// Hover tooltip pre markery (eToro pozície, buy signály) — LWC v5 hit-testing cez hoveredObjectId
+// Hover tooltip pre markery (eToro pozície, buy signály) — LWC v5 hit-testing.
 function pc_attachMarkerTooltip(chart, containerId) {
   const cont = document.getElementById(containerId);
   if (!cont) return;
@@ -5152,7 +5152,8 @@ function pc_attachMarkerTooltip(chart, containerId) {
     cont.appendChild(tip);
   }
   chart.subscribeCrosshairMove(param => {
-    const meta = param && param.hoveredObjectId ? pc_markerMeta[param.hoveredObjectId] : null;
+    const objectId = param?.hoveredInfo?.objectId ?? param?.hoveredObjectId;
+    const meta = objectId != null ? pc_markerMeta[String(objectId)] : null;
     if (!meta || !param.point) { tip.style.display = 'none'; return; }
     tip.innerHTML = meta.html;
     tip.style.display = 'block';
