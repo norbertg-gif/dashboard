@@ -3446,6 +3446,15 @@ function fixupChartSizes() {
   }
 }
 
+// LWC v5: markers are a series primitive (createSeriesMarkers), not series.setMarkers().
+// Keep one primitive per series so repeated calls update instead of stacking.
+const _seriesMarkerPrims = new WeakMap();
+function setSeriesMarkers(series, markers) {
+  const prim = _seriesMarkerPrims.get(series);
+  if (prim) { prim.setMarkers(markers); return; }
+  _seriesMarkerPrims.set(series, LightweightCharts.createSeriesMarkers(series, markers));
+}
+
 function makeChart(container, height, opts={}) {
   const t = getChartTheme();
   return LightweightCharts.createChart(container, {
@@ -3475,9 +3484,9 @@ function ensureRsiChart(id, r) {
   if (r.rsiChart) return;
   const cont = document.getElementById('sub-rsi-' + id);
   r.rsiChart = makeChart(cont, 80, { timeVisible:false });
-  r.rsiLine  = r.rsiChart.addLineSeries({ color:'#f0b030', lineWidth:1, priceScaleId:'right' });
-  r.rsiOB    = r.rsiChart.addLineSeries({ color:'#ff456044', lineWidth:1, lineStyle:2, priceScaleId:'right' });
-  r.rsiOS    = r.rsiChart.addLineSeries({ color:'#00c99a44', lineWidth:1, lineStyle:2, priceScaleId:'right' });
+  r.rsiLine  = r.rsiChart.addSeries(LightweightCharts.LineSeries, { color:'#f0b030', lineWidth:1, priceScaleId:'right' });
+  r.rsiOB    = r.rsiChart.addSeries(LightweightCharts.LineSeries, { color:'#ff456044', lineWidth:1, lineStyle:2, priceScaleId:'right' });
+  r.rsiOS    = r.rsiChart.addSeries(LightweightCharts.LineSeries, { color:'#00c99a44', lineWidth:1, lineStyle:2, priceScaleId:'right' });
   r.rsiChart.priceScale('right').applyOptions({ scaleMargins:{top:0.1,bottom:0.1} });
   r.syncFrom(r.mainChart, [r.rsiChart]);
   r.syncFrom(r.rsiChart,  [r.mainChart]);
@@ -3487,10 +3496,10 @@ function ensureAdxChart(id, r) {
   if (r.adxChart) return;
   const cont = document.getElementById('sub-adx-' + id);
   r.adxChart = makeChart(cont, 80, { timeVisible:false });
-  r.adxLine  = r.adxChart.addLineSeries({ color:'#ff8c42', lineWidth:2, priceScaleId:'right' });
-  r.diPLine  = r.adxChart.addLineSeries({ color:'#00c99a', lineWidth:1, lineStyle:2, priceScaleId:'right' });
-  r.diMLine  = r.adxChart.addLineSeries({ color:'#ff4560', lineWidth:1, lineStyle:2, priceScaleId:'right' });
-  r.adxThr   = r.adxChart.addLineSeries({ color:'#ffffff22', lineWidth:1, lineStyle:2, priceScaleId:'right' });
+  r.adxLine  = r.adxChart.addSeries(LightweightCharts.LineSeries, { color:'#ff8c42', lineWidth:2, priceScaleId:'right' });
+  r.diPLine  = r.adxChart.addSeries(LightweightCharts.LineSeries, { color:'#00c99a', lineWidth:1, lineStyle:2, priceScaleId:'right' });
+  r.diMLine  = r.adxChart.addSeries(LightweightCharts.LineSeries, { color:'#ff4560', lineWidth:1, lineStyle:2, priceScaleId:'right' });
+  r.adxThr   = r.adxChart.addSeries(LightweightCharts.LineSeries, { color:'#ffffff22', lineWidth:1, lineStyle:2, priceScaleId:'right' });
   r.adxChart.priceScale('right').applyOptions({ scaleMargins:{top:0.1,bottom:0.1} });
   r.syncFrom(r.mainChart, [r.adxChart]);
   r.syncFrom(r.adxChart,  [r.mainChart]);
@@ -3501,9 +3510,9 @@ function ensureMacdChart(id, r) {
   if (r.macdChart) return;
   const cont = document.getElementById('sub-macd-' + id);
   r.macdChart     = makeChart(cont, 80, { timeVisible:false });
-  r.macdLine      = r.macdChart.addLineSeries({ color:'#00d4d4', lineWidth:1, priceScaleId:'right' });
-  r.macdSignal    = r.macdChart.addLineSeries({ color:'#ff8c42', lineWidth:1, priceScaleId:'right' });
-  r.macdHist      = r.macdChart.addHistogramSeries({ priceScaleId:'right', color:'#00c99a66' });
+  r.macdLine      = r.macdChart.addSeries(LightweightCharts.LineSeries, { color:'#00d4d4', lineWidth:1, priceScaleId:'right' });
+  r.macdSignal    = r.macdChart.addSeries(LightweightCharts.LineSeries, { color:'#ff8c42', lineWidth:1, priceScaleId:'right' });
+  r.macdHist      = r.macdChart.addSeries(LightweightCharts.HistogramSeries, { priceScaleId:'right', color:'#00c99a66' });
   r.macdChart.priceScale('right').applyOptions({ scaleMargins:{top:0.1,bottom:0.1} });
   r.syncFrom(r.mainChart, [r.macdChart]);
   r.syncFrom(r.macdChart,  [r.mainChart]);
@@ -3595,8 +3604,8 @@ function createPanel(cfg) {
     };
     setTimeout(_fixW, 120);
   }
-  const candleSeries = mainChart.addCandlestickSeries({ upColor:'#00c99a', downColor:'#ff4560', borderVisible:false, wickUpColor:'#00c99a', wickDownColor:'#ff4560' });
-  const volSeries    = mainChart.addHistogramSeries({ color:'#00c99a22', priceFormat:{type:'volume'}, priceScaleId:'vol' });
+  const candleSeries = mainChart.addSeries(LightweightCharts.CandlestickSeries, { upColor:'#00c99a', downColor:'#ff4560', borderVisible:false, wickUpColor:'#00c99a', wickDownColor:'#ff4560' });
+  const volSeries    = mainChart.addSeries(LightweightCharts.HistogramSeries, { color:'#00c99a22', priceFormat:{type:'volume'}, priceScaleId:'vol' });
   mainChart.priceScale('vol').applyOptions({ scaleMargins:{top:0.85,bottom:0} });
 
   function syncFrom(sourceChart, targetCharts) {
@@ -3757,7 +3766,7 @@ function applyOverlays(id, data, r) {
   if (emaActive) {
     const EMA_STYLES = { ema20:{color:'#a070ff',lineWidth:1}, ema50:{color:'#4a9eff',lineWidth:1}, ema200:{color:'#ff8c42',lineWidth:1} };
     ['ema20','ema50','ema200'].forEach(key => {
-      const s = mc.addLineSeries({...EMA_STYLES[key], lastValueVisible:false, priceLineVisible:false});
+      const s = mc.addSeries(LightweightCharts.LineSeries, {...EMA_STYLES[key], lastValueVisible:false, priceLineVisible:false});
       s.setData(toLineData(data, key));
       r.overlaySeries[key] = s;
     });
@@ -3776,18 +3785,18 @@ function applyOverlays(id, data, r) {
   if (r.indicators.ichimoku) {
     const OPT = { lastValueVisible:false, priceLineVisible:false };
     // Tenkan — oranžová, Kijun — šedá
-    const tenS = mc.addLineSeries({color:'#ff8c4299', lineWidth:1, ...OPT});
+    const tenS = mc.addSeries(LightweightCharts.LineSeries, {color:'#ff8c4299', lineWidth:1, ...OPT});
     tenS.setData(toLineData(data,'tenkan')); r.overlaySeries['tenkan']=tenS;
-    const kijS = mc.addLineSeries({color:'#ffffff55', lineWidth:1, ...OPT});
+    const kijS = mc.addSeries(LightweightCharts.LineSeries, {color:'#ffffff55', lineWidth:1, ...OPT});
     kijS.setData(toLineData(data,'kijun')); r.overlaySeries['kijun']=kijS;
     r.overlaySeries['chikou'] = null;
 
     // Span A (zelená prerušovaná) + Span B (červená prerušovaná) + canvas výplň medzi nimi
     const allCloud = data.filter(d => d.span_a != null && d.span_b != null);
-    const sAB  = mc.addLineSeries({color:'#2d9e6b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
-    const sBB  = mc.addLineSeries({color:'#c0392b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
-    const sABr = mc.addLineSeries({color:'transparent', lineWidth:0, ...OPT});
-    const sBBr = mc.addLineSeries({color:'transparent', lineWidth:0, ...OPT});
+    const sAB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#2d9e6b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
+    const sBB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#c0392b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
+    const sABr = mc.addSeries(LightweightCharts.LineSeries, {color:'transparent', lineWidth:0, ...OPT});
+    const sBBr = mc.addSeries(LightweightCharts.LineSeries, {color:'transparent', lineWidth:0, ...OPT});
     sAB.setData(allCloud.map(d => ({time:d.time, value:d.span_a})));
     sBB.setData(allCloud.map(d => ({time:d.time, value:d.span_b})));
     sABr.setData([]); sBBr.setData([]);
@@ -4242,7 +4251,7 @@ function applyPatternMarkers(id, r, patterns) {
   }));
   const all = [...(r._etoroMarkersList||[]), ...r._patternMarkers]
     .sort((a,b) => a.time < b.time ? -1 : 1);
-  try { r.candleSeries.setMarkers(all); } catch(e) {}
+  try { setSeriesMarkers(r.candleSeries, all); } catch(e) {}
 
   // Tooltip
   let tip = document.getElementById('ptip-'+id);
@@ -4292,7 +4301,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
   }
   r.entryPriceLines = [];
-  r.candleSeries.setMarkers([]);
+  setSeriesMarkers(r.candleSeries, []);
 
   // Načítaj pozície pre oba účty ak ešte nie sú
   const accts = ['1', '2'];
@@ -4363,7 +4372,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   markers.sort((a,b) => a.time < b.time ? -1 : 1);
   r._etoroMarkersList = markers;
   const all = [...markers, ...(r._patternMarkers||[])].sort((a,b) => a.time < b.time ? -1 : 1);
-  r.candleSeries.setMarkers(all);
+  setSeriesMarkers(r.candleSeries, all);
 
   // Ulož pozície pre crosshair tooltip
   r._etoroPositions = allPositions;
@@ -4630,7 +4639,7 @@ async function loadChart(id, opts = {}) {
     r.etoroPct = null;
     if (r.indicators.ha) {
       // Pri HA sú ceny syntetické — markery vstupu by nesedeli
-      r.candleSeries.setMarkers([]);
+      setSeriesMarkers(r.candleSeries, []);
       if (r.avgPriceLine) { try { r.candleSeries.removePriceLine(r.avgPriceLine); } catch(e){} r.avgPriceLine = null; }
     }
     applyTagToPanel(id, getTag(sym));
@@ -5140,7 +5149,7 @@ function initCharts() {
 
   // TOP: real weekly candlestick chart
   pc_realChartInst = pc_makeChart('realChart');
-  pc_realSeries = pc_realChartInst.addCandlestickSeries({
+  pc_realSeries = pc_realChartInst.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: '#26a69a', downColor: '#ef5350',
     borderUpColor: '#26a69a', borderDownColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -5150,23 +5159,23 @@ function initCharts() {
   pc_predChartInst = pc_makeChart('predChart');
 
   // actual close line (yellow) — context
-  pc_btActualLine = pc_predChartInst.addLineSeries({
+  pc_btActualLine = pc_predChartInst.addSeries(LightweightCharts.LineSeries, {
     color: '#f59e0b', lineWidth: 1, lineStyle: 0, title: 'actual close',
     priceLineVisible: false, lastValueVisible: true,
   });
   // predicted close line (purple dashed) — hidden when overlay off, used for markers
-  pc_btPredLine = pc_predChartInst.addLineSeries({
+  pc_btPredLine = pc_predChartInst.addSeries(LightweightCharts.LineSeries, {
     color: 'rgba(0,0,0,0)', lineWidth: 0, lineStyle: 0,
     priceLineVisible: false, lastValueVisible: false,
   });
   // backtest candles — muted teal/salmon (distinct from real chart green/red)
-  pc_predCandleSeries = pc_predChartInst.addCandlestickSeries({
+  pc_predCandleSeries = pc_predChartInst.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: 'rgba(52,211,153,0.45)', downColor: 'rgba(251,113,133,0.45)',
     borderUpColor: '#34d399', borderDownColor: '#fb7185',
     wickUpColor: '#34d399', wickDownColor: '#fb7185',
   });
   // future prediction candle — brighter
-  pc_futureCandleSeries = pc_predChartInst.addCandlestickSeries({
+  pc_futureCandleSeries = pc_predChartInst.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: 'rgba(52,211,153,0.85)', downColor: 'rgba(251,113,133,0.85)',
     borderUpColor: '#6ee7b7', borderDownColor: '#fda4af',
     wickUpColor: '#6ee7b7', wickDownColor: '#fda4af',
@@ -5313,7 +5322,7 @@ function renderCharts(data) {
       markers.push({ time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
     });
   }
-  pc_realSeries.setMarkers(markers.sort((a, b) => a.time - b.time));
+  setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
   pc_btActualLine.setData(candles.map(c => ({ time: c.time, value: c.close })));
@@ -5345,10 +5354,10 @@ function renderCharts(data) {
       shape:    'circle',
       size:     r.correct === null ? 0.7 : 0.5,
     }));
-    pc_predCandleSeries.setMarkers(markers);
+    setSeriesMarkers(pc_predCandleSeries, markers);
   } else {
     pc_predCandleSeries.setData(padCandles);
-    pc_predCandleSeries.setMarkers([]);
+    setSeriesMarkers(pc_predCandleSeries, []);
   }
 
   // Future prediction candle (next week)
@@ -5369,7 +5378,7 @@ function renderCharts(data) {
   // Daily mini chart
   if (pc_dailyChartInst && data.daily_candles && data.daily_candles.length) {
     if (!pc_dailySeries) {
-      pc_dailySeries = pc_dailyChartInst.addCandlestickSeries({
+      pc_dailySeries = pc_dailyChartInst.addSeries(LightweightCharts.CandlestickSeries, {
         upColor: '#26a69a', downColor: '#ef5350',
         borderUpColor: '#26a69a', borderDownColor: '#ef5350',
         wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -5392,7 +5401,7 @@ function renderCharts(data) {
       }
       return { time: s.time, position: 'belowBar', color, shape: 'circle', text, size: s.score >= 3 ? 0.8 : 0.5 };
     }).sort((a, b) => a.time - b.time);
-    pc_dailySeries.setMarkers(dailyMarkers);
+    setSeriesMarkers(pc_dailySeries, dailyMarkers);
 
     pc_dailyChartInst.timeScale().fitContent();
 
@@ -6176,26 +6185,26 @@ function pc_applyOverlays() {
   clearOverlays();
 
   if (document.getElementById('chk_ema10').checked) {
-    pc_oEma10 = pc_realChartInst.addLineSeries({ color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA10' });
+    pc_oEma10 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA10' });
     pc_oEma10.setData(ind.ema10);
   }
   if (document.getElementById('chk_ema20').checked) {
-    pc_oEma20 = pc_realChartInst.addLineSeries({ color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
+    pc_oEma20 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
     pc_oEma20.setData(ind.ema20);
   }
   if (document.getElementById('chk_tenkan').checked) {
-    pc_oTenkan = pc_realChartInst.addLineSeries({ color: '#34d399', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Tenkan' });
+    pc_oTenkan = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#34d399', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Tenkan' });
     pc_oTenkan.setData(ind.ichi_tenkan);
   }
   if (document.getElementById('chk_kijun').checked) {
-    pc_oKijun = pc_realChartInst.addLineSeries({ color: '#f87171', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
+    pc_oKijun = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f87171', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
     pc_oKijun.setData(ind.ichi_kijun);
   }
   if (document.getElementById('chk_kumo').checked) {
     // Senkou A and B as lines
-    pc_oKumoA = pc_realChartInst.addLineSeries({ color: 'rgba(52,211,153,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou A' });
+    pc_oKumoA = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(52,211,153,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou A' });
     pc_oKumoA.setData(ind.ichi_sa);
-    pc_oKumoB = pc_realChartInst.addLineSeries({ color: 'rgba(248,113,113,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou B' });
+    pc_oKumoB = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(248,113,113,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou B' });
     pc_oKumoB.setData(ind.ichi_sb);
     // Draw filled cloud via custom canvas plugin on pc_realChartInst
     attachKumoPlugin(pc_realChartInst, ind.ichi_sa, ind.ichi_sb);
@@ -6237,23 +6246,23 @@ function buildSubpanel(type, ind, candles) {
 
   if (type === 'rsi') {
     label.textContent = 'RSI 14';
-    const s = pc_subChartInst.addLineSeries({ color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'RSI' });
+    const s = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'RSI' });
     s.setData(ind.rsi);
     // overbought/oversold lines
     const times = ind.rsi.map(d => d.time);
     [[70,'#ef5350'],[30,'#26a69a']].forEach(([lvl, color]) => {
-      const ref = pc_subChartInst.addLineSeries({ color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       ref.setData(times.map(t => ({ time: t, value: lvl })));
     });
     pc_subChartInst.priceScale('right').applyOptions({ autoScale: false, minValue: 0, maxValue: 100 });
 
   } else if (type === 'macd') {
     label.textContent = 'MACD';
-    const macdLine = pc_subChartInst.addLineSeries({ color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'MACD' });
+    const macdLine = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'MACD' });
     macdLine.setData(ind.macd);
-    const sigLine = pc_subChartInst.addLineSeries({ color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Signal' });
+    const sigLine = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Signal' });
     sigLine.setData(ind.macd_sig);
-    const hist = pc_subChartInst.addHistogramSeries({
+    const hist = pc_subChartInst.addSeries(LightweightCharts.HistogramSeries, {
       priceLineVisible: false, lastValueVisible: false,
       color: '#26a69a',
     });
@@ -6261,28 +6270,28 @@ function buildSubpanel(type, ind, candles) {
 
   } else if (type === 'stoch') {
     label.textContent = 'Stochastic RSI';
-    const k = pc_subChartInst.addLineSeries({ color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: '%K' });
+    const k = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: '%K' });
     k.setData(ind.stoch_k);
-    const d = pc_subChartInst.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, title: '%D' });
+    const d = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, title: '%D' });
     d.setData(ind.stoch_d);
     const times = ind.stoch_k.map(p => p.time);
     [[80,'#ef5350'],[20,'#26a69a']].forEach(([lvl, color]) => {
-      const ref = pc_subChartInst.addLineSeries({ color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       ref.setData(times.map(t => ({ time: t, value: lvl })));
     });
     pc_subChartInst.priceScale('right').applyOptions({ autoScale: false, minValue: 0, maxValue: 100 });
 
   } else if (type === 'adx') {
     label.textContent = 'ADX + DI';
-    const adx = pc_subChartInst.addLineSeries({ color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'ADX' });
+    const adx = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'ADX' });
     adx.setData(ind.adx);
-    const dip = pc_subChartInst.addLineSeries({ color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI+' });
+    const dip = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI+' });
     dip.setData(ind.di_plus);
-    const dim = pc_subChartInst.addLineSeries({ color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI-' });
+    const dim = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI-' });
     dim.setData(ind.di_minus);
     // ADX 25 reference
     if (ind.adx.length) {
-      const ref = pc_subChartInst.addLineSeries({ color: 'rgba(255,255,255,0.15)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(255,255,255,0.15)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       ref.setData(ind.adx.map(d => ({ time: d.time, value: 25 })));
     }
   }
@@ -6373,7 +6382,7 @@ function renderDailyMain(data) {
     if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
   }).observe(el);
 
-  const cs = pc_dailyMainInst.addCandlestickSeries({
+  const cs = pc_dailyMainInst.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: '#26a69a', downColor: '#ef5350',
     borderUpColor: '#26a69a', borderDownColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -6383,11 +6392,11 @@ function renderDailyMain(data) {
 
   const ind = data.daily_indicators || {};
   if (ind.ema20 && ind.ema20.length) {
-    const e20 = pc_dailyMainInst.addLineSeries({ color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
+    const e20 = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
     e20.setData(ind.ema20);
   }
   if (ind.ichi_kijun && ind.ichi_kijun.length) {
-    const kj = pc_dailyMainInst.addLineSeries({ color: '#f87171', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
+    const kj = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color: '#f87171', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
     kj.setData(ind.ichi_kijun);
   }
 
@@ -6405,7 +6414,7 @@ function renderDailyMain(data) {
         size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1),
       };
     });
-    cs.setMarkers(markers);
+    setSeriesMarkers(cs, markers);
   }
 
   pc_dailyMainInst.timeScale().fitContent();
