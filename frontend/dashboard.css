@@ -3115,3 +3115,21 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 /* Žltá/modrá zámerne — ape badge meria pozornosť (rank pohyb), nie bull/bear, nesmie sa pliesť s P/L farbami */
 .ape-tag.ape-up   { background: rgba(212,167,44,.14); color: #d4a72c; }
 .ape-tag.ape-down { background: rgba(96,165,250,.13); color: #60a5fa; }
+
+/* ── Marker hover tooltip (LWC v5 hit-testing) ─────────────────────────────── */
+.pc-marker-tip {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  white-space: nowrap;
+}
+.pc-marker-tip .tip-muted { color: var(--muted); }

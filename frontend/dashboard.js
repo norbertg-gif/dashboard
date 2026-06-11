@@ -5067,6 +5067,7 @@ Sheet: ${sheetName}`);
 // ══ Predictive Chart JS ══
 
 let pc_realChartInst = null, pc_predChartInst = null;
+let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testing)
 // Make pc_ vars accessible cross-script via window
 Object.defineProperty(window, 'pc_realChartInst', {get: () => pc_realChartInst, set: v => pc_realChartInst = v});
 Object.defineProperty(window, 'pc_predChartInst', {get: () => pc_predChartInst, set: v => pc_predChartInst = v});
@@ -5138,6 +5139,32 @@ function pc_makeChart(containerId) {
   return chart;
 }
 
+// Hover tooltip pre markery (eToro pozície, buy signály) — LWC v5 hit-testing cez hoveredObjectId
+function pc_attachMarkerTooltip(chart, containerId) {
+  const cont = document.getElementById(containerId);
+  if (!cont) return;
+  if (getComputedStyle(cont).position === 'static') cont.style.position = 'relative';
+  let tip = cont.querySelector('.pc-marker-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'pc-marker-tip';
+    tip.style.display = 'none';
+    cont.appendChild(tip);
+  }
+  chart.subscribeCrosshairMove(param => {
+    const meta = param && param.hoveredObjectId ? pc_markerMeta[param.hoveredObjectId] : null;
+    if (!meta || !param.point) { tip.style.display = 'none'; return; }
+    tip.innerHTML = meta.html;
+    tip.style.display = 'block';
+    const pad = 12;
+    let x = param.point.x + pad, y = param.point.y + pad;
+    if (x + tip.offsetWidth  > cont.clientWidth)  x = param.point.x - tip.offsetWidth  - pad;
+    if (y + tip.offsetHeight > cont.clientHeight) y = param.point.y - tip.offsetHeight - pad;
+    tip.style.left = Math.max(0, x) + 'px';
+    tip.style.top  = Math.max(0, y) + 'px';
+  });
+}
+
 function initCharts() {
   removeKumoCanvas();
   pc__kumoPrimitive = null; // starý chart sa odstraňuje celý, detach netreba
@@ -5154,6 +5181,7 @@ function initCharts() {
     borderUpColor: '#26a69a', borderDownColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
   });
+  pc_attachMarkerTooltip(pc_realChartInst, 'realChart');
 
   // BOTTOM: backtest candles + actual close line + future prediction candle
   pc_predChartInst = pc_makeChart('predChart');
@@ -5265,6 +5293,7 @@ function renderCharts(data) {
   pc_realSeries.setData(candles);
   // Markers: earnings + open week indicator + weekly buy signals (z daily)
   const markers = [];
+  pc_markerMeta = {};
 
   // Namapuj daily buy signály na weekly sviečky
   if (data.daily_buy_signals && data.daily_buy_signals.length && candles.length) {
@@ -5288,7 +5317,13 @@ function renderCharts(data) {
       if (wk.score >= 2) {
         // Priorita farby v týždni: buy > counter > watch
         const wkTier = wk.tiers.has('buy') ? 'buy' : wk.tiers.has('counter') ? 'counter' : 'watch';
+        const sigId = 'sig:' + wk.time;
+        pc_markerMeta[sigId] = { html:
+          `<b style="color:${sigTierColor(wkTier)}">${sigTierLabel(wkTier, wk.score)}</b> · sila ${wk.score}/4` +
+          (wk.count > 1 ? `<br>${wk.count} signálov v tomto týždni` : '') +
+          `<br><span class="tip-muted">${new Date(wk.time * 1000).toLocaleDateString('sk-SK')}</span>` };
         markers.push({
+          id:       sigId,
           time:     wk.time,
           position: 'belowBar',
           color:    sigTierColor(wkTier),
@@ -5314,12 +5349,23 @@ function renderCharts(data) {
   const ticker = (document.getElementById('tickerInput')?.value || '').trim().toUpperCase();
   const lastClose = candles.length ? candles[candles.length - 1].close : null;
   for (const acct of ['1', '2']) {
-    (etoroPositionsAll[acct] || []).filter(p => p.symbol === ticker).forEach(pos => {
+    (etoroPositionsAll[acct] || []).filter(p => p.symbol === ticker).forEach((pos, i) => {
       const mt = resolveMarkerTime({ ...pos, _acct: acct }, candles);
       if (!mt) return;
-      const inProfit = lastClose != null ? (pos.openRate || 0) <= lastClose : true;
+      // CLAUDE.md pitfall: P/L farba z pos.pnl — openRate porovnanie je zlé pre shorty/páku
+      const inProfit = Number.isFinite(pos.pnl) ? pos.pnl >= 0
+        : (lastClose != null ? (pos.openRate || 0) <= lastClose : true);
       const col = inProfit ? ACCT_COLORS[acct].profit : ACCT_COLORS[acct].loss;
-      markers.push({ time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
+      const posId = `pos:${acct}:${i}`;
+      const pnlTxt = Number.isFinite(pos.pnl)
+        ? `${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} $` +
+          (Number.isFinite(pos.amount) && pos.amount ? ` (${(pos.pnl / pos.amount * 100).toFixed(1)} %)` : '')
+        : 'n/a';
+      pc_markerMeta[posId] = { html:
+        `<b>Účet ${acct}</b> · ${pos.isBuy === false ? 'SELL' : 'BUY'}${pos.leverage > 1 ? ` ×${pos.leverage}` : ''}` +
+        `<br>Vstup ${pos.openRate}${pos.openDateTime ? ` · ${new Date(pos.openDateTime).toLocaleDateString('sk-SK')}` : ''}` +
+        `<br>P/L <span style="color:${inProfit ? 'var(--up,#26a69a)' : 'var(--down,#ef5350)'}">${pnlTxt}</span>` };
+      markers.push({ id: posId, time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
     });
   }
   setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
