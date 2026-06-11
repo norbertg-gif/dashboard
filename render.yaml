@@ -6,7 +6,7 @@ services:
     startCommand: python backend/trading_backend.py
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.14.3
       - key: RENDER
         value: "1"
       - key: DATA_DIR

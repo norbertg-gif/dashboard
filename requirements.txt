@@ -1,7 +1,7 @@
 fastapi>=0.100
 uvicorn>=0.23
 starlette>=0.27
-pandas>=2.0,<3.0
+pandas>=2.0,<4.0
 numpy>=1.24,<3.0
 scipy>=1.11
 scikit-learn>=1.3

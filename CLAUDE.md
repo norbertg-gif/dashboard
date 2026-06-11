@@ -4,7 +4,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 
 ## Stack
 
-- **Backend:** FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
+- **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS for XLSX import — no build step
 - **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
@@ -25,7 +25,7 @@ docs/
 trading_backend.py     # thin entrypoint shim for Render (imports backend/.)
 render.yaml            # web service + 1GB persistent disk at /data
 requirements.txt
-.python-version        # pinned Python 3.11.9 (runtime.txt nefunguje — Render ho ignoruje; PYTHON_VERSION env var tiež nastavená)
+.python-version        # pinned Python 3.14.3 (runtime.txt nefunguje — Render ho ignoruje; PYTHON_VERSION env var tiež nastavená)
 ```
 
 ## Commands
