@@ -3112,5 +3112,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   padding: 1px 6px; border-radius: 9px;
   background: rgba(139,148,158,.12); color: var(--muted, #8b949e);
 }
-.ape-tag.ape-up   { background: rgba(38,166,154,.12); color: var(--up, #26a69a); }
-.ape-tag.ape-down { background: rgba(239,83,80,.12);  color: var(--down, #ef5350); }
+/* Žltá/modrá zámerne — ape badge meria pozornosť (rank pohyb), nie bull/bear, nesmie sa pliesť s P/L farbami */
+.ape-tag.ape-up   { background: rgba(212,167,44,.14); color: #d4a72c; }
+.ape-tag.ape-down { background: rgba(96,165,250,.13); color: #60a5fa; }

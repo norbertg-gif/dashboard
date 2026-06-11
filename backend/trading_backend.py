@@ -4639,14 +4639,14 @@ async def _ape_fetch_server() -> dict | None:
                     f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{p}"
                 )
                 if r.status_code != 200:
-                    logger.warning("[ape] HTTP %s page %s", r.status_code, p)
+                    print(f"[ape] HTTP {r.status_code} page {p}")
                     break
                 data = r.json()
                 if data.get("pages"):
                     total_pages = data["pages"]
                 pages.append(data)
     except Exception as exc:
-        logger.warning("[ape] fetch error: %s", exc)
+        print(f"[ape] fetch error: {exc}")
         return None
     if not pages:
         return None
@@ -4867,6 +4867,33 @@ def _earnings_save_cache(dates: dict) -> dict:
     return payload
 
 
+def _earnings_fetch_finnhub() -> dict:
+    """Finnhub /calendar/earnings — JSON, 60 req/min free tier, pokrýva 3 mesiace dopredu."""
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("FINNHUB_API_KEY nie je nastavený")
+    today = datetime.now(timezone.utc).date()
+    resp = requests.get(
+        "https://finnhub.io/api/v1/calendar/earnings",
+        params={"from": today.isoformat(),
+                "to": (today + timedelta(days=90)).isoformat(),
+                "token": api_key},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    dates: dict = {}
+    for item in (resp.json().get("earningsCalendar") or []):
+        sym = (item.get("symbol") or "").upper()
+        report = item.get("date") or ""
+        if not sym or not report:
+            continue
+        if sym not in dates or report < dates[sym]:
+            dates[sym] = report
+    if not dates:
+        raise RuntimeError("empty earnings calendar (finnhub)")
+    return dates
+
+
 @app.get("/api/earnings")
 def get_earnings_calendar(refresh: int = Query(0)):
     cached = _earnings_cache_read()
@@ -4879,6 +4906,12 @@ def get_earnings_calendar(refresh: int = Query(0)):
                 return {**cached, "stale": False}
         except Exception:
             pass
+    # Primárne Finnhub (60 req/min, bez zdieľaného IP limitu), fallback Alpha Vantage
+    try:
+        payload = _earnings_save_cache(_earnings_fetch_finnhub())
+        return {**payload, "stale": False}
+    except Exception as e:
+        print(f"[earnings] finnhub failed, fallback AV: {e}")
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
     try:
         if not api_key:
