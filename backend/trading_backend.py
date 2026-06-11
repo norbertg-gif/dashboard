@@ -3299,30 +3299,15 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
 
         pred = apply_daily_filter(pred, daily_signal)
 
-        # Earnings dates — primárne zdieľaný Finnhub/AV kalendár (rovnaký zdroj ako
-        # scanner badge); yfinance .calendar len ako fallback (na Renderi často
-        # blokovaný Yahoo → prázdna karta v Predictive).
+        # Earnings dates — bulk kalendár → Finnhub per-symbol → yfinance
+        # (jednotná logika v _earnings_next_date, zdieľaná s GET /api/earnings/{symbol})
         earnings_dates = []
         try:
-            # refresh=0 explicitne — bez argumentu by tu bol FastAPI Query objekt (truthy)
-            cal_payload = get_earnings_calendar(refresh=0)
-            d = (cal_payload.get("dates") or {}).get(ticker.upper())
+            d = _earnings_next_date(ticker)
             if d:
                 earnings_dates.append(int(pd.Timestamp(d).timestamp()))
         except Exception:
             pass
-        if not earnings_dates:
-            try:
-                cal = yf.Ticker(ticker).calendar
-                if isinstance(cal, dict):
-                    ed_val = cal.get("Earnings Date", [])
-                    if not isinstance(ed_val, list):
-                        ed_val = [ed_val]
-                    for v in ed_val:
-                        if v:
-                            earnings_dates.append(int(pd.Timestamp(v).timestamp()))
-            except Exception:
-                pass
 
         return {
             "ticker":             ticker.upper(),
@@ -4912,6 +4897,67 @@ async def ingest_earnings_calendar(request: Request):
                 "error": _news_scrub_error(str(e))}
     payload = _earnings_save_cache(dates)
     return {**payload, "stale": False}
+
+
+_earnings_sym_failed_at: dict[str, float] = {}   # sym → ts neúspechu (1h backoff)
+
+def _earnings_next_date(symbol: str) -> str | None:
+    """Najbližší earnings dátum pre symbol: bulk kalendár → Finnhub per-symbol
+    (bulk free kalendár veľké tituly občas vynecháva) → yfinance fallback."""
+    sym = symbol.upper()
+    try:
+        payload = get_earnings_calendar(refresh=0)
+        d = (payload.get("dates") or {}).get(sym)
+        if d:
+            return d
+    except Exception:
+        pass
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    last_fail = _earnings_sym_failed_at.get(sym, 0)
+    if api_key and (time.time() - last_fail) > 3600:
+        try:
+            today = datetime.now(timezone.utc).date()
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={"symbol": sym, "from": today.isoformat(),
+                        "to": (today + timedelta(days=120)).isoformat(),
+                        "token": api_key},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            ds = sorted(i.get("date") for i in (resp.json().get("earningsCalendar") or []) if i.get("date"))
+            if ds:
+                # doplň do zdieľanej cache (fetched_at nechaj — nepredlžuj TTL bulku)
+                cached = _earnings_cache_read()
+                if cached is not None:
+                    cached.setdefault("dates", {})[sym] = ds[0]
+                    try:
+                        EARNINGS_CACHE_FILE.write_text(json.dumps(cached), encoding="utf-8")
+                    except Exception:
+                        pass
+                return ds[0]
+            _earnings_sym_failed_at[sym] = time.time()
+        except Exception as e:
+            _earnings_sym_failed_at[sym] = time.time()
+            print(f"[earnings] per-symbol fetch failed {sym}: {e}")
+    try:
+        cal = yf.Ticker(sym).calendar
+        if isinstance(cal, dict):
+            ed = cal.get("Earnings Date", [])
+            if not isinstance(ed, list):
+                ed = [ed]
+            ds = sorted(str(pd.Timestamp(v).date()) for v in ed if v)
+            if ds:
+                return ds[0]
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/earnings/{symbol}")
+def get_earnings_for_symbol(symbol: str):
+    """Per-ticker earnings dátum pre Predictive kartu (bulk → Finnhub symbol → yf)."""
+    return {"ticker": symbol.upper(), "date": _earnings_next_date(symbol)}
 
 
 @app.post("/api/news/{ticker}/ingest")

@@ -7092,8 +7092,29 @@ async function pc_ensureEarningsDate(ticker) {
   if (!card.querySelector('.earnings-unavailable')) return;   // dátum už máme
   await loadEarningsCalendar();
   if (!card.querySelector('.earnings-unavailable')) return;   // medzitým prekreslené
-  const d = _earningsDates && _earningsDates[String(ticker).toUpperCase()];
-  if (!d) return;
+  const sym = String(ticker).toUpperCase();
+  let d = _earningsDates && _earningsDates[sym];
+  if (!d) {
+    // bulk kalendár symbol nemá (Finnhub free občas vynecháva veľké tituly)
+    // → per-symbol endpoint (Finnhub ?symbol= → yfinance)
+    try {
+      const r = await fetch('/api/earnings/' + encodeURIComponent(sym));
+      if (r.ok) {
+        const j = await r.json();
+        if (j.date) { d = j.date; if (_earningsDates) _earningsDates[sym] = d; }
+      }
+    } catch (e) {}
+  }
+  if (!d) {
+    const note = card.querySelector('.earnings-unavailable-note');
+    if (note) {
+      const n = Object.keys(_earningsDates || {}).length;
+      note.textContent = n
+        ? `Kalendár (${n} tickerov) ani per-symbol dopyt nemá termín pre ${sym}.`
+        : 'Kalendár nedostupný — všetky zdroje zlyhali.';
+    }
+    return;
+  }
   const dt = new Date(d + 'T00:00:00');
   const daysUntil = Math.round((dt.getTime() - Date.now()) / 86400000);
   const daysText = daysUntil > 0 ? `o ${daysUntil} ${daysUntil === 1 ? 'deň' : daysUntil < 5 ? 'dni' : 'dní'}`
