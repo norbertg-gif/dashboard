@@ -5106,6 +5106,90 @@ function pc_attachMarkerTooltip(chart, containerId) {
   attachMarkerTooltip(chart, cont, objectId => pc_markerMeta[String(objectId)]);
 }
 
+// ── Volume Profile (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) ──
+let pc_vpPrimitive = null;
+let pc_vpEnabled = localStorage.getItem('pc_vp_enabled') === '1';
+const PC_VP_BINS = 40;
+
+class VolumeProfilePrimitive {
+  constructor(chart, series, getCandles) {
+    this._chart = chart;
+    this._series = series;
+    this._getCandles = getCandles;
+    const self = this;
+    this._paneView = {
+      update() {},
+      zOrder() { return 'bottom'; },
+      renderer() { return { draw: target => self._draw(target) }; },
+    };
+  }
+  paneViews() { return [this._paneView]; }
+  updateAllViews() {}
+
+  _draw(target) {
+    const candles = this._getCandles();
+    if (!candles || candles.length < 10) return;
+    const vr = this._chart.timeScale().getVisibleLogicalRange();
+    if (!vr) return;
+    const from = Math.max(0, Math.floor(vr.from));
+    const to = Math.min(candles.length - 1, Math.ceil(vr.to));
+    const slice = candles.slice(from, to + 1).filter(c => c.high != null && c.low != null);
+    if (slice.length < 5) return;
+    let pMin = Infinity, pMax = -Infinity;
+    for (const c of slice) { if (c.low < pMin) pMin = c.low; if (c.high > pMax) pMax = c.high; }
+    if (!(pMax > pMin)) return;
+    const binSize = (pMax - pMin) / PC_VP_BINS;
+    const vols = new Array(PC_VP_BINS).fill(0);
+    for (const c of slice) {
+      const v = Number(c.volume) || 0;
+      if (!v) continue;
+      // volume sviečky rovnomerne medzi biny pretínané rozsahom high–low
+      let b0 = Math.min(PC_VP_BINS - 1, Math.max(0, Math.floor((c.low - pMin) / binSize)));
+      let b1 = Math.min(PC_VP_BINS - 1, Math.max(0, Math.floor((c.high - pMin) / binSize)));
+      const share = v / (b1 - b0 + 1);
+      for (let b = b0; b <= b1; b++) vols[b] += share;
+    }
+    const maxVol = Math.max(...vols);
+    if (!maxVol) return;
+    const series = this._series;
+    target.useBitmapCoordinateSpace(scope => {
+      const ctx = scope.context;
+      const W = scope.bitmapSize.width;
+      const maxBarW = W * 0.18;   // max 18 % šírky panelu pri pravom okraji
+      for (let b = 0; b < PC_VP_BINS; b++) {
+        if (!vols[b]) continue;
+        const pLo = pMin + b * binSize;
+        const yLo = series.priceToCoordinate(pLo);
+        const yHi = series.priceToCoordinate(pLo + binSize);
+        if (yLo == null || yHi == null) continue;
+        const y0 = Math.min(yLo, yHi) * scope.verticalPixelRatio;
+        const h  = Math.max(1, Math.abs(yLo - yHi) * scope.verticalPixelRatio - 1);
+        const w  = (vols[b] / maxVol) * maxBarW;
+        ctx.fillStyle = 'rgba(96,165,250,0.28)';
+        ctx.fillRect(W - w, y0, w, h);
+      }
+    });
+  }
+}
+
+function pc_applyVolumeProfile() {
+  if (!pc_realSeries) return;
+  if (pc_vpEnabled && !pc_vpPrimitive) {
+    pc_vpPrimitive = new VolumeProfilePrimitive(pc_realChartInst, pc_realSeries,
+      () => (pc_lastData && pc_lastData.candles) || []);
+    pc_realSeries.attachPrimitive(pc_vpPrimitive);
+  } else if (!pc_vpEnabled && pc_vpPrimitive) {
+    try { pc_realSeries.detachPrimitive(pc_vpPrimitive); } catch (e) {}
+    pc_vpPrimitive = null;
+  }
+}
+
+function pc_toggleVolumeProfile(el) {
+  pc_vpEnabled = !!el.checked;
+  localStorage.setItem('pc_vp_enabled', pc_vpEnabled ? '1' : '0');
+  pc_applyVolumeProfile();
+}
+
 function initCharts() {
   removeKumoCanvas();
   pc__kumoPrimitive = null; // starý chart sa odstraňuje celý, detach netreba
@@ -5123,6 +5207,11 @@ function initCharts() {
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
   });
   pc_attachMarkerTooltip(pc_realChartInst, 'realChart');
+  // Volume Profile — starý primitive zomrel s odstráneným chartom
+  pc_vpPrimitive = null;
+  pc_applyVolumeProfile();
+  const vpChk = document.getElementById('chk_vp');
+  if (vpChk) vpChk.checked = pc_vpEnabled;
 
   // BOTTOM: backtest candles + actual close line + future prediction candle
   pc_predChartInst = pc_makeChart('predChart');
@@ -7605,6 +7694,7 @@ function loadTickerFromChecklist(ticker) {
 
 // Expose predictive functions globally for HTML onclick
 window.pc_applyOverlays = pc_applyOverlays;
+window.pc_toggleVolumeProfile = pc_toggleVolumeProfile;
 window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;

@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260611-earnings1">
+<link rel="stylesheet" href="/dashboard.css?v=20260611-vp1">
 </head>
 <body>
 
@@ -401,6 +401,12 @@
           <input type="checkbox" id="chk_kumo" onchange="pc_applyOverlays()">
           <label for="chk_kumo">Kumo cloud</label>
         </div>
+        <div class="ind-group-label" style="margin-top:6px;">Objem</div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:rgba(96,165,250,0.45); height:8px; border-radius:2px;"></div>
+          <input type="checkbox" id="chk_vp" onchange="pc_toggleVolumeProfile(this)">
+          <label for="chk_vp">Volume Profile</label>
+        </div>
       </div>
     </div>
 
@@ -507,6 +513,6 @@
     </table>
   </div>
 </div>
-<script src="/dashboard.js?v=20260611-earnings1"></script>
+<script src="/dashboard.js?v=20260611-vp1"></script>
 </body>
 </html>
