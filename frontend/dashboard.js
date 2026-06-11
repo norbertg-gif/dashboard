@@ -3459,7 +3459,7 @@ function makeChart(container, height, opts={}) {
   const t = getChartTheme();
   return LightweightCharts.createChart(container, {
     width:container.clientWidth, height,
-    layout:{ background:{type:'solid',color:t.bg}, textColor:t.text },
+    layout:{ background:{type:'solid',color:t.bg}, textColor:t.text, attributionLogo:false },
     grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
     crosshair:{ mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
     rightPriceScale:{ borderColor:t.border },
@@ -5117,7 +5117,7 @@ function getPcChartOpts() {
     crosshair:'#64748b55', crosshairLbl:'#0f1117',
   };
   return {
-    layout: { background: { color: t.bg }, textColor: t.text },
+    layout: { background: { color: t.bg }, textColor: t.text, attributionLogo: false },
     grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
     crosshair: { mode: 1 },
     rightPriceScale: { borderColor: t.border },
