@@ -6958,53 +6958,10 @@ async function loadRedditMentions(tickers) {
     const r = await fetch(`/api/reddit/mentions?tickers=${encodeURIComponent(tickers.join(','))}`);
     if (!r.ok) return;
     const data = await r.json();
-    // Cache má dáta a nie je stale → použij
-    if (data.data && Object.keys(data.data).length && !data.stale) {
+    if (data.data && Object.keys(data.data).length) {
       Object.assign(_apeMentions, data.data);
-      return;
     }
-    // Cache prázdna alebo stale → stiahni čerstvé dáta priamo z prehliadača
-    const fresh = await fetchRedditDirect();
-    if (fresh) Object.assign(_apeMentions, fresh);
   } catch (e) { console.warn('[reddit] mentions load failed:', e); }
-}
-
-async function fetchRedditDirect() {
-  try {
-    const pages = [];
-    // ApeWisdom má ~5 strán po 25 tickerov (top 125 stocks).
-    // Pole "pages" v odpovedi udáva celkový počet strán.
-    let totalPages = 5;
-    for (let p = 1; p <= Math.min(totalPages, 5); p++) {
-      const r = await fetch(`https://apewisdom.io/api/v1.0/filter/all-stocks/page/${p}`);
-      if (!r.ok) { console.warn('[reddit] HTTP', r.status, 'page', p); break; }
-      const data = await r.json();
-      if (data.pages) totalPages = data.pages;
-      pages.push(data);
-    }
-    if (!pages.length) { console.warn('[reddit] no pages fetched'); return null; }
-    // Pošli serveru na cachovanie
-    const ir = await fetch('/api/reddit/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pages),
-    });
-    if (!ir.ok) return null;
-    const result = await ir.json();
-    // Rebuild local map from pages
-    const map = {};
-    for (const page of pages) {
-      for (const item of (page.results || [])) {
-        const t = (item.ticker || '').toUpperCase();
-        if (t) map[t] = { ticker: t, name: item.name, mentions: item.mentions,
-          upvotes: item.upvotes, rank: item.rank,
-          rank_24h_ago: item.rank_24h_ago, mentions_24h_ago: item.mentions_24h_ago };
-      }
-    }
-    return Object.keys(map).length ? map : null;
-  } catch (e) {
-    return null;
-  }
 }
 
 async function loadHoldings() {

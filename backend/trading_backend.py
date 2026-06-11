@@ -4,6 +4,7 @@ Trading Dashboard Backend — port 8766
 pip install fastapi uvicorn yfinance pandas requests
 """
 
+import asyncio
 import gc, json, os, math, threading
 from io import BytesIO
 import numpy as np
@@ -4595,38 +4596,15 @@ def _ape_cache_read() -> dict | None:
     return None
 
 
-@app.get("/api/reddit/mentions")
-def get_reddit_mentions(tickers: str = Query("")):
-    """Vráti Reddit mentions pre zoznam tickerov z ApeWisdom cache.
-    Cache plní prehliadač cez POST /api/reddit/ingest (Cloudflare blokuje server-side fetch)."""
-    cached = _ape_cache_read()
-    age_h = None
-    if cached:
-        try:
-            age_h = (datetime.now(timezone.utc) -
-                     datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
-        except Exception:
-            pass
-    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
-    data = {t: cached["data"].get(t) for t in ticker_list if cached and cached.get("data", {}).get(t)} if cached else {}
-    return {
-        "data": data,
-        "fetched_at": cached.get("fetched_at") if cached else None,
-        "age_h": round(age_h, 1) if age_h is not None else None,
-        "stale": age_h is not None and age_h >= APE_CACHE_TTL_H,
-        "empty": not cached or not cached.get("data"),
-    }
+_APE_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+_APE_FETCH_LOCK = asyncio.Lock()
 
 
-@app.post("/api/reddit/ingest")
-async def ingest_reddit_mentions(request: Request):
-    """Prijme surové ApeWisdom JSON stránky stiahnuté prehliadačom, zlúči do cache."""
-    try:
-        pages = await request.json()   # list of raw page responses
-    except Exception:
-        raise HTTPException(400, "Neplatné JSON telo")
-    if not isinstance(pages, list):
-        pages = [pages]
+def _ape_merge_pages(pages: list) -> dict:
     merged: dict = {}
     for page in pages:
         for item in (page.get("results") or []):
@@ -4642,13 +4620,81 @@ async def ingest_reddit_mentions(request: Request):
                 "rank_24h_ago": item.get("rank_24h_ago"),
                 "mentions_24h_ago": item.get("mentions_24h_ago"),
             }
-    payload = {
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "data": merged,
+    return merged
+
+
+async def _ape_fetch_server() -> dict | None:
+    """Stiahne top 5 strán ApeWisdom zo servera s browser User-Agent."""
+    import httpx
+    pages = []
+    total_pages = 5
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": _APE_BROWSER_UA},
+            timeout=15,
+            follow_redirects=True,
+        ) as client:
+            for p in range(1, min(total_pages, 5) + 1):
+                r = await client.get(
+                    f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{p}"
+                )
+                if r.status_code != 200:
+                    logger.warning("[ape] HTTP %s page %s", r.status_code, p)
+                    break
+                data = r.json()
+                if data.get("pages"):
+                    total_pages = data["pages"]
+                pages.append(data)
+    except Exception as exc:
+        logger.warning("[ape] fetch error: %s", exc)
+        return None
+    if not pages:
+        return None
+    return _ape_merge_pages(pages)
+
+
+@app.get("/api/reddit/mentions")
+async def get_reddit_mentions(tickers: str = Query("")):
+    """Vráti Reddit mentions pre zoznam tickerov. Ak je cache stará, obnoví ju server-side."""
+    cached = _ape_cache_read()
+    age_h: float | None = None
+    if cached:
+        try:
+            age_h = (datetime.now(timezone.utc) -
+                     datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+        except Exception:
+            pass
+
+    # Obnov cache ak je stará alebo prázdna (non-blocking pre prvé volanie — lock zabraňuje súbežným fetchom)
+    if cached is None or (age_h is not None and age_h >= APE_CACHE_TTL_H):
+        if not _APE_FETCH_LOCK.locked():
+            async with _APE_FETCH_LOCK:
+                merged = await _ape_fetch_server()
+                if merged is not None:
+                    payload = {
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                        "data": merged,
+                    }
+                    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    APE_CACHE_FILE.write_text(
+                        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+                    )
+                    cached = payload
+                    age_h = 0.0
+
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    data = {
+        t: cached["data"].get(t)
+        for t in ticker_list
+        if cached and cached.get("data", {}).get(t)
+    } if cached else {}
+    return {
+        "data": data,
+        "fetched_at": cached.get("fetched_at") if cached else None,
+        "age_h": round(age_h, 1) if age_h is not None else None,
+        "stale": age_h is not None and age_h >= APE_CACHE_TTL_H,
+        "empty": not cached or not cached.get("data"),
     }
-    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    APE_CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return {"ok": True, "tickers": len(merged), "fetched_at": payload["fetched_at"]}
 
 
 
