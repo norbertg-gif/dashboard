@@ -65,6 +65,19 @@ These were already in the codebase and need to stay fixed:
 - **`get_public_portfolio` computes summary like the others.** It must NOT just return `port.get("equity")` raw — that field is unreliable; equity is computed as `cash + invested + total_pnl`.
 - **JS: predictive tab uses `pc_*` functions.** Overlay checkboxes in `trading_dashboard.html` must call `pc_applyOverlays()`, NOT `applyOverlays()` (which is the dashboard panel function and crashes when called without args).
 - **JS: chart options come from `getPcChartOpts()`.** Don't spread a non-existent `pc_CHART_OPTS` — it silently becomes default LWC theme (white background in dark mode).
+- **LWC v5 marker hover uses IDs, not candle time.** Every interactive marker must
+  have a stable `id` and matching metadata. Read it from
+  `param.hoveredInfo.objectId` (with `hoveredObjectId` only as a compatibility
+  fallback). Time-based matching shows a tooltip anywhere on the same candle
+  and must not be reintroduced.
+- **Use the shared `attachMarkerTooltip()` helper.** Standard panels keep metadata
+  in `registry[id]._markerMeta`; Predictive keeps it in `pc_markerMeta`. The
+  shared `.pc-marker-tip` CSS intentionally serves both.
+- **Crosshair mode is `LightweightCharts.CrosshairMode.MagnetOHLC`.** Keep the
+  named enum in both `makeChart()` / `applyChartTheme()` and
+  `getPcChartOpts()`; do not replace it with a numeric enum value. Programmatic
+  crosshair synchronization continues to use `setCrosshairPosition()` and is
+  independent of the mouse magnet mode.
 - **InstrumentTypeID:** eToro uses 5=Stocks, 6=ETF, 10=Crypto, 1=Currencies, 2=Commodities, 4=Indices. `ALLOWED_INSTRUMENT_TYPES` and `type_map` in `get_portfolio` must agree. Verify against live data before changing.
 - **Currency conversion.** `estimatePositionLivePnl` (JS) and `currentRate` fallback (Python) ignore that non-USD instruments report `units × price_delta` in instrument currency, while eToro `pnL` is USD. Fine for US stocks/ETF, wrong for European tickers. If touching this, use `conversionRateBid/Ask` from rates.
 - **Scanner memory limits.** `SCANNER_MAX_WORKERS` default is 3 (not 8) — 8 concurrent workers caused OOM restarts on Render free tier. `_CACHE_MEM_MAX` is 75 (not 200). Scanner worker explicitly `del`s DataFrames before returning; `gc.collect()` runs after full scan.
@@ -99,7 +112,10 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
 
 - **Decision Bar** (top): `predictiveDecisionFromData()` → Buy/Watch/Counter/No signal badge + sila x/4 + weekly bias + regime + vek signálu. Rendered above charts via `#pcDecisionBar`.
 - **Left column (Dôkazy):** C1–C4 aktuálny setup, história signálov, 30D/60D/90D validácia, Signal Analytics, Timeframe alignment. Collapsed by default on narrow screens.
-- **Main chart** (weekly/daily): `pc_realChartInst` / `pc_realSeries`. eToro open-position markers (circles) injected in `renderCharts()` alongside buy signal arrows.
+- **Main chart** (weekly/daily): `pc_realChartInst` / `pc_realSeries`. eToro
+  open-position markers (circles) are injected in `renderCharts()` alongside
+  buy signal arrows. Marker IDs resolve through `pc_markerMeta`; standard chart
+  panels use the same hover implementation through `registry[id]._markerMeta`.
 - **Predictive chart** (bottom, collapsible): `flex:1` vs main chart `flex:2` → 2:1 height ratio. Collapsed via `PC_MODEL_CHART_COLLAPSED_KEY` in localStorage.
 - **Subpanel** (RSI/MACD/ADX/StochRSI): `pc_subChartInst`, synced timescale with main chart.
 - **HMM regime**: `detect_market_regime(df)` called from `/api/chart` — 3-state GaussianHMM (bull/bear/sideways) + high_volatility override. Diagnostic only, does not affect ML prediction.

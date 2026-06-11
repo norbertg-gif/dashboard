@@ -74,6 +74,20 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Bot** — virtuálny paper-trading bot na testovanie signálov bez rizika
   (viď [sekcia 6](#6-virtuálny-obchodný-bot)).
 
+### Ovládanie grafov a markerov
+
+- V záložke **Grafy** aj **Prediktívny** používa crosshair režim
+  **MagnetOHLC**. Pri pohybe po sviečke sa cena prichytí k jej najbližšej
+  hodnote Open / High / Low / Close. Ide iba o pomôcku pri čítaní grafu;
+  nemení dáta, indikátory ani výpočet signálov.
+- Hover tooltip sa otvorí iba pri skutočnom zásahu konkrétneho markera, nie pri
+  ľubovoľnom prejdení cez rovnaký dátum.
+- Na bežných grafoch tooltip podporuje **eToro vstupy** a **pattern markery**.
+  V Predikcii podporuje **eToro vstupy** a **buy signál šípky**.
+- eToro tooltip ukazuje účet, BUY/SELL, páku, vstupnú cenu, dátum a P/L.
+  Buy signál tooltip ukazuje tier, silu signálu, počet signálov v týždni
+  a dátum. Pattern tooltip ukazuje názov a bullish/bearish smer.
+
 ---
 
 ## 4. Prediktívny tab — ako čítať signály
@@ -136,8 +150,10 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   malé krúžky pod sviečkou v ktorej bola pozícia otvorená (zelená = v zisku,
   červená = v strate, odlíšené podľa účtu).
 - Hover nad eToro kolieskom, buy šípkou alebo pattern markerom zobrazí presný
-  detail markera. Crosshair používa režim **MagnetOHLC** a pri pohybe sa
-  prichytáva k najbližšej OHLC hodnote sviečky.
+  detail markera. Tooltip používa natívny LWC hit-testing, takže sa nezobrazí
+  iba preto, že kurzor prešiel cez sviečku s rovnakým dátumom.
+- Crosshair používa režim **MagnetOHLC** a pri pohybe sa prichytáva
+  k najbližšej OHLC hodnote sviečky.
 - Spodný **Prediktívny chart** ukazuje predikciu ďalšej sviečky (+1 prognóza) a
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
