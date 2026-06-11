@@ -6966,21 +6966,23 @@ async function loadRedditMentions(tickers) {
     // Cache prázdna alebo stale → stiahni čerstvé dáta priamo z prehliadača
     const fresh = await fetchRedditDirect();
     if (fresh) Object.assign(_apeMentions, fresh);
-  } catch (e) { /* non-critical */ }
+  } catch (e) { console.warn('[reddit] mentions load failed:', e); }
 }
 
 async function fetchRedditDirect() {
   try {
     const pages = [];
-    // ApeWisdom má ~5 strán po 25 tickerov (top 125 stocks)
-    for (let p = 1; p <= 5; p++) {
+    // ApeWisdom má ~5 strán po 25 tickerov (top 125 stocks).
+    // Pole "pages" v odpovedi udáva celkový počet strán.
+    let totalPages = 5;
+    for (let p = 1; p <= Math.min(totalPages, 5); p++) {
       const r = await fetch(`https://apewisdom.io/api/v1.0/filter/all-stocks/page/${p}`);
-      if (!r.ok) break;
+      if (!r.ok) { console.warn('[reddit] HTTP', r.status, 'page', p); break; }
       const data = await r.json();
+      if (data.pages) totalPages = data.pages;
       pages.push(data);
-      if (!data.next_page) break;
     }
-    if (!pages.length) return null;
+    if (!pages.length) { console.warn('[reddit] no pages fetched'); return null; }
     // Pošli serveru na cachovanie
     const ir = await fetch('/api/reddit/ingest', {
       method: 'POST',
