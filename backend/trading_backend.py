@@ -3299,19 +3299,30 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
 
         pred = apply_daily_filter(pred, daily_signal)
 
-        # Earnings dates
+        # Earnings dates — primárne zdieľaný Finnhub/AV kalendár (rovnaký zdroj ako
+        # scanner badge); yfinance .calendar len ako fallback (na Renderi často
+        # blokovaný Yahoo → prázdna karta v Predictive).
         earnings_dates = []
         try:
-            cal = yf.Ticker(ticker).calendar
-            if isinstance(cal, dict):
-                ed_val = cal.get("Earnings Date", [])
-                if not isinstance(ed_val, list):
-                    ed_val = [ed_val]
-                for v in ed_val:
-                    if v:
-                        earnings_dates.append(int(pd.Timestamp(v).timestamp()))
+            # refresh=0 explicitne — bez argumentu by tu bol FastAPI Query objekt (truthy)
+            cal_payload = get_earnings_calendar(refresh=0)
+            d = (cal_payload.get("dates") or {}).get(ticker.upper())
+            if d:
+                earnings_dates.append(int(pd.Timestamp(d).timestamp()))
         except Exception:
             pass
+        if not earnings_dates:
+            try:
+                cal = yf.Ticker(ticker).calendar
+                if isinstance(cal, dict):
+                    ed_val = cal.get("Earnings Date", [])
+                    if not isinstance(ed_val, list):
+                        ed_val = [ed_val]
+                    for v in ed_val:
+                        if v:
+                            earnings_dates.append(int(pd.Timestamp(v).timestamp()))
+            except Exception:
+                pass
 
         return {
             "ticker":             ticker.upper(),
