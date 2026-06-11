@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260610-livep">
+<link rel="stylesheet" href="/dashboard.css?v=20260610-nofib">
 </head>
 <body>
 
@@ -398,19 +398,6 @@
           <input type="checkbox" id="chk_kumo" onchange="pc_applyOverlays()">
           <label for="chk_kumo">Kumo cloud</label>
         </div>
-        <div class="ind-group-label" style="margin-top:6px;">Úrovne</div>
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:#22d3ee;"></div>
-          <input type="checkbox" id="chk_fib" onchange="pc_applyOverlays()">
-          <label for="chk_fib">Fibonacci interactive</label>
-        </div>
-        <div class="fib-manual-controls">
-          <input id="fibLowInput" class="fib-input" type="number" step="0.01" placeholder="Auto swing low">
-          <input id="fibHighInput" class="fib-input" type="number" step="0.01" placeholder="Auto swing high">
-          <button class="fib-btn" onclick="drawManualFibFromInputs()">Vykresliť</button>
-          <button class="fib-btn" onclick="clearManualFib()">Vymazať</button>
-        </div>
-        <div class="fib-hint">Pri prvom zapnutí sa swing vyberie automaticky. Oba body môžeš ťahať na inú cenu aj sviečku.</div>
       </div>
     </div>
 
@@ -517,6 +504,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260610-livep"></script>
+  <script src="/dashboard.js?v=20260610-nofib"></script>
 </body>
 </html>

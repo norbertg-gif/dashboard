@@ -2183,41 +2183,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .opp-reason.warn { color: var(--yellow); }
 #predictiveTab .opp-reason.bad  { color: var(--down); }
 
-#predictiveTab .fib-manual-controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 8px;
-}
-#predictiveTab .fib-input {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 5px 7px;
-}
-#predictiveTab .fib-btn {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  color: var(--muted);
-  font-size: 11px;
-  padding: 5px 7px;
-  cursor: pointer;
-}
-#predictiveTab .fib-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-#predictiveTab .fib-hint {
-  color: var(--muted2);
-  font-size: 9px;
-  line-height: 1.35;
-  margin-top: 6px;
-}
 
 #predictiveTab .scanner-status,
 #predictiveTab .scanner-hint,
