@@ -5,6 +5,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python backend/trading_backend.py
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: RENDER
         value: "1"
       - key: DATA_DIR

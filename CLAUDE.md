@@ -25,7 +25,7 @@ docs/
 trading_backend.py     # thin entrypoint shim for Render (imports backend/.)
 render.yaml            # web service + 1GB persistent disk at /data
 requirements.txt
-runtime.txt            # pinned Python 3.11.9
+.python-version        # pinned Python 3.11.9 (runtime.txt nefunguje — Render ho ignoruje; PYTHON_VERSION env var tiež nastavená)
 ```
 
 ## Commands
