@@ -67,18 +67,9 @@ _public_rate: dict[str, list[float]] = {}
 
 # ══ PREDICTIVE CHART — functions ══════════════════════════════
 # ── Indicators ────────────────────────────────────────────────────────────────
-
-def calc_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
-def calc_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(com=period - 1, adjust=False).mean()
-    avg_loss = loss.ewm(com=period - 1, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+# NOTE: calc_ema/calc_rsi/calc_macd/calc_ichimoku/calc_stoch_rsi/calc_adx are
+# defined ONCE in the OHLCV+INDIKÁTORY section below (CLAUDE.md pitfall —
+# a duplicate set here used to shadow-break ADX unpacking in add_indicators).
 
 def calc_atr(df, period=14):
     hl = df["High"] - df["Low"]
@@ -86,46 +77,6 @@ def calc_atr(df, period=14):
     lc = (df["Low"]  - df["Close"].shift()).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
     return tr.ewm(com=period - 1, adjust=False).mean()
-
-def calc_macd(series):
-    ema12  = calc_ema(series, 12)
-    ema26  = calc_ema(series, 26)
-    macd   = ema12 - ema26
-    signal = calc_ema(macd, 9)
-    return macd, signal, macd - signal
-
-def calc_ichimoku(df, t=9, k=26, s=52):
-    high = df["High"]
-    low  = df["Low"]
-    tenkan  = (high.rolling(t).max() + low.rolling(t).min()) / 2
-    kijun   = (high.rolling(k).max() + low.rolling(k).min()) / 2
-    senkou_a = ((tenkan + kijun) / 2).shift(k)
-    senkou_b = ((high.rolling(s).max() + low.rolling(s).min()) / 2).shift(k)
-    chikou  = df["Close"].shift(-k)
-    return tenkan, kijun, senkou_a, senkou_b, chikou
-
-def calc_stoch_rsi(series, rsi_period=14, stoch_period=14, smooth_k=3, smooth_d=3):
-    rsi = calc_rsi(series, rsi_period)
-    rsi_min = rsi.rolling(stoch_period).min()
-    rsi_max = rsi.rolling(stoch_period).max()
-    stoch = (rsi - rsi_min) / (rsi_max - rsi_min + 1e-9) * 100
-    k = stoch.rolling(smooth_k).mean()
-    d = k.rolling(smooth_d).mean()
-    return k, d
-
-def calc_adx(df, period=14):
-    high  = df["High"]
-    low   = df["Low"]
-    up    = high.diff()
-    dn    = -low.diff()
-    dm_p  = pd.Series(np.where((up > dn) & (up > 0), up, 0.0), index=high.index)
-    dm_m  = pd.Series(np.where((dn > up) & (dn > 0), dn, 0.0), index=high.index)
-    atr_s = calc_atr(df, period)
-    di_p  = 100 * dm_p.ewm(com=period - 1, adjust=False).mean() / (atr_s + 1e-9)
-    di_m  = 100 * dm_m.ewm(com=period - 1, adjust=False).mean() / (atr_s + 1e-9)
-    dx    = 100 * (di_p - di_m).abs() / (di_p + di_m + 1e-9)
-    adx   = dx.ewm(com=period - 1, adjust=False).mean()
-    return adx, di_p, di_m
 
 def add_indicators(df):
     df = df.copy()
@@ -145,10 +96,10 @@ def add_indicators(df):
     _sk, _sd = calc_stoch_rsi(df["Close"])
     df["stoch_k"] = pd.to_numeric(_sk, errors='coerce')
     df["stoch_d"] = pd.to_numeric(_sd, errors='coerce')
-    _adx, _di_plus, _di_minus = calc_adx(df)
-    df["adx"]      = pd.to_numeric(_adx,     errors='coerce')
-    df["di_plus"]  = pd.to_numeric(_di_plus,  errors='coerce')
-    df["di_minus"] = pd.to_numeric(_di_minus, errors='coerce')
+    _adx_df = calc_adx(df)
+    df["adx"]      = pd.to_numeric(_adx_df["adx"],      errors='coerce')
+    df["di_plus"]  = pd.to_numeric(_adx_df["di_plus"],  errors='coerce')
+    df["di_minus"] = pd.to_numeric(_adx_df["di_minus"], errors='coerce')
     # Momentum & candle features (from ML feature set)
     df["ret_1"] = df["Close"].pct_change(1)
     df["ret_3"] = df["Close"].pct_change(3)
