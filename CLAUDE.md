@@ -74,8 +74,8 @@ These were already in the codebase and need to stay fixed:
 
 1. **Predictive chart accuracy → 60%+ directional.** Walk-forward validation done (3 expanding-window folds, accuracy = fold mean). Still planned: ROC (4-week), 52-week high/low position feature.
 2. **Regime-aware signal analytics.** In progress — user is adding regime context snapshot (HMM regime, confidence, weekly bias, ATR, C1–C4) to new signals. Next: Signal Analytics table per regime. Backfill historical signals via one-off script (download OHLCV per ticker, slice at signal date, recompute context — no look-ahead bias). Minimum ~20–30 evaluated signals per regime before adjusting scoring.
-3. **Hover tooltip for eToro markers.** Crosshair tooltip works; native hover on markers not resolved. → Blocked on LWC v4 API; **LWC v5 `hoveredItem` hit-testing solves this cleanly** (see item 4).
-4. **Upgrade Lightweight Charts 4.1.3 → v5.** Breaking changes are mechanical (find-replace friendly): `chart.addLineSeries()` → `chart.addSeries(LineSeries, opts)`, `series.setMarkers()` → `createSeriesMarkers()`. Gains: MagnetOHLC crosshair, data conflation (zoom-out perf), `hoveredItem` hit-testing (fixes item 3), `setSeriesOrder()`, −16% bundle. Multi-pane support simplifies subpanel. Est. effort: half-day. **Do not rush — test locally first.**
+3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
+4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile (SafariTrader plugin).** After LWC v5 migration — plugin targets v4.2, verify v5 compat first. Adds price-level volume distribution (institutional footprint). Repo: `https://github.com/safaritrader/lightweight-chart-plugin`.
 6. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
 

@@ -135,6 +135,9 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **eToro kolieska** — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa
   malé krúžky pod sviečkou v ktorej bola pozícia otvorená (zelená = v zisku,
   červená = v strate, odlíšené podľa účtu).
+- Hover nad eToro kolieskom, buy šípkou alebo pattern markerom zobrazí presný
+  detail markera. Crosshair používa režim **MagnetOHLC** a pri pohybe sa
+  prichytáva k najbližšej OHLC hodnote sviečky.
 - Spodný **Prediktívny chart** ukazuje predikciu ďalšej sviečky (+1 prognóza) a
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre

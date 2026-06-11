@@ -3455,13 +3455,38 @@ function setSeriesMarkers(series, markers) {
   _seriesMarkerPrims.set(series, LightweightCharts.createSeriesMarkers(series, markers));
 }
 
+function attachMarkerTooltip(chart, container, getMarkerMeta) {
+  if (!chart || !container) return;
+  if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+  let tip = container.querySelector('.pc-marker-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'pc-marker-tip';
+    tip.style.display = 'none';
+    container.appendChild(tip);
+  }
+  chart.subscribeCrosshairMove(param => {
+    const objectId = param?.hoveredInfo?.objectId ?? param?.hoveredObjectId;
+    const meta = objectId != null ? getMarkerMeta(String(objectId)) : null;
+    if (!meta || !param.point) { tip.style.display = 'none'; return; }
+    tip.innerHTML = meta.html;
+    tip.style.display = 'block';
+    const pad = 12;
+    let x = param.point.x + pad, y = param.point.y + pad;
+    if (x + tip.offsetWidth > container.clientWidth) x = param.point.x - tip.offsetWidth - pad;
+    if (y + tip.offsetHeight > container.clientHeight) y = param.point.y - tip.offsetHeight - pad;
+    tip.style.left = Math.max(0, x) + 'px';
+    tip.style.top = Math.max(0, y) + 'px';
+  });
+}
+
 function makeChart(container, height, opts={}) {
   const t = getChartTheme();
   return LightweightCharts.createChart(container, {
     width:container.clientWidth, height,
     layout:{ background:{type:'solid',color:t.bg}, textColor:t.text, attributionLogo:false },
     grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
-    crosshair:{ mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
+    crosshair:{ mode:LightweightCharts.CrosshairMode.MagnetOHLC, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
     rightPriceScale:{ borderColor:t.border },
     timeScale:{ borderColor:t.border, timeVisible:true, secondsVisible:false, visible:opts.timeVisible!==false },
     handleScroll:true, handleScale:true,
@@ -3473,7 +3498,7 @@ function applyChartTheme(chart) {
   chart.applyOptions({
     layout:{ background:{type:'solid',color:t.bg}, textColor:t.text },
     grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
-    crosshair:{ vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
+    crosshair:{ mode:LightweightCharts.CrosshairMode.MagnetOHLC, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
     rightPriceScale:{ borderColor:t.border },
     timeScale:{ borderColor:t.border },
   });
@@ -3640,7 +3665,9 @@ function createPanel(cfg) {
     lastWizardData: null, avgPriceLine: null, entryPriceLines: [], etoroPct: null,
     abortController: null, loadSeq: 0,
     _rawChartData: [], hasMoreHistory: false, historyLoading: false,
+    _markerMeta: {},
   };
+  attachMarkerTooltip(mainChart, mainCont, objectId => registry[id]?._markerMeta?.[objectId]);
 
   mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     const reg = registry[id];
@@ -4245,50 +4272,24 @@ async function loadPositionsForAccount(accountId) {
 const _PC = {bull:'#26a69a', bear:'#ef5350', neut:'#94a3b8'};
 function applyPatternMarkers(id, r, patterns) {
   if (!r.candleSeries || !patterns?.length) return;
-  r._patternMarkers = patterns.map(p => ({
-    time: p.time, position: p.rel==='Low'?'belowBar':'aboveBar',
-    color: _PC[p.dir], shape: 'circle', size: 0.65, text: '', _p: p,
-  }));
+  r._markerMeta ||= {};
+  r._patternMarkers = patterns.map((p, index) => {
+    const markerId = `pattern:${id}:${index}:${String(p.time)}`;
+    const col = _PC[p.dir];
+    const dir = p.dir === 'bull' ? '▲ Bullish' : p.dir === 'bear' ? '▼ Bearish' : '— Neutral';
+    r._markerMeta[markerId] = { html:
+      `<b style="color:${col}">${p.name}</b>` +
+      `<br>${dir}` +
+      `<br><span class="tip-muted">${timeToDateKey(p.time)}</span>` };
+    return {
+      id: markerId,
+      time: p.time, position: p.rel==='Low'?'belowBar':'aboveBar',
+      color: col, shape: 'circle', size: 0.65, text: '', _p: p,
+    };
+  });
   const all = [...(r._etoroMarkersList||[]), ...r._patternMarkers]
     .sort((a,b) => a.time < b.time ? -1 : 1);
   try { setSeriesMarkers(r.candleSeries, all); } catch(e) {}
-
-  // Tooltip
-  let tip = document.getElementById('ptip-'+id);
-  if (!tip) {
-    tip = document.createElement('div');
-    tip.id = 'ptip-'+id;
-    tip.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;'
-      +'background:var(--bg2);border:1px solid var(--border2);border-radius:8px;'
-      +'padding:10px 14px;box-shadow:0 4px 20px #0008;min-width:150px;';
-    document.body.appendChild(tip);
-  }
-  if (r._ptipSub) { try { r.mainChart.unsubscribeCrosshairMove(r._ptipSub); } catch(e){} }
-  r._ptipSub = param => {
-    if (!param.time) { tip.style.display='none'; return; }
-    const hit = r._patternMarkers?.find(m => String(m.time)===String(param.time));
-    if (!hit) { tip.style.display='none'; return; }
-    const p = hit._p; const col = _PC[p.dir];
-    const dir = p.dir==='bull'?'▲ Bullish':p.dir==='bear'?'▼ Bearish':'— Neutral';
-    const svgs = {
-      bull:`<svg width="28" height="34" viewBox="0 0 28 34"><line x1="7" y1="1" x2="7" y2="33" stroke="#ef5350" stroke-width="1.5"/><rect x="3" y="9" width="8" height="12" fill="#ef5350"/><line x1="21" y1="3" x2="21" y2="31" stroke="#26a69a" stroke-width="1.5"/><rect x="17" y="13" width="8" height="11" fill="#26a69a"/></svg>`,
-      bear:`<svg width="28" height="34" viewBox="0 0 28 34"><line x1="7" y1="1" x2="7" y2="33" stroke="#26a69a" stroke-width="1.5"/><rect x="3" y="7" width="8" height="12" fill="#26a69a"/><line x1="21" y1="3" x2="21" y2="31" stroke="#ef5350" stroke-width="1.5"/><rect x="17" y="11" width="8" height="14" fill="#ef5350"/></svg>`,
-      neut:`<svg width="18" height="34" viewBox="0 0 18 34"><line x1="9" y1="1" x2="9" y2="33" stroke="#94a3b8" stroke-width="1.5"/><rect x="5" y="14" width="8" height="5" fill="#94a3b8"/></svg>`,
-    };
-    tip.innerHTML = `<div style="display:flex;align-items:center;gap:10px;">${svgs[p.dir]||svgs.neut}
-      <div><div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:3px;">${p.name}</div>
-      <div style="font-size:11px;color:${col};font-weight:600;">${dir}</div></div></div>`;
-    tip.style.display = 'block';
-    const el = document.getElementById('chart-'+id);
-    if (el && param.point) {
-      const rc = el.getBoundingClientRect();
-      let tx = rc.left+param.point.x+16, ty = rc.top+param.point.y-20;
-      if (tx+180 > window.innerWidth-8) tx = rc.left+param.point.x-196;
-      if (ty < 4) ty = 4;
-      tip.style.left = tx+'px'; tip.style.top = ty+'px';
-    }
-  };
-  r.mainChart.subscribeCrosshairMove(r._ptipSub);
 }
 
 async function applyEtoroMarkers(id, symbol, r, chartData) {
@@ -4301,7 +4302,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
   }
   r.entryPriceLines = [];
-  setSeriesMarkers(r.candleSeries, []);
+  r._etoroMarkersList = [];
 
   // Načítaj pozície pre oba účty ak ešte nie sú
   const accts = ['1', '2'];
@@ -4318,7 +4319,11 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     pos.forEach(p => allPositions.push({ ...p, _acct: acct }));
   }
 
-  if (!allPositions.length) return;
+  if (!allPositions.length) {
+    setSeriesMarkers(r.candleSeries, [...(r._patternMarkers || [])]);
+    r._etoroPositions = [];
+    return;
+  }
 
   const lastClose = chartData.length ? chartData[chartData.length - 1].close : null;
 
@@ -4326,7 +4331,8 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   for (const pos of allPositions) {
     if (!pos.openRate) continue;
     const colors = ACCT_COLORS[pos._acct];
-    const inProfit = lastClose != null ? pos.openRate <= lastClose : true;
+    const inProfit = Number.isFinite(pos.pnl) ? pos.pnl >= 0
+      : (lastClose != null ? (pos.isBuy === false ? lastClose <= pos.openRate : pos.openRate <= lastClose) : true);
     try {
       const pl = r.candleSeries.createPriceLine({
         price:            pos.openRate,
@@ -4353,14 +4359,26 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
 
   // LWC markery — malé body bez textu, farebne podľa účtu
   const markers = [];
-  for (const pos of allPositions) {
+  r._markerMeta ||= {};
+  for (const [index, pos] of allPositions.entries()) {
     const markerTime = resolveMarkerTime(pos, chartData);
     if (!markerTime) continue;
     pos._markerTime = markerTime;
     const colors = ACCT_COLORS[pos._acct];
-    const inProfit = lastClose != null ? pos.openRate <= lastClose : true;
+    const inProfit = Number.isFinite(pos.pnl) ? pos.pnl >= 0
+      : (lastClose != null ? (pos.isBuy === false ? lastClose <= pos.openRate : pos.openRate <= lastClose) : true);
     const col = inProfit ? colors.profit : colors.loss;
+    const markerId = `position:${id}:${pos._acct}:${index}:${String(markerTime)}`;
+    const pnlTxt = Number.isFinite(pos.pnl)
+      ? `${pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)} $` +
+        (Number.isFinite(pos.amount) && pos.amount ? ` (${(pos.pnl / pos.amount * 100).toFixed(1)} %)` : '')
+      : 'n/a';
+    r._markerMeta[markerId] = { html:
+      `<b>Účet ${pos._acct}</b> · ${pos.isBuy === false ? 'SELL' : 'BUY'}${pos.leverage > 1 ? ` ×${pos.leverage}` : ''}` +
+      `<br>Vstup ${pos.openRate}${pos.openTimestamp ? ` · ${new Date(pos.openTimestamp).toLocaleDateString('sk-SK')}` : ''}` +
+      `<br>P/L <span style="color:${inProfit ? 'var(--up)' : 'var(--down)'}">${pnlTxt}</span>` };
     markers.push({
+      id:       markerId,
       time:     markerTime,
       position: 'belowBar',
       color:    col,
@@ -4374,65 +4392,8 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   const all = [...markers, ...(r._patternMarkers||[])].sort((a,b) => a.time < b.time ? -1 : 1);
   setSeriesMarkers(r.candleSeries, all);
 
-  // Ulož pozície pre crosshair tooltip
+  // Ulož pozície pre live prepočet a ďalšie panelové funkcie.
   r._etoroPositions = allPositions;
-
-  // Crosshair tooltip — subscribeCrosshairMove
-  if (!r._crosshairSub && r.mainChart) {
-    // Vytvor tooltip div
-    if (!document.getElementById('etoro-crosshair-tip')) {
-      const tip = document.createElement('div');
-      tip.id = 'etoro-crosshair-tip';
-      tip.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-events:none;' +
-        'background:var(--bg2);border:1px solid var(--border2);border-radius:6px;' +
-        'padding:8px 12px;font-family:var(--font-mono);font-size:11px;' +
-        'box-shadow:0 4px 20px rgba(0,0,0,0.6);min-width:180px;line-height:1.7;';
-      document.body.appendChild(tip);
-    }
-
-    try { r._crosshairSub = r.mainChart.subscribeCrosshairMove((param) => {
-      const tip = document.getElementById('etoro-crosshair-tip');
-      if (!tip) return;
-      if (!param.time || !r._etoroPositions?.length) { tip.style.display = 'none'; return; }
-
-      const markerKey = JSON.stringify(param.time);
-      const date = timeToDateKey(param.time);
-      const hits = r._etoroPositions.filter(p => JSON.stringify(p._markerTime) === markerKey);
-      if (!hits.length) { tip.style.display = 'none'; return; }
-
-      const lastClose = r._chartData?.length ? r._chartData[r._chartData.length-1].close : null;
-      let html = `<div style="color:var(--muted);font-size:10px;margin-bottom:4px;letter-spacing:.05em;">NÁKUPY · ${date}</div>`;
-      for (const pos of hits) {
-        const opened = pos.openTimestamp ? String(pos.openTimestamp).replace('T', ' ').slice(0, 16) : pos.openDate;
-        const colors = ACCT_COLORS[pos._acct];
-        const inProfit = lastClose && pos.openRate ? pos.openRate <= lastClose : true;
-        const col = inProfit ? colors.profit : colors.loss;
-        const pnl = pos.pnl || 0;
-        const pct = lastClose && pos.openRate ? ((lastClose - pos.openRate) / pos.openRate * 100) : null;
-        html += `<div style="display:flex;gap:10px;align-items:center;border-top:1px solid var(--border);padding-top:3px;margin-top:3px;">
-          <span style="color:${col};font-weight:700;">Účet ${pos._acct}</span>
-          <span style="color:var(--muted);">${pos.openRate?.toFixed(4)}</span>
-          <span style="color:var(--muted2);font-size:10px;">${opened || ''}</span>
-          <span style="color:${col};margin-left:auto;">${pnl>=0?'+':''}$${pnl.toFixed(2)}${pct!=null?' ('+( pct>=0?'+':'')+pct.toFixed(1)+'%)':''}</span>
-        </div>`;
-      }
-      tip.innerHTML = html;
-      tip.style.display = 'block';
-
-      // Pozícia tooltipa pri kurzore
-      const chartEl = document.getElementById('chart-' + id);
-      if (chartEl && param.point) {
-        const rect = chartEl.getBoundingClientRect();
-        let tx = rect.left + param.point.x + 16;
-        let ty = rect.top  + param.point.y - 20;
-        const tw = 200;
-        if (tx + tw > window.innerWidth - 8) tx = rect.left + param.point.x - tw - 16;
-        if (ty < 4) ty = 4;
-        tip.style.left = tx + 'px';
-        tip.style.top  = ty + 'px';
-      }
-    }); } catch(e) { console.warn('crosshair subscribe failed:', e); }
-  }
 }
 
 // ── LOAD CHART ────────────────────────────────────────────────────────────────
@@ -5120,7 +5081,7 @@ function getPcChartOpts() {
   return {
     layout: { background: { color: t.bg }, textColor: t.text, attributionLogo: false },
     grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
-    crosshair: { mode: 1 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.MagnetOHLC },
     rightPriceScale: { borderColor: t.border },
     timeScale: { borderColor: t.border, timeVisible: false },
   };
@@ -5142,28 +5103,7 @@ function pc_makeChart(containerId) {
 // Hover tooltip pre markery (eToro pozície, buy signály) — LWC v5 hit-testing.
 function pc_attachMarkerTooltip(chart, containerId) {
   const cont = document.getElementById(containerId);
-  if (!cont) return;
-  if (getComputedStyle(cont).position === 'static') cont.style.position = 'relative';
-  let tip = cont.querySelector('.pc-marker-tip');
-  if (!tip) {
-    tip = document.createElement('div');
-    tip.className = 'pc-marker-tip';
-    tip.style.display = 'none';
-    cont.appendChild(tip);
-  }
-  chart.subscribeCrosshairMove(param => {
-    const objectId = param?.hoveredInfo?.objectId ?? param?.hoveredObjectId;
-    const meta = objectId != null ? pc_markerMeta[String(objectId)] : null;
-    if (!meta || !param.point) { tip.style.display = 'none'; return; }
-    tip.innerHTML = meta.html;
-    tip.style.display = 'block';
-    const pad = 12;
-    let x = param.point.x + pad, y = param.point.y + pad;
-    if (x + tip.offsetWidth  > cont.clientWidth)  x = param.point.x - tip.offsetWidth  - pad;
-    if (y + tip.offsetHeight > cont.clientHeight) y = param.point.y - tip.offsetHeight - pad;
-    tip.style.left = Math.max(0, x) + 'px';
-    tip.style.top  = Math.max(0, y) + 'px';
-  });
+  attachMarkerTooltip(chart, cont, objectId => pc_markerMeta[String(objectId)]);
 }
 
 function initCharts() {
