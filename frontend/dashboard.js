@@ -5931,7 +5931,7 @@ function pc_renderSidebar(data) {
   const nextEarnings = allDates.find(ts => ts > now - 7 * 86400); // include last week
   if (nextEarnings) {
     const daysUntil = Math.round((nextEarnings - now) / 86400);
-    const daysText = daysUntil > 0 ? `o ${daysUntil} ${daysUntil === 1 ? 'deň' : daysUntil < 5 ? 'dni' : 'dní'}` : 'prebehol';
+    const daysText = daysUntil > 0 ? `o ${daysUntil} ${daysUntil === 1 ? 'deň' : daysUntil < 5 ? 'dni' : 'dní'}` : daysUntil === 0 ? 'dnes' : 'prebehol';
     earningsCard.innerHTML = `
       <div class="card-title">Najbližší Earnings</div>
       <div style="font-size:20px;font-weight:600;color:var(--text);margin:4px 0">${new Date(nextEarnings*1000).toLocaleDateString('sk-SK')}</div>
@@ -5945,6 +5945,7 @@ function pc_renderSidebar(data) {
     `;
   }
   earningsCard.style.display = '';
+  if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
 
   // Backtest card
   // Entry zone card
@@ -7062,8 +7063,14 @@ async function loadHoldings() {
   } catch (e) { /* non-critical */ }
 }
 
+let _earningsLoadedAt = 0;
 async function loadEarningsCalendar() {
-  if (_earningsDates) return;
+  // prázdny výsledok (chyba zdroja) nezamyká navždy — retry po 10 min
+  if (_earningsDates) {
+    if (Object.keys(_earningsDates).length) return;
+    if (Date.now() - _earningsLoadedAt < 10 * 60 * 1000) return;
+  }
+  _earningsLoadedAt = Date.now();
   try {
     const r = await fetch('/api/earnings');
     if (!r.ok) { _earningsDates = {}; return; }
@@ -7075,6 +7082,27 @@ async function loadEarningsCalendar() {
     }
     _earningsDates = data.dates || {};
   } catch (e) { _earningsDates = {}; }
+}
+
+// Predictive fallback: keď /api/chart nedodá earnings dátum (Finnhub/AV na serveri
+// zlyhali), dotiahni kalendár vrátane browser-direct AV cesty a doplň kartu.
+async function pc_ensureEarningsDate(ticker) {
+  const card = document.getElementById('earningsCard');
+  if (!card || !ticker) return;
+  if (!card.querySelector('.earnings-unavailable')) return;   // dátum už máme
+  await loadEarningsCalendar();
+  if (!card.querySelector('.earnings-unavailable')) return;   // medzitým prekreslené
+  const d = _earningsDates && _earningsDates[String(ticker).toUpperCase()];
+  if (!d) return;
+  const dt = new Date(d + 'T00:00:00');
+  const daysUntil = Math.round((dt.getTime() - Date.now()) / 86400000);
+  const daysText = daysUntil > 0 ? `o ${daysUntil} ${daysUntil === 1 ? 'deň' : daysUntil < 5 ? 'dni' : 'dní'}`
+    : daysUntil === 0 ? 'dnes' : 'prebehol';
+  card.innerHTML = `
+    <div class="card-title">Najbližší Earnings</div>
+    <div style="font-size:20px;font-weight:600;color:var(--text);margin:4px 0">${dt.toLocaleDateString('sk-SK')}</div>
+    <div style="font-size:11px;color:var(--muted)">${daysText}</div>
+  `;
 }
 
 async function fetchEarningsDirect() {
