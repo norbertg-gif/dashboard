@@ -4580,6 +4580,77 @@ NEWS_CACHE_TTL_H = 12
 NEWS_RELEVANCE_MIN = 0.15
 NEWS_MAX_ITEMS = 10
 
+# ── ApeWisdom Reddit mentions ──────────────────────────────────────────────────
+
+APE_CACHE_FILE = NEWS_CACHE_DIR / "_apewisdom.json"
+APE_CACHE_TTL_H = 6
+
+
+def _ape_cache_read() -> dict | None:
+    if APE_CACHE_FILE.exists():
+        try:
+            return json.loads(APE_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+@app.get("/api/reddit/mentions")
+def get_reddit_mentions(tickers: str = Query("")):
+    """Vráti Reddit mentions pre zoznam tickerov z ApeWisdom cache.
+    Cache plní prehliadač cez POST /api/reddit/ingest (Cloudflare blokuje server-side fetch)."""
+    cached = _ape_cache_read()
+    age_h = None
+    if cached:
+        try:
+            age_h = (datetime.now(timezone.utc) -
+                     datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+        except Exception:
+            pass
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    data = {t: cached["data"].get(t) for t in ticker_list if cached and cached.get("data", {}).get(t)} if cached else {}
+    return {
+        "data": data,
+        "fetched_at": cached.get("fetched_at") if cached else None,
+        "age_h": round(age_h, 1) if age_h is not None else None,
+        "stale": age_h is not None and age_h >= APE_CACHE_TTL_H,
+        "empty": not cached or not cached.get("data"),
+    }
+
+
+@app.post("/api/reddit/ingest")
+async def ingest_reddit_mentions(request: Request):
+    """Prijme surové ApeWisdom JSON stránky stiahnuté prehliadačom, zlúči do cache."""
+    try:
+        pages = await request.json()   # list of raw page responses
+    except Exception:
+        raise HTTPException(400, "Neplatné JSON telo")
+    if not isinstance(pages, list):
+        pages = [pages]
+    merged: dict = {}
+    for page in pages:
+        for item in (page.get("results") or []):
+            t = (item.get("ticker") or "").upper()
+            if not t:
+                continue
+            merged[t] = {
+                "ticker": t,
+                "name": item.get("name"),
+                "mentions": item.get("mentions"),
+                "upvotes": item.get("upvotes"),
+                "rank": item.get("rank"),
+                "rank_24h_ago": item.get("rank_24h_ago"),
+                "mentions_24h_ago": item.get("mentions_24h_ago"),
+            }
+    payload = {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "data": merged,
+    }
+    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    APE_CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return {"ok": True, "tickers": len(merged), "fetched_at": payload["fetched_at"]}
+
+
 
 def _news_cache_path(ticker: str) -> Path:
     return NEWS_CACHE_DIR / f"{ticker.upper()}.json"

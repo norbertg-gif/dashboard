@@ -6894,7 +6894,7 @@ ${escHtml(copyText)}</textarea>
     const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
@@ -6935,18 +6935,73 @@ ${escHtml(copyText)}</textarea>
 let _earningsDates = null;     // {TICKER: 'YYYY-MM-DD'}
 let _newsSummary = {};         // {TICKER: {avg, n}}
 let _holdings = null;          // {TICKER: {pnl, pnl_pct, amount}}
+let _apeMentions = {};         // {TICKER: {mentions, rank, rank_24h_ago, mentions_24h_ago}}
 let _scannerMetaLoading = false;
 
 const EARNINGS_WARN_DAYS = 7;
+const APE_CACHE_TTL_H = 6;
 
 async function ensureScannerMetaLoaded(tickers) {
   if (_scannerMetaLoading) return;
   _scannerMetaLoading = true;
   try {
-    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers), loadHoldings()]);
+    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers), loadHoldings(), loadRedditMentions(tickers)]);
     applyScannerBadges();
   } finally {
     _scannerMetaLoading = false;
+  }
+}
+
+async function loadRedditMentions(tickers) {
+  if (!tickers || !tickers.length) return;
+  try {
+    const r = await fetch(`/api/reddit/mentions?tickers=${encodeURIComponent(tickers.join(','))}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    // Cache má dáta a nie je stale → použij
+    if (data.data && Object.keys(data.data).length && !data.stale) {
+      Object.assign(_apeMentions, data.data);
+      return;
+    }
+    // Cache prázdna alebo stale → stiahni čerstvé dáta priamo z prehliadača
+    const fresh = await fetchRedditDirect();
+    if (fresh) Object.assign(_apeMentions, fresh);
+  } catch (e) { /* non-critical */ }
+}
+
+async function fetchRedditDirect() {
+  try {
+    const pages = [];
+    // ApeWisdom má ~5 strán po 25 tickerov (top 125 stocks)
+    for (let p = 1; p <= 5; p++) {
+      const r = await fetch(`https://apewisdom.io/api/v1.0/filter/all-stocks/page/${p}`);
+      if (!r.ok) break;
+      const data = await r.json();
+      pages.push(data);
+      if (!data.next_page) break;
+    }
+    if (!pages.length) return null;
+    // Pošli serveru na cachovanie
+    const ir = await fetch('/api/reddit/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pages),
+    });
+    if (!ir.ok) return null;
+    const result = await ir.json();
+    // Rebuild local map from pages
+    const map = {};
+    for (const page of pages) {
+      for (const item of (page.results || [])) {
+        const t = (item.ticker || '').toUpperCase();
+        if (t) map[t] = { ticker: t, name: item.name, mentions: item.mentions,
+          upvotes: item.upvotes, rank: item.rank,
+          rank_24h_ago: item.rank_24h_ago, mentions_24h_ago: item.mentions_24h_ago };
+      }
+    }
+    return Object.keys(map).length ? map : null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -7038,6 +7093,17 @@ function applyScannerBadges() {
     const dt = new Date(d + 'T00:00:00');
     el.innerHTML = `<span class="earn-warn" title="Earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} d.) — zvýšená volatilita, čísla pred reportom nemusia platiť">⚠ ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
   });
+  if (Object.keys(_apeMentions).length) {
+    document.querySelectorAll('[data-ape]').forEach(el => {
+      const a = _apeMentions[el.dataset.ape];
+      if (!a || !a.mentions) { el.innerHTML = ''; return; }
+      const rankChange = (a.rank_24h_ago != null && a.rank != null) ? a.rank_24h_ago - a.rank : null;
+      const arrow = rankChange === null ? '' : rankChange > 0 ? ' ↑' : rankChange < 0 ? ' ↓' : '';
+      const arrowCls = rankChange > 0 ? 'ape-up' : rankChange < 0 ? 'ape-down' : '';
+      const title = `Reddit mentions: ${a.mentions} (pred 24h: ${a.mentions_24h_ago ?? '?'}) | Rank #${a.rank ?? '?'} (pred 24h: #${a.rank_24h_ago ?? '?'})`;
+      el.innerHTML = `<span class="ape-tag ${arrowCls}" title="${title}">r/${a.mentions}${arrow}</span>`;
+    });
+  }
 }
 
 let _scannerNotesContent = '';
