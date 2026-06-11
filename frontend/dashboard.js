@@ -8329,11 +8329,11 @@ async function botCfgSave() {
   }
 }
 
-async function botRefresh() {
+async function botRefresh(livePrice = false) {
   const statusEl = document.getElementById('bot-status-msg');
-  if (statusEl) statusEl.textContent = 'Načítavam…';
+  if (statusEl) statusEl.textContent = livePrice ? 'Načítavam live ceny…' : 'Načítavam…';
   try {
-    const r = await fetch('/api/bot/status');
+    const r = await fetch(`/api/bot/status${livePrice ? '?refresh=1' : ''}`);
     if (!r.ok) throw new Error(await r.text());
     _botData = await r.json();
     botRenderKpis(_botData.kpis, _botData.initial_capital);

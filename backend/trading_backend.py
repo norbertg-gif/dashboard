@@ -5181,16 +5181,30 @@ def _bot_score_ticker(ticker: str) -> dict | None:
         return None
 
 
+def _bot_live_price(ticker: str, fallback: float) -> float:
+    """Aktuálna cena cez yfinance fast_info — pre bot status refresh."""
+    try:
+        p = yf.Ticker(ticker).fast_info.get("last_price") or yf.Ticker(ticker).fast_info.get("lastPrice")
+        if p and float(p) > 0:
+            return float(p)
+    except Exception:
+        pass
+    return fallback
+
+
 @app.get("/api/bot/status")
-def bot_status():
+def bot_status(refresh: int = Query(0)):
     portfolio = _bot_load()
     open_pos  = portfolio.get("open_positions", {})
 
     current_prices: dict = {}
     for ticker, pos in open_pos.items():
         try:
-            raw = _yf_download_cached(ticker, "5d", "1d")
-            current_prices[ticker] = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
+            if refresh:
+                current_prices[ticker] = _bot_live_price(ticker, pos["entry_price"])
+            else:
+                raw = _yf_download_cached(ticker, "5d", "1d")
+                current_prices[ticker] = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
         except Exception:
             current_prices[ticker] = pos["entry_price"]
 
