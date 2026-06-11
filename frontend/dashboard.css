@@ -3107,6 +3107,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   padding: 1px 6px; border-radius: 9px;
   background: rgba(245,158,11,.16); color: var(--warn, #f59e0b);
 }
+.earn-info {
+  margin-left: 5px; font-size: 10px; font-weight: 700; white-space: nowrap;
+  padding: 1px 6px; border-radius: 9px;
+  background: rgba(139,148,158,.14); color: var(--muted, #8b949e);
+}
+.earn-info.unavailable { opacity: .75; }
+.earnings-unavailable {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+.earnings-unavailable-note {
+  color: var(--muted2);
+  font-size: 11px;
+}
 .ape-tag {
   margin-left: 5px; font-size: 9.5px; font-weight: 700; white-space: nowrap;
   padding: 1px 6px; border-radius: 9px;

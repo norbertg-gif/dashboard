@@ -228,12 +228,14 @@
   <h3>Portfólio príznak (●)</h3>
   <p>Ak ticker už <strong>držíš v eToro portfóliu</strong> (ktorýkoľvek z dvoch účtov), zobrazí sa pri ňom farebná bodka s P/L: zelená <code>●+5.2%</code> = zisk, červená <code>●−3.1%</code> = strata, sivá = P/L sa nepodarilo vypočítať. Pomáha okamžite rozhodnúť, či ide o DCA (dokúpiť) alebo fresh entry. Dáta z portfolio cache, žiadne extra eToro volania.</p>
 
-  <h3>Earnings warning (⚠) a sentiment badge</h3>
+  <h3>Earnings termín a sentiment badge</h3>
   <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:</p>
   <ul>
-    <li><strong>⚠ + dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Alpha Vantage EARNINGS_CALENDAR — jeden request pre celý trh, cache 24 h. Najčastejší dôvod, prečo „top kôň" sklame, je report o pár dní — čísla pred earnings nemusia platiť.</li>
+    <li><strong>E: dátum</strong> (sivý) — najbližší známy earnings termín. Ak ešte nie je zverejnený alebo zdroj nemá údaje, zobrazí sa <strong>E: n/a</strong>.</li>
+    <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub s fallbackom Alpha Vantage EARNINGS_CALENDAR; cache 24 h. Čísla pred reportom nemusia platiť.</li>
     <li><strong>Sentiment badge</strong> (zelený/červený/sivý, napr. <code>+0.21</code>) — relevanciou vážený priemer sentimentu článkov z news cache. Zobrazuje sa len pre tickery, ktoré už majú stiahnuté správy (cez 📰) — žiadne API requesty navyše; cache sa časom zaplní sama.</li>
   </ul>
+  <p>Karta <strong>Najbližší Earnings</strong> v Prediktívnom tabe zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
 
   <h3>Interpretácia sentiment hodnôt</h3>
   <p>Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:</p>

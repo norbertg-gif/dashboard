@@ -288,18 +288,24 @@ Pomáha okamžite rozhodnúť: nový signál na titule, ktorý už máš → ot�
 DCA (dokúpiť) vs. ignorovať, nie fresh entry. Dáta z portfolio cache,
 žiadne extra eToro volania.
 
-### Earnings warning (⚠) a sentiment badge
+### Earnings termín a sentiment badge
 
 Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:
 
-- **⚠ + dátum** (oranžový) — ticker má **earnings do 7 dní**. Zdroj: Alpha
-  Vantage EARNINGS_CALENDAR — jeden request pre celý trh, cache 24 h.
+- **E: dátum** (sivý) — najbližší známy earnings termín. Ak termín ešte nie je
+  zverejnený alebo zdroj nemá údaje, zobrazí sa **E: n/a**.
+- **⚠ E: dátum** (oranžový) — ticker má **earnings do 7 dní**. Zdroj: Finnhub
+  s fallbackom Alpha Vantage EARNINGS_CALENDAR; kalendár sa cachuje 24 h.
   Najčastejší dôvod, prečo „top kôň" sklame, je report o pár dní — čísla
   pred earnings nemusia platiť.
 - **Sentiment badge** (zelený/červený/sivý, napr. `+0.21`) — relevanciou
   vážený priemer sentimentu článkov z news cache. Zobrazuje sa **len pre
   tickery, ktoré už majú stiahnuté správy** (cez 📰) — žiadne API requesty
   navyše; cache sa časom zaplní sama.
+
+Karta **Najbližší Earnings** v Prediktívnom tabe je vždy viditeľná. Ak
+poskytovateľ pre ticker zatiaľ termín nezverejnil, ukáže „Zatiaľ nedostupné“
+namiesto prázdneho alebo skrytého panelu.
 
 ### Interpretácia sentiment hodnôt
 

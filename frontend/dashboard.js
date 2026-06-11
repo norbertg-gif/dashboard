@@ -5836,7 +5836,7 @@ function pc_renderSidebar(data) {
     ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Historická presnosť ML modelu na testovacej sade (30% dát). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
   `;
 
-  // Earnings card — show nearest future date only
+  // Earnings card — keep it visible even when the provider has no date yet.
   const earningsCard = document.getElementById('earningsCard');
   const allDates = (data.earnings_dates || []).sort((a, b) => a - b);
   const nextEarnings = allDates.find(ts => ts > now - 7 * 86400); // include last week
@@ -5848,10 +5848,14 @@ function pc_renderSidebar(data) {
       <div style="font-size:20px;font-weight:600;color:var(--text);margin:4px 0">${new Date(nextEarnings*1000).toLocaleDateString('sk-SK')}</div>
       <div style="font-size:11px;color:var(--muted)">${daysText}</div>
     `;
-    earningsCard.style.display = '';
   } else {
-    earningsCard.style.display = 'none';
+    earningsCard.innerHTML = `
+      <div class="card-title">Najbližší Earnings</div>
+      <div class="earnings-unavailable">Zatiaľ nedostupné</div>
+      <div class="earnings-unavailable-note">Poskytovateľ zatiaľ nezverejnil termín.</div>
+    `;
   }
+  earningsCard.style.display = '';
 
   // Backtest card
   // Entry zone card
@@ -6973,15 +6977,15 @@ async function loadEarningsCalendar() {
   if (_earningsDates) return;
   try {
     const r = await fetch('/api/earnings');
-    if (!r.ok) return;
+    if (!r.ok) { _earningsDates = {}; return; }
     let data = await r.json();
     // rate-limit na Render IP → stiahni CSV priamo z prehliadača (per-IP limit)
     if (data.error && !Object.keys(data.dates || {}).length) {
       const direct = await fetchEarningsDirect();
       if (direct) data = direct;
     }
-    if (Object.keys(data.dates || {}).length) _earningsDates = data.dates;
-  } catch (e) { /* non-critical */ }
+    _earningsDates = data.dates || {};
+  } catch (e) { _earningsDates = {}; }
 }
 
 async function fetchEarningsDirect() {
@@ -7038,15 +7042,23 @@ function applyScannerBadges() {
     const cls = s.avg >= 0.15 ? 'bull' : s.avg <= -0.15 ? 'bear' : 'neutral';
     el.innerHTML = `<span class="news-badge ${cls}" title="Priemerný sentiment z ${s.n} článkov (vážený relevanciou)">${s.avg >= 0 ? '+' : ''}${s.avg.toFixed(2)}</span>`;
   });
-  if (!_earningsDates) return;
   const now = new Date();
   document.querySelectorAll('[data-earn]').forEach(el => {
-    const d = _earningsDates[el.dataset.earn];
-    if (!d) { el.innerHTML = ''; return; }
+    const d = _earningsDates?.[el.dataset.earn];
+    if (!d) {
+      el.innerHTML = '<span class="earn-info unavailable" title="Termín earnings zatiaľ nie je dostupný">E: n/a</span>';
+      return;
+    }
     const days = Math.ceil((new Date(d + 'T00:00:00') - now) / 86400000);
-    if (days < 0 || days > EARNINGS_WARN_DAYS) { el.innerHTML = ''; return; }
     const dt = new Date(d + 'T00:00:00');
-    el.innerHTML = `<span class="earn-warn" title="Earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} d.) — zvýšená volatilita, čísla pred reportom nemusia platiť">⚠ ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
+    if (days >= 0 && days <= EARNINGS_WARN_DAYS) {
+      el.innerHTML = `<span class="earn-warn" title="Earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} d.) — zvýšená volatilita, čísla pred reportom nemusia platiť">⚠ E: ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
+      return;
+    }
+    const title = days < 0
+      ? `Posledný evidovaný earnings ${dt.toLocaleDateString('sk-SK')}; nový termín zatiaľ nie je dostupný`
+      : `Najbližší earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} dní)`;
+    el.innerHTML = `<span class="earn-info" title="${title}">E: ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
   });
   if (Object.keys(_apeMentions).length) {
     document.querySelectorAll('[data-ape]').forEach(el => {
