@@ -48,6 +48,11 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 - **TRH kontextová lišta v Scanneri**: `GET /api/market/context` (QQQ/SPY trend, Nasdaq-100 breadth na pozadí, VIX, sektorová rotácia), 6h cache, dokumentácia v help.html/MANUAL.md. NEOVPLYVŇUJE C1–C4.
 - **Auto-fill grafov**: `.p-chart` flex 1 1 250px + zlúčený RO (výška+šírka+kumo). Drag handle mení flex-basis. Issue: kumo canvas po resize (backlog 6).
 - **Insider & EPS karta v Predictive**: `GET /api/ticker/insights/{symbol}` — primárne Finnhub (insider-transactions P/S kódy + earnings surprises), Yahoo quoteSummary fallback (z Render IP NEPREJDE — overené). `_scrub_token()` maskuje kľúč v chybách. OVERENÉ na prode (NVDA).
+- **Firma & očakávania rozšírená**: rovnaký insights endpoint teraz fail-soft
+  dopĺňa Finnhub recommendation trend, konsenzuálny price target (mean + low/high)
+  a short interest z basic metrics; Yahoo moduly sú fallback. UI ukazuje
+  Buy/Hold/Sell, cieľ v hodnote + potenciál % + rozpätie a nízky/zvýšený/vysoký
+  short interest. Zatiaľ iba kontext, bez zásahu do C1–C4/ML.
 - **Deploy webhook**: Render GitHub App flakala → GitHub webhook na Render Deploy Hook URL (Just the push event). Funguje spoľahlivo.
 - **Analytické plány poznačené v CLAUDE.md** (user si vyžiada): RS/párový kontext, makro kvadrant, news clustering.
 

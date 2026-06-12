@@ -334,6 +334,24 @@ Karta **Najbližší Earnings** v Prediktívnom tabe je vždy viditeľná. Ak
 poskytovateľ pre ticker zatiaľ termín nezverejnil, ukáže „Zatiaľ nedostupné“
 namiesto prázdneho alebo skrytého panelu.
 
+### Firma a očakávania
+
+Karta **Firma & očakávania** v Prediktívnom tabe dopĺňa technický signál o
+stručný externý kontext:
+
+- **Analytici** — súčet odporúčaní Buy / Hold / Sell z najnovšieho obdobia.
+- **Cieľ** — priemerná cieľová cena v absolútnej hodnote, potenciál voči
+  aktuálnej cene a dostupné rozpätie najnižšieho až najvyššieho cieľa.
+- **Short interest** — percento voľne obchodovaných akcií predaných nakrátko:
+  pod 5 % nízky, 5–10 % zvýšený, od 10 % vysoký.
+- Existujúce riadky **Insideri 90 d** a **EPS doručenie** zostávajú súčasťou
+  tej istej karty.
+
+Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 ani
+do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 30D/60D/90D výsledky.
+Vysoký short interest nie je automaticky bullish: môže zosilniť odraz, ale aj
+upozorňovať na fundamentálne riziko.
+
 ### Interpretácia sentiment hodnôt
 
 Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:

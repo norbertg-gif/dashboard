@@ -7156,7 +7156,7 @@ async function pc_loadInsights(ticker) {
     const d = await r.json();
     if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
     if (d.error) {
-      card.innerHTML = `<div class="card-title">Insider &amp; EPS</div>
+      card.innerHTML = `<div class="card-title">Firma &amp; očakávania</div>
         <div class="earnings-unavailable-note">Zdroj nedostupný (${escHtml(String(d.error))})</div>`;
       card.style.display = '';
       return;
@@ -7187,8 +7187,40 @@ async function pc_loadInsights(ticker) {
       rows.push(`<div class="pred-row"><span class="key">Odhad Q</span>
         <span class="val">$${d.eps_next.avg}${d.eps_next.analysts ? ` <span style="color:var(--muted)">(${d.eps_next.analysts} analytikov)</span>` : ''}</span></div>`);
     }
+    const ac = d.analyst_consensus;
+    if (ac) {
+      const buy = Number(ac.strong_buy || 0) + Number(ac.buy || 0);
+      const hold = Number(ac.hold || 0);
+      const sell = Number(ac.sell || 0) + Number(ac.strong_sell || 0);
+      rows.push(`<div class="pred-row" title="Najnovší dostupný analytický konsenzus${ac.period ? ` za ${escHtml(ac.period)}` : ''}. Kontext, nie súčasť C1–C4 ani ML.">
+        <span class="key">Analytici</span>
+        <span class="val"><span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span></span></div>`);
+    }
+    const pt = d.price_target;
+    if (pt && Number.isFinite(Number(pt.mean))) {
+      const target = Number(pt.mean);
+      const current = Number(pt.current) ||
+        Number(pc_lastData?.daily_candles?.at(-1)?.close) ||
+        Number(pc_lastData?.candles?.at(-1)?.close);
+      const potential = Number.isFinite(current) && current > 0 ? (target / current - 1) * 100 : null;
+      const range = Number.isFinite(Number(pt.low)) && Number.isFinite(Number(pt.high))
+        ? ` · ${fmtPrice(Number(pt.low))}–${fmtPrice(Number(pt.high))}` : '';
+      const potTxt = potential == null ? '' :
+        ` · <span style="color:${potential >= 0 ? 'var(--up)' : 'var(--down)'}">${potential >= 0 ? '+' : ''}${potential.toFixed(1)} %</span>`;
+      rows.push(`<div class="pred-row" title="Konsenzuálna cieľová cena analytikov${pt.updated_at ? `, aktualizované ${escHtml(String(pt.updated_at))}` : ''}. Rozpätie = najnižší až najvyšší cieľ.">
+        <span class="key">Cieľ</span><span class="val">${fmtPrice(target)}${potTxt}<span style="color:var(--muted)">${range}</span></span></div>`);
+    }
+    const si = d.short_interest;
+    if (si && Number.isFinite(Number(si.percent_float))) {
+      const shortPct = Number(si.percent_float);
+      const level = shortPct >= 10 ? 'Vysoký' : shortPct >= 5 ? 'Zvýšený' : 'Nízky';
+      const color = shortPct >= 10 ? 'var(--down)' : shortPct >= 5 ? 'var(--yellow)' : 'var(--muted)';
+      const ratio = Number.isFinite(Number(si.short_ratio)) ? ` · ratio ${Number(si.short_ratio).toFixed(1)}` : '';
+      rows.push(`<div class="pred-row" title="Podiel voľne obchodovaných akcií predaných nakrátko. Vysoká hodnota môže zosilniť odraz aj riziko; sama osebe nie je Buy signál.">
+        <span class="key">Short interest</span><span class="val"><span style="color:${color}">${level}</span> · ${shortPct.toFixed(1)} % float${ratio}</span></div>`);
+    }
     if (!rows.length) return;
-    card.innerHTML = `<div class="card-title" title="Yahoo Finance, obnova 12 h. Insider nákupy počas DIPu = konfirmácia; séria EPS beatov = firma doručuje.">Insider &amp; EPS</div>` + rows.join('');
+    card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
     card.style.display = '';
   } catch (e) { /* fail-soft */ }
 }

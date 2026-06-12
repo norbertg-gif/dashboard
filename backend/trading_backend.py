@@ -4966,6 +4966,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
+INSIGHTS_SCHEMA_VERSION = 2
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -5018,6 +5019,38 @@ def _insights_parse(qs: dict) -> dict:
     dates = [d for d in (_yraw(x) for x in cal) if d]
     if dates:
         out["earnings_date"] = datetime.fromtimestamp(min(dates), timezone.utc).date().isoformat()
+    trends = (qs.get("recommendationTrend") or {}).get("trend") or []
+    if trends:
+        tr = trends[0]
+        out["analyst_consensus"] = {
+            "period": tr.get("period"),
+            "strong_buy": int(tr.get("strongBuy") or 0),
+            "buy": int(tr.get("buy") or 0),
+            "hold": int(tr.get("hold") or 0),
+            "sell": int(tr.get("sell") or 0),
+            "strong_sell": int(tr.get("strongSell") or 0),
+        }
+    fd = qs.get("financialData") or {}
+    target_mean = _yraw(fd.get("targetMeanPrice"))
+    target_low = _yraw(fd.get("targetLowPrice"))
+    target_high = _yraw(fd.get("targetHighPrice"))
+    if any(v is not None for v in (target_mean, target_low, target_high)):
+        out["price_target"] = {
+            "mean": target_mean,
+            "low": target_low,
+            "high": target_high,
+            "median": _yraw(fd.get("targetMedianPrice")),
+            "current": _yraw(fd.get("currentPrice")),
+        }
+    ks = qs.get("defaultKeyStatistics") or {}
+    short_float = _yraw(ks.get("shortPercentOfFloat"))
+    if short_float is not None:
+        out["short_interest"] = {
+            "percent_float": round(float(short_float) * 100, 2),
+            "short_ratio": _yraw(ks.get("shortRatio")),
+            "shares_short": _yraw(ks.get("sharesShort")),
+            "source": "yahoo",
+        }
     return out
 
 
@@ -5070,6 +5103,57 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                          "surprise_pct": round(sp, 1) if sp is not None else None,
                          "beat": (a is not None and e is not None and a >= e)})
     out["eps_history"] = eps_hist
+    try:
+        r = requests.get("https://finnhub.io/api/v1/stock/recommendation",
+                         params={"symbol": sym, "token": api_key}, timeout=15)
+        r.raise_for_status()
+        recs = r.json() or []
+        if recs:
+            tr = recs[0]
+            out["analyst_consensus"] = {
+                "period": tr.get("period"),
+                "strong_buy": int(tr.get("strongBuy") or 0),
+                "buy": int(tr.get("buy") or 0),
+                "hold": int(tr.get("hold") or 0),
+                "sell": int(tr.get("sell") or 0),
+                "strong_sell": int(tr.get("strongSell") or 0),
+            }
+    except Exception as e:
+        print(f"[insights] recommendation {sym} failed: {_scrub_token(e)}")
+    try:
+        r = requests.get("https://finnhub.io/api/v1/stock/price-target",
+                         params={"symbol": sym, "token": api_key}, timeout=15)
+        r.raise_for_status()
+        pt = r.json() or {}
+        if any(pt.get(k) is not None for k in ("targetMean", "targetLow", "targetHigh")):
+            out["price_target"] = {
+                "mean": pt.get("targetMean"),
+                "low": pt.get("targetLow"),
+                "high": pt.get("targetHigh"),
+                "median": pt.get("targetMedian"),
+                "updated_at": pt.get("lastUpdated"),
+            }
+    except Exception as e:
+        print(f"[insights] price target {sym} failed: {_scrub_token(e)}")
+    try:
+        r = requests.get("https://finnhub.io/api/v1/stock/metric",
+                         params={"symbol": sym, "metric": "all", "token": api_key}, timeout=15)
+        r.raise_for_status()
+        metric = (r.json() or {}).get("metric") or {}
+        short_float = next((metric.get(k) for k in (
+            "shortPercentOfFloat", "shortInterestPercent", "shortInterestPct"
+        ) if metric.get(k) is not None), None)
+        short_ratio = next((metric.get(k) for k in (
+            "shortRatio", "shortInterestRatio"
+        ) if metric.get(k) is not None), None)
+        if short_float is not None or short_ratio is not None:
+            out["short_interest"] = {
+                "percent_float": round(float(short_float), 2) if short_float is not None else None,
+                "short_ratio": short_ratio,
+                "source": "finnhub",
+            }
+    except Exception as e:
+        print(f"[insights] short interest {sym} failed: {_scrub_token(e)}")
     if not (buys or sells or eps_hist):
         raise RuntimeError("prázdna odpoveď (insider aj EPS)")
     return out
@@ -5086,7 +5170,8 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             cached = json.loads(fpath.read_text(encoding="utf-8"))
             age_h = (datetime.now(timezone.utc)
                      - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
-            if age_h < (1 if cached.get("error") else INSIGHTS_TTL_H) and not refresh:
+            schema_ok = cached.get("schema_version") == INSIGHTS_SCHEMA_VERSION
+            if schema_ok and age_h < (1 if cached.get("error") else INSIGHTS_TTL_H) and not refresh:
                 return cached
         except Exception:
             cached = None
@@ -5098,7 +5183,11 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
     except Exception as e:
         errs.append(f"finnhub: {_scrub_token(e)}")
     if core is None:
-        qs = _yahoo_quote_summary(sym, "insiderTransactions,earningsHistory,earningsTrend,calendarEvents")
+        qs = _yahoo_quote_summary(
+            sym,
+            "insiderTransactions,earningsHistory,earningsTrend,calendarEvents,"
+            "recommendationTrend,financialData,defaultKeyStatistics",
+        )
         if qs is not None:
             core = {**_insights_parse(qs), "source": "yahoo"}
         else:
@@ -5106,10 +5195,11 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
     if core is None:
         if cached and not cached.get("error"):
             return {**cached, "stale": True}
-        payload = {"ticker": sym, "error": " | ".join(errs),
+        payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION,
+                   "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
     else:
-        payload = {"ticker": sym, **core,
+        payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION, **core,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
         # doplň earnings dátum do zdieľaného kalendára (rovnako ako per-symbol Finnhub)
         if payload.get("earnings_date"):
