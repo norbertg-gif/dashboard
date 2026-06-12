@@ -90,7 +90,8 @@ These were already in the codebase and need to stay fixed:
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
-6. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
+6. **Kumo canvas po resize.** Ichimoku kumo (custom canvas `drawCloudCanvas`) sa po flex auto-fill resize grafu neprekreslí správne — `cloudCanvasRender()` z RO callbacku zrejme beží skôr, než LWC dokončí layout, alebo canvas drží staré rozmery. Workaround: reload grafu. Nízka priorita (2026-06-12).
+7. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
 
