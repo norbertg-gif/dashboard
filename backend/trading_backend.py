@@ -4960,6 +4960,134 @@ def get_earnings_for_symbol(symbol: str):
     return {"ticker": symbol.upper(), "date": _earnings_next_date(symbol)}
 
 
+# ── Market context (Scanner) — QQQ/SPY trend, VIX, breadth, sektory ──────────
+MARKET_CTX_FILE = DATA_ROOT / "_market_context.json"
+MARKET_CTX_TTL_H = 6
+_market_ctx_lock = threading.Lock()
+_market_breadth_running = False
+
+_SECTOR_ETFS = {"XLK": "Tech", "XLC": "Komunikácie", "XLY": "Spotreba cykl.",
+                "XLP": "Spotreba defenz.", "XLV": "Zdravotníctvo", "XLF": "Financie",
+                "XLI": "Priemysel", "XLE": "Energie", "XLB": "Materiály",
+                "XLU": "Utility", "XLRE": "Reality"}
+
+
+def _mc_trend(df: pd.DataFrame) -> dict:
+    """Trend v štýle signal_tier: EMA10 vs EMA20 (+ close pod EMA20 pre down)."""
+    close = df["Close"].astype(float)
+    c = float(close.iloc[-1])
+    e10 = float(close.ewm(span=10, adjust=False).mean().iloc[-1])
+    e20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+    trend = "up" if e10 > e20 else ("down" if c < e20 else "side")
+    perf_1m = None
+    if len(close) > 21:
+        prev = float(close.iloc[-22])
+        if prev:
+            perf_1m = round((c - prev) / prev * 100, 2)
+    return {"trend": trend, "close": round(c, 2), "perf_1m": perf_1m}
+
+
+def _mc_compute_core() -> dict:
+    out: dict = {}
+    for key, sym in (("qqq", "QQQ"), ("spy", "SPY")):
+        try:
+            out[key] = _mc_trend(_yf_download_cached(sym, "6mo", "1d"))
+        except Exception as e:
+            out[key] = None
+            print(f"[marketctx] {sym}: {e}")
+    try:
+        vix = _yf_download_cached("^VIX", "3mo", "1d")
+        v = float(vix["Close"].astype(float).iloc[-1])
+        level = "pokoj" if v < 15 else "normál" if v < 20 else "zvýšený" if v < 30 else "stres"
+        out["vix"] = {"value": round(v, 1), "level": level}
+    except Exception as e:
+        out["vix"] = None
+        print(f"[marketctx] VIX: {e}")
+    sectors = []
+    for etf, name in _SECTOR_ETFS.items():
+        try:
+            df = _yf_download_cached(etf, "3mo", "1d")
+            close = df["Close"].astype(float)
+            if len(close) > 21 and float(close.iloc[-22]):
+                sectors.append({"etf": etf, "name": name,
+                                "perf_1m": round((float(close.iloc[-1]) - float(close.iloc[-22]))
+                                                 / float(close.iloc[-22]) * 100, 2)})
+        except Exception:
+            continue
+    sectors.sort(key=lambda s: s["perf_1m"], reverse=True)
+    out["sectors"] = sectors
+    return out
+
+
+def _mc_breadth_worker():
+    """% Nasdaq-100 titulov nad EMA50/EMA200 — sekvenčne, šetrne k pamäti."""
+    global _market_breadth_running
+    above50 = above200 = total = total200 = 0
+    for sym in NASDAQ100_TICKERS:
+        try:
+            df = _yf_download_cached(sym, "1y", "1d")
+            close = df["Close"].astype(float)
+            if len(close) < 60:
+                continue
+            c = float(close.iloc[-1])
+            total += 1
+            if c > float(close.ewm(span=50, adjust=False).mean().iloc[-1]):
+                above50 += 1
+            if len(close) >= 150:
+                total200 += 1
+                if c > float(close.ewm(span=200, adjust=False).mean().iloc[-1]):
+                    above200 += 1
+            del df, close
+        except Exception:
+            continue
+    breadth = {"above_ema50_pct": round(above50 / total * 100, 1) if total else None,
+               "above_ema200_pct": round(above200 / total200 * 100, 1) if total200 else None,
+               "coverage": total, "universe": len(NASDAQ100_TICKERS)}
+    try:
+        with _market_ctx_lock:
+            data = json.loads(MARKET_CTX_FILE.read_text(encoding="utf-8")) if MARKET_CTX_FILE.exists() else {}
+            data["breadth"] = breadth
+            MARKET_CTX_FILE.write_text(json.dumps(data), encoding="utf-8")
+    except Exception as e:
+        print(f"[marketctx] breadth save: {e}")
+    gc.collect()
+    _market_breadth_running = False
+
+
+@app.get("/api/market/context")
+def get_market_context(refresh: int = Query(0)):
+    """Kontext trhu pre Scanner — neovplyvňuje C1–C4 scoring, len interpretácia."""
+    global _market_breadth_running
+    cached = None
+    with _market_ctx_lock:
+        if MARKET_CTX_FILE.exists():
+            try:
+                cached = json.loads(MARKET_CTX_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cached = None
+    if cached and not refresh:
+        try:
+            age_h = (datetime.now(timezone.utc)
+                     - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+            if age_h < MARKET_CTX_TTL_H:
+                return cached
+        except Exception:
+            pass
+    data = _mc_compute_core()
+    data["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    # starý breadth nechaj, kým worker dopočíta nový
+    data["breadth"] = (cached or {}).get("breadth")
+    with _market_ctx_lock:
+        try:
+            MARKET_CTX_FILE.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            pass
+    if not _market_breadth_running:
+        _market_breadth_running = True
+        threading.Thread(target=_mc_breadth_worker, daemon=True).start()
+    return data
+
+
 @app.post("/api/news/{ticker}/ingest")
 async def ingest_ticker_news(ticker: str, request: Request):
     """Prijme surovú AV odpoveď stiahnutú prehliadačom (klientova IP obchádza

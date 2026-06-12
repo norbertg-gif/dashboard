@@ -6852,6 +6852,7 @@ async function renderScannerView() {
   if (!el) return;
   el.innerHTML = `
     <div class="scanner-page">
+      <div id="marketCtxBar" class="market-ctx-bar" title="Kontext trhu — neovplyvňuje skóre signálov, len ich interpretáciu"></div>
       <section class="scanner-candidate-radar">
         <div class="scanner-section-head">
           <div>
@@ -7032,6 +7033,7 @@ const EARNINGS_WARN_DAYS = 7;
 const APE_CACHE_TTL_H = 6;
 
 async function ensureScannerMetaLoaded(tickers) {
+  loadMarketContext();
   if (_scannerMetaLoading) return;
   _scannerMetaLoading = true;
   try {
@@ -7040,6 +7042,55 @@ async function ensureScannerMetaLoaded(tickers) {
   } finally {
     _scannerMetaLoading = false;
   }
+}
+
+// ── Market context bar — Trh: QQQ/SPY trend · Breadth · VIX · Sektory ────────
+let _marketCtx = null, _marketCtxAt = 0;
+async function loadMarketContext(force = false) {
+  if (!force && _marketCtx && Date.now() - _marketCtxAt < 30 * 60 * 1000) { renderMarketContext(); return; }
+  try {
+    const r = await fetch('/api/market/context');
+    if (!r.ok) return;
+    _marketCtx = await r.json();
+    _marketCtxAt = Date.now();
+    renderMarketContext();
+    // breadth sa počíta na pozadí — skús ho dotiahnuť o chvíľu
+    if (_marketCtx && (!_marketCtx.breadth || _marketCtx.breadth.above_ema50_pct == null)) {
+      setTimeout(() => loadMarketContext(true), 60000);
+    }
+  } catch (e) { /* non-critical */ }
+}
+
+function renderMarketContext() {
+  const el = document.getElementById('marketCtxBar');
+  if (!el || !_marketCtx) return;
+  const m = _marketCtx;
+  const arrow = t => t === 'up' ? '↑' : t === 'down' ? '↓' : '→';
+  const cls = t => t === 'up' ? 'mc-up' : t === 'down' ? 'mc-down' : 'mc-side';
+  const pct = v => `${v >= 0 ? '+' : ''}${v} %`;
+  const parts = [];
+  for (const [key, label] of [['qqq', 'QQQ'], ['spy', 'SPY']]) {
+    const t = m[key];
+    if (!t) continue;
+    parts.push(`<span class="mc-chip ${cls(t.trend)}" title="${label} trend (EMA10 vs EMA20), výkon za 1 mesiac">${label} ${arrow(t.trend)}${t.perf_1m != null ? ' ' + pct(t.perf_1m) : ''}</span>`);
+  }
+  const b = m.breadth;
+  if (b && b.above_ema50_pct != null) {
+    const bCls = b.above_ema50_pct >= 60 ? 'mc-up' : b.above_ema50_pct >= 40 ? 'mc-side' : 'mc-down';
+    const t200 = b.above_ema200_pct != null ? `, ${b.above_ema200_pct} % nad EMA200` : '';
+    parts.push(`<span class="mc-chip ${bCls}" title="Šírka Nasdaq-100: ${b.above_ema50_pct} % titulov nad EMA50${t200} (pokrytie ${b.coverage}/${b.universe})">Breadth ${b.above_ema50_pct} %</span>`);
+  } else {
+    parts.push(`<span class="mc-chip mc-side" title="Šírka trhu sa počíta na pozadí (~2 min)">Breadth …</span>`);
+  }
+  if (m.vix) {
+    const vCls = m.vix.value < 20 ? 'mc-up' : m.vix.value < 30 ? 'mc-side' : 'mc-down';
+    parts.push(`<span class="mc-chip ${vCls}" title="VIX — implikovaná volatilita S&P 500 (${m.vix.level})">VIX ${m.vix.value}</span>`);
+  }
+  if (m.sectors && m.sectors.length >= 2) {
+    const top = m.sectors[0], flop = m.sectors[m.sectors.length - 1];
+    parts.push(`<span class="mc-chip mc-neutral" title="Sektorová rotácia (1M výkon SPDR ETF): najsilnejší ${top.name}, najslabší ${flop.name}">${top.etf} ${pct(top.perf_1m)} · ${flop.etf} ${pct(flop.perf_1m)}</span>`);
+  }
+  el.innerHTML = `<span class="mc-label">TRH</span>${parts.join('')}`;
 }
 
 async function loadRedditMentions(tickers) {

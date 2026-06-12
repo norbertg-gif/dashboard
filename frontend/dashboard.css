@@ -3149,3 +3149,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   white-space: nowrap;
 }
 .pc-marker-tip .tip-muted { color: var(--muted); }
+
+/* ── Market context bar (Scanner) ──────────────────────────────────────────── */
+.market-ctx-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  padding: 6px 10px; margin-bottom: 4px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.market-ctx-bar:empty { display: none; }
+.mc-label { color: var(--muted2); font-size: 9.5px; font-weight: 700; letter-spacing: .08em; margin-right: 2px; }
+.mc-chip {
+  padding: 2px 8px; border-radius: 9px; font-weight: 600; white-space: nowrap;
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--muted);
+}
+.mc-chip.mc-up      { color: var(--up, #00c99a);   border-color: color-mix(in srgb, var(--up, #00c99a) 40%, transparent); }
+.mc-chip.mc-down    { color: var(--down, #ff4560); border-color: color-mix(in srgb, var(--down, #ff4560) 40%, transparent); }
+.mc-chip.mc-side    { color: var(--yellow, #f59e0b); border-color: color-mix(in srgb, var(--yellow, #f59e0b) 40%, transparent); }
+.mc-chip.mc-neutral { color: var(--muted); }

@@ -5,3 +5,4 @@ __pycache__/
 cache/
 data/
 news_cache/
+_market_context.json
