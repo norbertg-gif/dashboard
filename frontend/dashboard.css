@@ -3250,6 +3250,27 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 11px;
   font-family: var(--font-mono);
 }
+.verdict-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.verdict-sources span {
+  padding: 3px 7px;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.verdict-sources .ok {
+  color: var(--up);
+  border-color: color-mix(in srgb, var(--up) 38%, var(--border2));
+}
+.verdict-sources .missing {
+  color: var(--yellow);
+}
 .verdict-evidence {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3311,6 +3332,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .scanner-verdict-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
+}
+.pc-verdict-link {
+  margin-left: auto;
+  padding: 4px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pc-verdict-link:hover {
+  background: var(--accent);
+  color: var(--bg);
 }
 @media (max-width: 720px) {
   .verdict-view { padding: 12px; }

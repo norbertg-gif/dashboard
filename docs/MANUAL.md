@@ -79,6 +79,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   **ÁNO / POČKAŤ / NIE** pre horizont 30–90 dní. Ukáže najviac dva argumenty
   pre, dva proti a podmienku, ktorá môže verdikt zmeniť. Nepridáva nové skóre
   a nemení výpočet C1–C4 ani ML.
+  Indikátory **Technika / Trh / Firma / Earnings** ukazujú dostupnosť
+  podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa na
+  10 minút cachuje v prehliadači.
 
 ### Ovládanie grafov a markerov
 
@@ -402,6 +405,7 @@ tickerov — jeden zdieľaný blok textu pre celý scanner).
 - Pod šírkou ~1100 px sa panel zarovná pod tabuľku.
 - Tlačidlo **Verdikt** v riadku kandidáta otvorí zjednodušené investičné
   vyhodnotenie. Klik na zvyšok riadku naďalej otvorí plný detail v Predikcii.
+- Rovnaké tlačidlo je aj v hornej rozhodovacej lište Prediktívneho tabu.
 
 ### Export / kopírovanie
 

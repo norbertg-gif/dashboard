@@ -90,7 +90,8 @@ These were already in the codebase and need to stay fixed:
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
-6. **Kumo canvas po resize.** Ichimoku kumo (custom canvas `drawCloudCanvas`) sa po flex auto-fill resize grafu neprekreslí správne — `cloudCanvasRender()` z RO callbacku zrejme beží skôr, než LWC dokončí layout, alebo canvas drží staré rozmery. Workaround: reload grafu. Nízka priorita (2026-06-12).
+6. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
+   until LWC finishes layout; manual drag uses a double animation frame.
 7. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
@@ -150,13 +151,18 @@ Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()
   predictive model.
 - Frontend only: `loadVerdict()` fetches existing `/api/chart`,
   `/api/ticker/insights/{symbol}` and `/api/market/context` payloads in parallel.
+- Results use a 10-minute in-browser cache (`verdictCache`). `verdictLoadSeq`
+  prevents an older response from overwriting a newer ticker after rapid
+  navigation.
 - `buildInvestorVerdict()` applies explicit deterministic gates. Do not replace
   them with another opaque 0–100 score.
 - Output is deliberately limited to two positive arguments, two risks and one
   condition that would change the verdict. Detailed evidence remains in the
   Predictive tab via `openVerdictEvidence()`.
-- Missing optional insights are fail-soft and lower confidence; they must not
-  turn an otherwise valid technical setup into an automatic negative verdict.
+- Source availability chips expose Technika / Trh / Firma / Earnings. Missing
+  optional insights are fail-soft and lower confidence; they must not turn an
+  otherwise valid technical setup into an automatic negative verdict.
+- The Predictive Decision Bar and Scanner rows both link to the Verdict tab.
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
 - **Portfolio holding (●)**: `GET /api/portfolio/holdings` → `_get_portfolio_holdings()` aggregates both accounts' positions from portfolio disk cache into `{symbol: {pnl, pnl_pct, amount}}`. Green/red dot + P/L% → DCA vs fresh entry decision. No extra eToro calls.

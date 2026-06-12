@@ -3656,7 +3656,11 @@ function createPanel(cfg) {
       if (!(w > 0 && h > 0)) return;
       try { reg.mainChart.applyOptions({ width: w, height: h }); } catch (e) {}
       [reg.rsiChart, reg.adxChart, reg.macdChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
-      try { reg.cloudCanvasRender?.(); } catch (e) {}
+      // LWC dokončí interný layout až po aktuálnom frame. Kumo preto kreslíme
+      // v nasledujúcom frame, keď už majú time/price súradnice finálne rozmery.
+      requestAnimationFrame(() => {
+        try { registry[id]?.cloudCanvasRender?.(); } catch (e) {}
+      });
     });
   });
   ro.observe(panel);
@@ -3711,9 +3715,9 @@ function createPanel(cfg) {
         const el = document.getElementById('chart-' + id);
         if (el) {
           el.style.flexBasis = newH + 'px';
-          setTimeout(() => {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
             registry[id]?.cloudCanvasRender?.();
-          }, 50);
+          }));
         }
       }
       function onUp() {
@@ -6166,6 +6170,7 @@ function pc_renderDecisionBar(data) {
     <span class="pc-decision-chip">Regime <strong>${regimeText}</strong></span>
     <span class="pc-decision-chip">Posledný <strong>${predictiveSignalAgeLabel(latestSignal)}</strong></span>
     ${latestReturn != null ? `<span class="pc-decision-chip">Od signálu <strong>${latestReturn >= 0 ? '+' : ''}${latestReturn.toFixed(1)}%</strong></span>` : ''}
+    <button class="pc-verdict-link" onclick="openVerdictTicker('${escHtml(ticker)}', event)">Verdikt</button>
     <div class="pc-decision-summary">${summary}</div>
   `;
 }
@@ -7569,8 +7574,11 @@ function openScannerTicker(ticker) {
 }
 
 const VERDICT_TICKER_KEY = 'td_verdict_ticker';
+const VERDICT_CACHE_TTL_MS = 10 * 60 * 1000;
+const verdictCache = new Map();
 let verdictLastData = null;
 let verdictLastTicker = '';
+let verdictLoadSeq = 0;
 
 function initVerdictView() {
   const input = document.getElementById('verdictTickerInput');
@@ -7581,7 +7589,8 @@ function initVerdictView() {
       document.getElementById('tickerInput')?.value ||
       '';
   }
-  if (input.value && !verdictLastData) loadVerdict();
+  const sym = input.value.trim().toUpperCase();
+  if (sym && (!verdictLastData || verdictLastTicker !== sym)) loadVerdict();
 }
 
 function openVerdictTicker(ticker, event) {
@@ -7701,8 +7710,14 @@ function buildInvestorVerdict(ticker, data, insights, market) {
   else if (verdict === 'yes') condition = 'Verdikt sa zhorší pri strate weekly trendu alebo poklese signálu pod 3/4.';
   else condition = 'Nový Buy signál 3/4 v rastovom weekly trende môže zmeniť verdikt.';
 
-  const completeness = [data, market, insights].filter(Boolean).length;
-  const confidence = completeness === 3 && Math.abs(positives.length - risks.length) >= 2
+  const sources = [
+    { key: 'technika', label: 'Technika', available: !!data },
+    { key: 'trh', label: 'Trh', available: !!market },
+    { key: 'firma', label: 'Firma', available: !!insights && !insights.error },
+    { key: 'earnings', label: 'Earnings', available: Array.isArray(data?.earnings_dates) && data.earnings_dates.length > 0 },
+  ];
+  const completeness = sources.filter(source => source.available).length;
+  const confidence = completeness >= 3 && Math.abs(positives.length - risks.length) >= 2
     ? 'vyššia' : completeness >= 2 ? 'stredná' : 'nižšia';
   const labels = {
     yes: ['ÁNO', 'Podmienky sú momentálne priaznivé pre ďalšie zváženie vstupu.'],
@@ -7710,7 +7725,8 @@ function buildInvestorVerdict(ticker, data, insights, market) {
     no: ['NIE', 'Aktuálne riziká alebo trend prevažujú nad argumentmi pre vstup.'],
   };
   return { ticker, verdict, label: labels[verdict][0], summary: labels[verdict][1],
-    confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition };
+    confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition,
+    sources, evaluatedAt: new Date() };
 }
 
 function renderInvestorVerdict(result) {
@@ -7725,6 +7741,9 @@ function renderInvestorVerdict(result) {
       <div class="verdict-label">${result.label}</div>
       <div class="verdict-summary">${escHtml(result.summary)}</div>
       <div class="verdict-confidence">Istota: <strong>${escHtml(result.confidence)}</strong> · horizont 30–90 dní</div>
+      <div class="verdict-sources">
+        ${result.sources.map(source => `<span class="${source.available ? 'ok' : 'missing'}">${source.available ? '✓' : '–'} ${escHtml(source.label)}</span>`).join('')}
+      </div>
     </section>
     <div class="verdict-evidence">
       <section><h3>Pre</h3><ul>${bullets(result.positives, 'Žiadne silné potvrdenie navyše.')}</ul></section>
@@ -7736,11 +7755,11 @@ function renderInvestorVerdict(result) {
     </section>
     <div class="verdict-actions">
       <button class="btn primary" onclick="openVerdictEvidence()">Otvoriť dôkazy v Predikcii</button>
-      <span>Rozhodovacia pomôcka, nie finančné odporúčanie.</span>
+      <span>Vyhodnotené ${result.evaluatedAt.toLocaleTimeString('sk-SK', {hour:'2-digit', minute:'2-digit'})} · rozhodovacia pomôcka, nie finančné odporúčanie.</span>
     </div>`;
 }
 
-async function loadVerdict() {
+async function loadVerdict(force = false) {
   const input = document.getElementById('verdictTickerInput');
   const button = document.getElementById('verdictLoadBtn');
   const content = document.getElementById('verdictContent');
@@ -7749,9 +7768,17 @@ async function loadVerdict() {
   input.value = ticker;
   verdictLastTicker = ticker;
   localStorage.setItem(VERDICT_TICKER_KEY, ticker);
+  const seq = ++verdictLoadSeq;
   button && (button.disabled = true);
   content.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
   try {
+    const cached = verdictCache.get(ticker);
+    if (!force && cached && Date.now() - cached.at < VERDICT_CACHE_TTL_MS) {
+      if (seq !== verdictLoadSeq) return;
+      verdictLastData = cached.data;
+      renderInvestorVerdict(buildInvestorVerdict(ticker, cached.data, cached.insights, cached.market));
+      return;
+    }
     const chartPromise = (pc_lastData && document.getElementById('tickerInput')?.value?.toUpperCase() === ticker)
       ? Promise.resolve(pc_lastData)
       : fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=2y&reoptimize=false`)
@@ -7760,12 +7787,15 @@ async function loadVerdict() {
       .then(r => r.ok ? r.json() : null).catch(() => null);
     const marketPromise = loadMarketContext().then(() => _marketCtx).catch(() => _marketCtx);
     const [data, insights, market] = await Promise.all([chartPromise, insightsPromise, marketPromise]);
+    if (seq !== verdictLoadSeq) return;
+    verdictCache.set(ticker, { at: Date.now(), data, insights, market });
     verdictLastData = data;
     renderInvestorVerdict(buildInvestorVerdict(ticker, data, insights, market));
   } catch (error) {
+    if (seq !== verdictLoadSeq) return;
     content.innerHTML = `<div class="verdict-empty verdict-error">Ticker sa nepodarilo vyhodnotiť: ${escHtml(error.message)}</div>`;
   } finally {
-    button && (button.disabled = false);
+    if (seq === verdictLoadSeq) button && (button.disabled = false);
   }
 }
 

@@ -63,9 +63,21 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 3. ~~Hover tooltip~~ done
 4. ~~LWC v5~~ done — voliteľné: native panes pre subpanely, `setSeriesOrder()`, data conflation
 5. ~~Volume Profile~~ done — vizuálne overiť na prode (kreslenie netestované v browseri)
-6. Bad-gateway indikátor pre `get_market_recommendations`
-7. Earnings retry drobnosť: `_earningsDates = {}` po chybe sa drží do reloadu (zvážiť TTL reset)
+6. ~~Kumo canvas po resize~~ fixed — redraw počká na dokončenie LWC layoutu.
+7. Bad-gateway indikátor pre `get_market_recommendations`
+8. Earnings retry drobnosť: `_earningsDates = {}` po chybe sa drží do reloadu (zvážiť TTL reset)
+
+## Doplnené 2026-06-12 — Investor Verdikt
+
+- Samostatný tab agreguje existujúce technické, trhové, earnings a firemné
+  dáta do odpovede ÁNO / POČKAŤ / NIE.
+- Bez nového black-box skóre: explicitné pravidlá v `buildInvestorVerdict()`.
+- Max. 2 argumenty pre, 2 proti a jedna podmienka zmeny verdiktu.
+- Source chips ukazujú dostupnosť podkladov; chýbajúce dáta znižujú istotu.
+- 10-min browser cache + `verdictLoadSeq` proti race condition pri rýchlom
+  prepínaní tickerov.
+- Odkaz na Verdikt je v Scanneri aj v Decision Bare Prediktívneho tabu.
 
 ## Cache verzia
 
-`?v=20260612-ins1` (JS aj CSS)
+`?v=20260612-verdict2` (JS aj CSS)
