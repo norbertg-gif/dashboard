@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260612-ins1">
+<link rel="stylesheet" href="/dashboard.css?v=20260612-verdict1">
 </head>
 <body>
 
@@ -130,6 +130,7 @@
     <div class="main-tab" id="tab-risk" onclick="switchMainTab('risk')">Risk <button class="tab-popout" onclick="openMainTabWindow(event,'risk')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny <button class="tab-popout" onclick="openMainTabWindow(event,'predictive')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner <button class="tab-popout" onclick="openMainTabWindow(event,'scanner')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-verdict" onclick="switchMainTab('verdict')">Verdikt <button class="tab-popout" onclick="openMainTabWindow(event,'verdict')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-bot" onclick="switchMainTab('bot')">🤖 Bot <button class="tab-popout" onclick="openMainTabWindow(event,'bot')" title="Otvoriť v novej karte">↗</button></div>
     <button id="event-center-toggle" onclick="toggleEventCenter()" title="Nové udalosti za posledných 24/48 hodín">
       Udalosti <span id="event-center-count">0</span>
@@ -158,6 +159,24 @@
   <div id="main-history" class="tool-view" style="display:none;"></div>
   <div id="main-risk" class="tool-view" style="display:none;"></div>
   <div id="main-scanner" class="tool-view" style="display:none;"></div>
+  <div id="main-verdict" class="tool-view verdict-view" style="display:none;">
+    <div class="verdict-shell">
+      <div class="verdict-toolbar">
+        <div>
+          <div class="tool-title">Investičný verdikt</div>
+          <div class="verdict-subtitle">Stručné rozhodnutie z techniky, trhu, výsledkov a analytického konsenzu.</div>
+        </div>
+        <div class="verdict-controls">
+          <input id="verdictTickerInput" class="inp" type="text" maxlength="16" placeholder="Ticker" autocomplete="off"
+                 onkeydown="if(event.key==='Enter') loadVerdict()">
+          <button class="btn primary" id="verdictLoadBtn" onclick="loadVerdict()">Vyhodnotiť</button>
+        </div>
+      </div>
+      <div id="verdictContent" class="verdict-content">
+        <div class="verdict-empty">Zadaj ticker alebo otvor verdikt zo Scannera.</div>
+      </div>
+    </div>
+  </div>
 
   <!-- BOT TAB -->
   <div id="main-bot" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:16px;flex-direction:column;gap:16px;">
@@ -514,6 +533,6 @@
     </table>
   </div>
 </div>
-<script src="/dashboard.js?v=20260612-analyst1"></script>
+<script src="/dashboard.js?v=20260612-verdict1"></script>
 </body>
 </html>

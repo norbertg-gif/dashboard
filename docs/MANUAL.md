@@ -74,6 +74,12 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **Bot** — virtuálny paper-trading bot na testovanie signálov bez rizika
   (viď [sekcia 6](#6-virtuálny-obchodný-bot)).
 
+- **Verdikt** — stručná rozhodovacia vrstva pre jeden ticker. Z existujúcej
+  techniky, trhového kontextu, earnings a firemných očakávaní vytvorí odpoveď
+  **ÁNO / POČKAŤ / NIE** pre horizont 30–90 dní. Ukáže najviac dva argumenty
+  pre, dva proti a podmienku, ktorá môže verdikt zmeniť. Nepridáva nové skóre
+  a nemení výpočet C1–C4 ani ML.
+
 ### Ovládanie grafov a markerov
 
 - V záložke **Grafy** aj **Prediktívny** používa crosshair režim
@@ -394,6 +400,8 @@ tickerov — jeden zdieľaný blok textu pre celý scanner).
 - **Resize**: ťahaj pravý okraj panelu (horizontálne) alebo dolný okraj boxu
   (vertikálne).
 - Pod šírkou ~1100 px sa panel zarovná pod tabuľku.
+- Tlačidlo **Verdikt** v riadku kandidáta otvorí zjednodušené investičné
+  vyhodnotenie. Klik na zvyšok riadku naďalej otvorí plný detail v Predikcii.
 
 ### Export / kopírovanie
 

@@ -19,7 +19,7 @@ backend/
 frontend/
   trading_dashboard.html
   dashboard.css
-  dashboard.js         # ~7800 LOC, dashboard + predictive + scanner tab logic
+  dashboard.js         # dashboard + predictive + scanner + investor verdict tab logic
 docs/
   MANUAL.md            # Markdown user manual
 trading_backend.py     # thin entrypoint shim for Render (imports backend/.)
@@ -141,6 +141,22 @@ Three source sections:
 **Market context bar** (`#marketCtxBar`, chip-bar TRH nad Kandidátmi): `GET /api/market/context` → QQQ/SPY trend (EMA10/20 + 1M perf), VIX úroveň, 11 SPDR sektorov (1M ranking) synchrónne; Nasdaq-100 breadth (% nad EMA50/EMA200) v background threade (`_mc_breadth_worker`, sekvenčne — nie paralelne, OOM). Disk cache `_market_context.json` (DATA_ROOT, 6h TTL, v .gitignore). **Zámerne NEOVPLYVŇUJE C1–C4 scoring** — čisto interpretačná vrstva; nemeniť bez explicitného rozhodnutia. JS: `loadMarketContext()` volaný z `ensureScannerMetaLoaded()`, breadth sa dotiahne retry-om po 60 s.
 
 Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predictive')`.
+Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()`.
+
+## Verdict tab — key architecture
+
+- Purpose: compress existing evidence into a beginner-friendly **ÁNO / POČKAŤ /
+  NIE** answer for a 30–90 day horizon. It is an interpretation layer, not a new
+  predictive model.
+- Frontend only: `loadVerdict()` fetches existing `/api/chart`,
+  `/api/ticker/insights/{symbol}` and `/api/market/context` payloads in parallel.
+- `buildInvestorVerdict()` applies explicit deterministic gates. Do not replace
+  them with another opaque 0–100 score.
+- Output is deliberately limited to two positive arguments, two risks and one
+  condition that would change the verdict. Detailed evidence remains in the
+  Predictive tab via `openVerdictEvidence()`.
+- Missing optional insights are fail-soft and lower confidence; they must not
+  turn an otherwise valid technical setup into an automatic negative verdict.
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
 - **Portfolio holding (●)**: `GET /api/portfolio/holdings` → `_get_portfolio_holdings()` aggregates both accounts' positions from portfolio disk cache into `{symbol: {pnl, pnl_pct, amount}}`. Green/red dot + P/L% → DCA vs fresh entry decision. No extra eToro calls.

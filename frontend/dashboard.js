@@ -141,7 +141,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','history','risk','predictive','scanner','bot'].forEach(name => {
+  ['charts','portfolio','history','risk','predictive','scanner','verdict','bot'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -163,6 +163,8 @@ function switchMainTab(tab) {
     renderRiskView();
   } else if (tab === 'scanner') {
     renderScannerView();
+  } else if (tab === 'verdict') {
+    initVerdictView();
   } else if (tab === 'bot') {
     botRefresh();
   }
@@ -4964,7 +4966,7 @@ Sheet: ${sheetName}`);
   applyTheme();
   setEventWindow(eventWindowHours);
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
-  if (['charts','portfolio','history','risk','predictive','scanner'].includes(requestedTab)) {
+  if (['charts','portfolio','history','risk','predictive','scanner','verdict'].includes(requestedTab)) {
     switchMainTab(requestedTab);
   }
 
@@ -6993,7 +6995,7 @@ ${escHtml(copyText)}</textarea>
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
-      <td><span class="scanner-label ${decisionCls}">${decision}</span></td>
+      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
       <td class="r">${dip.fa ?? '-'}</td>
@@ -7564,6 +7566,207 @@ async function runNasdaqScanner() {
 function openScannerTicker(ticker) {
   switchMainTab('predictive');
   setTimeout(() => pc_selectTicker(ticker), 120);
+}
+
+const VERDICT_TICKER_KEY = 'td_verdict_ticker';
+let verdictLastData = null;
+let verdictLastTicker = '';
+
+function initVerdictView() {
+  const input = document.getElementById('verdictTickerInput');
+  if (!input) return;
+  if (!input.value) {
+    input.value = verdictLastTicker ||
+      localStorage.getItem(VERDICT_TICKER_KEY) ||
+      document.getElementById('tickerInput')?.value ||
+      '';
+  }
+  if (input.value && !verdictLastData) loadVerdict();
+}
+
+function openVerdictTicker(ticker, event) {
+  event?.stopPropagation();
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!sym) return;
+  verdictLastTicker = sym;
+  localStorage.setItem(VERDICT_TICKER_KEY, sym);
+  switchMainTab('verdict');
+  const input = document.getElementById('verdictTickerInput');
+  if (input) input.value = sym;
+  loadVerdict();
+}
+
+function openVerdictEvidence() {
+  const ticker = verdictLastTicker || document.getElementById('verdictTickerInput')?.value;
+  if (!ticker) return;
+  switchMainTab('predictive');
+  setTimeout(() => pc_selectTicker(String(ticker).toUpperCase()), 120);
+}
+
+function verdictPush(list, text) {
+  if (text && !list.includes(text)) list.push(text);
+}
+
+function buildInvestorVerdict(ticker, data, insights, market) {
+  const positives = [];
+  const risks = [];
+  const details = data?.today_details || {};
+  const rawScore = Number(data?.today_raw_score ?? data?.today_score ?? 0) || 0;
+  const weeklyBullish = !!data?.weekly_bias?.bullish;
+  const technical = predictiveDecisionFromData(data);
+  const close = Number(data?.daily_candles?.at(-1)?.close || data?.candles?.at(-1)?.close);
+  const missing = predictiveMissingSetup(details);
+
+  if (weeklyBullish) verdictPush(positives, `Weekly trend je rastový a DIP signál má silu ${rawScore}/4.`);
+  else verdictPush(risks, 'Weekly trend zatiaľ nepotvrdzuje rast.');
+
+  if (technical === 'buy' && rawScore >= 3) {
+    verdictPush(positives, 'Technický setup je potvrdený a je v súlade s trendom.');
+  } else if (technical === 'counter') {
+    verdictPush(risks, 'Signál ide proti aktuálnemu dennému trendu.');
+  } else if (rawScore < 3) {
+    verdictPush(risks, `Technickému vstupu chýba potvrdenie (${rawScore}/4).`);
+  }
+
+  const qqqTrend = market?.qqq?.trend;
+  const spyTrend = market?.spy?.trend;
+  const breadth = Number(market?.breadth?.above_ema50_pct);
+  const vix = Number(market?.vix?.value);
+  const marketSupportive = qqqTrend === 'up' && (!Number.isFinite(breadth) || breadth >= 50);
+  const marketAdverse = qqqTrend === 'down' && Number.isFinite(breadth) && breadth < 40;
+  if (marketSupportive) verdictPush(positives, 'Nasdaq trend a šírka trhu podporujú rast.');
+  if (marketAdverse) verdictPush(risks, 'Nasdaq aj šírka trhu sú momentálne nepriaznivé.');
+  if (spyTrend === 'down' && qqqTrend !== 'up') verdictPush(risks, 'Širší trh je v klesajúcom režime.');
+  if (Number.isFinite(vix) && vix >= 30) verdictPush(risks, `Volatilita trhu je vysoká (VIX ${vix.toFixed(1)}).`);
+
+  const earnings = (data?.earnings_dates || [])
+    .map(value => Number(value) * 1000)
+    .filter(value => Number.isFinite(value) && value >= Date.now())
+    .sort((a, b) => a - b);
+  const earningsDays = earnings.length ? Math.ceil((earnings[0] - Date.now()) / 86400000) : null;
+  const earningsRisk = earningsDays != null && earningsDays <= EARNINGS_WARN_DAYS;
+  if (earningsRisk) verdictPush(risks, `Earnings sú o ${earningsDays} dní; technický obraz sa môže rýchlo zmeniť.`);
+
+  const ac = insights?.analyst_consensus;
+  if (ac) {
+    const buy = Number(ac.strong_buy || 0) + Number(ac.buy || 0);
+    const sell = Number(ac.sell || 0) + Number(ac.strong_sell || 0);
+    if (buy > sell + 2) verdictPush(positives, `Analytický konsenzus prevažuje v prospech nákupu (${buy} Buy vs ${sell} Sell).`);
+    if (sell > buy) verdictPush(risks, `Analytický konsenzus je skôr negatívny (${sell} Sell vs ${buy} Buy).`);
+  }
+
+  const pt = insights?.price_target;
+  const target = Number(pt?.mean);
+  const targetPotential = Number.isFinite(target) && Number.isFinite(close) && close > 0
+    ? (target / close - 1) * 100 : null;
+  if (targetPotential != null && targetPotential >= 8) {
+    verdictPush(positives, `Priemerný cieľ analytikov je ${fmtPrice(target)} (${targetPotential.toFixed(1)} % nad cenou).`);
+  } else if (targetPotential != null && targetPotential <= -5) {
+    verdictPush(risks, `Cena je nad priemerným cieľom ${fmtPrice(target)} o ${Math.abs(targetPotential).toFixed(1)} %.`);
+  }
+
+  const eps = (insights?.eps_history || []).filter(item => item.actual != null);
+  const beats = eps.filter(item => item.beat).length;
+  if (eps.length >= 3 && beats >= Math.ceil(eps.length * 0.75)) {
+    verdictPush(positives, `Firma prekonala EPS odhady v ${beats} z ${eps.length} posledných kvartálov.`);
+  } else if (eps.length >= 3 && beats <= Math.floor(eps.length * 0.25)) {
+    verdictPush(risks, `Firma prekonala EPS odhady len v ${beats} z ${eps.length} kvartálov.`);
+  }
+
+  const insiderNet = Number(insights?.insider?.net_value_90d);
+  if (Number.isFinite(insiderNet) && insiderNet > 0) verdictPush(positives, 'Insideri boli za posledných 90 dní čistí kupujúci.');
+  if (Number.isFinite(insiderNet) && insiderNet < 0) verdictPush(risks, 'Insideri boli za posledných 90 dní čistí predávajúci.');
+
+  const shortPct = Number(insights?.short_interest?.percent_float);
+  if (Number.isFinite(shortPct) && shortPct >= 10) {
+    verdictPush(risks, `Short interest je vysoký (${shortPct.toFixed(1)} % float); pohyb môže byť prudký oboma smermi.`);
+  }
+
+  let verdict = 'wait';
+  if (technical === 'counter' || (!weeklyBullish && rawScore < 2) ||
+      (targetPotential != null && targetPotential <= -10 && technical !== 'buy')) {
+    verdict = 'no';
+  } else if (technical === 'buy' && rawScore >= 3 && !earningsRisk && !marketAdverse &&
+             (positives.length >= 2 || marketSupportive)) {
+    verdict = 'yes';
+  }
+
+  let condition = 'Počkať na jasnejšie technické potvrdenie.';
+  if (!weeklyBullish) condition = 'Weekly trend sa musí otočiť do rastu.';
+  else if (rawScore < 3) condition = missing.length
+    ? `Doplniť chýbajúcu podmienku: ${missing[0].replace(/^C\d\s*/, '')}.`
+    : 'Potrebný je potvrdený Buy signál aspoň 3/4.';
+  else if (earningsRisk) condition = 'Počkať na výsledky alebo stabilizáciu ceny po earnings.';
+  else if (marketAdverse || (Number.isFinite(vix) && vix >= 30)) condition = 'Počkať na pokojnejší trh alebo silnejšie potvrdenie ceny.';
+  else if (verdict === 'yes') condition = 'Verdikt sa zhorší pri strate weekly trendu alebo poklese signálu pod 3/4.';
+  else condition = 'Nový Buy signál 3/4 v rastovom weekly trende môže zmeniť verdikt.';
+
+  const completeness = [data, market, insights].filter(Boolean).length;
+  const confidence = completeness === 3 && Math.abs(positives.length - risks.length) >= 2
+    ? 'vyššia' : completeness >= 2 ? 'stredná' : 'nižšia';
+  const labels = {
+    yes: ['ÁNO', 'Podmienky sú momentálne priaznivé pre ďalšie zváženie vstupu.'],
+    wait: ['POČKAŤ', 'Dáta nie sú jednoznačné; vstup ešte nemá dostatočne čistý pomer potvrdení a rizík.'],
+    no: ['NIE', 'Aktuálne riziká alebo trend prevažujú nad argumentmi pre vstup.'],
+  };
+  return { ticker, verdict, label: labels[verdict][0], summary: labels[verdict][1],
+    confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition };
+}
+
+function renderInvestorVerdict(result) {
+  const el = document.getElementById('verdictContent');
+  if (!el) return;
+  const bullets = (items, empty) => items.length
+    ? items.map(text => `<li>${escHtml(text)}</li>`).join('')
+    : `<li class="muted">${empty}</li>`;
+  el.innerHTML = `
+    <section class="verdict-hero verdict-${result.verdict}">
+      <div class="verdict-symbol">${escHtml(result.ticker)}</div>
+      <div class="verdict-label">${result.label}</div>
+      <div class="verdict-summary">${escHtml(result.summary)}</div>
+      <div class="verdict-confidence">Istota: <strong>${escHtml(result.confidence)}</strong> · horizont 30–90 dní</div>
+    </section>
+    <div class="verdict-evidence">
+      <section><h3>Pre</h3><ul>${bullets(result.positives, 'Žiadne silné potvrdenie navyše.')}</ul></section>
+      <section><h3>Proti</h3><ul>${bullets(result.risks, 'Nebolo zistené významné varovanie.')}</ul></section>
+    </div>
+    <section class="verdict-condition">
+      <span>Čo zmení verdikt</span>
+      <strong>${escHtml(result.condition)}</strong>
+    </section>
+    <div class="verdict-actions">
+      <button class="btn primary" onclick="openVerdictEvidence()">Otvoriť dôkazy v Predikcii</button>
+      <span>Rozhodovacia pomôcka, nie finančné odporúčanie.</span>
+    </div>`;
+}
+
+async function loadVerdict() {
+  const input = document.getElementById('verdictTickerInput');
+  const button = document.getElementById('verdictLoadBtn');
+  const content = document.getElementById('verdictContent');
+  const ticker = String(input?.value || '').trim().toUpperCase();
+  if (!ticker || !content) return;
+  input.value = ticker;
+  verdictLastTicker = ticker;
+  localStorage.setItem(VERDICT_TICKER_KEY, ticker);
+  button && (button.disabled = true);
+  content.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
+  try {
+    const chartPromise = (pc_lastData && document.getElementById('tickerInput')?.value?.toUpperCase() === ticker)
+      ? Promise.resolve(pc_lastData)
+      : fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=2y&reoptimize=false`)
+          .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`); return r.json(); });
+    const insightsPromise = fetch('/api/ticker/insights/' + encodeURIComponent(ticker))
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+    const marketPromise = loadMarketContext().then(() => _marketCtx).catch(() => _marketCtx);
+    const [data, insights, market] = await Promise.all([chartPromise, insightsPromise, marketPromise]);
+    verdictLastData = data;
+    renderInvestorVerdict(buildInvestorVerdict(ticker, data, insights, market));
+  } catch (error) {
+    content.innerHTML = `<div class="verdict-empty verdict-error">Ticker sa nepodarilo vyhodnotiť: ${escHtml(error.message)}</div>`;
+  } finally {
+    button && (button.disabled = false);
+  }
 }
 
 const WL_KEY = 'td_watchlist'; // shared with dashboard
