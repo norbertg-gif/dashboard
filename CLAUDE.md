@@ -130,6 +130,8 @@ Three source sections:
 2. **Checklist** — batch-check custom ticker list or CSV import. Same data as Opportunities.
 3. **Nasdaq DIP scanner** — `loadNasdaqScannerResults()`, `/api/scanner/nasdaq/results`. DIP crossover + Finviz ranking.
 
+**Market context bar** (`#marketCtxBar`, chip-bar TRH nad Kandidátmi): `GET /api/market/context` → QQQ/SPY trend (EMA10/20 + 1M perf), VIX úroveň, 11 SPDR sektorov (1M ranking) synchrónne; Nasdaq-100 breadth (% nad EMA50/EMA200) v background threade (`_mc_breadth_worker`, sekvenčne — nie paralelne, OOM). Disk cache `_market_context.json` (DATA_ROOT, 6h TTL, v .gitignore). **Zámerne NEOVPLYVŇUJE C1–C4 scoring** — čisto interpretačná vrstva; nemeniť bez explicitného rozhodnutia. JS: `loadMarketContext()` volaný z `ensureScannerMetaLoaded()`, breadth sa dotiahne retry-om po 60 s.
+
 Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predictive')`.
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):

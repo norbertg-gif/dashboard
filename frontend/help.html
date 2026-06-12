@@ -180,6 +180,25 @@
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
   <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. Horný blok <strong>Kandidáti</strong> obsahuje Opportunities z watchlistu/eToro pozícií a vstup do Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály s externým <strong>DIP rankingom</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
 
+  <h3>Kontext trhu — lišta TRH</h3>
+  <p>Úplne hore v Scanneri je riadok chipov <strong>TRH</strong>. Odpovedá na otázku: <em>„Má môj Buy signál podporu širšieho trhu, alebo idem proti prúdu?“</em> Dôležité: lišta <strong>nevstupuje do C1–C4 skóre</strong> — signály počíta rovnako v býčom aj medveďom trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom trhu vyššiu šancu na úspech než v klesajúcom.</p>
+  <table>
+    <tr><th>Chip</th><th>Čo meria</th><th>Ako čítať</th></tr>
+    <tr><td><strong>QQQ ↑ +3.1 %</strong></td><td>Trend Nasdaq-100 ETF (EMA10 vs EMA20 — rovnaká logika ako tier signálov) + výkon za 1 mesiac.</td><td><span style="color:#00c99a">↑ zelená</span> = uptrend, DIP nákupy majú vietor v chrbte. <span style="color:#f59e0b">→ oranžová</span> = bočný trh, signály fungujú, ale čakaj pomalšie pohyby. <span style="color:#ff4560">↓ červená</span> = downtrend (cena pod EMA20), každý Buy je counter-trend voči indexu.</td></tr>
+    <tr><td><strong>SPY ↑</strong></td><td>To isté pre S&amp;P 500 — širší trh mimo tech.</td><td>Keď sa QQQ a SPY rozchádzajú (QQQ ↓, SPY ↑), problém je koncentrovaný v tech sektore — pozri chip sektorov, či tvoj kandidát nesedí práve v ňom.</td></tr>
+    <tr><td><strong>Breadth 62 %</strong></td><td>Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 (dlhodobé zdravie) a pokrytie dát.</td><td><strong>≥ 60 %</strong> (zelená) — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. <strong>40–60 %</strong> (oranžová) — selektívny trh, vyberaj prísnejšie (preferuj 4/4 a crossover s DIP rankingom). <strong>&lt; 40 %</strong> (červená) — väčšina titulov klesá; aj keď index drží, nesie ho pár mega-capov. <em>Najcennejší je rozpor:</em> QQQ ↑ ale Breadth &lt; 50 % = krehká rally — index ťahá NVDA+MSFT a spol., priemerný DIP kandidát podporu nemá.</td></tr>
+    <tr><td><strong>VIX 18.3</strong></td><td>Implikovaná volatilita S&amp;P 500 („index strachu“).</td><td><strong>&lt; 15</strong> pokoj — trh spí, pozor na samoľúbosť pred korekciou. <strong>15–20</strong> normál — štandardné prostredie. <strong>20–30</strong> zvýšený (oranžová) — nervozita, DIP signálov pribúda, ale dno nemusí byť finálne; zvažuj menšie pozície. <strong>30+</strong> stres (červená) — panika; historicky najlepšie dlhodobé vstupy, ale krátkodobo čokoľvek; vstupuj postupne, nie naraz.</td></tr>
+    <tr><td><strong>XLK +4.2 % · XLE −2.1 %</strong></td><td>Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11 sledovaných).</td><td>Kapitál rotuje medzi sektormi. Kandidát zo sektora na čele rotácie má prúd so sebou; kandidát z chvostu potrebuje silnejší vlastný príbeh. Tooltip ukáže názvy sektorov. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ.</td></tr>
+  </table>
+  <p><strong>Praktické kombinácie:</strong></p>
+  <ul>
+    <li><strong>QQQ ↑ + Breadth ≥ 60 % + VIX &lt; 20</strong> — plná podpora trhu. Buy signály ber štandardne.</li>
+    <li><strong>QQQ ↑ + Breadth &lt; 50 %</strong> — úzka rally. Preferuj kandidátov z vedúcich sektorov, ostatným zníž váhu.</li>
+    <li><strong>QQQ ↓ + VIX 20–30</strong> — korekcia v behu. DIP signály budú pribúdať; nechaj ich dozrieť (vyžaduj 4/4, čerstvý signál, DIP crossover) a počítaj s tým, že prvé dno býva falošné.</li>
+    <li><strong>QQQ ↓ + Breadth &lt; 40 % + VIX 30+</strong> — kapitulačná fáza. Pre dlhodobé pozície historicky najlepšie ceny, ale vstupuj po častiach (DCA), nie celou veľkosťou naraz.</li>
+  </ul>
+  <p>Dáta sa obnovujú raz za 6 hodín (server cache). Breadth sa pri prvom otvorení počíta na pozadí ~2 minúty — dovtedy chip ukazuje „Breadth …“ a doplní sa sám.</p>
+
   <h3>Ovládanie</h3>
   <ul>
     <li><strong>Opportunities</strong> — kompaktný radar titulov z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.</li>

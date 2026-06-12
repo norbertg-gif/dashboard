@@ -211,6 +211,33 @@ Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. Horný
 Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály
 s externým **DIP rankingom**. Klik na kandidáta otvorí jeho detail v Predikcii.
 
+### Kontext trhu — lišta TRH
+
+Úplne hore v Scanneri je riadok chipov **TRH**. Odpovedá na otázku: _„Má môj
+Buy signál podporu širšieho trhu, alebo idem proti prúdu?“_ Dôležité: lišta
+**nevstupuje do C1–C4 skóre** — signály sa počítajú rovnako v býčom aj medveďom
+trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom
+trhu vyššiu šancu na úspech než v klesajúcom.
+
+| Chip | Čo meria | Ako čítať |
+|---|---|---|
+| **QQQ ↑ +3.1 %** | Trend Nasdaq-100 ETF (EMA10 vs EMA20 — rovnaká logika ako tier signálov) + výkon za 1 mesiac. | ↑ zelená = uptrend, DIP nákupy majú vietor v chrbte. → oranžová = bočný trh, pomalšie pohyby. ↓ červená = downtrend (cena pod EMA20), každý Buy je counter-trend voči indexu. |
+| **SPY ↑** | To isté pre S&P 500 — širší trh mimo tech. | Keď sa QQQ a SPY rozchádzajú (QQQ ↓, SPY ↑), problém je koncentrovaný v tech sektore — pozri chip sektorov. |
+| **Breadth 62 %** | Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 a pokrytie dát. | **≥ 60 %** zelená — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. **40–60 %** oranžová — selektívny trh, preferuj 4/4 a DIP crossover. **< 40 %** červená — väčšinu trhu nesie pár mega-capov. _Najcennejší je rozpor:_ QQQ ↑ ale Breadth < 50 % = krehká rally bez podpory priemerného titulu. |
+| **VIX 18.3** | Implikovaná volatilita S&P 500 („index strachu"). | **< 15** pokoj (pozor na samoľúbosť), **15–20** normál, **20–30** zvýšený — nervozita, menšie pozície, **30+** stres — panika; historicky najlepšie dlhodobé vstupy, ale vstupuj postupne. |
+| **XLK +4.2 % · XLE −2.1 %** | Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11). | Kandidát z vedúceho sektora má prúd so sebou. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ. |
+
+**Praktické kombinácie:**
+
+- **QQQ ↑ + Breadth ≥ 60 % + VIX < 20** — plná podpora trhu, Buy signály ber štandardne.
+- **QQQ ↑ + Breadth < 50 %** — úzka rally; preferuj kandidátov z vedúcich sektorov.
+- **QQQ ↓ + VIX 20–30** — korekcia v behu; vyžaduj 4/4, čerstvý signál a DIP crossover, prvé dno býva falošné.
+- **QQQ ↓ + Breadth < 40 % + VIX 30+** — kapitulačná fáza; dlhodobo najlepšie ceny, ale vstupuj po častiach (DCA).
+
+Dáta sa obnovujú raz za 6 hodín (server cache `_market_context.json`). Breadth
+sa pri prvom otvorení počíta na pozadí ~2 minúty — chip ukazuje „Breadth …"
+a doplní sa sám. Endpoint: `GET /api/market/context`.
+
 ### Ovládanie
 
 - **Opportunities** — kompaktný radar najzaujímavejších titulov z watchlistu
