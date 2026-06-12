@@ -6,6 +6,7 @@ pip install fastapi uvicorn yfinance pandas requests
 
 import asyncio
 import gc, json, os, math, threading
+import re
 from io import BytesIO
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -5020,6 +5021,60 @@ def _insights_parse(qs: dict) -> dict:
     return out
 
 
+def _scrub_token(msg: str) -> str:
+    """requests chyby obsahujú celú URL vrátane ?token= — maskuj kľúč."""
+    return re.sub(r"token=[^&\s]+", "token=***", str(msg))
+
+
+def _insights_fetch_finnhub(sym: str) -> dict:
+    """Insider transakcie + EPS surprises z Finnhubu (free tier, funguje z Renderu)."""
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("FINNHUB_API_KEY nie je nastavený")
+    today = datetime.now(timezone.utc).date()
+    out: dict = {}
+    # Insider transakcie 90 d — SEC Form 4 kódy: P = purchase, S = sale
+    r = requests.get("https://finnhub.io/api/v1/stock/insider-transactions",
+                     params={"symbol": sym, "from": (today - timedelta(days=90)).isoformat(),
+                             "to": today.isoformat(), "token": api_key}, timeout=15)
+    r.raise_for_status()
+    buys = sells = 0
+    buy_val = sell_val = 0.0
+    recent = []
+    for t in (r.json().get("data") or []):
+        code = (t.get("transactionCode") or "").upper()
+        kind = "buy" if code == "P" else ("sell" if code == "S" else None)
+        if not kind:
+            continue   # granty, exercise, gifty atď. nezapočítavaj
+        shares = abs(float(t.get("change") or 0))
+        price = float(t.get("transactionPrice") or 0)
+        val = shares * price
+        if kind == "buy":
+            buys += 1; buy_val += val
+        else:
+            sells += 1; sell_val += val
+        if len(recent) < 6:
+            recent.append({"date": t.get("transactionDate"), "name": t.get("name"),
+                           "relation": None, "type": kind, "shares": shares, "value": val or None})
+    out["insider"] = {"buys_90d": buys, "sells_90d": sells,
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+    # EPS surprises — posledné 4 kvartály (API vracia najnovší prvý → otoč)
+    r = requests.get("https://finnhub.io/api/v1/stock/earnings",
+                     params={"symbol": sym, "token": api_key}, timeout=15)
+    r.raise_for_status()
+    eps_hist = []
+    for h in (r.json() or [])[:4][::-1]:
+        a, e = h.get("actual"), h.get("estimate")
+        sp = h.get("surprisePercent")
+        eps_hist.append({"quarter": h.get("period"), "actual": a, "estimate": e,
+                         "surprise_pct": round(sp, 1) if sp is not None else None,
+                         "beat": (a is not None and e is not None and a >= e)})
+    out["eps_history"] = eps_hist
+    if not (buys or sells or eps_hist):
+        raise RuntimeError("prázdna odpoveď (insider aj EPS)")
+    return out
+
+
 @app.get("/api/ticker/insights/{symbol}")
 def get_ticker_insights(symbol: str, refresh: int = Query(0)):
     """Insider transakcie + EPS beat/miss história + earnings dátum (Yahoo, 12h cache)."""
@@ -5035,14 +5090,26 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 return cached
         except Exception:
             cached = None
-    qs = _yahoo_quote_summary(sym, "insiderTransactions,earningsHistory,earningsTrend,calendarEvents")
-    if qs is None:
+    core = None
+    errs = []
+    # Primárne Finnhub (z Renderu funguje), Yahoo quoteSummary ako fallback
+    try:
+        core = {**_insights_fetch_finnhub(sym), "source": "finnhub"}
+    except Exception as e:
+        errs.append(f"finnhub: {_scrub_token(e)}")
+    if core is None:
+        qs = _yahoo_quote_summary(sym, "insiderTransactions,earningsHistory,earningsTrend,calendarEvents")
+        if qs is not None:
+            core = {**_insights_parse(qs), "source": "yahoo"}
+        else:
+            errs.append("yahoo unavailable")
+    if core is None:
         if cached and not cached.get("error"):
             return {**cached, "stale": True}
-        payload = {"ticker": sym, "error": "yahoo unavailable",
+        payload = {"ticker": sym, "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
     else:
-        payload = {"ticker": sym, **_insights_parse(qs),
+        payload = {"ticker": sym, **core,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
         # doplň earnings dátum do zdieľaného kalendára (rovnako ako per-symbol Finnhub)
         if payload.get("earnings_date"):
