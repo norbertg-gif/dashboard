@@ -3616,7 +3616,8 @@ function createPanel(cfg) {
   document.getElementById('grid').appendChild(panel);
 
   const mainCont  = document.getElementById('chart-' + id);
-  if (initialChartHeight) mainCont.style.height = initialChartHeight + 'px';
+  // Výška grafu = flex-basis; graf rastie a vypĺňa všetok voľný priestor panela
+  if (initialChartHeight) mainCont.style.flexBasis = initialChartHeight + 'px';
   const mainChart = makeChart(mainCont, initialChartHeight || 240);
   // Panel mohol byť vytvorený so skrytým/neusadeným layoutom (šírka 0) — LWC potom
   // nevykreslí nič, kým nepríde resize. Retry kým sa šírka neusadí.
@@ -3640,18 +3641,24 @@ function createPanel(cfg) {
     });
   }
 
-  const ro = new ResizeObserver(entries => {
-    for (const e of entries) {
-      const w = e.contentRect.width;
-      if (w > 0) {
-        mainChart.applyOptions({width:w});
-        const reg = registry[id];
-        if (reg?.rsiChart) reg.rsiChart.applyOptions({width:w});
-        if (reg?.adxChart) reg.adxChart.applyOptions({width:w});
-      }
-    }
+  // RO: šírka panela + výška grafu (auto-fill po skrytí subpanelu/wizardu/news).
+  // Drží LWC canvasy (main výška+šírka, subpanely šírka) a kumo canvas v sync.
+  let _roRaf = null;
+  const ro = new ResizeObserver(() => {
+    if (_roRaf) return;
+    _roRaf = requestAnimationFrame(() => {
+      _roRaf = null;
+      const reg = registry[id];
+      if (!reg) return;
+      const w = mainCont.clientWidth, h = mainCont.clientHeight;
+      if (!(w > 0 && h > 0)) return;
+      try { reg.mainChart.applyOptions({ width: w, height: h }); } catch (e) {}
+      [reg.rsiChart, reg.adxChart, reg.macdChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
+      try { reg.cloudCanvasRender?.(); } catch (e) {}
+    });
   });
   ro.observe(panel);
+  ro.observe(mainCont);
 
   registry[id] = {
     mainChart, candleSeries, volSeries,
@@ -3701,8 +3708,7 @@ function createPanel(cfg) {
         const newH = Math.min(MAX_H, Math.max(MIN_H, _startH + e.clientY - _startY));
         const el = document.getElementById('chart-' + id);
         if (el) {
-          el.style.height = newH + 'px';
-          registry[id]?.mainChart.applyOptions({height: newH});
+          el.style.flexBasis = newH + 'px';
           setTimeout(() => {
             registry[id]?.cloudCanvasRender?.();
           }, 50);
