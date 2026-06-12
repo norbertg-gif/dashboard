@@ -92,6 +92,13 @@ These were already in the codebase and need to stay fixed:
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
 6. **💡 Bad-gateway indicator.** `get_market_recommendations` returns 502 on free eToro API tier — currently silently fails.
 
+### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
+
+- **RS / párový kontext v Predictive** — relatívna sila tickera voči QQQ, SPY a sektorovému ETF (1M/3M). Nadväzuje na existujúceho kandidáta „RS voči SPY". Dátový základ: `_yf_download_cached` + `_SECTOR_ETFS` mapa už existujú.
+- **Makro režim trhu** — Goldilocks/Stagflation kvadrant odvodený z dát, ktoré už máme v `/api/market/context` (SPY/QQQ trend + VIX + breadth). Doplniť ako interpretačný chip do TRH lišty; žiadny nový dátový zdroj.
+- **News clustering** — zoskupiť články o rovnakej udalosti do jedného príbehu, nech sentiment nie je umelo násobený duplicitami. Až keď bude news cache dostatočne naplnená.
+- Pravidlo pre všetky tri: interpretačné vrstvy, NEVSTUPUJÚ do C1–C4 scoringu.
+
 ## Signal scoring — single source of truth
 
 `score_signal_day(row, zscore)` + `rolling_zscore()` + `signal_tier()` are module-level functions in `trading_backend.py`, called by both the scanner (`_scan_buy_signal_for_ticker`) and the predictive endpoint. Same ticker shows same x/4 score in both places.
