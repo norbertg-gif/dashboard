@@ -4901,6 +4901,165 @@ async def ingest_earnings_calendar(request: Request):
 
 _earnings_sym_failed_at: dict[str, float] = {}   # sym → ts neúspechu (1h backoff)
 
+# ── Yahoo quoteSummary (cookie + crumb session, ako yfinance ale pod kontrolou) ──
+_YAHOO_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+_yahoo_auth: dict = {"cookie": None, "crumb": None, "expiry": 0.0}
+_yahoo_auth_lock = threading.Lock()
+
+
+def _yahoo_get_auth(force: bool = False) -> dict | None:
+    """Session cookie z fc.yahoo.com + crumb token. Cache 30 min."""
+    with _yahoo_auth_lock:
+        if not force and _yahoo_auth["crumb"] and time.time() < _yahoo_auth["expiry"]:
+            return dict(_yahoo_auth)
+        try:
+            s = requests.Session()
+            s.headers["User-Agent"] = _YAHOO_UA
+            # fc.yahoo.com vracia 404, ale nastaví session cookie — neraise-ovať
+            s.get("https://fc.yahoo.com", timeout=10, allow_redirects=True)
+            cookie = "; ".join(f"{c.name}={c.value}" for c in s.cookies)
+            r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+            crumb = r.text.strip()
+            if not cookie or not crumb or "<" in crumb:
+                raise RuntimeError(f"bad crumb/cookie (crumb={crumb[:30]!r})")
+            _yahoo_auth.update({"cookie": cookie, "crumb": crumb, "expiry": time.time() + 1800})
+            return dict(_yahoo_auth)
+        except Exception as e:
+            print(f"[yahoo] auth failed: {e}")
+            return None
+
+
+def _yahoo_quote_summary(symbol: str, modules: str) -> dict | None:
+    """GET v10/finance/quoteSummary — vráti result[0] alebo None (fail-soft)."""
+    auth = _yahoo_get_auth()
+    if not auth:
+        return None
+    url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(symbol)}"
+    for attempt in (1, 2):
+        try:
+            r = requests.get(url,
+                             params={"modules": modules, "crumb": auth["crumb"]},
+                             headers={"User-Agent": _YAHOO_UA, "Cookie": auth["cookie"]},
+                             timeout=15)
+            if r.status_code in (401, 403) and attempt == 1:
+                auth = _yahoo_get_auth(force=True)
+                if not auth:
+                    return None
+                continue
+            r.raise_for_status()
+            res = (r.json().get("quoteSummary") or {}).get("result") or []
+            return res[0] if res else None
+        except Exception as e:
+            if attempt == 2:
+                print(f"[yahoo] quoteSummary {symbol} failed: {e}")
+                return None
+    return None
+
+
+def _yraw(v):
+    """Yahoo čísla sú {raw: 1.23, fmt: '1.23'} objekty."""
+    return v.get("raw") if isinstance(v, dict) else v
+
+
+# ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
+YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
+INSIGHTS_TTL_H = 12
+
+
+def _insights_parse(qs: dict) -> dict:
+    out: dict = {}
+    # Insider transakcie za 90 dní
+    txs = (qs.get("insiderTransactions") or {}).get("transactions") or []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    buys = sells = 0
+    buy_val = sell_val = 0.0
+    recent = []
+    for t in txs:
+        ts = _yraw(t.get("startDate"))
+        if not ts or ts < cutoff:
+            continue
+        text = (t.get("transactionText") or "").lower()
+        kind = "buy" if ("purchase" in text or "buy" in text) else ("sell" if "sale" in text else None)
+        if not kind:
+            continue   # awards/grants/exercise bez kontextu nezapočítavaj
+        val = float(_yraw(t.get("value")) or 0)
+        if kind == "buy":
+            buys += 1; buy_val += val
+        else:
+            sells += 1; sell_val += val
+        if len(recent) < 6:
+            recent.append({"date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+                           "name": t.get("filerName"), "relation": t.get("filerRelation"),
+                           "type": kind, "shares": _yraw(t.get("shares")), "value": val or None})
+    out["insider"] = {"buys_90d": buys, "sells_90d": sells,
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+    # EPS história — posledné 4 kvartály (beat/miss)
+    hist = (qs.get("earningsHistory") or {}).get("history") or []
+    eps_hist = []
+    for h in hist:
+        a, e = _yraw(h.get("epsActual")), _yraw(h.get("epsEstimate"))
+        sp = _yraw(h.get("surprisePercent"))
+        eps_hist.append({"quarter": h.get("quarter", {}).get("fmt") if isinstance(h.get("quarter"), dict) else h.get("quarter"),
+                         "actual": a, "estimate": e,
+                         "surprise_pct": round(sp * 100, 1) if sp is not None else None,
+                         "beat": (a is not None and e is not None and a >= e)})
+    out["eps_history"] = eps_hist
+    # Odhad na aktuálny kvartál + rast
+    for tr in (qs.get("earningsTrend") or {}).get("trend") or []:
+        if tr.get("period") == "0q":
+            out["eps_next"] = {"avg": _yraw((tr.get("earningsEstimate") or {}).get("avg")),
+                               "analysts": _yraw((tr.get("earningsEstimate") or {}).get("numberOfAnalysts")),
+                               "growth": _yraw(tr.get("growth"))}
+            break
+    # Earnings dátum z calendarEvents (bonus pre earnings reťazec)
+    cal = ((qs.get("calendarEvents") or {}).get("earnings") or {}).get("earningsDate") or []
+    dates = [d for d in (_yraw(x) for x in cal) if d]
+    if dates:
+        out["earnings_date"] = datetime.fromtimestamp(min(dates), timezone.utc).date().isoformat()
+    return out
+
+
+@app.get("/api/ticker/insights/{symbol}")
+def get_ticker_insights(symbol: str, refresh: int = Query(0)):
+    """Insider transakcie + EPS beat/miss história + earnings dátum (Yahoo, 12h cache)."""
+    sym = symbol.upper()
+    fpath = YAHOO_INSIGHTS_DIR / f"{sym}.json"
+    cached = None
+    if fpath.exists():
+        try:
+            cached = json.loads(fpath.read_text(encoding="utf-8"))
+            age_h = (datetime.now(timezone.utc)
+                     - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+            if age_h < (1 if cached.get("error") else INSIGHTS_TTL_H) and not refresh:
+                return cached
+        except Exception:
+            cached = None
+    qs = _yahoo_quote_summary(sym, "insiderTransactions,earningsHistory,earningsTrend,calendarEvents")
+    if qs is None:
+        if cached and not cached.get("error"):
+            return {**cached, "stale": True}
+        payload = {"ticker": sym, "error": "yahoo unavailable",
+                   "fetched_at": datetime.now(timezone.utc).isoformat()}
+    else:
+        payload = {"ticker": sym, **_insights_parse(qs),
+                   "fetched_at": datetime.now(timezone.utc).isoformat()}
+        # doplň earnings dátum do zdieľaného kalendára (rovnako ako per-symbol Finnhub)
+        if payload.get("earnings_date"):
+            try:
+                ec = _earnings_cache_read()
+                if ec is not None and not (ec.get("dates") or {}).get(sym):
+                    ec.setdefault("dates", {})[sym] = payload["earnings_date"]
+                    EARNINGS_CACHE_FILE.write_text(json.dumps(ec), encoding="utf-8")
+            except Exception:
+                pass
+    try:
+        YAHOO_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+    return payload
+
 def _earnings_next_date(symbol: str) -> str | None:
     """Najbližší earnings dátum pre symbol: bulk kalendár → Finnhub per-symbol
     (bulk free kalendár veľké tituly občas vynecháva) → yfinance fallback."""
@@ -4940,6 +5099,13 @@ def _earnings_next_date(symbol: str) -> str | None:
         except Exception as e:
             _earnings_sym_failed_at[sym] = time.time()
             print(f"[earnings] per-symbol fetch failed {sym}: {e}")
+    # Yahoo calendarEvents raw (vlastný UA + crumb — yfinance .calendar na Renderi padá)
+    qs = _yahoo_quote_summary(sym, "calendarEvents")
+    if qs:
+        cal_ev = ((qs.get("calendarEvents") or {}).get("earnings") or {}).get("earningsDate") or []
+        ds = [d for d in (_yraw(x) for x in cal_ev) if d]
+        if ds:
+            return datetime.fromtimestamp(min(ds), timezone.utc).date().isoformat()
     try:
         cal = yf.Ticker(sym).calendar
         if isinstance(cal, dict):

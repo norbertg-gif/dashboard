@@ -165,6 +165,17 @@ Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureSc
 - **Earnings calendar** (`GET /api/earnings`): primary source is Finnhub `/calendar/earnings` (`FINNHUB_API_KEY` env, 60 req/min free tier, 90-day window, JSON); fallback chain: AV `EARNINGS_CALENDAR` CSV → browser-direct CSV ingest via `POST /api/earnings/ingest`. 24h cache in `_earnings_calendar.json`, 1h negative cache. Earnings UI is fail-soft and always visible: Scanner shows grey `E: date`, orange `⚠ E: date` when earnings ≤ 7 days (`EARNINGS_WARN_DAYS`), or `E: n/a`; Predictive shows a persistent card with “Zatiaľ nedostupné” if no date exists. `loadEarningsCalendar()` must set `_earningsDates = {}` on empty/error responses so placeholders render. AV returns JSON instead of CSV on errors — `_earnings_parse_csv` detects leading `{`.
 - **ApeWisdom Reddit mentions** (`GET /api/reddit/mentions`): server-side fetch (httpx + browser User-Agent — apewisdom.io has no CORS headers, browser-direct fails), top 5 pages, 6h cache in `_apewisdom.json`, async lock prevents concurrent refetch. Badge `r/{mentions}↑↓` colored by 24h rank move — **yellow up / blue down on purpose**: it measures attention, not bull/bear, must not look like P/L colors.
 
+## Yahoo quoteSummary — key architecture
+
+**Role:** Insider transakcie + EPS história + earnings záloha — bez API kľúča.
+
+- **Auth:** `_yahoo_get_auth()` — session cookie z `fc.yahoo.com` (vracia 404, ale nastaví cookie) + crumb z `/v1/test/getcrumb`, cache 30 min, retry pri 401/403. Browser UA povinný.
+- **`_yahoo_quote_summary(sym, modules)`** — fail-soft wrapper na `v10/finance/quoteSummary`.
+- **`GET /api/ticker/insights/{symbol}`** — moduly `insiderTransactions,earningsHistory,earningsTrend,calendarEvents` v jednom requeste. Disk cache `yahoo_insights/{SYM}.json` (DATA_ROOT, 12h TTL, 1h negative, stale fallback, v .gitignore). Insider parsing: len transakcie s 'purchase'/'sale' v texte (awards/grants sa ignorujú), 90-dňové okno. `earnings_date` z calendarEvents sa dopĺňa do zdieľaného earnings kalendára.
+- **Earnings reťazec** (`_earnings_next_date`): bulk Finnhub → Finnhub `?symbol=` → **Yahoo calendarEvents raw** → yfinance `.calendar`. Yahoo čísla sú `{raw, fmt}` objekty — vždy cez `_yraw()`.
+- **Frontend:** karta `#insightsCard` v Predictive sidebar (`pc_loadInsights`, volaná z `pc_renderSidebar`) — insider 90d nákupy/predaje + net hodnota, EPS beat/miss chipy (✓/✗ + tooltip so surprise %), odhad na aktuálny kvartál. Fail-soft: karta skrytá / zobrazí dôvod chyby.
+- **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
+
 ## Virtual trading bot — key architecture
 
 **Role:** Paper-trading simulation — backtesting-lite na live dátach.

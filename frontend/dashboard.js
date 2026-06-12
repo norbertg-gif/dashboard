@@ -5952,6 +5952,7 @@ function pc_renderSidebar(data) {
   }
   earningsCard.style.display = '';
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
+  pc_loadInsights(data.ticker);
 
   // Backtest card
   // Entry zone card
@@ -7139,6 +7140,57 @@ async function loadEarningsCalendar() {
     }
     _earningsDates = data.dates || {};
   } catch (e) { _earningsDates = {}; }
+}
+
+// Insider transakcie + EPS beat/miss karta (Yahoo quoteSummary, 12h server cache)
+let _insightsForTicker = null;
+async function pc_loadInsights(ticker) {
+  const card = document.getElementById('insightsCard');
+  if (!card || !ticker) return;
+  const sym = String(ticker).toUpperCase();
+  _insightsForTicker = sym;
+  card.style.display = 'none';
+  try {
+    const r = await fetch('/api/ticker/insights/' + encodeURIComponent(sym));
+    if (!r.ok || _insightsForTicker !== sym) return;
+    const d = await r.json();
+    if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
+    if (d.error) {
+      card.innerHTML = `<div class="card-title">Insider &amp; EPS</div>
+        <div class="earnings-unavailable-note">Zdroj nedostupný (${escHtml(String(d.error))})</div>`;
+      card.style.display = '';
+      return;
+    }
+    const rows = [];
+    const ins = d.insider;
+    if (ins && (ins.buys_90d || ins.sells_90d)) {
+      const net = ins.net_value_90d || 0;
+      const netTxt = Math.abs(net) >= 1e6 ? `${(net / 1e6).toFixed(1)} M$` : `${(net / 1e3).toFixed(0)} k$`;
+      const cls = net > 0 ? 'var(--up)' : net < 0 ? 'var(--down)' : 'var(--muted)';
+      const tip = (ins.recent || []).map(t =>
+        `${t.date} ${t.type === 'buy' ? 'NÁKUP' : 'PREDAJ'} ${t.name || ''}${t.value ? ` (${(t.value / 1e3).toFixed(0)} k$)` : ''}`).join('\n');
+      rows.push(`<div class="pred-row" title="${escHtml(tip)}"><span class="key">Insideri 90 d</span>
+        <span class="val">${ins.buys_90d}× nákup / ${ins.sells_90d}× predaj · <span style="color:${cls}">${net >= 0 ? '+' : ''}${netTxt}</span></span></div>`);
+    } else if (ins) {
+      rows.push(`<div class="pred-row"><span class="key">Insideri 90 d</span><span class="val" style="color:var(--muted)">žiadne obchody</span></div>`);
+    }
+    const eh = (d.eps_history || []).filter(h => h.actual != null);
+    if (eh.length) {
+      const chips = eh.map(h =>
+        `<span title="${escHtml(h.quarter || '')}: ${h.actual} vs ${h.estimate}${h.surprise_pct != null ? ` (${h.surprise_pct >= 0 ? '+' : ''}${h.surprise_pct} %)` : ''}"
+           style="color:${h.beat ? 'var(--up)' : 'var(--down)'};font-weight:700;">${h.beat ? '✓' : '✗'}</span>`).join(' ');
+      const beats = eh.filter(h => h.beat).length;
+      rows.push(`<div class="pred-row"><span class="key" title="EPS vs odhad analytikov, posledné ${eh.length} kvartály (najstarší vľavo)">EPS doručenie</span>
+        <span class="val">${chips} <span style="color:var(--muted)">(${beats}/${eh.length})</span></span></div>`);
+    }
+    if (d.eps_next && d.eps_next.avg != null) {
+      rows.push(`<div class="pred-row"><span class="key">Odhad Q</span>
+        <span class="val">$${d.eps_next.avg}${d.eps_next.analysts ? ` <span style="color:var(--muted)">(${d.eps_next.analysts} analytikov)</span>` : ''}</span></div>`);
+    }
+    if (!rows.length) return;
+    card.innerHTML = `<div class="card-title" title="Yahoo Finance, obnova 12 h. Insider nákupy počas DIPu = konfirmácia; séria EPS beatov = firma doručuje.">Insider &amp; EPS</div>` + rows.join('');
+    card.style.display = '';
+  } catch (e) { /* fail-soft */ }
 }
 
 // Predictive fallback: keď /api/chart nedodá earnings dátum (Finnhub/AV na serveri
