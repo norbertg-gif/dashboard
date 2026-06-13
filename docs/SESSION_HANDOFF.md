@@ -78,6 +78,20 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
   prepínaní tickerov.
 - Odkaz na Verdikt je v Scanneri aj v Decision Bare Prediktívneho tabu.
 
+## Doplnene 2026-06-13 - autonomna davka (backlog + analyticke plany)
+
+- **Predictive features (#1)**: roc_4 (4-period ROC) + pos_52w (pozicia v rolling 52-period high/low rozsahu, 0-1, min_periods=20) pridane do ML_FEATURES (teraz 12). ADX/DI features znova zive po fixe duplicit.
+- **Makro rezim kvadrant** (analyticky plan #2): _mc_regime_quadrant() -> Goldilocks/Prehriatie/Risk-off/Utlm/Neutral z QQQ/SPY trendu + VIX + breadth. Pole market_regime v /api/market/context, chip na cele TRH listy. NEOVPLYVNUJE C1-C4.
+- **Relativna sila** (analyticky plan #1, ciastocne): GET /api/ticker/rs/{symbol} = RS voci QQQ/SPY (1M/3M), karta #rsCard v Predictive (pc_loadRS). Sektorove ETF RS este chyba (treba ticker->sektor mapu).
+- **Bad-gateway indikator (#7)**: get_market_recommendations vracia {unavailable, reason} s HTTP 200; frontend ukaze cistu hlasku.
+- **Manualy**: Volume Profile + Insider & EPS doplnene do help.html/MANUAL.md.
+
+## Zostava otvorene
+
+- **#2 Regime-aware signal analytics** - backfill historickych signalov (download OHLCV per ticker, slice pri datume signalu, recompute kontext bez look-ahead). Potrebuje zive data + rozhodnutie o pristupe.
+- **News clustering** (analyticky plan #3) - az ked bude news cache naplnena.
+- **Sektorove ETF RS** - treba ticker->sektor mapu (Finnhub /stock/profile2).
+
 ## Cache verzia
 
-`?v=20260612-verdict2` (JS aj CSS)
+`?v=20260613-rec1` (JS aj CSS)
