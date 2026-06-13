@@ -4186,6 +4186,13 @@ def enrich_scanner_payload(payload: dict) -> dict:
     clean_scores = {k: v for k, v in dip_scores.items() if not k.startswith("_")}
     out["dip_import"]["count"] = len(clean_scores)
     out["results"] = [enrich_with_dip(r, clean_scores) for r in rows]
+    massive = _massive_nasdaq_context(refresh=False)
+    massive_tickers = (massive or {}).get("tickers") or {}
+    for row in out["results"]:
+        row["market_day"] = massive_tickers.get(str(row.get("ticker") or "").upper())
+    out["massive_market"] = {
+        key: value for key, value in (massive or {}).items() if key != "tickers"
+    } if massive else None
     out["crossover_matches"] = sum(1 for r in out["results"] if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD)
     return out
 
@@ -5499,11 +5506,183 @@ MARKET_CTX_FILE = DATA_ROOT / "_market_context.json"
 MARKET_CTX_TTL_H = 6
 _market_ctx_lock = threading.Lock()
 _market_breadth_running = False
+MASSIVE_MARKET_DIR = DATA_ROOT / "massive_market"
+MASSIVE_MARKET_DIR.mkdir(parents=True, exist_ok=True)
+_massive_market_lock = threading.Lock()
 
 _SECTOR_ETFS = {"XLK": "Tech", "XLC": "Komunikácie", "XLY": "Spotreba cykl.",
                 "XLP": "Spotreba defenz.", "XLV": "Zdravotníctvo", "XLF": "Financie",
                 "XLI": "Priemysel", "XLE": "Energie", "XLB": "Materiály",
                 "XLU": "Utility", "XLRE": "Reality"}
+
+
+def _massive_market_file(date_str: str) -> Path:
+    return MASSIVE_MARKET_DIR / f"{date_str}.json"
+
+
+def _massive_candidate_dates() -> list[str]:
+    day = datetime.now(timezone.utc).date()
+    dates = []
+    while len(dates) < 5:
+        day -= timedelta(days=1)
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+    return dates
+
+
+def _massive_fetch_grouped_day(date_str: str) -> dict | None:
+    api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+    if not api_key:
+        return None
+    response = requests.get(
+        f"https://api.massive.com/v2/aggs/grouped/locale/us/market/stocks/{date_str}",
+        params={"adjusted": "true", "include_otc": "false", "apiKey": api_key},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    rows = payload.get("results") or []
+    if not rows:
+        return None
+    nasdaq_universe = set(NASDAQ100_TICKERS)
+    by_ticker = {}
+    for row in rows:
+        ticker = str(row.get("T") or "").upper()
+        if ticker in nasdaq_universe:
+            by_ticker[ticker] = {
+                key: row.get(key) for key in ("o", "h", "l", "c", "v", "vw", "n", "t")
+            }
+    return {
+        "provider": "massive",
+        "date": date_str,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "market_count": len(rows),
+        "rows": by_ticker,
+    }
+
+
+def _massive_load_snapshot(refresh: bool = False) -> dict | None:
+    """One grouped EOD request per market day, persisted on Render disk."""
+    with _massive_market_lock:
+        candidates = _massive_candidate_dates()
+        if not refresh:
+            for date_str in candidates:
+                path = _massive_market_file(date_str)
+                if path.exists():
+                    try:
+                        cached = json.loads(path.read_text(encoding="utf-8"))
+                        if cached.get("rows"):
+                            return cached
+                    except Exception:
+                        pass
+        for date_str in candidates:
+            path = _massive_market_file(date_str)
+            if path.exists() and not refresh:
+                continue
+            try:
+                snapshot = _massive_fetch_grouped_day(date_str)
+                if snapshot:
+                    path.write_text(json.dumps(snapshot), encoding="utf-8")
+                    return snapshot
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                print(f"[massive] grouped day {date_str}: HTTP {status}")
+                if status == 429:
+                    break
+            except Exception as exc:
+                print(f"[massive] grouped day {date_str}: {type(exc).__name__}")
+                break
+    return None
+
+
+def _percentile_rank(values: list[float], value: float) -> int | None:
+    clean = sorted(v for v in values if math.isfinite(v))
+    if not clean or not math.isfinite(value):
+        return None
+    return round(sum(1 for v in clean if v <= value) / len(clean) * 100)
+
+
+def _massive_nasdaq_context(refresh: bool = False) -> dict | None:
+    snapshot = _massive_load_snapshot(refresh=refresh)
+    if not snapshot:
+        return None
+    rows = snapshot.get("rows") or {}
+    universe_rows = {ticker: rows[ticker] for ticker in NASDAQ100_TICKERS if ticker in rows}
+    if not universe_rows:
+        return None
+
+    advances = declines = flat = above_vwap = 0
+    up_volume = down_volume = 0.0
+    transaction_values = []
+    ticker_context = {}
+    for ticker, row in universe_rows.items():
+        open_ = float(row.get("o") or 0)
+        close = float(row.get("c") or 0)
+        volume = float(row.get("v") or 0)
+        vwap = float(row.get("vw") or 0)
+        transactions = float(row.get("n") or 0)
+        change_pct = ((close / open_) - 1) * 100 if open_ > 0 else None
+        vs_vwap_pct = ((close / vwap) - 1) * 100 if vwap > 0 else None
+        if change_pct is not None:
+            if change_pct > 0.01:
+                advances += 1
+                up_volume += volume
+            elif change_pct < -0.01:
+                declines += 1
+                down_volume += volume
+            else:
+                flat += 1
+        if vs_vwap_pct is not None and vs_vwap_pct >= 0:
+            above_vwap += 1
+        if transactions > 0:
+            transaction_values.append(transactions)
+        ticker_context[ticker] = {
+            "change_pct": round(change_pct, 2) if change_pct is not None else None,
+            "vs_vwap_pct": round(vs_vwap_pct, 2) if vs_vwap_pct is not None else None,
+            "volume": int(volume),
+            "transactions": int(transactions),
+            "vwap": round(vwap, 4) if vwap else None,
+        }
+
+    for item in ticker_context.values():
+        item["activity_percentile"] = _percentile_rank(
+            transaction_values, float(item.get("transactions") or 0)
+        )
+
+    coverage = len(universe_rows)
+    advance_pct = advances / coverage * 100
+    above_vwap_pct = above_vwap / coverage * 100
+    volume_ratio = up_volume / down_volume if down_volume > 0 else None
+    score = advance_pct * 0.55 + above_vwap_pct * 0.45
+    if volume_ratio is not None:
+        score += max(-10, min(10, (volume_ratio - 1) * 12))
+    score = round(max(0, min(100, score)), 1)
+    if score >= 62:
+        state, label = "bullish", "Bullish"
+    elif score < 42:
+        state, label = "defensive", "Defenzívny"
+    else:
+        state, label = "neutral", "Neutrálny"
+    return {
+        "provider": "massive",
+        "date": snapshot.get("date"),
+        "market_count": snapshot.get("market_count"),
+        "coverage": coverage,
+        "universe": len(NASDAQ100_TICKERS),
+        "state": state,
+        "label": label,
+        "score": score,
+        "advancers": advances,
+        "decliners": declines,
+        "flat": flat,
+        "advance_pct": round(advance_pct, 1),
+        "above_vwap_pct": round(above_vwap_pct, 1),
+        "up_down_volume_ratio": round(volume_ratio, 2) if volume_ratio is not None else None,
+        "up_volume": round(up_volume),
+        "down_volume": round(down_volume),
+        "tickers": ticker_context,
+        "interpretation_only": True,
+    }
 
 
 def _mc_trend(df: pd.DataFrame) -> dict:
@@ -5635,6 +5814,8 @@ def get_market_context(refresh: int = Query(0)):
             age_h = (datetime.now(timezone.utc)
                      - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
             if age_h < MARKET_CTX_TTL_H:
+                if not cached.get("massive"):
+                    cached["massive"] = _massive_nasdaq_context(refresh=False)
                 return cached
         except Exception:
             pass
@@ -5642,6 +5823,7 @@ def get_market_context(refresh: int = Query(0)):
     data["fetched_at"] = datetime.now(timezone.utc).isoformat()
     # starý breadth nechaj, kým worker dopočíta nový
     data["breadth"] = (cached or {}).get("breadth")
+    data["massive"] = _massive_nasdaq_context(refresh=bool(refresh))
     data["market_regime"] = _mc_regime_quadrant(data)
     with _market_ctx_lock:
         try:
@@ -5651,6 +5833,14 @@ def get_market_context(refresh: int = Query(0)):
     if not _market_breadth_running:
         _market_breadth_running = True
         threading.Thread(target=_mc_breadth_worker, daemon=True).start()
+    return data
+
+
+@app.get("/api/market/massive")
+def get_massive_market_context(refresh: int = Query(0)):
+    data = _massive_nasdaq_context(refresh=bool(refresh))
+    if not data:
+        raise HTTPException(status_code=503, detail="Massive market snapshot is unavailable")
     return data
 
 

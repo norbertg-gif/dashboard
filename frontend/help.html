@@ -192,6 +192,8 @@
     <tr><td><strong>QQQ ↑ +3.1 %</strong></td><td>Trend Nasdaq-100 ETF (EMA10 vs EMA20 — rovnaká logika ako tier signálov) + výkon za 1 mesiac.</td><td><span style="color:#00c99a">↑ zelená</span> = uptrend, DIP nákupy majú vietor v chrbte. <span style="color:#f59e0b">→ oranžová</span> = bočný trh, signály fungujú, ale čakaj pomalšie pohyby. <span style="color:#ff4560">↓ červená</span> = downtrend (cena pod EMA20), každý Buy je counter-trend voči indexu.</td></tr>
     <tr><td><strong>SPY ↑</strong></td><td>To isté pre S&amp;P 500 — širší trh mimo tech.</td><td>Keď sa QQQ a SPY rozchádzajú (QQQ ↓, SPY ↑), problém je koncentrovaný v tech sektore — pozri chip sektorov, či tvoj kandidát nesedí práve v ňom.</td></tr>
     <tr><td><strong>Breadth 62 %</strong></td><td>Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 (dlhodobé zdravie) a pokrytie dát.</td><td><strong>≥ 60 %</strong> (zelená) — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. <strong>40–60 %</strong> (oranžová) — selektívny trh, vyberaj prísnejšie (preferuj 4/4 a crossover s DIP rankingom). <strong>&lt; 40 %</strong> (červená) — väčšina titulov klesá; aj keď index drží, nesie ho pár mega-capov. <em>Najcennejší je rozpor:</em> QQQ ↑ ale Breadth &lt; 50 % = krehká rally — index ťahá NVDA+MSFT a spol., priemerný DIP kandidát podporu nemá.</td></tr>
+    <tr><td><strong>Pulse Bullish 68</strong></td><td>Massive EOD súhrn Nasdaq-100: podiel rastúcich titulov, close nad VWAP a up/down volume.</td><td><strong>≥ 62</strong> Bullish, <strong>42–62</strong> Neutrálny, <strong>&lt; 42</strong> Defenzívny. Kontext, nie nový signál.</td></tr>
+    <tr><td><strong>A/D 64/35 · nad VWAP 61 %</strong></td><td>Počet rastúcich/klesajúcich titulov a podiel close nad denným VWAP.</td><td>Pomáha odlíšiť široko podporovaný rast od pohybu niekoľkých megacapov.</td></tr>
     <tr><td><strong>VIX 18.3</strong></td><td>Implikovaná volatilita S&amp;P 500 („index strachu“).</td><td><strong>&lt; 15</strong> pokoj — trh spí, pozor na samoľúbosť pred korekciou. <strong>15–20</strong> normál — štandardné prostredie. <strong>20–30</strong> zvýšený (oranžová) — nervozita, DIP signálov pribúda, ale dno nemusí byť finálne; zvažuj menšie pozície. <strong>30+</strong> stres (červená) — panika; historicky najlepšie dlhodobé vstupy, ale krátkodobo čokoľvek; vstupuj postupne, nie naraz.</td></tr>
     <tr><td><strong>XLK +4.2 % · XLE −2.1 %</strong></td><td>Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11 sledovaných).</td><td>Kapitál rotuje medzi sektormi. Kandidát zo sektora na čele rotácie má prúd so sebou; kandidát z chvostu potrebuje silnejší vlastný príbeh. Tooltip ukáže názvy sektorov. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ.</td></tr>
     <tr><td><strong>◆ Goldilocks / Prehriatie / Risk-off / Útlm</strong></td><td>Súhrnný <strong>režim trhu</strong> ako kvadrant <em>trend × volatilita</em> — odvodený z QQQ/SPY trendu, VIX a breadth (nie inflačný Goldilocks, inflačné dáta nemáme).</td><td><strong>Goldilocks</strong> (rast + pokoj) — najlepšie prostredie pre DIP vstupy. <strong>Prehriatie</strong> (rast + nervozita VIX) — selektívne, menšie pozície. <strong>Risk-off</strong> (pokles + stres) — defenzíva, počkať na stabilizáciu. <strong>Útlm</strong> (pokles + pokoj) — opatrné hľadanie dna. Je to zhrnutie ostatných chipov do jedného slova; rovnako neovplyvňuje C1–C4.</td></tr>
@@ -203,7 +205,7 @@
     <li><strong>QQQ ↓ + VIX 20–30</strong> — korekcia v behu. DIP signály budú pribúdať; nechaj ich dozrieť (vyžaduj 4/4, čerstvý signál, DIP crossover) a počítaj s tým, že prvé dno býva falošné.</li>
     <li><strong>QQQ ↓ + Breadth &lt; 40 % + VIX 30+</strong> — kapitulačná fáza. Pre dlhodobé pozície historicky najlepšie ceny, ale vstupuj po častiach (DCA), nie celou veľkosťou naraz.</li>
   </ul>
-  <p>Dáta sa obnovujú raz za 6 hodín (server cache). Breadth sa pri prvom otvorení počíta na pozadí ~2 minúty — dovtedy chip ukazuje „Breadth …“ a doplní sa sám.</p>
+  <p>Dáta sa obnovujú raz za 6 hodín (server cache). Breadth sa pri prvom otvorení počíta na pozadí ~2 minúty. Massive grouped snapshot sa stiahne najviac raz za uzavretý obchodný deň a uloží sa na serverový disk.</p>
 
   <h3>Ovládanie</h3>
   <ul>
@@ -237,8 +239,10 @@
     <tr><td><strong>Date</strong></td><td>Dátum posledného signálu.</td></tr>
     <tr><td><strong>Sig</strong></td><td>Skóre <code>x/4</code> (farba = tier).</td></tr>
     <tr><td><strong>Last</strong></td><td>Posledná cena.</td></tr>
+    <tr><td><strong>Trh</strong></td><td>Massive EOD: denný pohyb, close voči VWAP a <code>Axx</code> = percentil počtu transakcií v Nasdaq-100.</td></tr>
     <tr><td><strong>Reason</strong></td><td>Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8").</td></tr>
   </table>
+  <p>Massive údaje sú interpretačné a zatiaľ nemenia C1–C4, DIP skóre, ML ani Buy/Watch/Counter.</p>
 
   <h3>Správy a sentiment (📰)</h3>
   <p>Každý riadok Nasdaq DIP scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>

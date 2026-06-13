@@ -3172,6 +3172,20 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .mc-chip.mc-side    { color: var(--yellow, #f59e0b); border-color: color-mix(in srgb, var(--yellow, #f59e0b) 40%, transparent); }
 .mc-chip.mc-neutral { color: var(--muted); }
 
+.scanner-market-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 82px;
+  font-family: var(--font-mono);
+  line-height: 1.15;
+}
+.scanner-market-cell b { font-size: 11px; }
+.scanner-market-cell small { color: var(--muted); font-size: 8.5px; white-space: nowrap; }
+.scanner-market-cell.market-up b { color: var(--up); }
+.scanner-market-cell.market-down b { color: var(--down); }
+.scanner-market-cell.market-flat b { color: var(--yellow); }
+
 /* ── Investor verdict ─────────────────────────────────────────────────────── */
 .verdict-view {
   overflow: auto;

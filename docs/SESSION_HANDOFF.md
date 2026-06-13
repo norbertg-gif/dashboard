@@ -94,4 +94,18 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 
 ## Cache verzia
 
-`?v=20260613-rec1` (JS aj CSS)
+`?v=20260613-massive1` (JS aj CSS)
+
+## Doplnené 2026-06-13 — Massive Nasdaq Market Pulse
+
+- `MASSIVE_API_KEY` ostáva iba v Render environment.
+- Grouped EOD endpoint sa volá najviac raz za uzavretý obchodný deň.
+- Na disk sa z celého US snapshotu ukladá iba normalizovaný Nasdaq-100 subset
+  do `DATA_ROOT/massive_market/YYYY-MM-DD.json`.
+- `_massive_nasdaq_context()` počíta A/D, percento nad denným VWAP, up/down
+  volume ratio a jednoduchý Market Pulse 0–100.
+- Scanner dostal stĺpec `Trh`: daily change, close vs VWAP a transakčný
+  percentil `Axx` v rámci Nasdaq-100.
+- Massive kontext je interpretačný a nemení C1–C4, DIP, ML ani tier.
+- Endpointy: `/api/market/massive`, rozšírený `/api/market/context`;
+  diagnostika ostáva `/api/diagnostics/massive`.

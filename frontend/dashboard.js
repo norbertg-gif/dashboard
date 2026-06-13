@@ -7093,8 +7093,12 @@ function renderNasdaqScanner(payload) {
     const dip = Number.isFinite(Number(r.dip_total)) ? r.dip_total : '-';
     const rank = r.dip_rank ?? '-';
     const label = r.dip_label || 'TECH ONLY';
+    const market = r.market_day || {};
+    const marketText = Number.isFinite(Number(market.change_pct))
+      ? `${Number(market.change_pct) >= 0 ? '+' : ''}${Number(market.change_pct).toFixed(2)}%`
+      : '-';
     const reason = (r.positive_factors || []).find(f => !/signal \d\/4/.test(f)) || (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
-    return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${reason}`;
+    return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${marketText}\t${reason}`;
   }).join('\n');
 
   const kpis = {
@@ -7108,7 +7112,7 @@ function renderNasdaqScanner(payload) {
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}</div>
     <details class="scanner-export">
       <summary>Export / kopírovanie</summary>
-      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tReason
+      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tMarket\tReason
 ${escHtml(copyText)}</textarea>
     </details>
     <div class="scanner-kpis">
@@ -7121,7 +7125,7 @@ ${escHtml(copyText)}</textarea>
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Rozhodnutie</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Reason</th>
+          <th>Ticker</th><th>Rozhodnutie</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -7135,6 +7139,17 @@ ${escHtml(copyText)}</textarea>
     const tier = sig.date ? sigTier(sig.tier, sig.score) : '';
     const decision = sig.date ? sigTierLabel(sig.tier, sig.score) : 'Bez signálu';
     const decisionCls = tier === 'buy' ? 'buy' : tier === 'counter' ? 'counter' : tier === 'watch' ? 'watch' : 'tech';
+    const market = r.market_day || {};
+    const marketChange = Number(market.change_pct);
+    const marketVwap = Number(market.vs_vwap_pct);
+    const activity = Number(market.activity_percentile);
+    const marketCls = Number.isFinite(marketChange) ? (marketChange > 0 ? 'market-up' : marketChange < 0 ? 'market-down' : 'market-flat') : 'market-flat';
+    const marketHtml = Number.isFinite(marketChange)
+      ? `<span class="scanner-market-cell ${marketCls}" title="Massive EOD: denný pohyb ${marketChange.toFixed(2)} %, close ${Number.isFinite(marketVwap) && marketVwap >= 0 ? 'nad' : 'pod'} VWAP o ${Number.isFinite(marketVwap) ? Math.abs(marketVwap).toFixed(2) : '?'} %, aktivita ${Number.isFinite(activity) ? activity + '. percentil' : 'n/a'}">
+          <b>${marketChange >= 0 ? '+' : ''}${marketChange.toFixed(2)}%</b>
+          <small>VWAP ${Number.isFinite(marketVwap) ? `${marketVwap >= 0 ? '+' : ''}${marketVwap.toFixed(2)}%` : '-'}${Number.isFinite(activity) ? ` · A${activity}` : ''}</small>
+        </span>`
+      : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button></td>
@@ -7146,9 +7161,10 @@ ${escHtml(copyText)}</textarea>
       <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
       <td class="r">${price}</td>
+      <td>${marketHtml}</td>
       <td>${escHtml(reason)}</td>
     </tr>
-    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="11" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
+    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="12" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
   }).join('') + `</tbody></table></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">
@@ -7225,6 +7241,14 @@ function renderMarketContext() {
     const rCls = { goldilocks: 'mc-regime-good', overheat: 'mc-regime-warn',
                    riskoff: 'mc-regime-bad', lull: 'mc-regime-warn', neutral: 'mc-regime-neutral' }[r.quadrant] || 'mc-regime-neutral';
     parts.push(`<span class="mc-chip mc-regime ${rCls}" title="Trhový režim (trend × volatilita, odvodený z QQQ/SPY + VIX + breadth) — ${r.note}. Interpretácia, neovplyvňuje skóre signálov.">◆ ${r.label}</span>`);
+  }
+  const massive = m.massive;
+  if (massive) {
+    const pulseCls = massive.state === 'bullish' ? 'mc-up'
+      : massive.state === 'defensive' ? 'mc-down' : 'mc-side';
+    parts.push(`<span class="mc-chip ${pulseCls}" title="Massive EOD Nasdaq-100 Market Pulse ${massive.date}: ${massive.advancers} rastie / ${massive.decliners} klesá, ${massive.above_vwap_pct} % nad denným VWAP, up/down volume ${massive.up_down_volume_ratio ?? 'n/a'}. Interpretácia, nemení C1–C4.">Pulse ${massive.label} ${massive.score}</span>`);
+    parts.push(`<span class="mc-chip ${massive.advance_pct >= 55 ? 'mc-up' : massive.advance_pct < 45 ? 'mc-down' : 'mc-side'}" title="Podiel rastúcich titulov Nasdaq-100 v poslednom uzavretom obchodnom dni">A/D ${massive.advancers}/${massive.decliners}</span>`);
+    parts.push(`<span class="mc-chip ${massive.above_vwap_pct >= 55 ? 'mc-up' : massive.above_vwap_pct < 45 ? 'mc-down' : 'mc-side'}" title="Podiel Nasdaq-100 titulov, ktoré zatvorili nad denným VWAP">nad VWAP ${massive.above_vwap_pct}%</span>`);
   }
   for (const [key, label] of [['qqq', 'QQQ'], ['spy', 'SPY']]) {
     const t = m[key];

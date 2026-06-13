@@ -261,6 +261,9 @@ trhu vyššiu šancu na úspech než v klesajúcom.
 | **QQQ ↑ +3.1 %** | Trend Nasdaq-100 ETF (EMA10 vs EMA20 — rovnaká logika ako tier signálov) + výkon za 1 mesiac. | ↑ zelená = uptrend, DIP nákupy majú vietor v chrbte. → oranžová = bočný trh, pomalšie pohyby. ↓ červená = downtrend (cena pod EMA20), každý Buy je counter-trend voči indexu. |
 | **SPY ↑** | To isté pre S&P 500 — širší trh mimo tech. | Keď sa QQQ a SPY rozchádzajú (QQQ ↓, SPY ↑), problém je koncentrovaný v tech sektore — pozri chip sektorov. |
 | **Breadth 62 %** | Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 a pokrytie dát. | **≥ 60 %** zelená — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. **40–60 %** oranžová — selektívny trh, preferuj 4/4 a DIP crossover. **< 40 %** červená — väčšinu trhu nesie pár mega-capov. _Najcennejší je rozpor:_ QQQ ↑ ale Breadth < 50 % = krehká rally bez podpory priemerného titulu. |
+| **Pulse Bullish 68** | Denný Nasdaq-100 Market Pulse z Massive: kombinuje podiel rastúcich titulov, podiel nad VWAP a pomer rastúceho/klesajúceho objemu. | **≥ 62** Bullish, **42–62** Neutrálny, **< 42** Defenzívny. Je to EOD kontext posledného uzavretého dňa, nie obchodný signál. |
+| **A/D 64/35** | Počet rastúcich a klesajúcich titulov Nasdaq-100 za posledný uzavretý deň. | Ukazuje, či pohyb indexu podporuje väčšina titulov alebo len niekoľko veľkých spoločností. |
+| **nad VWAP 61 %** | Podiel Nasdaq-100 titulov, ktorých close skončil nad denným VWAP. | Nad 55 % je široká intradenná podpora, pod 45 % skôr predajný tlak. |
 | **VIX 18.3** | Implikovaná volatilita S&P 500 („index strachu"). | **< 15** pokoj (pozor na samoľúbosť), **15–20** normál, **20–30** zvýšený — nervozita, menšie pozície, **30+** stres — panika; historicky najlepšie dlhodobé vstupy, ale vstupuj postupne. |
 | **XLK +4.2 % · XLE −2.1 %** | Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11). | Kandidát z vedúceho sektora má prúd so sebou. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ. |
 | **◆ Goldilocks / Prehriatie / Risk-off / Útlm** | Súhrnný **režim trhu** ako kvadrant *trend × volatilita* z QQQ/SPY + VIX + breadth (nie inflačný Goldilocks). | **Goldilocks** (rast + pokoj) — ideálne pre DIP. **Prehriatie** (rast + VIX nervozita) — selektívne, menšie pozície. **Risk-off** (pokles + stres) — defenzíva. **Útlm** (pokles + pokoj) — opatrné hľadanie dna. Zhrnutie ostatných chipov do jedného slova; neovplyvňuje C1–C4. |
@@ -274,7 +277,10 @@ trhu vyššiu šancu na úspech než v klesajúcom.
 
 Dáta sa obnovujú raz za 6 hodín (server cache `_market_context.json`). Breadth
 sa pri prvom otvorení počíta na pozadí ~2 minúty — chip ukazuje „Breadth …"
-a doplní sa sám. Endpoint: `GET /api/market/context`.
+a doplní sa sám. Massive grouped snapshot sa sťahuje najviac raz za uzavretý
+obchodný deň a ukladá sa do `massive_market/YYYY-MM-DD.json`. Jeden request
+obsahuje celý americký trh; dashboard z neho vyberie Nasdaq-100. Endpoint:
+`GET /api/market/context`, samostatná kontrola `GET /api/market/massive`.
 
 ### Ovládanie
 
@@ -316,7 +322,12 @@ a doplní sa sám. Endpoint: `GET /api/market/context`.
 | **Date** | Dátum posledného signálu. |
 | **Sig** | Skóre signálu `x/4` (farba = tier buy/watch/counter). |
 | **Last** | Posledná cena. |
+| **Trh** | Massive EOD kontext titulu: denný pohyb, vzdialenosť close od VWAP a `Axx` = percentil počtu transakcií v rámci Nasdaq-100. |
 | **Reason** | Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8", „blízko EMA/Kijun zóny"). |
+
+Massive údaje sú zatiaľ iba **interpretačné**. Nevstupujú do C1–C4, DIP skóre,
+ML ani rozhodnutia Buy/Watch/Counter. Denné snapshoty sa priebežne archivujú,
+aby bolo možné neskôr overiť ich prínos na 30D/60D/90D výsledkoch.
 
 ### Správy a sentiment (📰)
 
