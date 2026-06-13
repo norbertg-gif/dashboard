@@ -85,7 +85,7 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
-1. **Predictive chart accuracy → 60%+ directional.** Walk-forward validation done (3 expanding-window folds, accuracy = fold mean). Still planned: ROC (4-week), 52-week high/low position feature.
+1. **Predictive chart accuracy → 60%+ directional.** Walk-forward validation done (3 expanding-window folds, accuracy = fold mean). ROC (4-period) + 52-week high/low position feature pridané do `ML_FEATURES` (`roc_4`, `pos_52w`; `pos_52w` = rolling(52, min_periods=20) high/low pozícia 0–1). ADX/DI features tiež znova živé po fixe duplicitných `calc_*`. Ďalej možné: medziregimové váženie, dlhší ROC (12-period kvartálny).
 2. **Regime-aware signal analytics.** In progress — user is adding regime context snapshot (HMM regime, confidence, weekly bias, ATR, C1–C4) to new signals. Next: Signal Analytics table per regime. Backfill historical signals via one-off script (download OHLCV per ticker, slice at signal date, recompute context — no look-ahead bias). Minimum ~20–30 evaluated signals per regime before adjusting scoring.
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.

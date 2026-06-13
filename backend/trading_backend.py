@@ -109,6 +109,13 @@ def add_indicators(df):
     df["range"] = (df["High"] - df["Low"]) / df["Close"]
     df["volatility"] = df["ret_1"].rolling(10).std()
     df["ema20_dist"] = (df["Close"] - df["ema20"]) / df["Close"]
+    # ROC (4-period momentum) + pozícia v 52-period high/low rozsahu (0=dno, 1=vrchol).
+    # Na weekly grafe = ~1 mesiac momentum a 1-ročný rozsah; min_periods drží feature
+    # živú aj na kratšej histórii (inak by dropna zožralo prvých 52 riadkov).
+    df["roc_4"] = df["Close"].pct_change(4)
+    _roll_max = df["High"].rolling(52, min_periods=20).max()
+    _roll_min = df["Low"].rolling(52, min_periods=20).min()
+    df["pos_52w"] = (df["Close"] - _roll_min) / (_roll_max - _roll_min).replace(0, np.nan)
     return df
 
 # ── ML confidence model ──────────────────────────────────────────────────────
@@ -191,7 +198,8 @@ def save_signals_log(log: dict):
     SIGNALS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
 
 ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
-               "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio"]
+               "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio",
+               "roc_4", "pos_52w"]
 
 def train_ml_model(df):
     """Walk-forward validácia: 3 expanding-window foldy namiesto jedného 70/30
