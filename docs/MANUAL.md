@@ -167,6 +167,13 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
   hlavný graf.
+- **Volume Profile** (checkbox v *Indikátory — overlay*, skupina Objem) —
+  horizontálny histogram pri pravom okraji ukazuje, **pri akých cenách** sa
+  zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = **POC**
+  (cena najväčšej zhody, pôsobí ako magnet); zhluky dlhých pruhov = supportné /
+  rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo
+  (LVN). Profil sa prepočítava podľa zoomu — priblíženie = voľba obdobia analýzy.
+  Stav prežíva reload (`localStorage`).
 
 ### Pravý panel (sidebar)
 
@@ -177,6 +184,20 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   - **Open / High / Low / Close** — predikované hodnoty.
   - **Composite signal** — agregovaný smerový signál.
   - **ML bull prob / ML accuracy** — pravdepodobnosť rastu a presnosť modelu.
+- **Najbližší Earnings** — dátum reportu z reťazca Finnhub bulk → Finnhub
+  per-symbol → Yahoo calendarEvents → yfinance. Keď žiadny zdroj nedodá termín,
+  karta to napíše namiesto tichého skrytia.
+- **Insider & EPS** — z Finnhubu (Yahoo quoteSummary ako fallback):
+  - **Insideri 90 d** — počet nákupov / predajov + čistá hodnota; hover zobrazí
+    jednotlivé obchody s menami a sumami. Počítajú sa len SEC Form 4 kódy
+    P (purchase) a S (sale); granty a exercise sa ignorujú.
+  - **EPS doručenie** — posledné 4 kvartály ako ✓/✗ chipy (hover = actual vs.
+    odhad a surprise %), plus beat-rate `(x/4)`.
+  - **Odhad Q** — konsenzus EPS na aktuálny kvartál (keď je dostupný).
+  - _Interpretácia:_ insider **nákupy** sú silný signál (zriedkavé, dobrovoľné),
+    najmä počas DIPu. **Predaje** sú u veľkých titulov často plánované (10b5-1
+    schémy) a samy o sebe nie sú medvedie — neber 40× predaj u mega-capu ako
+    varovanie. Séria EPS beatov = firma spoľahlivo doručuje. Karta je fail-soft.
 - **Technická vstupná zóna** — len technický odhad vstupu.
 - **Backtesting** — celková správnosť, priemerná chyba, porovnanie vs. default
   váhy.
