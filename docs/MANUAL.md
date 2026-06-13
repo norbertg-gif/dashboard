@@ -377,9 +377,8 @@ namiesto prázdneho alebo skrytého panelu.
 Karta **Firma & očakávania** v Prediktívnom tabe dopĺňa technický signál o
 stručný externý kontext:
 
-- **Analytici** — súčet odporúčaní Buy / Hold / Sell z najnovšieho obdobia.
-- **Cieľ** — priemerná cieľová cena v absolútnej hodnote, potenciál voči
-  aktuálnej cene a dostupné rozpätie najnižšieho až najvyššieho cieľa.
+- **Analytici** — súčet odporúčaní Buy / Hold / Sell z najnovšieho obdobia;
+  priemerná cieľová cena je uvedená priamo za konsenzom v zátvorke.
 - **Short interest** — percento voľne obchodovaných akcií predaných nakrátko:
   pod 5 % nízky, 5–10 % zvýšený, od 10 % vysoký.
 - Existujúce riadky **Insideri 90 d** a **EPS doručenie** zostávajú súčasťou
@@ -389,6 +388,12 @@ Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 a
 do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 30D/60D/90D výsledky.
 Vysoký short interest nie je automaticky bullish: môže zosilniť odraz, ale aj
 upozorňovať na fundamentálne riziko.
+
+V záložke **Portfólio** je v ponuke **Stĺpce** voliteľný stĺpec **Cieľ** iba
+pre akcie. Zobrazuje priemernú cieľovú cenu a pod ňou počty
+`Buy/Hold/Sell`. Zelená znamená prevahu Buy, červená prevahu Sell a žltá
+prevahu Hold alebo nerozhodný konsenzus. Údaje sa načítajú až po zapnutí
+stĺpca a rovnaký ticker sa sťahuje iba raz.
 
 ### Interpretácia sentiment hodnôt
 

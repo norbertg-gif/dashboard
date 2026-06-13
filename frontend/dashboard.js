@@ -1233,6 +1233,7 @@ const PORT_COLS = [
   { key:'units',       label:'Jednotky',     def:false, fmt:'num4'   },
   { key:'openRate',    label:'Vstup',        def:true,  fmt:'price'  },
   { key:'currentRate', label:'Aktuálna',     def:false, fmt:'price'  },
+  { key:'analystTarget',label:'Cieľ',         def:false, fmt:'analystTarget' },
   { key:'dailyPnl',    label:'Denný P/L',    def:true,  fmt:'pnl'    },
   { key:'pnl',         label:'P/L ($)',      def:true,  fmt:'pnl'    },
   { key:'pnlPct',      label:'P/L (%)',      def:true,  fmt:'pct'    },
@@ -1357,8 +1358,99 @@ async function loadPortData(pid) {
   renderPortPanel(pid);
 }
 
+const portfolioAnalystCache = new Map();
+const portfolioAnalystPending = new Map();
+
+function analystConsensusSummary(data) {
+  const consensus = data?.analyst_consensus;
+  const target = Number(data?.price_target?.mean);
+  if (!consensus && !Number.isFinite(target)) return null;
+  const buy = Number(consensus?.strong_buy || 0) + Number(consensus?.buy || 0);
+  const hold = Number(consensus?.hold || 0);
+  const sell = Number(consensus?.sell || 0) + Number(consensus?.strong_sell || 0);
+  return {
+    target: Number.isFinite(target) ? target : null,
+    buy, hold, sell,
+    cls: buy > hold && buy > sell ? 'positive'
+      : sell > buy && sell > hold ? 'negative'
+      : 'neutral',
+    updatedAt: data?.price_target?.updated_at || data?.fetched_at || null,
+  };
+}
+
+async function getPortfolioAnalystInfo(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return null;
+  if (portfolioAnalystCache.has(sym)) return portfolioAnalystCache.get(sym);
+  if (portfolioAnalystPending.has(sym)) return portfolioAnalystPending.get(sym);
+  const pending = fetch('/api/ticker/insights/' + encodeURIComponent(sym))
+    .then(async response => {
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.error ? null : analystConsensusSummary(data);
+    })
+    .catch(() => null)
+    .then(info => {
+      portfolioAnalystCache.set(sym, info);
+      portfolioAnalystPending.delete(sym);
+      return info;
+    });
+  portfolioAnalystPending.set(sym, pending);
+  return pending;
+}
+
+function applyPortfolioAnalystInfo(data, symbol, info) {
+  for (const position of (data?.positions || [])) {
+    if (String(position.symbol || '').toUpperCase() !== symbol) continue;
+    position.analystInfo = info;
+    position.analystTarget = info?.target ?? null;
+  }
+}
+
+function isPortfolioStock(position) {
+  const type = position?.type;
+  return !type || type === 'Stock' || type === 'Other';
+}
+
+async function ensurePortfolioAnalystTargets(pid) {
+  const state = getPortState(pid);
+  if (!state?.data?.positions || !state.colVisible.analystTarget) return;
+  const symbols = [...new Set(state.data.positions
+    .filter(isPortfolioStock)
+    .map(position => String(position.symbol || '').trim().toUpperCase())
+    .filter(Boolean))];
+  const queue = symbols.filter(symbol =>
+    !state.data.positions.some(position =>
+      String(position.symbol || '').toUpperCase() === symbol &&
+      Object.prototype.hasOwnProperty.call(position, 'analystInfo')));
+  if (!queue.length) return;
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const symbol = queue[cursor++];
+      const info = await getPortfolioAnalystInfo(symbol);
+      if (getPortState(pid).data !== state.data) return;
+      applyPortfolioAnalystInfo(state.data, symbol, info);
+      document.querySelectorAll(`[data-port-analyst="${pid}-${symbol}"]`).forEach(cell => {
+        cell.innerHTML = fmtPortVal(info, 'analystTarget');
+      });
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+
 function fmtPortVal(val, fmt) {
   if (val == null || val === '') return '<span style="color:var(--muted)">—</span>';
+  if (fmt === 'analystTarget') {
+    if (!val || typeof val !== 'object') return '<span style="color:var(--muted)">—</span>';
+    const target = Number(val.target);
+    const targetText = Number.isFinite(target) ? fmtPrice(target) : 'N/A';
+    const title = `Buy / Hold / Sell: ${val.buy}/${val.hold}/${val.sell}${val.updatedAt ? ` · ${val.updatedAt}` : ''}`;
+    return `<div class="port-analyst-target ${val.cls || 'neutral'}" title="${escHtml(title)}">
+      <strong>${targetText}</strong><span>${val.buy}/${val.hold}/${val.sell}</span>
+    </div>`;
+  }
   const n = parseFloat(val);
   switch(fmt) {
     case 'sym':   return ''; // handled separately
@@ -1743,6 +1835,13 @@ function renderPortPanel(pid) {
           </div></td>`;
         } else if (col.key === 'trade') {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
+        } else if (col.key === 'analystTarget') {
+          const isStock = isPortfolioStock(row);
+          const info = isStock ? row.analystInfo : null;
+          const pending = isStock && !Object.prototype.hasOwnProperty.call(row, 'analystInfo');
+          html += `<td class="r" data-port-analyst="${pid}-${sym}">${pending
+            ? '<span class="port-analyst-loading">…</span>'
+            : fmtPortVal(info, 'analystTarget')}</td>`;
         } else {
           const liveCols = ['currentRate','dailyPnl','pnl','pnlPct'];
           const liveRowKey = s.view === 'ticker' ? `${pid}-${sym}` : `${pid}-${row.positionId || sym}`;
@@ -1820,6 +1919,7 @@ function renderPortPanel(pid) {
 
   html += `</div>`;
   cont.innerHTML = html;
+  if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);
 }
 
 // Portfolio akcie
@@ -7244,27 +7344,18 @@ async function pc_loadInsights(ticker) {
         <span class="val">$${d.eps_next.avg}${d.eps_next.analysts ? ` <span style="color:var(--muted)">(${d.eps_next.analysts} analytikov)</span>` : ''}</span></div>`);
     }
     const ac = d.analyst_consensus;
+    const pt = d.price_target;
     if (ac) {
       const buy = Number(ac.strong_buy || 0) + Number(ac.buy || 0);
       const hold = Number(ac.hold || 0);
       const sell = Number(ac.sell || 0) + Number(ac.strong_sell || 0);
+      const target = Number(pt?.mean);
+      const targetText = Number.isFinite(target)
+        ? ` <span style="color:var(--muted)">(${fmtPrice(target)} cieľ)</span>`
+        : '';
       rows.push(`<div class="pred-row" title="Najnovší dostupný analytický konsenzus${ac.period ? ` za ${escHtml(ac.period)}` : ''}. Kontext, nie súčasť C1–C4 ani ML.">
         <span class="key">Analytici</span>
-        <span class="val"><span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span></span></div>`);
-    }
-    const pt = d.price_target;
-    if (pt && Number.isFinite(Number(pt.mean))) {
-      const target = Number(pt.mean);
-      const current = Number(pt.current) ||
-        Number(pc_lastData?.daily_candles?.at(-1)?.close) ||
-        Number(pc_lastData?.candles?.at(-1)?.close);
-      const potential = Number.isFinite(current) && current > 0 ? (target / current - 1) * 100 : null;
-      const range = Number.isFinite(Number(pt.low)) && Number.isFinite(Number(pt.high))
-        ? ` · ${fmtPrice(Number(pt.low))}–${fmtPrice(Number(pt.high))}` : '';
-      const potTxt = potential == null ? '' :
-        ` · <span style="color:${potential >= 0 ? 'var(--up)' : 'var(--down)'}">${potential >= 0 ? '+' : ''}${potential.toFixed(1)} %</span>`;
-      rows.push(`<div class="pred-row" title="Konsenzuálna cieľová cena analytikov${pt.updated_at ? `, aktualizované ${escHtml(String(pt.updated_at))}` : ''}. Rozpätie = najnižší až najvyšší cieľ.">
-        <span class="key">Cieľ</span><span class="val">${fmtPrice(target)}${potTxt}<span style="color:var(--muted)">${range}</span></span></div>`);
+        <span class="val"><span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span>${targetText}</span></div>`);
     }
     const si = d.short_interest;
     if (si && Number.isFinite(Number(si.percent_float))) {

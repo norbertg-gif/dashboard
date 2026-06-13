@@ -206,9 +206,14 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - **Earnings reťazec** (`_earnings_next_date`): bulk Finnhub → Finnhub `?symbol=` → **Yahoo calendarEvents raw** → yfinance `.calendar`. Yahoo čísla sú `{raw, fmt}` objekty — vždy cez `_yraw()`.
 - **Frontend:** karta `#insightsCard` v Predictive sidebar
   (`pc_loadInsights`) má názov **Firma & očakávania**: insider 90d, EPS
-  beat/miss, Buy/Hold/Sell, priemerný target v hodnote + potenciál % + low/high
-  range a short interest klasifikovaný ako nízky / zvýšený / vysoký.
+  beat/miss, Buy/Hold/Sell s priemerným targetom v zátvorke a short interest
+  klasifikovaný ako nízky / zvýšený / vysoký.
   Tieto polia sú interpretačné a NEVSTUPUJÚ do C1–C4 ani ML.
+- **Portfolio target column:** `PORT_COLS.analystTarget`, default hidden and
+  stocks-only. Lazy-loads `/api/ticker/insights/{symbol}` only when visible,
+  deduplicates requests across accounts/trades with `portfolioAnalystCache`,
+  and renders target + Buy/Hold/Sell counts. Color is green only when Buy is
+  the largest bucket, red when Sell is largest, otherwise yellow.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Virtual trading bot — key architecture
