@@ -5713,14 +5713,22 @@ function pc_renderDailyExtra(data) {
     `<button class="signal-segment-horizon${pc_signalSegmentHorizon === horizon ? ' active' : ''}"
       onclick="setSignalSegmentHorizon(${horizon})">${horizon}D</button>`
   ).join('');
-  const segmentTable = group => `
+  const segmentTitle = { tier: 'Podľa rozhodnutia', score: 'Podľa sily', regime: 'Podľa režimu trhu' };
+  const segmentTable = group => {
+    // Skry režimovú tabuľku, kým nie sú žiadne dáta (kontext ešte nebackfillnutý)
+    if (group === 'regime') {
+      const rows = outcomeSegments.regime?.[String(pc_signalSegmentHorizon)] || [];
+      if (!rows.some(r => (Number(r.total) || 0) > 0)) return '';
+    }
+    return `
     <div class="signal-segment-table">
-      <div class="signal-segment-title">${group === 'tier' ? 'Podľa rozhodnutia' : 'Podľa sily'}</div>
+      <div class="signal-segment-title">${segmentTitle[group] || group}</div>
       <div class="signal-segment-row header">
         <span>Segment</span><span>N</span><span>Win</span><span>Medián</span><span>MFE</span><span>MAE</span>
       </div>
       ${segmentRows(group, pc_signalSegmentHorizon)}
     </div>`;
+  };
   const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
     const col = s.outcome === 'win'  ? '#26a69a'
              : s.outcome === 'loss' ? '#ef5350'
@@ -5822,6 +5830,7 @@ function pc_renderDailyExtra(data) {
         <div class="signal-segment-tables">
           ${segmentTable('tier')}
           ${segmentTable('score')}
+          ${segmentTable('regime')}
         </div>
         <div class="signal-outcome-note">N = počet vyhodnotených signálov. Vzorka pod 5 je označená ako predbežná.</div>
       </details>

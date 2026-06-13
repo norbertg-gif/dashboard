@@ -3256,6 +3256,13 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                             "close": sig["close"],
                         })
                 daily_buy_signals.sort(key=lambda x: x["time"])
+                # Pripoj regime label z uloženého kontextu (pre per-regime analytiku)
+                for _s in daily_buy_signals:
+                    _dk = str(pd.Timestamp(int(_s["time"]), unit="s").date())
+                    _ctx = (ticker_slog.get(_dk) or {}).get("context") or {}
+                    _reg = (_ctx.get("regime") or {}).get("label")
+                    if _reg:
+                        _s["regime"] = _reg
                 daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
                     df_d, daily_buy_signals
                 )
@@ -3910,6 +3917,14 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
         "score": [
             (str(score), f"{score}/4", [signal for signal in enriched if int(signal.get("score", 0)) == score])
             for score in (2, 3, 4)
+        ],
+        # Per-regime — vyžaduje backfillnutý kontext (context.regime.label) na signáloch.
+        # Bez kontextu zostane skupina prázdna (degraduje pôvabne).
+        "regime": [
+            ("bull", "Bull", [s for s in enriched if s.get("regime") == "bull"]),
+            ("sideways", "Sideways", [s for s in enriched if s.get("regime") == "sideways"]),
+            ("bear", "Bear", [s for s in enriched if s.get("regime") == "bear"]),
+            ("high_volatility", "Vysoká vol.", [s for s in enriched if s.get("regime") == "high_volatility"]),
         ],
     }
     segments = {}

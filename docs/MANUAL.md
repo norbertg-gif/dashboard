@@ -142,8 +142,12 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   medián, MFE (maximálny rast) a MAE (maximálny pokles). Táto vrstva zatiaľ
   nemení skóre ani generovanie signálov.
 - **Signal Analytics** — výsledky možno prepínať medzi 30D/60D/90D a porovnať
-  podľa tieru (Buy/Watch/Counter) alebo sily signálu (2/4, 3/4, 4/4). Vzorka
+  podľa tieru (Buy/Watch/Counter), sily signálu (2/4, 3/4, 4/4) a **režimu trhu**
+  (Bull/Sideways/Bear/Vysoká vol. — z HMM kontextu uloženého pri signále). Vzorka
   menšia než päť vyhodnotených signálov je vizuálne označená ako predbežná.
+  Režimová tabuľka sa zobrazí až keď signály majú vyplnený kontext (nové signály
+  ho majú automaticky; staré sa doplnia jednorazovým backfillom — viď technická
+  príloha).
 - **Kontext nových signálov** — od verzie kontextu 1 sa pri novom signále na
   najnovšej uzavretej sviečke uloží HMM režim a celý posterior vektor, 5D/20D
   momentum, 20D volatilita, ATR %, vzdialenosť od 52-týždňového maxima, weekly
