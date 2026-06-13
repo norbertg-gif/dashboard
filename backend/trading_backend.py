@@ -3192,6 +3192,11 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                 today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
                 latest_closed_date = latest_closed_daily_date(df_d)
                 df_score   = df_d.iloc[-90:].reset_index()
+                # Auto-kontext budget: max HMM fitov navyše na jedno načítanie grafu
+                # (okrem poslednej sviečky, ktorá ho dostane vždy). Drží /api/chart
+                # svižné a zároveň postupne dopĺňa kontext do starých signálov pri
+                # bežnom prezeraní — manuálny backfill tak nie je nutný.
+                _ctx_budget = 4
 
                 for i in range(5, len(df_score)):
                     row      = df_score.iloc[i]
@@ -3207,18 +3212,25 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                         tier = signal_tier(sc, details["trend"])
                         # Save to log if not already there
                         if date_key not in ticker_slog:
-                            entry = {
+                            ticker_slog[date_key] = {
                                 "score":   sc,
                                 "tier":    tier,
                                 "close":   round(float(row["Close"]), 2),
                                 "details": details,
                                 "rules_version": SIGNAL_RULES_VERSION,
                             }
-                            if latest_closed_date is not None and row_date.normalize() == latest_closed_date:
-                                entry["context"] = build_signal_context(
-                                    df_d, row_date, details, zscore, weekly_bullish
-                                )
-                            ticker_slog[date_key] = entry
+                        # Auto-kontext: dopočítaj chýbajúci kontext (nový aj starý
+                        # záznam). Posledná uzavretá sviečka vždy; staršie do vyčerpania
+                        # rozpočtu. Žiadny look-ahead — build_signal_context si dáta oreže.
+                        entry = ticker_slog[date_key]
+                        if not entry.get("context"):
+                            is_latest = latest_closed_date is not None and row_date.normalize() == latest_closed_date
+                            if is_latest or _ctx_budget > 0:
+                                ctx = build_signal_context(df_d, row_date, details, zscore, weekly_bullish)
+                                if ctx:
+                                    entry["context"] = ctx
+                                    if not is_latest:
+                                        _ctx_budget -= 1
                         # Always include in chart signals (from log if exists)
                         saved = ticker_slog.get(date_key, {})
                         daily_buy_signals.append({
