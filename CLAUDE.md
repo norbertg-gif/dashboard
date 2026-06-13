@@ -220,6 +220,10 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   `portColWidth()` (`saved width -> PORT_DEFAULT_WIDTHS`). The table width is
   the exact sum of visible columns, so resizing one column never stretches the
   last column; unused viewport space remains empty on the right.
+- **Massive diagnostics:** `GET /api/diagnostics/massive` probes the Render-only
+  `MASSIVE_API_KEY` against daily bars, previous-day aggregates, the grouped
+  U.S. daily market snapshot, and ticker reference data. It returns capability
+  metadata only and never includes the key or raw request URL.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Virtual trading bot — key architecture

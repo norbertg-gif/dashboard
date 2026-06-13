@@ -6336,6 +6336,88 @@ def health():
         "render": bool(os.getenv("RENDER")),
     }
 
+
+def _previous_weekday_utc() -> str:
+    day = datetime.now(timezone.utc).date() - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
+@app.get("/api/diagnostics/massive")
+def massive_diagnostics(
+    symbol: str = Query("AAPL", min_length=1, max_length=12),
+    date: str | None = Query(None),
+):
+    """Probe Massive free-plan capabilities without exposing or persisting its key."""
+    api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="MASSIVE_API_KEY is not configured")
+
+    sym = re.sub(r"[^A-Za-z0-9.\-]", "", symbol.upper())
+    if not sym:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    probe_date = date or _previous_weekday_utc()
+    try:
+        datetime.strptime(probe_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date must use YYYY-MM-DD")
+
+    base = "https://api.massive.com"
+    probes = {
+        "daily_bars": f"/v2/aggs/ticker/{sym}/range/1/day/{probe_date}/{probe_date}",
+        "previous_day": f"/v2/aggs/ticker/{sym}/prev",
+        "daily_market": f"/v2/aggs/grouped/locale/us/market/stocks/{probe_date}",
+        "ticker_details": f"/v3/reference/tickers/{sym}",
+    }
+
+    results = {}
+    for name, path in probes.items():
+        try:
+            response = requests.get(
+                base + path,
+                params={"adjusted": "true", "apiKey": api_key},
+                timeout=20,
+            )
+            payload = response.json() if response.content else {}
+            rows = payload.get("results")
+            if isinstance(rows, list):
+                sample = rows[0] if rows else None
+                count = len(rows)
+            elif isinstance(rows, dict):
+                sample = rows
+                count = 1
+            else:
+                sample = None
+                count = int(payload.get("resultsCount") or 0)
+            results[name] = {
+                "ok": response.ok and payload.get("status") not in ("ERROR", "NOT_AUTHORIZED"),
+                "http_status": response.status_code,
+                "status": payload.get("status"),
+                "count": count,
+                "sample_fields": sorted(sample.keys()) if isinstance(sample, dict) else [],
+                "message": payload.get("error") or payload.get("message"),
+            }
+        except Exception as exc:
+            # Do not return request URLs because requests may include apiKey in them.
+            results[name] = {
+                "ok": False,
+                "http_status": None,
+                "status": "exception",
+                "count": 0,
+                "sample_fields": [],
+                "message": type(exc).__name__,
+            }
+
+    return {
+        "provider": "massive",
+        "symbol": sym,
+        "date": probe_date,
+        "configured": True,
+        "probes": results,
+    }
+
+
 @app.get("/")
 def root():
     from fastapi.responses import FileResponse

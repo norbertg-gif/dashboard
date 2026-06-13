@@ -603,6 +603,13 @@ jazykom.
 
 ## 10. Technická príloha
 
+### Massive API diagnostika
+
+Po nastavení `MASSIVE_API_KEY` v Render environment možno dostupnosť free plánu
+overiť cez `/api/diagnostics/massive`. Endpoint iba testuje daily agregáty,
+hromadný denný market snapshot a referenčné dáta. Kľúč sa nevracia do odpovede
+ani sa neukladá do repozitára.
+
 > Pre údržbu. Detailné pravidlá a pasce sú v `CLAUDE.md` v repozitári.
 
 ### Stack
