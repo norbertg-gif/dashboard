@@ -1,5 +1,15 @@
 # Session Handoff — 2026-06-11 (večer)
 
+## Doplnené 2026-06-13 — kompletný používateľský manuál
+
+- `frontend/help.html` bol rozšírený na praktickú príručku pre menej skúseného
+  tradera: odporúčaný workflow, bežné grafy, Portfólio/História/Risk, samostatný
+  Investičný Verdikt, MFE/MAE, HMM High Vol a obmedzenia Volume Profile.
+- Doplnené sú aj vysvetlenia analytických cieľov, live odhadov P/L, Massive
+  EOD vrstvy a troubleshooting po deployi.
+- `docs/MANUAL.md` je zosúladený s používateľskou časťou HTML manuálu.
+- Technická príloha už uvádza Python 3.14 a Lightweight Charts 5.2.0.
+
 ## Stav po tejto session
 
 Posledný commit na `main`: pozri `git log` — session končila webhook testom (tento docs commit).

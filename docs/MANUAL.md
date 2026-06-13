@@ -14,6 +14,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 1. [Prihlásenie a prístup](#1-prihlásenie-a-prístup)
 2. [Horná lišta](#2-horná-lišta)
 3. [Záložky](#3-záložky)
+   - [Odporúčaný pracovný postup](#odporúčaný-pracovný-postup)
+   - [Bežné grafy](#bežné-grafy)
+   - [Portfólio, História a Risk](#portfólio-história-a-risk)
 4. [Prediktívny tab — ako čítať signály](#4-prediktívny-tab--ako-čítať-signály)
 5. [Scanner + DIP stratégia](#5-scanner--dip-stratégia)
 6. [Virtuálny obchodný bot](#6-virtuálny-obchodný-bot)
@@ -83,6 +86,45 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa na
   10 minút cachuje v prehliadači.
 
+### Odporúčaný pracovný postup
+
+1. V **Scanneri** skontroluj stav trhu a nájdi Buy/Watch kandidátov.
+2. V **Predikcii** otvor konkrétny ticker a pozri C1–C4, trend, weekly bias,
+   earnings, správy a firemné očakávania.
+3. Vo **Verdikte** si nechaj dôkazy zhrnúť do ÁNO / POČKAŤ / NIE.
+4. Ak titul už vlastníš, v **Portfóliu** skontroluj P/L, denný pohyb,
+   koncentráciu a cieľ analytikov.
+5. Rozhodnutie rob až po kontrole rizika a veľkosti pozície. Dashboard je
+   rozhodovacia pomôcka, nie automatické investičné odporúčanie.
+
+### Bežné grafy
+
+- Každý panel má ticker, timeframe, refresh, Heikin-Ashi, eToro Trade odkaz,
+  indikátory a správy. Stav panelov, timeframe a viditeľný rozsah sa ukladajú.
+- **EMA** ukazuje krátkodobý/strednodobý trend, **Ichimoku** trend a zóny,
+  **RSI** prekúpenosť/prepredanosť, **ADX** silu trendu a **MACD** momentum.
+- **Volume Profile** ukazuje objem podľa ceny za práve viditeľný úsek:
+  POC je najobchodovanejšia cena, HVN sú husté zóny a LVN riedke zóny.
+  Z denných OHLCV dát nemožno spoľahlivo rozdeliť profil na Buy/Sell volume;
+  na to sú potrebné jednotlivé obchody a bid/ask klasifikácia.
+- Live cena upravuje poslednú sviečku. Uzavreté sviečky sa používajú z cache,
+  aby sa graf zobrazil rýchlo a zbytočne sa nesťahovala celá história.
+
+### Portfólio, História a Risk
+
+- **Cash** je voľná hotovosť, **Invested** vložený kapitál, **P/L** otvorený
+  zisk/strata, **Dnes P/L** odhad dnešného pohybu a **Equity** približná hodnota
+  účtu. P/L a Equity sa medzi eToro snapshotmi prepočítavajú z live cien.
+- Account 1/2, typ aktíva a Per ticker/Per trade menia pohľad, nie samotné
+  eToro dáta. Per ticker agreguje viac obchodov; Per trade ich rozbalí.
+- Stĺpce možno zapínať, radiť a nezávisle meniť ich šírku. Nastavenie sa uloží.
+  Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
+- **História** je záznam uzavretých obchodov. **Risk** ukazuje koncentráciu,
+  najväčšie pozície, rizikové príznaky a heatmapu: veľkosť = podiel na equity,
+  farba = denný P/L, doplnkový údaj = celkový P/L.
+- Malé rozdiely oproti eToro sú možné kvôli spreadu, konverzii meny, poplatkom
+  a zaokrúhleniu.
+
 ### Ovládanie grafov a markerov
 
 - V záložke **Grafy** aj **Prediktívny** používa crosshair režim
@@ -141,6 +183,8 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   po 30, 60 a 90 obchodných sviečkach. Zobrazuje výnos, win rate, priemer,
   medián, MFE (maximálny rast) a MAE (maximálny pokles). Táto vrstva zatiaľ
   nemení skóre ani generovanie signálov.
+- **MFE** je najväčší priebežný zisk počas horizontu; **MAE** je najväčší
+  priebežný pokles. Ukazujú kvalitu cesty, nie iba konečný výsledok.
 - **Signal Analytics** — výsledky možno prepínať medzi 30D/60D/90D a porovnať
   podľa tieru (Buy/Watch/Counter), sily signálu (2/4, 3/4, 4/4) a **režimu trhu**
   (Bull/Sideways/Bear/Vysoká vol. — z HMM kontextu uloženého pri signále). Vzorka
@@ -185,6 +229,8 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   - **Smer** — BULLISH / BEARISH + očakávaná % zmena.
   - **Regime** — režim trhu z HMM modelu (Bull / Bear / Sideways / High
     volatility) + miera istoty. Je to **diagnostika**, nezasahuje do ML predikcie.
+    High volatility neurčuje smer: upozorňuje na veľké pohyby oboma smermi.
+    Hodnota 100 % je istota klasifikácie režimu, nie istota zisku.
   - **Open / High / Low / Close** — predikované hodnoty.
   - **Composite signal** — agregovaný smerový signál.
   - **ML bull prob / ML accuracy** — pravdepodobnosť rastu a presnosť modelu.
@@ -401,6 +447,10 @@ stručný externý kontext:
 - Existujúce riadky **Insideri 90 d** a **EPS doručenie** zostávajú súčasťou
   tej istej karty.
 
+Priemerný analytický cieľ nie je garantovaná budúca cena. Je to konsenzus,
+ktorý môže byť starý alebo sa po výsledkoch prudko zmeniť. Čítaj ho spolu
+s počtom Buy/Hold/Sell, aktuálnou cenou a termínom earnings.
+
 Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 ani
 do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 30D/60D/90D výsledky.
 Vysoký short interest nie je automaticky bullish: môže zosilniť odraz, ale aj
@@ -411,6 +461,16 @@ pre akcie. Zobrazuje priemernú cieľovú cenu a pod ňou počty
 `Buy/Hold/Sell`. Zelená znamená prevahu Buy, červená prevahu Sell a žltá
 prevahu Hold alebo nerozhodný konsenzus. Údaje sa načítajú až po zapnutí
 stĺpca a rovnaký ticker sa sťahuje iba raz.
+
+### Ako používať Investičný Verdikt
+
+- **ÁNO** znamená, že dostupné technické a kontextové dôkazy sa podporujú.
+- **POČKAŤ** znamená, že setup potrebuje potvrdenie alebo odstránenie rizika.
+- **NIE** znamená nevstupovať teraz; nie hodnotenie dlhodobej kvality firmy.
+- Verdikt ukáže najviac dva argumenty pre, dva proti a jednu podmienku zmeny.
+- Technika / Trh / Firma / Earnings sú indikátory dostupnosti zdrojov.
+  Chýbajúci zdroj znižuje istotu, ale automaticky nevytvára negatívny verdikt.
+- Verdikt je transparentný preklad existujúcich dát, nie ďalší black-box model.
 
 ### Interpretácia sentiment hodnôt
 
@@ -627,15 +687,15 @@ ani sa neukladá do repozitára.
 
 ### Stack
 
-- **Backend:** FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn,
+- **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn,
   yfinance, hmmlearn.
 - **eToro proxy:** stdlib HTTPServer na `localhost:8765`, štartuje ako background
   thread z `trading_backend.py` (nie samostatný proces v produkcii).
-- **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS na XLSX
+- **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 5.2.0, SheetJS na XLSX
   import — bez build kroku.
-- **Storage:** `/data` (Render disk) — `presets.json`, `trade_journal.json`,
-  `predictive_signals_log.json`, `predictive_weights_log.json`,
-  `bot_portfolio.json`, `cache/{ohlcv,portfolio,instruments}`.
+- **Storage:** `/data` (Render disk) — presety, watchlist, signal/weights logy,
+  bot, DIP dáta a cache pre OHLCV, portfólio, správy, insights a Massive
+  market snapshoty.
 
 ### Rozloženie
 
@@ -669,6 +729,7 @@ render.yaml            # web service + 1GB disk na /data
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
 | `ALPHA_VANTAGE_API_KEY` | News sentiment v scanneri (free tier: 25 req/deň). |
+| `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. |
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
 | `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |

@@ -59,8 +59,12 @@
       <li><a href="#login">Prihlásenie a prístup</a></li>
       <li><a href="#topbar">Horná lišta</a></li>
       <li><a href="#tabs">Záložky</a></li>
+      <li><a href="#workflow">Odporúčaný pracovný postup</a></li>
+      <li><a href="#charts">Grafy</a></li>
+      <li><a href="#portfolio">Portfólio, História a Risk</a></li>
       <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
+      <li><a href="#verdict">Investičný verdikt</a></li>
       <li><a href="#bot">Virtuálny obchodný bot</a></li>
       <li><a href="#philosophy">Filozofia signálov</a></li>
       <li><a href="#presets">Presety, watchlist, eToro</a></li>
@@ -111,6 +115,81 @@
     <li>eToro detail obsahuje účet, BUY/SELL, páku, vstupnú cenu, dátum a P/L. Signál ukazuje tier, silu, počet signálov v týždni a dátum.</li>
   </ul>
 
+  <h2 id="workflow">Odporúčaný pracovný postup</h2>
+  <ol>
+    <li><strong>Scanner:</strong> pozri najprv lištu TRH. Porovnaj NDX a SPX Pulse, Breadth a VIX. Tým zistíš, či trh kandidátom pomáha alebo ideš proti prúdu.</li>
+    <li><strong>Kandidáti:</strong> vyber Buy/Watch titul s rozumnou silou a DIP kvalitou. Stĺpec Trh ti povie, či titul v posledný deň rástol, kde zatvoril voči VWAP a aká bola jeho relatívna obchodná aktivita.</li>
+    <li><strong>Prediktívny:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 30D/60D/90D validáciu, earnings a firemný kontext.</li>
+    <li><strong>Verdikt:</strong> použi ho ako záverečné zhrnutie, nie ako náhradu vlastného rozhodnutia. Rozklikni dôkazy, ak záver nie je jasný.</li>
+    <li><strong>Portfólio a Risk:</strong> pred vstupom over koncentráciu, veľkosť existujúcej pozície a či už nemáš priveľa kapitálu v rovnakom type aktív.</li>
+  </ol>
+  <blockquote><p>Dashboard nehľadá istotu. Skladá nezávislé dôkazy: technický setup, trend, širší trh, história podobných signálov a firemné riziká. Jeden zelený údaj nikdy nie je dostatočný dôvod na nákup.</p></blockquote>
+
+  <h2 id="charts">Grafy — bežná technická analýza</h2>
+  <h3>Panel grafu</h3>
+  <ul>
+    <li><strong>Ticker</strong> možno zmeniť priamo v paneli alebo klikom na watchlist/eToro pozíciu. Aktívny panel má zvýraznený okraj.</li>
+    <li><strong>Timeframe</strong> je nezávislý od obdobia: vyberieš napríklad 15 min, 30 min, 4 h alebo 1 d a backend načíta primerané množstvo sviečok.</li>
+    <li><strong>Refresh</strong> zachová uzavreté sviečky z cache a obnoví najmä poslednú rozpracovanú sviečku.</li>
+    <li>Zoom, viditeľný rozsah, timeframe a stav panelu sa ukladajú, aby sa graf po návrate otvoril podobne ako naposledy.</li>
+    <li><strong>HA</strong> prepína Heikin-Ashi zobrazenie. Je vizuálne hladšie, ale jeho ceny nie sú skutočné obchodné OHLC hodnoty.</li>
+    <li><strong>Trade</strong> otvorí stránku titulu na eToro; nejde o automatické zadanie pokynu.</li>
+  </ul>
+
+  <h3>Indikátory a overlay</h3>
+  <table>
+    <tr><th>Prvok</th><th>Praktický význam</th><th>Pozor</th></tr>
+    <tr><td><strong>EMA</strong></td><td>Kĺzavé priemery pomáhajú čítať krátky a stredný trend. Hover legenda určí, ktorá farba patrí ku ktorej EMA.</td><td>Kríženie EMA reaguje oneskorene; nie je samostatný vstup.</td></tr>
+    <tr><td><strong>Ichimoku</strong></td><td>Kumo, Tenkan a Kijun ukazujú trend, dynamickú podporu/rezistenciu a rovnováhu ceny.</td><td>Cloud nie je cenová predpoveď, ale zóna kontextu.</td></tr>
+    <tr><td><strong>RSI / ADX / MACD</strong></td><td>RSI meria momentum, ADX silu trendu a MACD zmenu momenta.</td><td>Prekúpené neznamená automaticky predávať a prepredané automaticky kupovať.</td></tr>
+    <tr><td><strong>Wizard</strong></td><td>Zobrazí súhrn technických indikátorov a patternov pre rýchlu orientáciu.</td><td>Je to vysvetľujúca vrstva, nie samostatný obchodný systém.</td></tr>
+    <tr><td><strong>News</strong></td><td>Otvorí správy k tickeru.</td><td>Titulok môže byť zavádzajúci; čítaj zdroj a dátum.</td></tr>
+  </table>
+
+  <h3>Volume Profile</h3>
+  <p>Horizontálne pruhy pri pravej cenovej osi ukazujú, koľko objemu sa zobchodovalo v jednotlivých cenových pásmach viditeľného grafu.</p>
+  <ul>
+    <li><strong>POC</strong> — najdlhší pruh, cena s najväčším objemom.</li>
+    <li><strong>HVN</strong> — širšie zhluky objemu; trh tam cenu dlhšie akceptoval.</li>
+    <li><strong>LVN</strong> — tenké oblasti; cena cez ne často prechádza rýchlejšie.</li>
+    <li>Profil sa mení so zoomom, pretože analyzuje práve viditeľné sviečky.</li>
+  </ul>
+  <blockquote><p>Profil z našich OHLCV dát nevie presne rozdeliť objem na Buy a Sell. Modrý pruh je celkový zobchodovaný objem. Skutočná order-flow delta by potrebovala tickové obchody synchronizované s bid/ask dátami, ktoré free zdroje neposkytujú.</p></blockquote>
+
+  <h2 id="portfolio">Portfólio, História a Risk</h2>
+  <h3>Portfólio — summary</h3>
+  <table>
+    <tr><th>Údaj</th><th>Čo znamená</th></tr>
+    <tr><td><strong>Cash</strong></td><td>Voľná hotovosť hlásená účtom.</td></tr>
+    <tr><td><strong>Invested</strong></td><td>Kapitál viazaný v priamych pozíciách a podporovaných portfóliových položkách.</td></tr>
+    <tr><td><strong>P/L</strong></td><td>Odhad aktuálneho celkového zisku/straty. Medzi eToro snapshotmi sa prepočítava z live cien.</td></tr>
+    <tr><td><strong>Dnes P/L</strong></td><td>Odhad dnešného pohybu priamych pozícií oproti predchádzajúcemu close. Smart/Copy nemusí byť zahrnuté úplne.</td></tr>
+    <tr><td><strong>Equity</strong></td><td>Cash + investovaný kapitál + P/L. Live prepočet je veľmi blízky eToro, ale nemusí sedieť na cent kvôli poplatkom, FX, Smart/Copy a času snapshotu.</td></tr>
+  </table>
+
+  <h3>Portfólio — tabuľka a ovládanie</h3>
+  <ul>
+    <li><strong>Account 1 / Account 2</strong> prepína účet. Filtre Akcie, ETF, Krypto, Forex a Smart/Copy obmedzia zobrazenie.</li>
+    <li><strong>Per ticker</strong> zlúči všetky obchody rovnakého titulu. Klik na ticker otvorí jeho jednotlivé pozície. <strong>Per trade</strong> ukáže každý obchod osobitne.</li>
+    <li>Klik na názov hlavičky zoradí tabuľku; šípka ukazuje smer radenia.</li>
+    <li><strong>Stĺpce</strong> menia viditeľnosť aj poradie. Každý stĺpec má samostatnú šírku; voľný priestor môže zostať napravo a široká tabuľka sa posúva horizontálne.</li>
+    <li><strong>💾</strong> uloží konfiguráciu stĺpcov na server, aby bola dostupná aj na inom PC. CSV exportuje aktuálny pohľad.</li>
+    <li><strong>Cieľ</strong> je voliteľný iba pre akcie: priemerná cieľová cena a počty Buy/Hold/Sell. Zelená znamená prevahu Buy, červená Sell a žltá Hold/remízu. Cieľ analytikov nie je garantovaná budúca cena.</li>
+    <li><strong>Trade</strong> je samostatný schovateľný stĺpec s odkazom na eToro.</li>
+  </ul>
+
+  <h3>História</h3>
+  <p>Zobrazuje uzavreté obchody z eToro. Stĺpce možno radiť; P/L je realizovaný výsledok, nie aktuálny odhad. Dátum otvorenia a zatvorenia pomáha spätne porovnať obchod so signálmi a stavom trhu.</p>
+
+  <h3>Risk</h3>
+  <ul>
+    <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>
+    <li><strong>Risk flags</strong> upozorňujú na nadmerné váhy alebo inú koncentráciu. Sú varovaním na kontrolu, nie automatickým pokynom predať.</li>
+    <li><strong>Podľa typu</strong> rozdeľuje kapitál medzi akcie, ETF, krypto a ďalšie typy.</li>
+    <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
+    <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
+  </ul>
+
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
 
   <h3>Glosár a vizuálna priorita</h3>
@@ -149,7 +228,7 @@
     <li><strong>eToro kolieska</strong> — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa malé krúžky pod sviečkou, kde bola pozícia otvorená (zelená = v zisku, červená = v strate, odlíšené podľa účtu). Hover nad eToro kolieskom alebo buy šípkou zobrazí presný detail cez natívny LWC hit-testing.</li>
     <li>Crosshair používa režim <strong>MagnetOHLC</strong> a prichytáva sa k najbližšej OHLC hodnote sviečky.</li>
     <li>Spodný <strong>Prediktívny chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1), ukazuje predikciu ďalšej sviečky a dá sa zbaliť, keď chceš viac priestoru pre hlavný graf.</li>
-    <li><strong>Volume Profile</strong> (checkbox v <em>Indikátory — overlay</em>, skupina Objem) — horizontálny histogram pri pravom okraji ukazuje, <strong>pri akých cenách</strong> sa zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = <strong>POC</strong> (cena najväčšej zhody, magnet); zhluky dlhých pruhov = supportné/rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo (LVN). Profil sa prepočítava podľa zoomu, takže priblíženie = voľba obdobia analýzy. Stav checkboxu prežíva reload.</li>
+    <li><strong>Volume Profile</strong> (checkbox v <em>Indikátory — overlay</em>, skupina Objem) — horizontálny histogram pri pravom okraji ukazuje, <strong>pri akých cenách</strong> sa zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = <strong>POC</strong> (cena najväčšej zhody, magnet); zhluky dlhých pruhov = supportné/rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo (LVN). Profil sa prepočítava podľa zoomu, takže priblíženie = voľba obdobia analýzy. Stav checkboxu prežíva reload. Z denných OHLCV dát sa nedá spoľahlivo určiť, ktorá časť pruhu bola skutočne Buy a ktorá Sell — na to by boli potrebné jednotlivé obchody s bid/ask klasifikáciou.</li>
   </ul>
 
   <h3>Pravý panel</h3>
@@ -169,6 +248,14 @@
     <li><strong>Aktuálny setup</strong> — C1 až C4, trend, weekly bias a vysvetlenie, čo ešte chýba k novému signálu.</li>
     <li><strong>HISTÓRIA SIGNÁLOV</strong> — časová os signálov s úspešnosťou.</li>
     <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
+  </ul>
+
+  <h3>Ako čítať MFE, MAE a Regime</h3>
+  <ul>
+    <li><strong>MFE — Maximum Favorable Excursion</strong> je najväčší priebežný zisk, ktorý signál počas zvoleného horizontu dosiahol. Výsledok po 60 dňoch môže byť +4 %, ale MFE +18 % znamená, že titul bol medzitým až 18 % v zisku.</li>
+    <li><strong>MAE — Maximum Adverse Excursion</strong> je najväčší priebežný pokles od vstupu. Výsledok +10 % s MAE −14 % bol úspešný, ale cesta k nemu bola riziková.</li>
+    <li><strong>Regime: High Vol</strong> neznamená Buy ani Sell. Model iba rozpoznal režim neobvykle veľkých pohybov. Cena môže prudko rásť aj klesať; pozícia preto vyžaduje väčšiu rezervu, menšiu veľkosť alebo trpezlivejší vstup.</li>
+    <li><strong>High Vol · 100 %</strong> znamená vysokú istotu HMM modelu, že aktuálne dáta patria do režimu vysokej volatility. Nie je to 100 % istota smeru ani zisku.</li>
   </ul>
 
   <h3>Farby signálov (tier)</h3>
@@ -312,6 +399,27 @@
   <h3>Watch vs. Buy</h3>
   <p>Signál sa zaznamenáva od <strong>2/4</strong> podmienok. Či je buy/watch/counter rozhoduje trendový kontext (viď farby vyššie), nie len počet podmienok.</p>
 
+  <h2 id="verdict">Investičný Verdikt</h2>
+  <p>Záložka <strong>Verdikt</strong> je záverečná zjednodušená vrstva pre človeka, ktorý nechce naraz interpretovať desiatky indikátorov. Odpovedá na otázku: <em>„Dáva tento titul pri dostupných údajoch zmysel pre horizont približne 30–90 dní?“</em></p>
+
+  <h3>Tri možné odpovede</h3>
+  <table>
+    <tr><th>Verdikt</th><th>Praktický význam</th></tr>
+    <tr><td class="good"><strong>ÁNO</strong></td><td>Technický setup a dostupný kontext sa navzájom podporujú. Nie je to príkaz kúpiť; pred vstupom stále skontroluj cenu, earnings, správy a veľkosť pozície.</td></tr>
+    <tr><td class="warn"><strong>POČKAŤ</strong></td><td>Niektoré podmienky sú priaznivé, ale chýba potvrdenie alebo je prítomné konkrétne riziko. Panel uvedie, čo by malo nastať, aby sa situácia zlepšila.</td></tr>
+    <tr><td class="bad"><strong>NIE</strong></td><td>Riziká alebo trend momentálne prevažujú. Znamená „nevstupovať teraz“, nie tvrdenie, že firma je dlhodobo zlá.</td></tr>
+  </table>
+
+  <h3>Čo tvorí verdikt</h3>
+  <ul>
+    <li><strong>Technika</strong> — rozhodnutie Buy/Watch/Counter, sila C1–C4, weekly bias, trend a stav signálu.</li>
+    <li><strong>Trh</strong> — QQQ/SPY, breadth, VIX, sektory a Massive EOD kontext.</li>
+    <li><strong>Firma</strong> — analytický konsenzus, cieľová cena, short interest, insider transakcie a EPS história, ak sú dostupné.</li>
+    <li><strong>Earnings</strong> — blízkosť najbližšieho reportu, ktorý môže technický setup okamžite zmeniť.</li>
+  </ul>
+  <p>Výstup je zámerne krátky: najviac dva dôvody <strong>pre</strong>, dva dôvody <strong>proti</strong> a jedna podmienka, ktorá môže záver zmeniť. Tlačidlo na dôkazy otvorí detail v Prediktívnom tabe.</p>
+  <blockquote><p>Verdikt nevytvára nový model ani tajné skóre. Len prekladá už existujúce dáta do ľudskej reči. Ak niektorý zdroj chýba, zobrazí sa jeho nedostupnosť a istota záveru sa zníži.</p></blockquote>
+
   <h2 id="bot">6. Virtuálny obchodný bot</h2>
   <p>Záložka <strong>Bot</strong> simuluje paper-trading na live dátach — overuje, ako by si sa obchodoval na základe technických signálov, bez rizika skutočného kapitálu.</p>
 
@@ -406,6 +514,9 @@
     <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
     <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
     <tr><td>Market recommendations 502</td><td>Free eToro API tier — tiché zlyhanie.</td></tr>
+    <tr><td>Massive / Trh ukazuje n/a</td><td>Skontroluj <code>MASSIVE_API_KEY</code> na Renderi. EOD dáta sú dostupné až po uzavretí trhu; vrstva je interpretačná a výpadok nemení C1–C4.</td></tr>
+    <tr><td>P/L sa mierne líši od eToro</td><td>Dashboard medzi snapshotmi robí live odhad z cien. eToro môže započítať konverziu meny, spread, poplatky a interné zaokrúhlenie. Malá odchýlka je očakávaná.</td></tr>
+    <tr><td>Po deployi vidím staré UI</td><td>Počkaj na dokončenie Render deployu a obnov stránku. Statické súbory majú cache verziu; pri nezvyčajnom stave pomôže anonymné okno alebo vymazanie dát webu.</td></tr>
     <tr><td>Staré signály majú zlú farbu</td><td>Log sa neprepisuje; prefarbia sa po novom vyhodnotení.</td></tr>
   </table>
 
@@ -414,10 +525,10 @@
 
   <h3>Stack</h3>
   <ul>
-    <li><strong>Backend:</strong> FastAPI (Python 3.11), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn.</li>
+    <li><strong>Backend:</strong> FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn.</li>
     <li><strong>eToro proxy:</strong> stdlib HTTPServer na <code>localhost:8765</code>, background thread (nie samostatný proces v produkcii).</li>
-    <li><strong>Frontend:</strong> vanilla HTML/CSS/JS, Lightweight Charts 4.1.3, SheetJS — bez build kroku.</li>
-    <li><strong>Storage:</strong> <code>/data</code> (Render disk) — presets, journal, signal/weights logy, <code>bot_portfolio.json</code>, <code>cache/{ohlcv,portfolio,instruments}</code>.</li>
+    <li><strong>Frontend:</strong> vanilla HTML/CSS/JS, Lightweight Charts 5.2.0, SheetJS — bez build kroku.</li>
+    <li><strong>Storage:</strong> <code>/data</code> (Render disk) — presety, watchlist, signal/weights logy, bot, DIP dáta a cache pre OHLCV, portfólio, správy, insights a Massive market snapshoty.</li>
   </ul>
 
   <h3>Rozloženie</h3>
@@ -447,6 +558,7 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
     <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v scanneri (free tier: 25 req/deň).</td></tr>
+    <tr><td><code>MASSIVE_API_KEY</code></td><td>End-of-day trhový kontext Nasdaq-100 a S&amp;P 500, VWAP, objem a transakčná aktivita.</td></tr>
     <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM).</td></tr>
     <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania (default 15 s).</td></tr>
     <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 30 s).</td></tr>
