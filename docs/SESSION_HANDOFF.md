@@ -94,16 +94,18 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 
 ## Cache verzia
 
-`?v=20260613-massive1` (JS aj CSS)
+`?v=20260613-massive2` (JS aj CSS)
 
 ## Doplnené 2026-06-13 — Massive Nasdaq Market Pulse
 
 - `MASSIVE_API_KEY` ostáva iba v Render environment.
 - Grouped EOD endpoint sa volá najviac raz za uzavretý obchodný deň.
-- Na disk sa z celého US snapshotu ukladá iba normalizovaný Nasdaq-100 subset
-  do `DATA_ROOT/massive_market/YYYY-MM-DD.json`.
-- `_massive_nasdaq_context()` počíta A/D, percento nad denným VWAP, up/down
-  volume ratio a jednoduchý Market Pulse 0–100.
+- Na disk sa z celého US snapshotu ukladá iba zjednotený Nasdaq-100 + S&P 500
+  subset do `DATA_ROOT/massive_market/YYYY-MM-DD.json`.
+- S&P 500 universe sa obnovuje z Wikipédie raz za 7 dní; pri chybe ostáva stale
+  cache. Bodkové tickery sa normalizujú na pomlčku.
+- `_massive_universe_context()` počíta samostatný NDX aj SPX Market Pulse:
+  A/D, percento nad denným VWAP a up/down volume ratio.
 - Scanner dostal stĺpec `Trh`: daily change, close vs VWAP a transakčný
   percentil `Axx` v rámci Nasdaq-100.
 - Massive kontext je interpretačný a nemení C1–C4, DIP, ML ani tier.

@@ -7244,11 +7244,18 @@ function renderMarketContext() {
   }
   const massive = m.massive;
   if (massive) {
-    const pulseCls = massive.state === 'bullish' ? 'mc-up'
-      : massive.state === 'defensive' ? 'mc-down' : 'mc-side';
-    parts.push(`<span class="mc-chip ${pulseCls}" title="Massive EOD Nasdaq-100 Market Pulse ${massive.date}: ${massive.advancers} rastie / ${massive.decliners} klesá, ${massive.above_vwap_pct} % nad denným VWAP, up/down volume ${massive.up_down_volume_ratio ?? 'n/a'}. Interpretácia, nemení C1–C4.">Pulse ${massive.label} ${massive.score}</span>`);
-    parts.push(`<span class="mc-chip ${massive.advance_pct >= 55 ? 'mc-up' : massive.advance_pct < 45 ? 'mc-down' : 'mc-side'}" title="Podiel rastúcich titulov Nasdaq-100 v poslednom uzavretom obchodnom dni">A/D ${massive.advancers}/${massive.decliners}</span>`);
-    parts.push(`<span class="mc-chip ${massive.above_vwap_pct >= 55 ? 'mc-up' : massive.above_vwap_pct < 45 ? 'mc-down' : 'mc-side'}" title="Podiel Nasdaq-100 titulov, ktoré zatvorili nad denným VWAP">nad VWAP ${massive.above_vwap_pct}%</span>`);
+    const pulseChip = (pulse, shortName) => {
+      if (!pulse) return '';
+      const pulseCls = pulse.state === 'bullish' ? 'mc-up'
+        : pulse.state === 'defensive' ? 'mc-down' : 'mc-side';
+      return `<span class="mc-chip ${pulseCls}" title="Massive EOD ${pulse.universe_name} ${massive.date}: ${pulse.advancers} rastie / ${pulse.decliners} klesá, ${pulse.above_vwap_pct} % nad VWAP, up/down volume ${pulse.up_down_volume_ratio ?? 'n/a'}, pokrytie ${pulse.coverage}/${pulse.universe}. Interpretácia, nemení C1–C4.">${shortName} ${pulse.label} ${pulse.score}</span>`;
+    };
+    parts.push(pulseChip(massive.nasdaq100, 'NDX'));
+    parts.push(pulseChip(massive.sp500, 'SPX'));
+    const ndx = massive.nasdaq100;
+    if (ndx) {
+      parts.push(`<span class="mc-chip ${ndx.advance_pct >= 55 ? 'mc-up' : ndx.advance_pct < 45 ? 'mc-down' : 'mc-side'}" title="Nasdaq-100: rastúce/klesajúce tituly a podiel close nad denným VWAP">NDX A/D ${ndx.advancers}/${ndx.decliners} · VWAP ${ndx.above_vwap_pct}%</span>`);
+    }
   }
   for (const [key, label] of [['qqq', 'QQQ'], ['spy', 'SPY']]) {
     const t = m[key];

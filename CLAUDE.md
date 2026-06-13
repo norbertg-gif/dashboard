@@ -142,13 +142,16 @@ Three source sections:
 **Market context bar** (`#marketCtxBar`, chip-bar TRH nad Kandidátmi): `GET /api/market/context` → QQQ/SPY trend (EMA10/20 + 1M perf), VIX úroveň, 11 SPDR sektorov (1M ranking) synchrónne; Nasdaq-100 breadth (% nad EMA50/EMA200) v background threade (`_mc_breadth_worker`, sekvenčne — nie paralelne, OOM). Massive grouped EOD data add `Pulse`, A/D and `% above daily VWAP`. Disk cache `_market_context.json` (DATA_ROOT, 6h TTL, v .gitignore). **Zámerne NEOVPLYVŇUJE C1–C4 scoring** — čisto interpretačná vrstva; nemeniť bez explicitného rozhodnutia. JS: `loadMarketContext()` volaný z `ensureScannerMetaLoaded()`, breadth sa dotiahne retry-om po 60 s.
 
 **Massive EOD layer:** `_massive_load_snapshot()` calls the grouped U.S. market
-endpoint at most once per completed market date and persists the normalized
-result under `DATA_ROOT/massive_market/YYYY-MM-DD.json`. `_massive_nasdaq_context()`
-intersects it with `NASDAQ100_TICKERS` and computes advance/decline counts,
-percent above daily VWAP, up/down volume ratio and a 0–100 Market Pulse.
+endpoint at most once per completed market date and persists only the union of
+Nasdaq-100 and S&P 500 under `DATA_ROOT/massive_market/YYYY-MM-DD.json`.
+`_sp500_universe()` refreshes Wikipedia membership every 7 days, normalizes
+dot tickers to Massive's dash form, and uses stale disk cache on failure.
+`_massive_universe_context()` independently computes advance/decline counts,
+percent above daily VWAP, up/down volume ratio and a 0–100 Market Pulse for
+Nasdaq-100 and S&P 500.
 `enrich_scanner_payload()` attaches per-ticker `market_day` with daily change,
 distance from VWAP and cross-sectional transaction activity percentile.
-`GET /api/market/massive` exposes the context separately. This layer remains
+`GET /api/market/massive` exposes both contexts separately. This layer remains
 interpretation-only until 30D/60D/90D validation supports a scoring change.
 
 Click on any ticker → `openScannerTicker(ticker)` → `switchMainTab('predictive')`.

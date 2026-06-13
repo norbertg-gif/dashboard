@@ -261,7 +261,7 @@ trhu vyššiu šancu na úspech než v klesajúcom.
 | **QQQ ↑ +3.1 %** | Trend Nasdaq-100 ETF (EMA10 vs EMA20 — rovnaká logika ako tier signálov) + výkon za 1 mesiac. | ↑ zelená = uptrend, DIP nákupy majú vietor v chrbte. → oranžová = bočný trh, pomalšie pohyby. ↓ červená = downtrend (cena pod EMA20), každý Buy je counter-trend voči indexu. |
 | **SPY ↑** | To isté pre S&P 500 — širší trh mimo tech. | Keď sa QQQ a SPY rozchádzajú (QQQ ↓, SPY ↑), problém je koncentrovaný v tech sektore — pozri chip sektorov. |
 | **Breadth 62 %** | Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 a pokrytie dát. | **≥ 60 %** zelená — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. **40–60 %** oranžová — selektívny trh, preferuj 4/4 a DIP crossover. **< 40 %** červená — väčšinu trhu nesie pár mega-capov. _Najcennejší je rozpor:_ QQQ ↑ ale Breadth < 50 % = krehká rally bez podpory priemerného titulu. |
-| **Pulse Bullish 68** | Denný Nasdaq-100 Market Pulse z Massive: kombinuje podiel rastúcich titulov, podiel nad VWAP a pomer rastúceho/klesajúceho objemu. | **≥ 62** Bullish, **42–62** Neutrálny, **< 42** Defenzívny. Je to EOD kontext posledného uzavretého dňa, nie obchodný signál. |
+| **NDX Bullish 68 / SPX Neutral 55** | Dva denné Market Pulse pohľady z Massive: Nasdaq-100 a S&P 500. Každý kombinuje podiel rastúcich titulov, podiel nad VWAP a pomer rastúceho/klesajúceho objemu. | **≥ 62** Bullish, **42–62** Neutrálny, **< 42** Defenzívny. Rozdiel NDX vs SPX ukáže, či je pohyb sústredený v technológiách alebo v celom trhu. |
 | **A/D 64/35** | Počet rastúcich a klesajúcich titulov Nasdaq-100 za posledný uzavretý deň. | Ukazuje, či pohyb indexu podporuje väčšina titulov alebo len niekoľko veľkých spoločností. |
 | **nad VWAP 61 %** | Podiel Nasdaq-100 titulov, ktorých close skončil nad denným VWAP. | Nad 55 % je široká intradenná podpora, pod 45 % skôr predajný tlak. |
 | **VIX 18.3** | Implikovaná volatilita S&P 500 („index strachu"). | **< 15** pokoj (pozor na samoľúbosť), **15–20** normál, **20–30** zvýšený — nervozita, menšie pozície, **30+** stres — panika; historicky najlepšie dlhodobé vstupy, ale vstupuj postupne. |
@@ -279,7 +279,9 @@ Dáta sa obnovujú raz za 6 hodín (server cache `_market_context.json`). Breadt
 sa pri prvom otvorení počíta na pozadí ~2 minúty — chip ukazuje „Breadth …"
 a doplní sa sám. Massive grouped snapshot sa sťahuje najviac raz za uzavretý
 obchodný deň a ukladá sa do `massive_market/YYYY-MM-DD.json`. Jeden request
-obsahuje celý americký trh; dashboard z neho vyberie Nasdaq-100. Endpoint:
+obsahuje celý americký trh; dashboard z neho uloží iba zjednotenú množinu
+Nasdaq-100 a S&P 500. Spoločné tickery sa ukladajú iba raz. Zoznam S&P 500 sa
+obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 `GET /api/market/context`, samostatná kontrola `GET /api/market/massive`.
 
 ### Ovládanie

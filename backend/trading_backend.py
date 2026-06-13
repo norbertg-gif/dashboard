@@ -4186,13 +4186,11 @@ def enrich_scanner_payload(payload: dict) -> dict:
     clean_scores = {k: v for k, v in dip_scores.items() if not k.startswith("_")}
     out["dip_import"]["count"] = len(clean_scores)
     out["results"] = [enrich_with_dip(r, clean_scores) for r in rows]
-    massive = _massive_nasdaq_context(refresh=False)
-    massive_tickers = (massive or {}).get("tickers") or {}
+    massive = _massive_market_context(refresh=False)
+    massive_tickers = ((massive or {}).get("nasdaq100") or {}).get("tickers") or {}
     for row in out["results"]:
         row["market_day"] = massive_tickers.get(str(row.get("ticker") or "").upper())
-    out["massive_market"] = {
-        key: value for key, value in (massive or {}).items() if key != "tickers"
-    } if massive else None
+    out["massive_market"] = massive
     out["crossover_matches"] = sum(1 for r in out["results"] if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD)
     return out
 
@@ -5508,6 +5506,8 @@ _market_ctx_lock = threading.Lock()
 _market_breadth_running = False
 MASSIVE_MARKET_DIR = DATA_ROOT / "massive_market"
 MASSIVE_MARKET_DIR.mkdir(parents=True, exist_ok=True)
+SP500_UNIVERSE_FILE = MASSIVE_MARKET_DIR / "_sp500_universe.json"
+SP500_UNIVERSE_TTL_DAYS = 7
 _massive_market_lock = threading.Lock()
 
 _SECTOR_ETFS = {"XLK": "Tech", "XLC": "Komunikácie", "XLY": "Spotreba cykl.",
@@ -5518,6 +5518,47 @@ _SECTOR_ETFS = {"XLK": "Tech", "XLC": "Komunikácie", "XLY": "Spotreba cykl.",
 
 def _massive_market_file(date_str: str) -> Path:
     return MASSIVE_MARKET_DIR / f"{date_str}.json"
+
+
+def _sp500_universe() -> list[str]:
+    cached = None
+    if SP500_UNIVERSE_FILE.exists():
+        try:
+            cached = json.loads(SP500_UNIVERSE_FILE.read_text(encoding="utf-8"))
+            fetched = datetime.fromisoformat(cached["fetched_at"])
+            if (datetime.now(timezone.utc) - fetched).days < SP500_UNIVERSE_TTL_DAYS:
+                return cached.get("tickers") or []
+        except Exception:
+            cached = None
+    try:
+        from bs4 import BeautifulSoup
+        response = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "TradingDashboard/1.0 (personal market research)"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.select_one("table.wikitable")
+        tickers = []
+        for row in table.select("tbody tr")[1:] if table else []:
+            cell = row.find("td")
+            ticker = cell.get_text(strip=True).upper().replace(".", "-") if cell else ""
+            if ticker and re.fullmatch(r"[A-Z0-9\-]+", ticker):
+                tickers.append(ticker)
+        tickers = sorted(set(tickers))
+        if len(tickers) < 450:
+            raise RuntimeError("S&P 500 universe response is incomplete")
+        payload = {
+            "source": "wikipedia",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "tickers": tickers,
+        }
+        SP500_UNIVERSE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+        return tickers
+    except Exception as exc:
+        print(f"[massive] S&P 500 universe: {type(exc).__name__}")
+        return (cached or {}).get("tickers") or []
 
 
 def _massive_candidate_dates() -> list[str]:
@@ -5544,15 +5585,16 @@ def _massive_fetch_grouped_day(date_str: str) -> dict | None:
     rows = payload.get("results") or []
     if not rows:
         return None
-    nasdaq_universe = set(NASDAQ100_TICKERS)
+    tracked_universe = set(NASDAQ100_TICKERS) | set(_sp500_universe())
     by_ticker = {}
     for row in rows:
         ticker = str(row.get("T") or "").upper()
-        if ticker in nasdaq_universe:
+        if ticker in tracked_universe:
             by_ticker[ticker] = {
                 key: row.get(key) for key in ("o", "h", "l", "c", "v", "vw", "n", "t")
             }
     return {
+        "schema_version": 2,
         "provider": "massive",
         "date": date_str,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -5571,7 +5613,7 @@ def _massive_load_snapshot(refresh: bool = False) -> dict | None:
                 if path.exists():
                     try:
                         cached = json.loads(path.read_text(encoding="utf-8"))
-                        if cached.get("rows"):
+                        if cached.get("schema_version") == 2 and cached.get("rows"):
                             return cached
                     except Exception:
                         pass
@@ -5602,12 +5644,13 @@ def _percentile_rank(values: list[float], value: float) -> int | None:
     return round(sum(1 for v in clean if v <= value) / len(clean) * 100)
 
 
-def _massive_nasdaq_context(refresh: bool = False) -> dict | None:
-    snapshot = _massive_load_snapshot(refresh=refresh)
-    if not snapshot:
-        return None
+def _massive_universe_context(
+    snapshot: dict,
+    tickers: list[str],
+    universe_name: str,
+) -> dict | None:
     rows = snapshot.get("rows") or {}
-    universe_rows = {ticker: rows[ticker] for ticker in NASDAQ100_TICKERS if ticker in rows}
+    universe_rows = {ticker: rows[ticker] for ticker in tickers if ticker in rows}
     if not universe_rows:
         return None
 
@@ -5665,10 +5708,11 @@ def _massive_nasdaq_context(refresh: bool = False) -> dict | None:
         state, label = "neutral", "Neutrálny"
     return {
         "provider": "massive",
+        "universe_name": universe_name,
         "date": snapshot.get("date"),
         "market_count": snapshot.get("market_count"),
         "coverage": coverage,
-        "universe": len(NASDAQ100_TICKERS),
+        "universe": len(tickers),
         "state": state,
         "label": label,
         "score": score,
@@ -5681,6 +5725,26 @@ def _massive_nasdaq_context(refresh: bool = False) -> dict | None:
         "up_volume": round(up_volume),
         "down_volume": round(down_volume),
         "tickers": ticker_context,
+        "interpretation_only": True,
+    }
+
+
+def _massive_market_context(refresh: bool = False) -> dict | None:
+    snapshot = _massive_load_snapshot(refresh=refresh)
+    if not snapshot:
+        return None
+    nasdaq = _massive_universe_context(snapshot, NASDAQ100_TICKERS, "Nasdaq-100")
+    sp500_tickers = _sp500_universe()
+    sp500 = _massive_universe_context(snapshot, sp500_tickers, "S&P 500") if sp500_tickers else None
+    if not nasdaq and not sp500:
+        return None
+    return {
+        "provider": "massive",
+        "date": snapshot.get("date"),
+        "market_count": snapshot.get("market_count"),
+        "stored_tickers": len(snapshot.get("rows") or {}),
+        "nasdaq100": nasdaq,
+        "sp500": sp500,
         "interpretation_only": True,
     }
 
@@ -5815,7 +5879,7 @@ def get_market_context(refresh: int = Query(0)):
                      - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
             if age_h < MARKET_CTX_TTL_H:
                 if not cached.get("massive"):
-                    cached["massive"] = _massive_nasdaq_context(refresh=False)
+                    cached["massive"] = _massive_market_context(refresh=False)
                 return cached
         except Exception:
             pass
@@ -5823,7 +5887,7 @@ def get_market_context(refresh: int = Query(0)):
     data["fetched_at"] = datetime.now(timezone.utc).isoformat()
     # starý breadth nechaj, kým worker dopočíta nový
     data["breadth"] = (cached or {}).get("breadth")
-    data["massive"] = _massive_nasdaq_context(refresh=bool(refresh))
+    data["massive"] = _massive_market_context(refresh=bool(refresh))
     data["market_regime"] = _mc_regime_quadrant(data)
     with _market_ctx_lock:
         try:
@@ -5838,7 +5902,7 @@ def get_market_context(refresh: int = Query(0)):
 
 @app.get("/api/market/massive")
 def get_massive_market_context(refresh: int = Query(0)):
-    data = _massive_nasdaq_context(refresh=bool(refresh))
+    data = _massive_market_context(refresh=bool(refresh))
     if not data:
         raise HTTPException(status_code=503, detail="Massive market snapshot is unavailable")
     return data
