@@ -1483,10 +1483,16 @@ def remove_from_etoro_watchlist(watchlist_id: str, instrument_id: int, account: 
 
 @app.get("/api/etoro/recommendations")
 def get_market_recommendations(account: str = Query("1"), count: int = Query(20)):
+    # Market-recommendations endpoint je na free eToro API tieri nedostupný (502).
+    # Vraciame štruktúrované {unavailable: true} s HTTP 200 namiesto surového 502,
+    # aby frontend ukázal čistú hlášku, nie kryptickú chybu / tiché zlyhanie.
     try:
         resp = requests.get(f"{ETORO_PROXY}/etoro/market-recommendations/{count}?account={account}", timeout=8)
-        if resp.status_code == 204: return []
-        if not resp.ok: raise HTTPException(502, f"eToro recommendations: {resp.status_code}")
+        if resp.status_code == 204:
+            return []
+        if not resp.ok:
+            return {"unavailable": True,
+                    "reason": f"eToro API tier nepodporuje odporúčania (HTTP {resp.status_code})"}
         data = resp.json()
         result = []
         for item in (data.get("instruments") or (data if isinstance(data, list) else [])):
@@ -1495,8 +1501,8 @@ def get_market_recommendations(account: str = Query("1"), count: int = Query(20)
             if iid and sym:
                 result.append({"instrumentId": iid, "symbol": sym, "name": item.get("displayName") or sym})
         return result
-    except HTTPException: raise
-    except Exception as e: raise HTTPException(502, str(e))
+    except Exception as e:
+        return {"unavailable": True, "reason": f"eToro odporúčania nedostupné ({type(e).__name__})"}
 
 
 @app.get("/api/etoro/rates")

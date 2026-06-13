@@ -3010,6 +3010,10 @@ async function toggleRecommendations() {
     const r = await fetch(`${API}/api/etoro/recommendations?account=${activeAccount||'1'}&count=15`);
     if (!r.ok) throw new Error(r.statusText);
     const items = await r.json();
+    if (items && items.unavailable) {
+      el.innerHTML = `<div class="etoro-loading" title="${escHtml(items.reason || '')}">ℹ Odporúčania nie sú dostupné na tomto eToro API tieri</div>`;
+      return;
+    }
     if (!items.length) { el.innerHTML = '<div class="etoro-loading">Žiadne odporúčania</div>'; return; }
     el.innerHTML = items.map(item => {
       const inWl = watchlist.some(w => w.symbol === item.symbol);
