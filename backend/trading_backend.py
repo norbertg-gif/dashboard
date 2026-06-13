@@ -3619,6 +3619,7 @@ def build_signal_context(
     details: dict,
     zscore: float,
     weekly_bullish: bool | None,
+    context_source: str = "live",
 ) -> dict | None:
     """Snapshot kontextu pre nový signál bez použitia budúcich dát."""
     if df_daily is None or df_daily.empty:
@@ -3673,7 +3674,7 @@ def build_signal_context(
 
     return {
         "context_version": SIGNAL_CONTEXT_VERSION,
-        "context_source": "live",
+        "context_source": context_source,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "data_through": str(cutoff.date()),
         "daily_bars": int(len(history)),
@@ -3697,6 +3698,79 @@ def build_signal_context(
             "c4_zscore_dip": bool(details.get("zscore_dip")),
         },
     }
+
+
+def _normalize_ts(value):
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    return ts.normalize()
+
+
+def _weekly_bullish_asof(raw_w: pd.DataFrame, signal_date) -> bool | None:
+    """Reprodukuje weekly bias k dátumu signálu — rovnaká logika ako live
+    (composite > 0.05 AND nad kumo AND EMA10 > EMA20), ale na weekly dátach
+    orezaných po signal_date (žiadny look-ahead)."""
+    if raw_w is None or raw_w.empty:
+        return None
+    cutoff = _normalize_ts(signal_date)
+    hist = raw_w.loc[[_normalize_ts(ix) <= cutoff for ix in raw_w.index]]
+    if len(hist) < 30:
+        return None
+    df_w = add_indicators(hist)
+    last_w = df_w.iloc[-1]
+    lc_w = float(last_w["Close"])
+    try:
+        w_comp = predict_next_candle(df_w)["composite"]
+    except Exception:
+        return None
+    sa = float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w
+    sb = float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w
+    w_above_kumo = lc_w > max(sa, sb)
+    w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
+    return bool(w_comp > 0.05 and w_above_kumo and w_ema_bull)
+
+
+def _backfill_ticker_context(ticker: str, entries: dict, force: bool = False) -> dict:
+    """Doplní `context` do historických signálov tickera, ktorým chýba. Reuse
+    build_signal_context (single source of truth), zscore a weekly_bullish sa
+    dopočítajú z dát orezaných po dátume signálu. Mutuje `entries` in-place."""
+    todo = [d for d, e in entries.items()
+            if isinstance(e, dict) and (force or not e.get("context"))]
+    if not todo:
+        return {"backfilled": 0, "skipped": len(entries), "errors": 0}
+    try:
+        raw_d = _yf_download_cached(ticker, "2y", "1d")
+        if len(raw_d) < 30:
+            return {"backfilled": 0, "skipped": 0, "errors": len(todo), "reason": "málo daily dát"}
+        df_d = add_indicators(raw_d)
+        zs = rolling_zscore(df_d["Close"])
+        raw_w = None
+        try:
+            raw_w = _yf_download_cached(ticker, "5y", "1wk")
+        except Exception:
+            pass
+    except Exception as e:
+        return {"backfilled": 0, "skipped": 0, "errors": len(todo), "reason": str(e)}
+    done = err = 0
+    for date_key in todo:
+        try:
+            sig_date = _normalize_ts(date_key)
+            details = entries[date_key].get("details") or {}
+            zsub = zs.loc[[_normalize_ts(ix) <= sig_date for ix in zs.index]]
+            zval = float(zsub.iloc[-1]) if len(zsub) else 0.0
+            wb = _weekly_bullish_asof(raw_w, sig_date)
+            ctx = build_signal_context(df_d, sig_date, details, zval, wb, context_source="backfill")
+            if ctx:
+                entries[date_key]["context"] = ctx
+                done += 1
+            else:
+                err += 1
+        except Exception:
+            err += 1
+    del raw_d, df_d, zs, raw_w
+    gc.collect()
+    return {"backfilled": done, "skipped": len(entries) - len(todo), "errors": err}
 
 
 def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) -> tuple[list[dict], dict, dict]:
@@ -4532,6 +4606,49 @@ async def save_scanner_note(request: Request):
         encoding="utf-8",
     )
     return {"ok": True}
+
+
+@app.post("/api/admin/backfill-regime-context")
+def backfill_regime_context(target: str = Query("log"), ticker: str = Query(None),
+                            limit: int = Query(10), force: int = Query(0)):
+    """Doplní regime kontext do historických signálov, ktorým chýba (boli zalogované
+    pred SIGNAL_CONTEXT_VERSION). Idempotentné a inkrementálne: spúšťaj opakovane,
+    `limit` tickerov na volanie (HMM fit per signál je pamäťovo náročný). Reuse
+    build_signal_context — žiadny look-ahead. Tag context_source='backfill'.
+    target=log|archive|both. Mutuje len chýbajúci `context`, ostatné polia nechá."""
+    targets = ["log", "archive"] if target == "both" else [target]
+    summary = {"target": target, "tickers_processed": 0, "backfilled": 0,
+               "errors": 0, "remaining_tickers": 0, "per_ticker": {}}
+    for tgt in targets:
+        if tgt == "log":
+            store = load_signals_log(); save = save_signals_log
+        elif tgt == "archive":
+            store = load_signals_archive()
+            save = lambda d: SIGNALS_ARCHIVE.write_text(
+                json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            continue
+        # tickery s aspoň jedným signálom bez kontextu
+        pending = [t for t, ents in store.items() if isinstance(ents, dict) and
+                   any(isinstance(e, dict) and (force or not e.get("context")) for e in ents.values())]
+        if ticker:
+            pending = [t for t in pending if t == ticker.upper()]
+        summary["remaining_tickers"] += max(0, len(pending) - limit) if not ticker else 0
+        changed = False
+        for t in pending[:limit]:
+            res = _backfill_ticker_context(t, store[t], force=bool(force))
+            summary["per_ticker"][t] = res
+            summary["tickers_processed"] += 1
+            summary["backfilled"] += res.get("backfilled", 0)
+            summary["errors"] += res.get("errors", 0)
+            if res.get("backfilled"):
+                changed = True
+        if changed:
+            try:
+                save(store)
+            except Exception as e:
+                summary["save_error"] = str(e)
+    return summary
 
 
 # ── News sentiment (Alpha Vantage) ────────────────────────────────────────────
