@@ -1244,6 +1244,13 @@ const PORT_COLS = [
   { key:'positionId',  label:'Position ID',  def:false, fmt:'id'     },
 ];
 
+const PORT_DEFAULT_WIDTHS = {
+  symbol: 230, trade: 90, type: 90, isBuy: 90, openDateTime: 120,
+  amount: 120, units: 110, openRate: 110, currentRate: 110,
+  analystTarget: 110, dailyPnl: 110, pnl: 105, pnlPct: 105,
+  fees: 100, leverage: 90, stopLoss: 110, takeProfit: 110, positionId: 150,
+};
+
 function normalizePortColumns(saved = {}) {
   const known = new Set(PORT_COLS.map(c => c.key));
   const savedOrder = Array.isArray(saved.colOrder) ? saved.colOrder.filter(k => known.has(k)) : [];
@@ -1629,9 +1636,15 @@ function getVisibleCols(s) {
     .filter(c => c && s.colVisible[c.key]);
 }
 
+function portColWidth(s, key) {
+  const saved = Number(s.colWidths?.[key]);
+  if (Number.isFinite(saved) && saved >= 50) return Math.min(520, saved);
+  return PORT_DEFAULT_WIDTHS[key] || 110;
+}
+
 function portColStyle(s, key) {
-  const w = Number(s.colWidths?.[key]);
-  return Number.isFinite(w) && w >= 50 ? ` style="width:${w}px;min-width:${w}px;max-width:${w}px;"` : '';
+  const w = portColWidth(s, key);
+  return ` style="width:${w}px;min-width:${w}px;max-width:${w}px;"`;
 }
 
 function getFilteredPositions(s) {
@@ -1806,7 +1819,8 @@ function renderPortPanel(pid) {
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
-    html += `<div class="port-table-wrap"><table class="port-table" style="table-layout:fixed;"><colgroup>`;
+    const tableWidth = cols.reduce((sum, col) => sum + portColWidth(s, col.key), 0);
+    html += `<div class="port-table-wrap"><table class="port-table" style="table-layout:fixed;width:${tableWidth}px;min-width:${tableWidth}px;max-width:${tableWidth}px;"><colgroup>`;
     for (const col of cols) html += `<col data-col="${col.key}"${portColStyle(s, col.key)}>`;
     html += `</colgroup><thead><tr>`;
     for (const col of cols) {
@@ -2044,6 +2058,13 @@ function portResizeMove(e) {
     el.style.minWidth = w + 'px';
     el.style.maxWidth = w + 'px';
   });
+  const table = root?.querySelector('.port-table');
+  if (table) {
+    const total = getVisibleCols(s).reduce((sum, col) => sum + portColWidth(s, col.key), 0);
+    table.style.width = total + 'px';
+    table.style.minWidth = total + 'px';
+    table.style.maxWidth = total + 'px';
+  }
 }
 function portResizeEnd() {
   if (portResizeState) savePortState(portResizeState.pid);
@@ -2087,7 +2108,7 @@ function portToggleColDrop(pid) {
         <span class="port-col-drag-handle">⠿</span>
         <input type="checkbox" ${s.colVisible[k]?'checked':''} onchange="portToggleCol('${pid}','${k}',this.checked)">
         <span style="flex:1;">${col.label}</span>
-        <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2);">${s.colWidths?.[k] || 'auto'}</span>
+        <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2);">${portColWidth(s, k)} px</span>
       </label>`;
     }).join('');
   document.body.appendChild(drop);

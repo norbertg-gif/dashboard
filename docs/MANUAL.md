@@ -374,6 +374,10 @@ namiesto prázdneho alebo skrytého panelu.
 
 ### Firma a očakávania
 
+V Portfóliu sa šírka každého stĺpca nastavuje samostatne potiahnutím úchytu v
+hlavičke. Tabuľka má šírku podľa súčtu stĺpcov, takže voľné miesto zostáva
+napravo a pri širšej tabuľke sa použije horizontálny posuvník.
+
 Karta **Firma & očakávania** v Prediktívnom tabe dopĺňa technický signál o
 stručný externý kontext:
 

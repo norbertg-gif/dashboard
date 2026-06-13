@@ -1176,12 +1176,13 @@ body.sidebar-collapsed #sb-resizer {
   overflow: auto;
 }
 .port-table, .tool-table {
-  width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-family: var(--font-mono);
   font-size: 12px;
 }
+.port-table { width: max-content; }
+.tool-table { width: 100%; }
 .port-table th, .tool-table th {
   position: sticky;
   top: 0;

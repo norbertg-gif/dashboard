@@ -216,6 +216,10 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   the largest bucket, red when Sell is largest, otherwise yellow.
   Partial Finnhub insights are enriched from Yahoo when consensus is missing
   or the mean price target is null/zero; the frontend accepts only targets > 0.
+- **Portfolio column sizing:** every visible column resolves through
+  `portColWidth()` (`saved width -> PORT_DEFAULT_WIDTHS`). The table width is
+  the exact sum of visible columns, so resizing one column never stretches the
+  last column; unused viewport space remains empty on the right.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Virtual trading bot — key architecture
