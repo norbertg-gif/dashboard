@@ -1363,13 +1363,15 @@ const portfolioAnalystPending = new Map();
 
 function analystConsensusSummary(data) {
   const consensus = data?.analyst_consensus;
-  const target = Number(data?.price_target?.mean);
-  if (!consensus && !Number.isFinite(target)) return null;
+  const targetRaw = data?.price_target?.mean;
+  const target = targetRaw == null || targetRaw === '' ? NaN : Number(targetRaw);
+  const validTarget = Number.isFinite(target) && target > 0;
+  if (!consensus && !validTarget) return null;
   const buy = Number(consensus?.strong_buy || 0) + Number(consensus?.buy || 0);
   const hold = Number(consensus?.hold || 0);
   const sell = Number(consensus?.sell || 0) + Number(consensus?.strong_sell || 0);
   return {
-    target: Number.isFinite(target) ? target : null,
+    target: validTarget ? target : null,
     buy, hold, sell,
     cls: buy > hold && buy > sell ? 'positive'
       : sell > buy && sell > hold ? 'negative'
@@ -7349,8 +7351,9 @@ async function pc_loadInsights(ticker) {
       const buy = Number(ac.strong_buy || 0) + Number(ac.buy || 0);
       const hold = Number(ac.hold || 0);
       const sell = Number(ac.sell || 0) + Number(ac.strong_sell || 0);
-      const target = Number(pt?.mean);
-      const targetText = Number.isFinite(target)
+      const targetRaw = pt?.mean;
+      const target = targetRaw == null || targetRaw === '' ? NaN : Number(targetRaw);
+      const targetText = Number.isFinite(target) && target > 0
         ? ` <span style="color:var(--muted)">(${fmtPrice(target)} cieľ)</span>`
         : '';
       rows.push(`<div class="pred-row" title="Najnovší dostupný analytický konsenzus${ac.period ? ` za ${escHtml(ac.period)}` : ''}. Kontext, nie súčasť C1–C4 ani ML.">

@@ -5112,7 +5112,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 2
+INSIGHTS_SCHEMA_VERSION = 3
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -5366,6 +5366,33 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         core = {**_insights_fetch_finnhub(sym), "source": "finnhub"}
     except Exception as e:
         errs.append(f"finnhub: {_scrub_token(e)}")
+    # Finnhub can return insider/EPS data while omitting analyst targets.
+    # Enrich only missing sections from Yahoo instead of discarding good data.
+    core_target = (core or {}).get("price_target") or {}
+    try:
+        core_target_valid = float(core_target.get("mean")) > 0
+    except (TypeError, ValueError):
+        core_target_valid = False
+    if core is not None and (
+        not core.get("analyst_consensus") or not core_target_valid
+    ):
+        qs = _yahoo_quote_summary(sym, "recommendationTrend,financialData")
+        if qs is not None:
+            yahoo_extra = _insights_parse(qs)
+            enriched = False
+            if not core.get("analyst_consensus") and yahoo_extra.get("analyst_consensus"):
+                core["analyst_consensus"] = yahoo_extra["analyst_consensus"]
+                enriched = True
+            yahoo_target = yahoo_extra.get("price_target") or {}
+            try:
+                yahoo_target_valid = float(yahoo_target.get("mean")) > 0
+            except (TypeError, ValueError):
+                yahoo_target_valid = False
+            if not core_target_valid and yahoo_target_valid:
+                core["price_target"] = yahoo_target
+                enriched = True
+            if enriched:
+                core["source"] = "finnhub+yahoo"
     if core is None:
         qs = _yahoo_quote_summary(
             sym,

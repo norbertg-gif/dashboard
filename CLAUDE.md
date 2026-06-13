@@ -214,6 +214,8 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   deduplicates requests across accounts/trades with `portfolioAnalystCache`,
   and renders target + Buy/Hold/Sell counts. Color is green only when Buy is
   the largest bucket, red when Sell is largest, otherwise yellow.
+  Partial Finnhub insights are enriched from Yahoo when consensus is missing
+  or the mean price target is null/zero; the frontend accepts only targets > 0.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Virtual trading bot — key architecture
