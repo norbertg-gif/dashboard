@@ -5959,6 +5959,7 @@ function pc_renderSidebar(data) {
   earningsCard.style.display = '';
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
+  pc_loadRS(data.ticker);
 
   // Backtest card
   // Entry zone card
@@ -7153,6 +7154,35 @@ async function loadEarningsCalendar() {
     }
     _earningsDates = data.dates || {};
   } catch (e) { _earningsDates = {}; }
+}
+
+// Relatívna sila voči QQQ/SPY (1M/3M) — interpretačná karta, neovplyvňuje skóre
+let _rsForTicker = null;
+async function pc_loadRS(ticker) {
+  const card = document.getElementById('rsCard');
+  if (!card || !ticker) return;
+  const sym = String(ticker).toUpperCase();
+  _rsForTicker = sym;
+  card.style.display = 'none';
+  try {
+    const r = await fetch('/api/ticker/rs/' + encodeURIComponent(sym));
+    if (!r.ok || _rsForTicker !== sym) return;
+    const d = await r.json();
+    if (_rsForTicker !== sym || d.error || !d.periods) return;
+    const sign = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)} %`;
+    const colCell = v => v == null ? '<td style="color:var(--muted)">—</td>'
+      : `<td style="color:${v >= 0 ? 'var(--up)' : 'var(--down)'};font-weight:700;">${sign(v)}</td>`;
+    const rows = [];
+    for (const [plabel, name] of [['1m', '1 mesiac'], ['3m', '3 mesiace']]) {
+      const p = d.periods[plabel];
+      if (!p) continue;
+      rows.push(`<tr><td style="color:var(--muted)">${name}</td>${colCell(p.vs_QQQ)}${colCell(p.vs_SPY)}</tr>`);
+    }
+    if (!rows.length) return;
+    card.innerHTML = `<div class="card-title" title="Relatívna sila = výkon tickera mínus výkon indexu. Kladné (zelené) = ticker prekonáva trh; záporné = zaostáva. Interpretácia, neovplyvňuje C1–C4.">Relatívna sila</div>
+      <table class="rs-table"><thead><tr><th></th><th>vs QQQ</th><th>vs SPY</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    card.style.display = '';
+  } catch (e) { /* fail-soft */ }
 }
 
 // Insider transakcie + EPS beat/miss karta (Yahoo quoteSummary, 12h server cache)

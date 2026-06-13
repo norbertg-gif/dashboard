@@ -96,7 +96,7 @@ These were already in the codebase and need to stay fixed:
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
 
-- **RS / párový kontext v Predictive** — relatívna sila tickera voči QQQ, SPY a sektorovému ETF (1M/3M). Nadväzuje na existujúceho kandidáta „RS voči SPY". Dátový základ: `_yf_download_cached` + `_SECTOR_ETFS` mapa už existujú.
+- **RS / párový kontext v Predictive** — ✅ ČIASTOČNE. `GET /api/ticker/rs/{symbol}` počíta RS voči QQQ a SPY (1M/3M), karta `#rsCard` v Predictive sidebar (`pc_loadRS`). Sektorové ETF RS ešte chýba (treba ticker→sektor mapu — Finnhub `/stock/profile2` alebo statická). NEOVPLYVŇUJE C1–C4.
 - **Makro režim trhu** — ✅ HOTOVO. `_mc_regime_quadrant()` odvodí kvadrant trend × volatilita (Goldilocks/Prehriatie/Risk-off/Útlm/Neutrál) z QQQ/SPY trendu + VIX + breadth. Pole `market_regime` v `/api/market/context`, chip `◆` v TRH lište (`renderMarketContext`). Prepočíta sa aj v breadth workeri keď dorazí breadth. NEOVPLYVŇUJE C1–C4.
 - **News clustering** — zoskupiť články o rovnakej udalosti do jedného príbehu, nech sentiment nie je umelo násobený duplicitami. Až keď bude news cache dostatočne naplnená.
 - Pravidlo pre všetky tri: interpretačné vrstvy, NEVSTUPUJÚ do C1–C4 scoringu.

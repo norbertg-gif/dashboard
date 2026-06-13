@@ -5167,6 +5167,44 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     return out
 
 
+@app.get("/api/ticker/rs/{symbol}")
+def get_ticker_rs(symbol: str):
+    """Relatívna sila tickera voči QQQ a SPY (1M/3M). Interpretačná vrstva pre
+    Predictive — NEOVPLYVŇUJE C1–C4. QQQ/SPY ťahá zo zdieľanej _yf cache."""
+    sym = symbol.upper()
+
+    def perf(df, days):
+        c = df["Close"].astype(float)
+        if len(c) <= days or not float(c.iloc[-days - 1]):
+            return None
+        return (float(c.iloc[-1]) - float(c.iloc[-days - 1])) / float(c.iloc[-days - 1]) * 100
+
+    try:
+        tdf = _yf_download_cached(sym, "6mo", "1d")
+    except Exception as e:
+        return {"ticker": sym, "error": str(e)}
+    benches = {}
+    for b in ("QQQ", "SPY"):
+        try:
+            benches[b] = _yf_download_cached(b, "6mo", "1d")
+        except Exception:
+            pass
+    periods = {}
+    for plabel, days in (("1m", 21), ("3m", 63)):
+        tp = perf(tdf, days)
+        if tp is None:
+            continue
+        entry = {"ticker_perf": round(tp, 2)}
+        for b, bdf in benches.items():
+            bp = perf(bdf, days)
+            if bp is not None:
+                entry[f"vs_{b}"] = round(tp - bp, 2)
+        periods[plabel] = entry
+    if not periods:
+        return {"ticker": sym, "error": "nedostatok histórie"}
+    return {"ticker": sym, "periods": periods}
+
+
 @app.get("/api/ticker/insights/{symbol}")
 def get_ticker_insights(symbol: str, refresh: int = Query(0)):
     """Insider transakcie + EPS beat/miss história + earnings dátum (Yahoo, 12h cache)."""

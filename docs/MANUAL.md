@@ -198,6 +198,9 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
     najmä počas DIPu. **Predaje** sú u veľkých titulov často plánované (10b5-1
     schémy) a samy o sebe nie sú medvedie — neber 40× predaj u mega-capu ako
     varovanie. Séria EPS beatov = firma spoľahlivo doručuje. Karta je fail-soft.
+- **Relatívna sila** — výkon tickera mínus výkon indexu (QQQ, SPY) za 1 a 3
+  mesiace. Kladné (zelené) = prekonáva trh, záporné = zaostáva. Odlíši lídra od
+  zaostávajúceho aj v rastúcom trhu. Interpretácia, neovplyvňuje C1–C4.
 - **Technická vstupná zóna** — len technický odhad vstupu.
 - **Backtesting** — celková správnosť, priemerná chyba, porovnanie vs. default
   váhy.

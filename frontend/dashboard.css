@@ -3363,3 +3363,10 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .mc-regime-warn    { color: var(--yellow, #f59e0b); background: color-mix(in srgb, var(--yellow, #f59e0b) 14%, transparent); border-color: color-mix(in srgb, var(--yellow, #f59e0b) 45%, transparent); }
 .mc-regime-bad     { color: var(--down, #ff4560); background: color-mix(in srgb, var(--down, #ff4560) 14%, transparent);  border-color: color-mix(in srgb, var(--down, #ff4560) 45%, transparent); }
 .mc-regime-neutral { color: var(--muted); }
+
+/* ── Relatívna sila tabuľka (Predictive sidebar) ──────────────────────────── */
+.rs-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; margin-top: 4px; }
+.rs-table th { color: var(--muted2); font-weight: 600; text-align: right; padding: 2px 6px; font-size: 10px; }
+.rs-table th:first-child { text-align: left; }
+.rs-table td { text-align: right; padding: 2px 6px; }
+.rs-table td:first-child { text-align: left; }
