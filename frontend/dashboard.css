@@ -4,6 +4,7 @@
   --bg:          #080c14;
   --bg-card:     #0f1422;
   --bg-input:    #161d2f;
+  --bg2:         #161d2f;
   --border:      #1e293b;
   --border-focus:#3b82f6;
   --text:        #f8fafc;
@@ -71,6 +72,7 @@ html[data-variant="odvazna"] {
   --bg:          #030508;
   --bg-card:     #070c14;
   --bg-input:    #0d1322;
+  --bg2:         #0d1322;
   --border:      #121b2d;
   --border-focus:oklch(78% 0.24 230);
   --text:        #f8fafc;
@@ -109,6 +111,7 @@ body.light-mode {
   --bg:          #f1f5f9;
   --bg-card:     #ffffff;
   --bg-input:    #f8fafc;
+  --bg2:         #ffffff;
   --border:      #e2e8f0;
   --border-focus:#3b82f6;
   --text:        #0f172a;
