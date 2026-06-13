@@ -256,6 +256,7 @@ trhu vyššiu šancu na úspech než v klesajúcom.
 | **Breadth 62 %** | Šírka trhu: % titulov Nasdaq-100 nad svojou EMA50. Tooltip pridáva % nad EMA200 a pokrytie dát. | **≥ 60 %** zelená — rastie väčšina trhu, zdravé prostredie pre DIP vstupy. **40–60 %** oranžová — selektívny trh, preferuj 4/4 a DIP crossover. **< 40 %** červená — väčšinu trhu nesie pár mega-capov. _Najcennejší je rozpor:_ QQQ ↑ ale Breadth < 50 % = krehká rally bez podpory priemerného titulu. |
 | **VIX 18.3** | Implikovaná volatilita S&P 500 („index strachu"). | **< 15** pokoj (pozor na samoľúbosť), **15–20** normál, **20–30** zvýšený — nervozita, menšie pozície, **30+** stres — panika; historicky najlepšie dlhodobé vstupy, ale vstupuj postupne. |
 | **XLK +4.2 % · XLE −2.1 %** | Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11). | Kandidát z vedúceho sektora má prúd so sebou. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ. |
+| **◆ Goldilocks / Prehriatie / Risk-off / Útlm** | Súhrnný **režim trhu** ako kvadrant *trend × volatilita* z QQQ/SPY + VIX + breadth (nie inflačný Goldilocks). | **Goldilocks** (rast + pokoj) — ideálne pre DIP. **Prehriatie** (rast + VIX nervozita) — selektívne, menšie pozície. **Risk-off** (pokles + stres) — defenzíva. **Útlm** (pokles + pokoj) — opatrné hľadanie dna. Zhrnutie ostatných chipov do jedného slova; neovplyvňuje C1–C4. |
 
 **Praktické kombinácie:**
 

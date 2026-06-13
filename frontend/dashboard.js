@@ -7083,6 +7083,12 @@ function renderMarketContext() {
   const cls = t => t === 'up' ? 'mc-up' : t === 'down' ? 'mc-down' : 'mc-side';
   const pct = v => `${v >= 0 ? '+' : ''}${v} %`;
   const parts = [];
+  if (m.market_regime) {
+    const r = m.market_regime;
+    const rCls = { goldilocks: 'mc-regime-good', overheat: 'mc-regime-warn',
+                   riskoff: 'mc-regime-bad', lull: 'mc-regime-warn', neutral: 'mc-regime-neutral' }[r.quadrant] || 'mc-regime-neutral';
+    parts.push(`<span class="mc-chip mc-regime ${rCls}" title="Trhový režim (trend × volatilita, odvodený z QQQ/SPY + VIX + breadth) — ${r.note}. Interpretácia, neovplyvňuje skóre signálov.">◆ ${r.label}</span>`);
+  }
   for (const [key, label] of [['qqq', 'QQQ'], ['spy', 'SPY']]) {
     const t = m[key];
     if (!t) continue;

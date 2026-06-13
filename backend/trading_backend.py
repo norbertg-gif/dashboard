@@ -5350,6 +5350,36 @@ def _mc_compute_core() -> dict:
     return out
 
 
+def _mc_regime_quadrant(data: dict) -> dict | None:
+    """Trhový režim ako kvadrant trend × volatilita. Interpretačná nadstavba nad
+    market-context dátami (nie inflačný Goldilocks — inflačné dáta nemáme).
+    NEOVPLYVŇUJE C1–C4. Breadth zjemňuje rozhodnutie, ale nie je povinný."""
+    qqq = data.get("qqq") or {}
+    spy = data.get("spy") or {}
+    vix = data.get("vix") or {}
+    breadth = data.get("breadth") or {}
+    trends = [t for t in (qqq.get("trend"), spy.get("trend")) if t]
+    if not trends or vix.get("value") is None:
+        return None
+    up = sum(1 for t in trends if t == "up")
+    down = sum(1 for t in trends if t == "down")
+    b50 = breadth.get("above_ema50_pct")
+    risk_on = up > down and (b50 is None or b50 >= 50)
+    risk_off = down > up or (b50 is not None and b50 < 40)
+    calm = vix["value"] < 20
+    if risk_on and calm:
+        q, label, note = "goldilocks", "Goldilocks", "rast + pokoj — ideálne prostredie pre DIP vstupy"
+    elif risk_on and not calm:
+        q, label, note = "overheat", "Prehriatie", "rast + nervozita — selektívne, menšie pozície"
+    elif risk_off and not calm:
+        q, label, note = "riskoff", "Risk-off", "pokles + stres — defenzíva, počkať na stabilizáciu"
+    elif risk_off and calm:
+        q, label, note = "lull", "Útlm", "pokles + pokoj — opatrné hľadanie dna"
+    else:
+        q, label, note = "neutral", "Neutrál", "zmiešané signály — bez jasného režimu"
+    return {"quadrant": q, "label": label, "note": note}
+
+
 def _mc_breadth_worker():
     """% Nasdaq-100 titulov nad EMA50/EMA200 — sekvenčne, šetrne k pamäti."""
     global _market_breadth_running
@@ -5378,6 +5408,7 @@ def _mc_breadth_worker():
         with _market_ctx_lock:
             data = json.loads(MARKET_CTX_FILE.read_text(encoding="utf-8")) if MARKET_CTX_FILE.exists() else {}
             data["breadth"] = breadth
+            data["market_regime"] = _mc_regime_quadrant(data)   # breadth dopresnil kvadrant
             MARKET_CTX_FILE.write_text(json.dumps(data), encoding="utf-8")
     except Exception as e:
         print(f"[marketctx] breadth save: {e}")
@@ -5408,6 +5439,7 @@ def get_market_context(refresh: int = Query(0)):
     data["fetched_at"] = datetime.now(timezone.utc).isoformat()
     # starý breadth nechaj, kým worker dopočíta nový
     data["breadth"] = (cached or {}).get("breadth")
+    data["market_regime"] = _mc_regime_quadrant(data)
     with _market_ctx_lock:
         try:
             MARKET_CTX_FILE.write_text(json.dumps(data), encoding="utf-8")
