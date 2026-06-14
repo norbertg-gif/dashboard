@@ -250,6 +250,25 @@
     <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
   </ul>
 
+  <h3>Analytika signálov — detailný popis tabuliek</h3>
+  <p>Sekcia <strong>ANALYTIKA SIGNÁLOV</strong> v ľavom paneli obsahuje tri tabuľky a tlačidlá <strong>30D / 60D / 90D</strong> na prepínanie horizontu. Klik na horizont prepne všetky tri tabuľky súčasne.</p>
+  <p>Každá tabuľka má rovnaké stĺpce:</p>
+  <table>
+    <tr><th>Stĺpec</th><th>Čo znamená</th></tr>
+    <tr><td><strong>Segment</strong></td><td>Kategória riadku (napr. Buy, 3/4, Bull).</td></tr>
+    <tr><td><strong>N</strong></td><td>Počet <em>vyhodnotených</em> signálov, ktorým uplynul zvolený horizont. Hover nad číslom zobrazí celkový počet vrátane <code>pending</code> signálov čakajúcich na vyhodnotenie.</td></tr>
+    <tr><td><strong>Win</strong></td><td>Podiel signálov, kde cena po uplynutí horizontu dosiahla kladný výnos nad prahom <code>1–3× ATR%</code> (výsledok <code>win</code>).</td></tr>
+    <tr><td><strong>Medián</strong></td><td>Stredný výnos vyhodnotených signálov v % na konci horizontu. Medián je odolnejší voči extrémnym hodnotám než priemer — jeden obchod +80 % ho nedeformuje.</td></tr>
+    <tr><td><strong>MFE</strong></td><td>Priemerné maximum favorable excursion — najväčší priebežný zisk počas horizontu. Vysoký MFE s nízkym MAE = čistý trend, malé otrasy.</td></tr>
+    <tr><td><strong>MAE</strong></td><td>Priemerné maximum adverse excursion — najväčší priebežný pokles od vstupu. Ukazuje, koľko „bolesti" bolo treba vydržať. MAE −12 % pri win rate 65 % znamená, že víťazné obchody prešli hlbokými korekciami na ceste k zisku.</td></tr>
+  </table>
+  <blockquote><p><strong>Predbežná vzorka:</strong> Riadok s N &lt; 5 je vizuálne bledší — čísla sú smerovým odhadom, nie štatistikou. Čakaj, kým N dosiahne aspoň 10–15 pred vyvodzovaním záverov.</p></blockquote>
+  <ul>
+    <li><strong>Tabuľka 1 — Podľa rozhodnutia (Tier):</strong> Porovnáva výsledky Buy, Watch a Counter signálov. Očakávaný vzor: Buy vykazuje najvyšší win rate, Counter najnižší. Ak Counter vykazuje podobné výsledky ako Buy, signalizuje silný makro bull trh — aj counter-trendový dip priniesol dobrý výsledok napriek riziku.</li>
+    <li><strong>Tabuľka 2 — Podľa sily signálu (2/4 / 3/4 / 4/4):</strong> Keď sa win rate a medián výrazne zlepšujú od 2/4 k 4/4, vyššia sila skutočne predikuje lepší výsledok. Keď sú čísla podobné naprieč silami, ticker nereaguje silno na C1–C4 podmienky.</li>
+    <li><strong>Tabuľka 3 — Podľa režimu trhu (Bull / Sideways / Bear / Vysoká vol.):</strong> Zobrazí sa len keď signály majú vyplnený HMM kontext. Nové signály dostávajú kontext automaticky; staré sa dopĺňajú priebežne pri každom zobrazení tickera. Toto je v praxi najhodnotnejšia tabuľka: rovnaký Buy 3/4 setup v Bull režime môže mať win rate 70 %, kým v Bear len 30 %. Pre zmysluplné čísla je potrebných ~20–30 vyhodnotených signálov na jeden segment.</li>
+  </ul>
+
   <h3>Ako čítať MFE, MAE a Regime</h3>
   <ul>
     <li><strong>MFE — Maximum Favorable Excursion</strong> je najväčší priebežný zisk, ktorý signál počas zvoleného horizontu dosiahol. Výsledok po 60 dňoch môže byť +4 %, ale MFE +18 % znamená, že titul bol medzitým až 18 % v zisku.</li>
@@ -340,6 +359,24 @@
     <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
     <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.</li>
   </ul>
+
+  <h3>Reddit zmienky (r/N)</h3>
+  <p>V riadkoch Nasdaq DIP scannera sa vedľa tickera môže zobraziť badge <strong><code>r/N↑</code></strong> alebo <strong><code>r/N↓</code></strong> — počet nedávnych zmienok tickera v obchodných subredditoch. Zdroj: <strong>ApeWisdom</strong>, ktorý agreguje komunity r/WallStreetBets, r/stocks, r/investing a podobné.</p>
+  <ul>
+    <li><strong>N</strong> — celkový počet zaznamenaných zmienok za sledované obdobie.</li>
+    <li><strong>↑ žltá</strong> — rank tickera sa za posledných 24 hodín <em>zlepšil</em>: titul sa diskutuje aktívnejšie ako včera.</li>
+    <li><strong>↓ modrá</strong> — rank sa <em>zhoršil</em>: menej pozornosti než deň predtým.</li>
+    <li><strong>Hover nad badge</strong> — zobrazí presné čísla: aktuálne zmienky, zmienky pred 24 hodinami, aktuálny rank a rank pred 24 hodinami.</li>
+  </ul>
+  <blockquote><p><strong>Dôležité:</strong> Farba badge-u meria <strong>pozornosť, nie smer pohybu.</strong> Žltá ↑ nie je bullish signál — ticker môže byť diskutovaný práve preto, že prudko rastie, ale rovnako preto, že sa rúca. Farby boli zvolené zámerne ako žltá/modrá, aby sa nepomiešali so zelenými/červenými P/L farbami.</p></blockquote>
+  <table>
+    <tr><th>Kombinácia</th><th>Čo to naznačuje</th></tr>
+    <tr><td>Silný Buy 3–4/4 + ↑ rastúce zmienky</td><td>Titul si všíma retail aj technický setup — potenciálne výbušný kandidát.</td></tr>
+    <tr><td>Silný Buy 3–4/4 bez badge</td><td>„Tichý" kandidát pod radarom. Pohyb poháňaný inštitucionálnym flow bez retailového FOMO. Často spoľahlivejší.</td></tr>
+    <tr><td>Vysoké zmienky bez technického signálu</td><td>Špekulatívny pohyb; ťažko načasovateľný a rizikový.</td></tr>
+    <tr><td>Extrémne zmienky (stovky–tisíce)</td><td>Aktívna špekulačná fáza. Zvýšené riziko prestreleniaerzie a prudkého obratu. Veľmi nízka prediktabilita ďalšieho pohybu.</td></tr>
+  </table>
+  <p>Dáta sa obnovujú každých <strong>6 hodín</strong> na serveri a načítavajú sa automaticky pri otvorení scannera. Badge sa zobrazí len pre tickery, ktoré figurujú v aktuálnych top výsledkoch ApeWisdom. Ticker bez badge neznamená nutne nula zmienok — len sa nenachádza v top zozname.</p>
 
   <h3>Portfólio príznak (●)</h3>
   <p>Ak ticker už <strong>držíš v eToro portfóliu</strong> (ktorýkoľvek z dvoch účtov), zobrazí sa pri ňom farebná bodka s P/L: zelená <code>●+5.2%</code> = zisk, červená <code>●−3.1%</code> = strata, sivá = P/L sa nepodarilo vypočítať. Pomáha okamžite rozhodnúť, či ide o DCA (dokúpiť) alebo fresh entry. Dáta z portfolio cache, žiadne extra eToro volania.</p>

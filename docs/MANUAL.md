@@ -269,6 +269,51 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **ZHODA ČASOVÝCH RÁMCOV** — zhoda timeframeov: Weekly bias, Weekly trend, Daily
   trend, Daily signal → súhrn **PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ**.
 
+### Analytika signálov — detailný popis tabuliek
+
+Sekcia **ANALYTIKA SIGNÁLOV** v ľavom paneli obsahuje tri tabuľky a tlačidlá
+**30D / 60D / 90D** na prepínanie horizontu. Klik na horizont prepne všetky tri
+tabuľky súčasne.
+
+Každá tabuľka má rovnaké stĺpce:
+
+| Stĺpec | Čo znamená |
+|---|---|
+| **Segment** | Kategória riadku (napr. Buy, 3/4, Bull). |
+| **N** | Počet *vyhodnotených* signálov, ktorým uplynul zvolený horizont. Hover nad číslom zobrazí celkový počet vrátane `pending` signálov čakajúcich na vyhodnotenie. |
+| **Win** | Podiel signálov, kde cena po uplynutí horizontu dosiahla kladný výnos nad prahom `1–3× ATR%` (výsledok `win`). |
+| **Medián** | Stredný výnos vyhodnotených signálov v % na konci horizontu. Medián je odolnejší voči extrémnym hodnotám než priemer — jeden obchod +80 % ho nedeformuje. |
+| **MFE** | Priemerné maximum favorable excursion — najväčší priebežný zisk počas horizontu. Vysoký MFE s nízkym MAE = čistý trend, malé otrasy. |
+| **MAE** | Priemerné maximum adverse excursion — najväčší priebežný pokles od vstupu. Ukazuje, koľko „bolesti" bolo treba vydržať, kým sa obchod vyhodnotil. MAE −12 % pri win rate 65 % znamená, že víťazné obchody prešli hlbokými korekciami na ceste k zisku. |
+
+> **Predbežná vzorka:** Riadok s N < 5 je vizuálne bledší — čísla sú smerovým
+> odhadom, nie štatistikou. Čakaj, kým N dosiahne aspoň 10–15 pred tým, ako
+> z hodnôt vyvodzuješ závery.
+
+**Tabuľka 1 — Podľa rozhodnutia (Tier):**
+Porovnáva výsledky Buy, Watch a Counter signálov. Očakávaný vzor: Buy vykazuje
+najvyšší win rate a najlepší medián výnosu, Counter najnižší. Ak Counter vykazuje
+podobné výsledky ako Buy, signalizuje silný makro bull trh — aj counter-trendový
+dip priniesol dobrý výsledok napriek riziku „catching a falling knife".
+
+**Tabuľka 2 — Podľa sily signálu (2/4 / 3/4 / 4/4):**
+Porovnáva výsledky podľa počtu splnených podmienok C1–C4. Keď sa win rate a
+medián výrazne zlepšujú od 2/4 k 4/4, systém pre daný ticker funguje — vyššia
+sila skutočne predikuje lepší výsledok. Keď sú čísla podobné naprieč silami,
+ticker nereaguje silno na C1–C4 podmienky.
+
+**Tabuľka 3 — Podľa režimu trhu (Bull / Sideways / Bear / Vysoká vol.):**
+Táto tabuľka sa zobrazí len vtedy, keď signály majú vyplnený HMM kontext (segmenty
+Bull / Sideways / Bear / Vysoká volatilita). Nové signály dostávajú kontext
+automaticky; staré signály sa dopĺňajú priebežne pri každom zobrazení tickera
+v Prediktívnom tabe alebo jednorazovým backfillom (sekcia Technická príloha).
+
+Toto je v praxi najhodnotnejšia tabuľka: rovnaký Buy 3/4 setup v Bull režime môže
+mať win rate 70 % a medián +8 %, kým v Bear režime len 30 % a medián −5 %. Keď
+nazbieraš ~20–30 vyhodnotených signálov na jeden segment, budeš vedieť, pri akých
+trhových podmienkach daný ticker na signály reaguje spoľahlivo — a pri akých radšej
+čakať na silnejší setup alebo lepšie trhové prostredie.
+
 ### Farby signálov (tier)
 
 O farbe rozhoduje **kontext trendu**, nie hrubé skóre:
@@ -398,6 +443,37 @@ NEWS_SENTIMENT).
 - Načo to je: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva
   iracionálna — žaloby, profit warningy, sektorové správy. News blok
   pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.
+
+### Reddit zmienky (r/N)
+
+V riadkoch Nasdaq DIP scannera sa vedľa tickera môže zobraziť badge
+**`r/N↑`** alebo **`r/N↓`** — počet nedávnych zmienok tickera v obchodných
+subredditoch. Zdroj: **ApeWisdom**, ktorý agreguje komunity r/WallStreetBets,
+r/stocks, r/investing a podobné.
+
+- **N** — celkový počet zaznamenaných zmienok za sledované obdobie.
+- **↑ žltá** — rank tickera sa za posledných 24 hodín *zlepšil*: titul sa
+  diskutuje aktívnejšie ako včera.
+- **↓ modrá** — rank sa *zhoršil*: menej pozornosti než deň predtým.
+- **Hover nad badge** — zobrazí presné čísla: aktuálne zmienky, zmienky pred
+  24 hodinami, aktuálny rank a rank pred 24 hodinami.
+
+**Dôležité:** Farba badge-u meria **pozornosť, nie smer pohybu.** Žltá ↑ nie
+je bullish signál — ticker môže byť diskutovaný práve preto, že prudko rastie,
+ale rovnako preto, že sa rúca. Farby boli zámerne zvolené ako žltá/modrá, aby
+sa nepomiešali so zelenými/červenými P/L farbami.
+
+| Kombinácia | Čo to naznačuje |
+|---|---|
+| Silný Buy 3–4/4 + ↑ rastúce zmienky | Titul si všíma retail aj technický setup — potenciálne výbušný kandidát. |
+| Silný Buy 3–4/4 bez badge | „Tichý" kandidát pod radarom. Pohyb poháňaný inštitucionálnym flow bez retailového FOMO. Často spoľahlivejší. |
+| Vysoké zmienky bez technického signálu | Špekulatívny pohyb; ťažko načasovateľný. |
+| Extrémne zmienky (stovky–tisíce) | Aktívna špekulačná fáza. Zvýšené riziko prestreleniaerzie a prudkého obratu. |
+
+Dáta sa obnovujú každých **6 hodín** na serveri a načítavajú sa automaticky pri
+otvorení scannera. Badge sa zobrazí len pre tickery, ktoré figurujú v aktuálnych
+top výsledkoch ApeWisdom. Ticker bez badge neznamená nutne nula zmienok — len
+sa nenachádza v top zozname.
 
 ### Portfólio príznak (●)
 
