@@ -7242,6 +7242,19 @@ function renderMarketContext() {
                    riskoff: 'mc-regime-bad', lull: 'mc-regime-warn', neutral: 'mc-regime-neutral' }[r.quadrant] || 'mc-regime-neutral';
     parts.push(`<span class="mc-chip mc-regime ${rCls}" title="Trhový režim (trend × volatilita, odvodený z QQQ/SPY + VIX + breadth) — ${r.note}. Interpretácia, neovplyvňuje skóre signálov.">◆ ${r.label}</span>`);
   }
+  if (m.macro && m.macro.label) {
+    const mm = m.macro;
+    const goodLabels = { 'Goldilocks': 'mc-regime-good', 'Dezinflácia': 'mc-regime-good' };
+    const badLabels = { 'Inverzná krivka': 'mc-regime-bad', 'Vysoká inflácia': 'mc-regime-bad' };
+    const mCls = goodLabels[mm.label] || badLabels[mm.label] || 'mc-regime-neutral';
+    const bits = [];
+    if (mm.inflation_yoy != null) bits.push(`CPI ${mm.inflation_yoy} %`);
+    if (mm.yield_curve && mm.yield_curve.spread_10y2y != null) bits.push(`10Y-2Y ${mm.yield_curve.spread_10y2y >= 0 ? '+' : ''}${mm.yield_curve.spread_10y2y}`);
+    if (mm.fed_funds != null) bits.push(`Fed ${mm.fed_funds} %`);
+    if (mm.unemployment != null) bits.push(`Nezam. ${mm.unemployment} %`);
+    const tip = `Makro (FRED) — ${mm.note}. ${bits.join(' · ')}. Interpretácia, neovplyvňuje C1–C4.`;
+    parts.push(`<span class="mc-chip mc-regime ${mCls}" title="${tip}">⬢ ${mm.label}</span>`);
+  }
   const massive = m.massive;
   if (massive) {
     const pulseChip = (pulse, shortName) => {
@@ -7339,15 +7352,21 @@ async function pc_loadRS(ticker) {
     const sign = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)} %`;
     const colCell = v => v == null ? '<td style="color:var(--muted)">—</td>'
       : `<td style="color:${v >= 0 ? 'var(--up)' : 'var(--down)'};font-weight:700;">${sign(v)}</td>`;
+    const secEtf = d.sector_etf || null;
+    const secKey = secEtf ? 'vs_' + secEtf : null;
+    const secHdr = secEtf
+      ? `<th title="Sektorový SPDR ETF${d.sector_name ? ' · ' + escHtml(d.sector_name) : ''}${d.sector_industry ? ' (' + escHtml(d.sector_industry) + ')' : ''}">vs ${escHtml(secEtf)}</th>`
+      : '';
     const rows = [];
     for (const [plabel, name] of [['1m', '1 mesiac'], ['3m', '3 mesiace']]) {
       const p = d.periods[plabel];
       if (!p) continue;
-      rows.push(`<tr><td style="color:var(--muted)">${name}</td>${colCell(p.vs_QQQ)}${colCell(p.vs_SPY)}</tr>`);
+      const secCell = secKey ? colCell(p[secKey]) : '';
+      rows.push(`<tr><td style="color:var(--muted)">${name}</td>${colCell(p.vs_QQQ)}${colCell(p.vs_SPY)}${secCell}</tr>`);
     }
     if (!rows.length) return;
-    card.innerHTML = `<div class="card-title" title="Relatívna sila = výkon tickera mínus výkon indexu. Kladné (zelené) = ticker prekonáva trh; záporné = zaostáva. Interpretácia, neovplyvňuje C1–C4.">Relatívna sila</div>
-      <table class="rs-table"><thead><tr><th></th><th>vs QQQ</th><th>vs SPY</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    card.innerHTML = `<div class="card-title" title="Relatívna sila = výkon tickera mínus výkon indexu/sektoru. Kladné (zelené) = ticker prekonáva; záporné = zaostáva. Sektor = SPDR ETF tickera. Interpretácia, neovplyvňuje C1–C4.">Relatívna sila</div>
+      <table class="rs-table"><thead><tr><th></th><th>vs QQQ</th><th>vs SPY</th>${secHdr}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
     card.style.display = '';
   } catch (e) { /* fail-soft */ }
 }

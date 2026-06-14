@@ -6,5 +6,7 @@ cache/
 data/
 news_cache/
 _market_context.json
+_ticker_sectors.json
+_fred_macro.json
 yahoo_insights/
 massive_market/

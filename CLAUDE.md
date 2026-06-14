@@ -96,8 +96,8 @@ These were already in the codebase and need to stay fixed:
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
 
-- **RS / párový kontext v Predictive** — ✅ ČIASTOČNE. `GET /api/ticker/rs/{symbol}` počíta RS voči QQQ a SPY (1M/3M), karta `#rsCard` v Predictive sidebar (`pc_loadRS`). Sektorové ETF RS ešte chýba (treba ticker→sektor mapu — Finnhub `/stock/profile2` alebo statická). NEOVPLYVŇUJE C1–C4.
-- **Makro režim trhu** — ✅ HOTOVO. `_mc_regime_quadrant()` odvodí kvadrant trend × volatilita (Goldilocks/Prehriatie/Risk-off/Útlm/Neutrál) z QQQ/SPY trendu + VIX + breadth. Pole `market_regime` v `/api/market/context`, chip `◆` v TRH lište (`renderMarketContext`). Prepočíta sa aj v breadth workeri keď dorazí breadth. NEOVPLYVŇUJE C1–C4.
+- **RS / párový kontext v Predictive** — ✅ HOTOVO. `GET /api/ticker/rs/{symbol}` počíta RS voči QQQ, SPY **a vlastnému SPDR sektoru** (1M/3M), karta `#rsCard` v Predictive sidebar (`pc_loadRS`). Ticker→sektor mapa cez Finnhub `/stock/profile2` (`_ticker_sector_etf`, kľúčové slová z `finnhubIndustry` → 11 SPDR ETF, disk cache `_ticker_sectors.json` 90d, fail-soft). RS karta pridá tretí stĺpec `vs XLx` keď sektor existuje. NEOVPLYVŇUJE C1–C4.
+- **Makro režim trhu** — ✅ HOTOVO + FRED vrstva. `_mc_regime_quadrant()` odvodí kvadrant trend × volatilita (Goldilocks/Prehriatie/Risk-off/Útlm/Neutrál) z QQQ/SPY trendu + VIX + breadth (chip `◆`). **Navyše `_fred_macro()`** (vyžaduje `FRED_API_KEY`, fail-soft bez kľúča) dodáva reálne makro dáta — výnosová krivka T10Y2Y (inverzia = recesné riziko), 10Y výnos, fed funds, nezamestnanosť, CPI YoY inflácia — a label (Goldilocks/Inverzná krivka/Vysoká inflácia/Dezinflácia/Neutrál). Pole `macro` v `/api/market/context`, chip `⬢` v TRH lište. Disk cache `_fred_macro.json` 12h. NEOVPLYVŇUJE C1–C4.
 - **News clustering** — zoskupiť články o rovnakej udalosti do jedného príbehu, nech sentiment nie je umelo násobený duplicitami. Až keď bude news cache dostatočne naplnená.
 - Pravidlo pre všetky tri: interpretačné vrstvy, NEVSTUPUJÚ do C1–C4 scoringu.
 
@@ -264,6 +264,8 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 
 ## Data flow worth knowing
 
+- **`_yf_download_cached` skúša Massive pred yfinance.** yfinance je na free tieri najkrehkejší zdroj (rate-limit → prázdne grafy, scanner "chyby"). `_massive_daily_bars(ticker, period, interval)` ťahá denné/týždenné bary z Massive `/v2/aggs/ticker/.../range/1/{day|week}/...` (Polygon-style), yfinance je fallback. Intraday (1h/4h) ostáva na yfinance (free Massive plán ho nemá). Po prvom `NOT_AUTHORIZED` sa Massive bary vypnú flagom `_massive_bars_disabled` (žiadny opakovaný latency hit). `get_chart` (weekly predictive) má Massive len ako fallback keď yfinance vráti prázdno. **Over cez `/api/diagnostics/massive`, či free plán per-ticker agregáty vôbec dáva** — ak nie, všetko padá späť na yfinance bez zmeny správania.
+- **ML + HMM model cache (`_MODEL_CACHE`).** `train_ml_model` a `detect_market_regime` sa inak fitovali pri každom `/api/chart` requeste. Cache kľúč `ticker:period:1wk:{posledná_sviečka}:{n}` → fit sa robí raz za sviečku. ML ukladá len `(acc, bull_prob)` (model je downstream nepoužitý → šetrí RAM), HMM celý dict. Max 256 záznamov, LRU prune.
 - **OHLCV cache is incremental.** `cache/ohlcv/{SYMBOL}_{INTERVAL}.gz` stores up to 1000 candles. Subsequent fetches request a tail (3–50 candles) and merge by `fromDate` key. Full refetch only on first load.
 - **Portfolio cache TTL = 120s RAM, falls back to disk on eToro proxy outage.** Stale-while-erroring is intentional.
 - **WebSocket** (`wss://ws.etoro.com/ws`) drives live prices for chart last candle, rates tab, portfolio P/L, and predictive daily/weekly last candle. REST refresh runs every 15s as fallback only.

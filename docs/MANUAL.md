@@ -248,9 +248,13 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
     najmä počas DIPu. **Predaje** sú u veľkých titulov často plánované (10b5-1
     schémy) a samy o sebe nie sú medvedie — neber 40× predaj u mega-capu ako
     varovanie. Séria EPS beatov = firma spoľahlivo doručuje. Karta je fail-soft.
-- **Relatívna sila** — výkon tickera mínus výkon indexu (QQQ, SPY) za 1 a 3
-  mesiace. Kladné (zelené) = prekonáva trh, záporné = zaostáva. Odlíši lídra od
-  zaostávajúceho aj v rastúcom trhu. Interpretácia, neovplyvňuje C1–C4.
+- **Relatívna sila** — výkon tickera mínus výkon benchmarku za 1 a 3 mesiace.
+  Kladné (zelené) = prekonáva, záporné = zaostáva. Porovnáva sa voči **QQQ, SPY
+  a vlastnému SPDR sektoru** tickera (napr. `vs XLK` pre technologický titul —
+  sektor sa určí z Finnhub profile2). Stĺpec `vs sektor` je najdôležitejší: titul
+  môže prekonávať SPY, no zaostávať za vlastným sektorom = relatívne slabý hráč.
+  Odlíši lídra od zaostávajúceho aj v rastúcom trhu. Interpretácia, neovplyvňuje
+  C1–C4.
 - **Technická vstupná zóna** — len technický odhad vstupu.
 - **Backtesting** — celková správnosť, priemerná chyba, porovnanie vs. default
   váhy.
@@ -358,6 +362,7 @@ trhu vyššiu šancu na úspech než v klesajúcom.
 | **VIX 18.3** | Implikovaná volatilita S&P 500 („index strachu"). | **< 15** pokoj (pozor na samoľúbosť), **15–20** normál, **20–30** zvýšený — nervozita, menšie pozície, **30+** stres — panika; historicky najlepšie dlhodobé vstupy, ale vstupuj postupne. |
 | **XLK +4.2 % · XLE −2.1 %** | Sektorová rotácia: najsilnejší a najslabší SPDR sektor za 1 mesiac (z 11). | Kandidát z vedúceho sektora má prúd so sebou. Defenzívne sektory na čele (XLP, XLU, XLV) = trh sa schováva — risk-off varovanie aj pri zelenom QQQ. |
 | **◆ Goldilocks / Prehriatie / Risk-off / Útlm** | Súhrnný **režim trhu** ako kvadrant *trend × volatilita* z QQQ/SPY + VIX + breadth (nie inflačný Goldilocks). | **Goldilocks** (rast + pokoj) — ideálne pre DIP. **Prehriatie** (rast + VIX nervozita) — selektívne, menšie pozície. **Risk-off** (pokles + stres) — defenzíva. **Útlm** (pokles + pokoj) — opatrné hľadanie dna. Zhrnutie ostatných chipov do jedného slova; neovplyvňuje C1–C4. |
+| **⬢ Makro (FRED)** | **Reálny makroekonomický kontext** z Federal Reserve: výnosová krivka (10Y-2Y), CPI inflácia, fed funds sadzba, nezamestnanosť. Na rozdiel od ◆ ide o tvrdé makro dáta, nie odvodené z cien. Hover zobrazí presné hodnoty. | **Goldilocks** (inflácia 2–4 % + pozitívna krivka) — zdravé prostredie. **Dezinflácia** (inflácia < 2 %) — priestor na uvoľnenie politiky. **Vysoká inflácia** (≥ 4 %) — tlak na sadzby. **Inverzná krivka** (10Y < 2Y) — historický predstih recesie o 6–18 mesiacov, najsilnejšie varovanie. Vyžaduje `FRED_API_KEY`; bez neho sa chip nezobrazí. Interpretácia, neovplyvňuje C1–C4. |
 
 **Praktické kombinácie:**
 
@@ -805,7 +810,9 @@ render.yaml            # web service + 1GB disk na /data
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
 | `ALPHA_VANTAGE_API_KEY` | News sentiment v scanneri (free tier: 25 req/deň). |
-| `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. |
+| `FINNHUB_API_KEY` | Earnings, insider, EPS, analytický konsenzus a **mapa ticker→sektor** (profile2) pre sektorovú relatívnu silu. |
+| `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako **primárny zdroj denných/týždenných OHLCV** (yfinance fallback). |
+| `FRED_API_KEY` | Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva ticho vynechá. |
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
 | `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |

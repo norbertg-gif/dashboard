@@ -201,11 +201,43 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
                "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio",
                "roc_4", "pos_52w"]
 
-def train_ml_model(df):
+# ── Model cache (ML + HMM) ────────────────────────────────────────────────────
+# train_ml_model (RandomForest 3-fold) aj detect_market_regime (GaussianHMM) sa
+# inak fitujú pri každom /api/chart requeste. Keď sa cache_key (ticker+timeframe+
+# posledná sviečka) nezmení, výsledok je identický — tak ho cacheujeme do najbližšej
+# uzavretej sviečky. ML ukladá len (acc, bull_prob), nie samotný model (šetrí RAM
+# na Render free tieri); regime ukladá celý dict (malý).
+_MODEL_CACHE: dict = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+_MODEL_CACHE_MAX = 256
+
+
+def _model_cache_get(kind: str, cache_key):
+    if not cache_key:
+        return None
+    with _MODEL_CACHE_LOCK:
+        return _MODEL_CACHE.get((kind, cache_key))
+
+
+def _model_cache_put(kind: str, cache_key, value):
+    if not cache_key:
+        return
+    with _MODEL_CACHE_LOCK:
+        if len(_MODEL_CACHE) >= _MODEL_CACHE_MAX:
+            for k in list(_MODEL_CACHE.keys())[: _MODEL_CACHE_MAX // 3]:
+                _MODEL_CACHE.pop(k, None)
+        _MODEL_CACHE[(kind, cache_key)] = value
+
+
+def train_ml_model(df, cache_key=None):
     """Walk-forward validácia: 3 expanding-window foldy namiesto jedného 70/30
     splitu — accuracy je priemer cez foldy, takže nezávisí od toho, ktorý režim
     padol do test setu. Finálny model sa trénuje na všetkých dátach.
-    Returns (model, mean_test_accuracy, bull_prob_for_last_row)."""
+    Returns (model, mean_test_accuracy, bull_prob_for_last_row).
+    Pri cache hit je model None (nepoužíva sa downstream) — vraciame (acc, bull)."""
+    cached = _model_cache_get("ml", cache_key)
+    if cached is not None:
+        return None, cached[0], cached[1]
     df_ml = df.copy()
     df_ml["target"] = (df_ml["Close"].shift(-1) > df_ml["Close"]).astype(int)
     df_ml = df_ml.dropna(subset=ML_FEATURES + ["target"])
@@ -250,18 +282,23 @@ def train_ml_model(df):
     last_row = df_ml.iloc[-1][ML_FEATURES].values.reshape(1, -1)
     bull_prob = float(model.predict_proba(last_row)[0][1])
 
-    return model, round(acc, 1), bull_prob
+    acc_rounded = round(acc, 1)
+    _model_cache_put("ml", cache_key, (acc_rounded, bull_prob))
+    return model, acc_rounded, bull_prob
 
 
 # ── HMM Regime Detection ──────────────────────────────────────────────────────
 
-def detect_market_regime(df) -> dict:
+def detect_market_regime(df, cache_key=None) -> dict:
     """Fit a 3-state Gaussian HMM on log-returns and map states to
     bear / sideways / bull / high_volatility using mean return + volatility.
 
     Returns dict with: regime (str), confidence (float 0-1), states (list),
     regime_history (list of {date, regime} for last 26 bars), or error (str).
     """
+    cached = _model_cache_get("hmm", cache_key)
+    if cached is not None:
+        return cached
     try:
         from hmmlearn.hmm import GaussianHMM
     except ImportError:
@@ -327,7 +364,7 @@ def detect_market_regime(df) -> dict:
             lbl = "high_volatility" if (median_vol > 0 and v > median_vol * 1.8) else label_map[int(s)]
             history.append({"date": str(d.date() if hasattr(d, 'date') else d)[:10], "regime": lbl})
 
-        return {
+        result = {
             "regime":          current_regime,
             "confidence":      round(confidence, 3),
             "regime_probabilities": regime_probabilities,
@@ -344,6 +381,8 @@ def detect_market_regime(df) -> dict:
             },
             "error": None,
         }
+        _model_cache_put("hmm", cache_key, result)
+        return result
     except Exception as e:
         return {"error": f"HMM chyba: {type(e).__name__}: {str(e)[:80]}"}
 
@@ -2920,12 +2959,18 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
     try:
         raw = yf.download(ticker, period=period, interval="1wk",
                           auto_adjust=True, progress=False)
-        if raw.empty:
-            raise HTTPException(404, f"No data for {ticker}")
-
-        print(f"[CHART] Step 2: downloaded {len(raw)} rows", flush=True)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
+        if raw is None or raw.empty:
+            # yfinance zlyhal (rate-limit/timeout) → skús Massive ako záchranu
+            mb = _massive_daily_bars(ticker, period, "1wk")
+            if mb is not None and len(mb) >= 2:
+                print(f"[CHART] yfinance prázdne → Massive fallback ({len(mb)} rows)", flush=True)
+                raw = mb
+            else:
+                raise HTTPException(404, f"No data for {ticker}")
+
+        print(f"[CHART] Step 2: downloaded {len(raw)} rows", flush=True)
 
         raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
         print(f"[CHART] Step 3: cleaned {len(raw)} rows", flush=True)
@@ -3026,17 +3071,24 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         backtest    = run_backtest(df, weights=final_weights)
         print("[CHART] Step 10: backtest2 done", flush=True)
 
+        # Cache key pre ML + HMM: kým je posledná uzavretá sviečka rovnaká,
+        # výsledok fitu je identický → cacheujeme do najbližšej novej sviečky.
+        try:
+            _model_key = f"{ticker}:{period}:1wk:{pd.Timestamp(df.index[-1]).date()}:{len(df)}"
+        except Exception:
+            _model_key = None
+
         print("[CHART] Step 11: ML training...", flush=True)
         # Train ML confidence model (skip if taking too long)
         try:
-            _ml_model, ml_acc, ml_bull_prob = train_ml_model(df)
+            _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
             print("[CHART] Step 12: ML done", flush=True)
         except Exception:
             ml_acc, ml_bull_prob = None, 0.5
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
         try:
-            regime_info = detect_market_regime(df)
+            regime_info = detect_market_regime(df, cache_key=_model_key)
         except Exception as e:
             regime_info = {"error": str(e)[:80]}
 
@@ -4315,6 +4367,68 @@ _YF_CACHE_LOCK = threading.Lock()
 _YF_CACHE_TTL = 1800   # s
 _YF_CACHE_MAX = 150    # entries (DataFrames sú malé: ~126 riadkov × 6 stĺpcov)
 
+# ── Massive denné/týždenné bary (Polygon-style) — yfinance alternatíva ─────────
+# yfinance je na free tieri najkrehkejší zdroj (rate-limit, timeouty → prázdne
+# grafy a "chyby" v scanneri). Ak je MASSIVE_API_KEY nastavený a free plán
+# podporuje per-ticker agregáty, ťaháme denné/týždenné bary odtiaľ a yfinance
+# necháme len ako fallback. Intraday (1h/4h) ostáva na yfinance — free Massive
+# plán ho nemá. Chart endpoint (get_ohlcv) má vlastnú cestu, tu sa nemení.
+_MASSIVE_BARS_TIMESPAN = {"1d": "day", "1wk": "week"}
+_MASSIVE_PERIOD_DAYS = {
+    "1mo": 31, "3mo": 95, "6mo": 190, "1y": 370, "2y": 735, "5y": 1830, "max": 3650,
+}
+_massive_bars_disabled = False  # po prvom NOT_AUTHORIZED prestaneme skúšať (free plán)
+
+
+def _massive_daily_bars(ticker: str, period: str, interval: str):
+    """OHLCV DataFrame v yfinance tvare (Open/High/Low/Close/Volume, DatetimeIndex)
+    z Massive per-ticker agregátov, alebo None (fail-soft)."""
+    global _massive_bars_disabled
+    if _massive_bars_disabled:
+        return None
+    timespan = _MASSIVE_BARS_TIMESPAN.get(interval)
+    if not timespan:
+        return None
+    api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+    if not api_key:
+        return None
+    days = _MASSIVE_PERIOD_DAYS.get(period, 400)
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=days)
+    try:
+        r = requests.get(
+            f"https://api.massive.com/v2/aggs/ticker/{urllib.parse.quote(ticker)}"
+            f"/range/1/{timespan}/{start.isoformat()}/{end.isoformat()}",
+            params={"adjusted": "true", "sort": "asc", "limit": "5000", "apiKey": api_key},
+            timeout=SCANNER_YF_TIMEOUT,
+        )
+        payload = r.json() if r.content else {}
+        if payload.get("status") == "NOT_AUTHORIZED" or r.status_code in (401, 403):
+            _massive_bars_disabled = True
+            print("[massive] per-ticker bary nie sú na tomto pláne autorizované — "
+                  "vypínam, používam yfinance")
+            return None
+        if not r.ok:
+            return None
+        rows = payload.get("results") or []
+        if not rows:
+            return None
+        df = pd.DataFrame([
+            {"Open": x.get("o"), "High": x.get("h"), "Low": x.get("l"),
+             "Close": x.get("c"), "Volume": x.get("v"), "__t": x.get("t")}
+            for x in rows if x.get("t") is not None
+        ])
+        if df.empty:
+            return None
+        df.index = pd.to_datetime(df.pop("__t"), unit="ms")
+        df.index.name = "Date"
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        return df if len(df) >= 2 else None
+    except Exception as exc:
+        print(f"[massive] bary {ticker} {period}/{interval}: {type(exc).__name__}")
+        return None
+
+
 def _yf_download_cached(ticker: str, period: str, interval: str):
     key = (ticker, period, interval)
     now = time.time()
@@ -4322,10 +4436,12 @@ def _yf_download_cached(ticker: str, period: str, interval: str):
         hit = _YF_CACHE.get(key)
         if hit and now - hit[0] < _YF_CACHE_TTL:
             return hit[1].copy()
-    raw = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.get_level_values(0)
-    raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
+    raw = _massive_daily_bars(ticker, period, interval)
+    if raw is None or len(raw) < 2:
+        raw = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+        raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
     with _YF_CACHE_LOCK:
         if len(_YF_CACHE) >= _YF_CACHE_MAX:
             oldest = sorted(_YF_CACHE.items(), key=lambda kv: kv[1][0])[: _YF_CACHE_MAX // 3]
@@ -5322,10 +5438,95 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     return out
 
 
+# ── Ticker → SPDR sektorový ETF (Finnhub profile2) ────────────────────────────
+# Finnhub vracia hrubú finnhubIndustry; mapujeme ju kľúčovými slovami na 11 SPDR
+# sektorov, aby RS karta vedela porovnať ticker aj voči vlastnému sektoru, nie len
+# voči QQQ/SPY. Sektor sa mení zriedka → cache 90 dní na disku.
+_FINNHUB_INDUSTRY_TO_ETF = [
+    ("semiconduct", "XLK"), ("software", "XLK"), ("technology", "XLK"), ("hardware", "XLK"),
+    ("electronic", "XLK"), ("it services", "XLK"),
+    ("media", "XLC"), ("communication", "XLC"), ("telecom", "XLC"), ("entertainment", "XLC"),
+    ("retail", "XLY"), ("automobile", "XLY"), ("auto", "XLY"), ("hotel", "XLY"),
+    ("restaurant", "XLY"), ("apparel", "XLY"), ("leisure", "XLY"), ("luxury", "XLY"),
+    ("consumer discretionary", "XLY"),
+    ("food", "XLP"), ("beverage", "XLP"), ("tobacco", "XLP"), ("household", "XLP"),
+    ("consumer staple", "XLP"), ("consumer product", "XLP"),
+    ("pharmaceutical", "XLV"), ("biotechnology", "XLV"), ("health", "XLV"), ("medical", "XLV"),
+    ("life science", "XLV"),
+    ("bank", "XLF"), ("insurance", "XLF"), ("financial", "XLF"), ("capital market", "XLF"),
+    ("aerospace", "XLI"), ("machinery", "XLI"), ("transportation", "XLI"), ("airline", "XLI"),
+    ("industrial", "XLI"), ("logistics", "XLI"), ("construction", "XLI"),
+    ("oil", "XLE"), ("gas", "XLE"), ("energy", "XLE"), ("petroleum", "XLE"),
+    ("chemical", "XLB"), ("metal", "XLB"), ("mining", "XLB"), ("material", "XLB"),
+    ("paper", "XLB"), ("steel", "XLB"),
+    ("utilit", "XLU"),
+    ("real estate", "XLRE"), ("reit", "XLRE"),
+]
+SECTOR_CACHE_FILE = DATA_ROOT / "_ticker_sectors.json"
+_sector_cache_lock = threading.Lock()
+_SECTOR_TTL_DAYS = 90
+
+
+def _industry_to_etf(industry: str) -> str | None:
+    low = (industry or "").lower()
+    for needle, etf in _FINNHUB_INDUSTRY_TO_ETF:
+        if needle in low:
+            return etf
+    return None
+
+
+def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
+    """Vráti (etf, finnhub_industry) pre ticker. Cache 90d na disku, fail-soft."""
+    sym = sym.upper()
+    with _sector_cache_lock:
+        cache = {}
+        if SECTOR_CACHE_FILE.exists():
+            try:
+                cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cache = {}
+        hit = cache.get(sym)
+        if hit:
+            try:
+                age = (datetime.now(timezone.utc)
+                       - datetime.fromisoformat(hit["fetched_at"])).days
+                if age < _SECTOR_TTL_DAYS:
+                    return hit.get("etf"), hit.get("industry")
+            except Exception:
+                pass
+    api_key = os.getenv("FINNHUB_API_KEY", "")
+    if not api_key:
+        return None, None
+    try:
+        r = requests.get("https://finnhub.io/api/v1/stock/profile2",
+                         params={"symbol": sym, "token": api_key}, timeout=15)
+        r.raise_for_status()
+        industry = (r.json() or {}).get("finnhubIndustry") or ""
+        etf = _industry_to_etf(industry)
+        with _sector_cache_lock:
+            cache = {}
+            if SECTOR_CACHE_FILE.exists():
+                try:
+                    cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
+                except Exception:
+                    cache = {}
+            cache[sym] = {"etf": etf, "industry": industry,
+                          "fetched_at": datetime.now(timezone.utc).isoformat()}
+            try:
+                SECTOR_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+            except Exception:
+                pass
+        return etf, industry
+    except Exception as e:
+        print(f"[sector] profile2 {sym}: {_scrub_token(e)}")
+        return None, None
+
+
 @app.get("/api/ticker/rs/{symbol}")
 def get_ticker_rs(symbol: str):
-    """Relatívna sila tickera voči QQQ a SPY (1M/3M). Interpretačná vrstva pre
-    Predictive — NEOVPLYVŇUJE C1–C4. QQQ/SPY ťahá zo zdieľanej _yf cache."""
+    """Relatívna sila tickera voči QQQ, SPY a vlastnému SPDR sektoru (1M/3M).
+    Interpretačná vrstva pre Predictive — NEOVPLYVŇUJE C1–C4. Benchmarky ťahajú
+    zo zdieľanej _yf cache; sektor z Finnhub profile2 (cache 90d)."""
     sym = symbol.upper()
 
     def perf(df, days):
@@ -5338,8 +5539,15 @@ def get_ticker_rs(symbol: str):
         tdf = _yf_download_cached(sym, "6mo", "1d")
     except Exception as e:
         return {"ticker": sym, "error": str(e)}
+
+    # Vlastný sektor tickera (fail-soft — RS funguje aj bez neho)
+    sector_etf, sector_industry = _ticker_sector_etf(sym)
+
     benches = {}
-    for b in ("QQQ", "SPY"):
+    bench_list = ["QQQ", "SPY"]
+    if sector_etf and sector_etf not in bench_list:
+        bench_list.append(sector_etf)
+    for b in bench_list:
         try:
             benches[b] = _yf_download_cached(b, "6mo", "1d")
         except Exception:
@@ -5357,7 +5565,12 @@ def get_ticker_rs(symbol: str):
         periods[plabel] = entry
     if not periods:
         return {"ticker": sym, "error": "nedostatok histórie"}
-    return {"ticker": sym, "periods": periods}
+    out = {"ticker": sym, "periods": periods}
+    if sector_etf:
+        out["sector_etf"] = sector_etf
+        out["sector_name"] = _SECTOR_ETFS.get(sector_etf)
+        out["sector_industry"] = sector_industry
+    return out
 
 
 @app.get("/api/ticker/insights/{symbol}")
@@ -5776,6 +5989,91 @@ def _mc_trend(df: pd.DataFrame) -> dict:
     return {"trend": trend, "close": round(c, 2), "perf_1m": perf_1m}
 
 
+# ── FRED makro dáta (Federal Reserve) ─────────────────────────────────────────
+# Vypĺňa medzeru "inflačné dáta nemáme": výnosová krivka, inflácia, fed funds,
+# nezamestnanosť → reálny makro kontext k trendovo-volatilitnému kvadrantu.
+# Vyžaduje FRED_API_KEY (zadarmo); bez kľúča je fail-soft (pole sa vynechá).
+# Interpretačná vrstva — NEOVPLYVŇUJE C1–C4.
+FRED_CACHE_FILE = DATA_ROOT / "_fred_macro.json"
+_fred_lock = threading.Lock()
+_FRED_TTL_H = 12
+
+
+def _fred_series_latest(series_id: str, api_key: str, limit: int = 1) -> list[dict]:
+    r = requests.get(
+        "https://api.stlouisfed.org/fred/series/observations",
+        params={"series_id": series_id, "api_key": api_key, "file_type": "json",
+                "sort_order": "desc", "limit": limit},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return [o for o in (r.json().get("observations") or [])
+            if o.get("value") not in (".", "", None)]
+
+
+def _fred_macro_label(m: dict) -> tuple[str, str]:
+    infl = m.get("inflation_yoy")
+    curve = m.get("yield_curve") or {}
+    if curve.get("inverted"):
+        return "Inverzná krivka", "10Y < 2Y — historický predstih recesie (6–18 mes.)"
+    if infl is not None and infl >= 4:
+        return "Vysoká inflácia", "inflácia ≥ 4 % — tlak na sadzby, opatrnosť"
+    if infl is not None and 2 <= infl < 4:
+        return "Goldilocks", "inflácia 2–4 % + pozitívna krivka — zdravé prostredie"
+    if infl is not None and infl < 2:
+        return "Dezinflácia", "inflácia < 2 % — priestor na uvoľnenie politiky"
+    return "Neutrál", "bez výrazného makro extrému"
+
+
+def _fred_macro(refresh: bool = False) -> dict | None:
+    api_key = os.getenv("FRED_API_KEY", "").strip()
+    if not api_key:
+        return None
+    with _fred_lock:
+        if not refresh and FRED_CACHE_FILE.exists():
+            try:
+                cached = json.loads(FRED_CACHE_FILE.read_text(encoding="utf-8"))
+                age_h = (datetime.now(timezone.utc)
+                         - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+                if age_h < _FRED_TTL_H:
+                    return cached
+            except Exception:
+                pass
+    out: dict = {}
+    try:
+        t10y2y = _fred_series_latest("T10Y2Y", api_key)
+        if t10y2y:
+            spread = float(t10y2y[0]["value"])
+            out["yield_curve"] = {"spread_10y2y": round(spread, 2),
+                                  "inverted": spread < 0, "date": t10y2y[0]["date"]}
+        dgs10 = _fred_series_latest("DGS10", api_key)
+        if dgs10:
+            out["treasury_10y"] = round(float(dgs10[0]["value"]), 2)
+        dff = _fred_series_latest("DFF", api_key)
+        if dff:
+            out["fed_funds"] = round(float(dff[0]["value"]), 2)
+        unrate = _fred_series_latest("UNRATE", api_key)
+        if unrate:
+            out["unemployment"] = round(float(unrate[0]["value"]), 1)
+        cpi = _fred_series_latest("CPIAUCSL", api_key, limit=13)  # YoY potrebuje 13 mes.
+        if len(cpi) >= 13 and float(cpi[12]["value"]):
+            out["inflation_yoy"] = round((float(cpi[0]["value"]) / float(cpi[12]["value"]) - 1) * 100, 1)
+            out["inflation_date"] = cpi[0]["date"]
+    except Exception as e:
+        print(f"[fred] {_scrub_token(e)}")
+        if not out:
+            return None
+    out["label"], out["note"] = _fred_macro_label(out)
+    out["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    out["interpretation_only"] = True
+    with _fred_lock:
+        try:
+            FRED_CACHE_FILE.write_text(json.dumps(out), encoding="utf-8")
+        except Exception:
+            pass
+    return out
+
+
 def _mc_compute_core() -> dict:
     out: dict = {}
     for key, sym in (("qqq", "QQQ"), ("spy", "SPY")):
@@ -5805,6 +6103,7 @@ def _mc_compute_core() -> dict:
             continue
     sectors.sort(key=lambda s: s["perf_1m"], reverse=True)
     out["sectors"] = sectors
+    out["macro"] = _fred_macro()   # FRED makro vrstva (fail-soft bez FRED_API_KEY)
     return out
 
 
