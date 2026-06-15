@@ -8,5 +8,6 @@ news_cache/
 _market_context.json
 _ticker_sectors.json
 _fred_macro.json
+finviz_screeners.json
 yahoo_insights/
 massive_market/

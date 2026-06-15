@@ -330,10 +330,11 @@
     <li>Prihlás sa na <strong>finviz.com</strong> v prehliadači a over, že je aktívny tvoj column preset.</li>
     <li><strong>Bookmarklet spúšťaj výhradne na otvorenom finviz.com tabe</strong> — používa tvoju prihlásenú session cez same-origin fetch. Na inej doméne (Google a pod.) skončí chybou „Finviz 404“; skript to dnes rovno odhalí hláškou, na akej doméne si.</li>
     <li>Klikni na záložku <strong>📥 Finviz → Dashboard</strong>. Skript najprv overí, či Finviz vracia tvoje custom stĺpce (kontrola prihlásenia); ak nie, zastaví sa s hláškou.</li>
-    <li>Postupne doťahá všetky stránky nakonfigurovaných screenerov (auto-pagina­cia <code>r=1,21,41…</code> až po prázdnu stránku), spojí ich a jedným POST-om pošle do dashboardu.</li>
+    <li>Stiahne si zoznam screener URL z dashboardu (spravuješ ho v paneli <strong>⚙ Finviz URL zoznam</strong> v Scanneri), postupne doťahá každú URL vo tvojej session, spojí ich a jedným POST-om pošle do dashboardu.</li>
     <li>Na konci ukáže hlášku s počtom naimportovaných tickerov.</li>
   </ol>
-  <p><strong>Bezpečnosť:</strong> bookmarklet posiela dáta na <code>/api/public/finviz/import-html</code> chránený tokenom <code>PUBLIC_API_TOKEN</code> (rovnaký model ako news clientkey). Token je v texte záložky — drž ho len vo svojom prehliadači. Filtre screenerov a URL dashboardu sú v premenných na začiatku skriptu, ľahko meniteľné.</p>
+  <p><strong>Konfigurácia URL:</strong> v Scanneri klikni na <strong>⚙ Finviz URL zoznam</strong> a vlož svoje Finviz screener URL — jednu na riadok (vrátane stránok <code>r=21, r=41…</code>). Uloží sa na dashboard, takže bookmarklet nie je viazaný na konkrétne PC a zmena filtra = úprava v jednom paneli, nie editovanie záložky.</p>
+  <p><strong>Bezpečnosť:</strong> bookmarklet komunikuje s <code>/api/public/finviz/*</code> chránenými tokenom <code>PUBLIC_API_TOKEN</code> (rovnaký model ako news clientkey). Token je v texte záložky — drž ho len vo svojom prehliadači. URL dashboardu je jediná ďalšia premenná v skripte.</p>
 
   <h3>KPI dlaždice</h3>
   <table>

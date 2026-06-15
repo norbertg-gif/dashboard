@@ -124,6 +124,7 @@ WEIGHTS_LOG     = DATA_ROOT / "predictive_weights_log.json"
 SIGNALS_LOG     = DATA_ROOT / "predictive_signals_log.json"
 SIGNALS_ARCHIVE = DATA_ROOT / "predictive_signals_archive.json"
 SCANNER_NOTES_FILE = DATA_ROOT / "scanner_notes.json"
+FINVIZ_SCREENERS_FILE = DATA_ROOT / "finviz_screeners.json"
 DEFAULT_WEIGHTS = {"ema": 0.20, "rsi": 0.10, "macd": 0.20, "vol": 0.15, "ichi": 0.25, "stoch": 0.10}
 
 
@@ -4373,7 +4374,63 @@ async def public_import_finviz_html(
     return _store_finviz_html_import(files)
 
 
-@app.get("/api/scanner/dip/html-preview")
+def _parse_finviz_screener_urls(text):
+    """Z textového bloku (URL na riadok) vyber platné Finviz screener URL/query."""
+    urls = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "screener.ashx" not in line:
+            continue
+        urls.append(line)
+    return urls
+
+
+def _load_finviz_screeners():
+    if FINVIZ_SCREENERS_FILE.exists():
+        try:
+            data = json.loads(FINVIZ_SCREENERS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("urls"), list):
+                return data
+        except Exception:
+            pass
+    return {"urls": [], "updated_at": None}
+
+
+@app.get("/api/scanner/finviz/screeners")
+def get_finviz_screeners():
+    data = _load_finviz_screeners()
+    return {
+        "content": "\n".join(data.get("urls", [])),
+        "urls": data.get("urls", []),
+        "count": len(data.get("urls", [])),
+        "updated_at": data.get("updated_at"),
+    }
+
+
+@app.post("/api/scanner/finviz/screeners")
+async def save_finviz_screeners(request: Request):
+    body = await request.json()
+    urls = _parse_finviz_screener_urls(body.get("content", ""))
+    payload = {"urls": urls, "updated_at": datetime.now(timezone.utc).isoformat()}
+    FINVIZ_SCREENERS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "count": len(urls), "updated_at": payload["updated_at"]}
+
+
+@app.get("/api/public/finviz/screeners")
+def public_finviz_screeners(
+    request: Request,
+    authorization: str | None = Header(None),
+    x_api_token: str | None = Header(None, alias="X-API-Token"),
+    token: str | None = Query(None),
+):
+    """Token-chránený zoznam screener URL pre bookmarklet (beží v finviz.com session)."""
+    _check_public_rate_limit(request)
+    provided_token = _public_token_from_headers(authorization, x_api_token, token)
+    if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    return {"urls": _load_finviz_screeners().get("urls", [])}
 def get_dip_html_preview():
     if not FINVIZ_IMPORT_FILE.exists():
         return {"rows": [], "pages": [], "unique_tickers": 0}

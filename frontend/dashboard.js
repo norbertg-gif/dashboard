@@ -6909,6 +6909,48 @@ async function loadDipStatus() {
   }
 }
 
+async function toggleFinvizScreenerConfig() {
+  const panel = document.getElementById('finvizScreenerPanel');
+  if (!panel) return;
+  const opening = panel.style.display === 'none';
+  panel.style.display = opening ? '' : 'none';
+  if (opening) await loadFinvizScreeners();
+}
+
+async function loadFinvizScreeners() {
+  const ta = document.getElementById('finvizScreenerText');
+  const status = document.getElementById('finvizScreenerStatus');
+  try {
+    const res = await fetch('/api/scanner/finviz/screeners');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (ta) ta.value = data.content || '';
+    if (status) status.textContent = data.count
+      ? `${data.count} URL · uložené ${fmtImportTime(data.updated_at)}`
+      : 'Zoznam je zatiaľ prázdny.';
+  } catch(e) {
+    if (status) status.textContent = 'Načítanie zlyhalo: ' + e.message;
+  }
+}
+
+async function saveFinvizScreeners() {
+  const ta = document.getElementById('finvizScreenerText');
+  const status = document.getElementById('finvizScreenerStatus');
+  if (status) status.innerHTML = '<span class="cl-spinner"></span>Ukladám...';
+  try {
+    const res = await fetch('/api/scanner/finviz/screeners', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: ta ? ta.value : '' }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (status) status.textContent = `Uložené: ${data.count} URL · ${fmtImportTime(data.updated_at)}`;
+  } catch(e) {
+    if (status) status.textContent = 'Uloženie zlyhalo: ' + e.message;
+  }
+}
+
 async function importDipExcel() {
   const input = document.getElementById('dipImportInput');
   const status = document.getElementById('dipImportStatus');
@@ -7062,7 +7104,16 @@ async function renderScannerView() {
             <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
             <input id="finvizHtmlFolderInput" class="scanner-file" type="file" accept=".html,.htm" webkitdirectory directory multiple>
             <button class="btn" onclick="importFinvizHtmlFolder()">Import Finviz HTML folder</button>
+            <button class="btn" onclick="toggleFinvizScreenerConfig()">⚙ Finviz URL zoznam</button>
             <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+          </div>
+        </div>
+        <div id="finvizScreenerPanel" class="finviz-screener-panel" style="display:none">
+          <div class="finviz-screener-help">Zoznam Finviz screener URL pre bookmarklet — jedna na riadok. Bookmarklet si ich stiahne a postupne naimportuje. Mení sa zriedka, ale nie je viazaný na konkrétne PC.</div>
+          <textarea id="finvizScreenerText" class="finviz-screener-text" rows="6" placeholder="https://finviz.com/screener.ashx?v=151&f=idx_ndx&o=ticker&#10;https://finviz.com/screener.ashx?v=151&f=idx_ndx&o=ticker&r=21&#10;..."></textarea>
+          <div class="finviz-screener-actions">
+            <button class="btn primary" onclick="saveFinvizScreeners()">Uložiť zoznam</button>
+            <span id="finvizScreenerStatus" class="muted"></span>
           </div>
         </div>
         <div class="scanner-meta-row">
