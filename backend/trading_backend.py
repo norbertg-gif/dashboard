@@ -755,7 +755,12 @@ def df_to_candles(df):
 
 ALLOWED_CORS_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "https://dashboard-yvb5.onrender.com").split(",")
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        # finviz.* — aby bookmarklet (beží v origine finviz.com) mohol POST-núť
+        # nazbierané HTML na /api/public/finviz/import-html a prečítať výsledok.
+        "https://dashboard-yvb5.onrender.com,https://finviz.com,https://elite.finviz.com",
+    ).split(",")
     if origin.strip()
 ]
 app.add_middleware(
@@ -4325,10 +4330,8 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
     return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at")}
 
 
-@app.post("/api/scanner/dip/import-html")
-async def import_dip_html(request: Request):
-    body = await request.json()
-    files = body.get("files") if isinstance(body, dict) else None
+def _store_finviz_html_import(files):
+    """Spoločná logika pre interný aj public import-html: parse → score → ulož."""
     if not isinstance(files, list) or not files:
         raise HTTPException(400, "Vyber priecinok s HTML subormi")
     if len(files) > 50:
@@ -4341,6 +4344,33 @@ async def import_dip_html(request: Request):
         "rows_total": result["rows_total"], "duplicates": result["duplicates"],
         "updated_at": result["updated_at"], "pages": result["pages"],
     }
+
+
+@app.post("/api/scanner/dip/import-html")
+async def import_dip_html(request: Request):
+    body = await request.json()
+    files = body.get("files") if isinstance(body, dict) else None
+    return _store_finviz_html_import(files)
+
+
+@app.post("/api/public/finviz/import-html")
+async def public_import_finviz_html(
+    request: Request,
+    authorization: str | None = Header(None),
+    x_api_token: str | None = Header(None, alias="X-API-Token"),
+    token: str | None = Query(None),
+):
+    """
+    Verejný (token-chránený) import Finviz HTML — pre bookmarklet bežiaci
+    v prihlásenej finviz.com session. Telo: {"files": [{"name", "html"}, ...]}.
+    """
+    _check_public_rate_limit(request)
+    provided_token = _public_token_from_headers(authorization, x_api_token, token)
+    if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid token")
+    body = await request.json()
+    files = body.get("files") if isinstance(body, dict) else None
+    return _store_finviz_html_import(files)
 
 
 @app.get("/api/scanner/dip/html-preview")
