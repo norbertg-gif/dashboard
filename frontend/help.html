@@ -328,6 +328,7 @@
   <p>Namiesto ručného ukladania HTML stránok môžeš použiť <strong>bookmarklet</strong> (záložku so skriptom). Beží priamo v prehliadači v tvojej <strong>prihlásenej</strong> Finviz session, takže dostane presne tvoj custom column preset — to, čo serverové sťahovanie z Renderu nedokáže (neprihlásená datacenter IP).</p>
   <ol>
     <li>Prihlás sa na <strong>finviz.com</strong> v prehliadači a over, že je aktívny tvoj column preset.</li>
+    <li><strong>Bookmarklet spúšťaj výhradne na otvorenom finviz.com tabe</strong> — používa tvoju prihlásenú session cez same-origin fetch. Na inej doméne (Google a pod.) skončí chybou „Finviz 404“; skript to dnes rovno odhalí hláškou, na akej doméne si.</li>
     <li>Klikni na záložku <strong>📥 Finviz → Dashboard</strong>. Skript najprv overí, či Finviz vracia tvoje custom stĺpce (kontrola prihlásenia); ak nie, zastaví sa s hláškou.</li>
     <li>Postupne doťahá všetky stránky nakonfigurovaných screenerov (auto-pagina­cia <code>r=1,21,41…</code> až po prázdnu stránku), spojí ich a jedným POST-om pošle do dashboardu.</li>
     <li>Na konci ukáže hlášku s počtom naimportovaných tickerov.</li>
