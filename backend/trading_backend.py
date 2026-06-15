@@ -4431,6 +4431,9 @@ def public_finviz_screeners(
     if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid token")
     return {"urls": _load_finviz_screeners().get("urls", [])}
+
+
+@app.get("/api/scanner/dip/html-preview")
 def get_dip_html_preview():
     if not FINVIZ_IMPORT_FILE.exists():
         return {"rows": [], "pages": [], "unique_tickers": 0}
