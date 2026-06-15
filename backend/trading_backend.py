@@ -6751,8 +6751,6 @@ def bot_run():
                 exit_reason = "stop_loss"
             elif pnl_pct >= tp_pct:
                 exit_reason = "take_profit"
-            elif tier == "counter" and score >= 3:
-                exit_reason = "counter_signal"
 
             if exit_reason:
                 pnl  = (price - entry) * pos["shares"]
