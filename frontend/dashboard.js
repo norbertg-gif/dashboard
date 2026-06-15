@@ -3763,10 +3763,19 @@ function createPanel(cfg) {
   const volSeries    = mainChart.addSeries(LightweightCharts.HistogramSeries, { color:'#00c99a22', priceFormat:{type:'volume'}, priceScaleId:'vol' });
   mainChart.priceScale('vol').applyOptions({ scaleMargins:{top:0.85,bottom:0} });
 
+  // Zdieľaný flag proti spätnej slučke: charty sú prepojené obojsmerne v mesh
+  // (main↔rsi↔adx↔macd). Bez neho každé setVisibleLogicalRange refire-ne
+  // protistranu a pri určitom zoome sa rozsahy rozkmitajú → graf skáče doprava.
+  let _syncingScales = false;
   function syncFrom(sourceChart, targetCharts) {
     sourceChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (!range) return;
-      targetCharts.forEach(tc => { try { tc.timeScale().setVisibleLogicalRange(range); } catch(e){} });
+      if (_syncingScales || !range) return;
+      _syncingScales = true;
+      try {
+        targetCharts.forEach(tc => { try { tc.timeScale().setVisibleLogicalRange(range); } catch(e){} });
+      } finally {
+        _syncingScales = false;
+      }
     });
   }
 
