@@ -6890,6 +6890,15 @@ function attachScannerExportResize() {
   box.addEventListener('keyup', save);
 }
 
+function fmtImportTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).replace('T', ' ').replace(/\.\d+.*/, '');
+  return d.toLocaleString('sk-SK', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 async function loadDipStatus() {
   try {
     const res = await fetch('/api/scanner/dip/status');
@@ -7068,7 +7077,7 @@ async function renderScannerView() {
   const status = document.getElementById('dipImportStatus');
   if (status) {
     if (dip.error) status.textContent = 'DIP stav nedostupný: ' + dip.error;
-    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · ${String(dip.updated_at || '').replace('T',' ').replace(/\.\d+.*/, '')}`;
+    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · import ${fmtImportTime(dip.updated_at)}`;
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
   // Posledný scan ide z cache — načítaj okamžite a nezávisle od pomalých sekcií
