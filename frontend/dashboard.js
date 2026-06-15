@@ -5172,6 +5172,7 @@ let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testin
 Object.defineProperty(window, 'pc_realChartInst', {get: () => pc_realChartInst, set: v => pc_realChartInst = v});
 Object.defineProperty(window, 'pc_predChartInst', {get: () => pc_predChartInst, set: v => pc_predChartInst = v});
 let pc_realSeries = null, pc_predSeries = null;
+let pc_realVolSeries = null;
 let pc_predCandleSeries = null, pc_futureCandleSeries = null;
 let pc_btPredLine = null, pc_btActualLine = null;
 let btMarkers = [];
@@ -5345,6 +5346,12 @@ function initCharts() {
     borderUpColor: '#26a69a', borderDownColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
   });
+  // Volume histogram (dole, farebne zelená/červená ako v štandardných grafoch)
+  pc_realVolSeries = pc_realChartInst.addSeries(LightweightCharts.HistogramSeries, {
+    priceFormat: { type: 'volume' }, priceScaleId: 'vol',
+    color: '#26a69a55', lastValueVisible: false, priceLineVisible: false,
+  });
+  pc_realChartInst.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
   pc_attachMarkerTooltip(pc_realChartInst, 'realChart');
   // Volume Profile — starý primitive zomrel s odstráneným chartom
   pc_vpPrimitive = null;
@@ -5460,6 +5467,14 @@ function renderCharts(data) {
 
   // TOP: historical candles — mark last as incomplete if current week
   pc_realSeries.setData(candles);
+  // Volume histogram — zelená pre rastovú sviečku, červená pre klesajúcu
+  if (pc_realVolSeries) {
+    pc_realVolSeries.setData(candles.map(c => ({
+      time: c.time,
+      value: Number(c.volume) || 0,
+      color: c.close >= c.open ? '#26a69a55' : '#ef535055',
+    })));
+  }
   // Markers: earnings + open week indicator + weekly buy signals (z daily)
   const markers = [];
   pc_markerMeta = {};
