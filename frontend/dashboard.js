@@ -1421,6 +1421,22 @@ function isPortfolioStock(position) {
   return !type || type === 'Stock' || type === 'Other';
 }
 
+// Časový test: akcie/ETF držané dlhšie než rok (oslobodenie od dane z príjmu pri
+// predaji, SK). Crypto/Forex/Commodity sem nepatria. Per-trade pohľad — každý
+// obchod má vlastný dátum otvorenia.
+function tradePassedYearTest(row) {
+  const t = row?.type;
+  const eligible = !t || t === 'Stock' || t === 'ETF' || t === 'Other';
+  if (!eligible) return false;
+  const raw = row.openDateTime || row.openTimestamp || row.openDate;
+  if (!raw) return false;
+  const opened = new Date(raw);
+  if (isNaN(opened.getTime())) return false;
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  return opened <= cutoff;
+}
+
 async function ensurePortfolioAnalystTargets(pid) {
   const state = getPortState(pid);
   if (!state?.data?.positions || !state.colVisible.analystTarget) return;
@@ -1851,6 +1867,11 @@ function renderPortPanel(pid) {
           </div></td>`;
         } else if (col.key === 'trade') {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
+        } else if (col.key === 'openDateTime') {
+          const star = (s.view !== 'ticker' && tradePassedYearTest(row))
+            ? ' <span class="port-year-test" title="Časový test splnený — akcia/ETF držaná dlhšie než rok (oslobodenie od dane z príjmu pri predaji)">★</span>'
+            : '';
+          html += `<td>${fmtPortVal(row.openDateTime, 'date')}${star}</td>`;
         } else if (col.key === 'analystTarget') {
           const isStock = isPortfolioStock(row);
           const info = isStock ? row.analystInfo : null;
