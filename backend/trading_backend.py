@@ -5530,33 +5530,69 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     return out
 
 
-def _fmp_price_target(sym: str) -> dict | None:
-    """FMP /stable/price-target-consensus — cieľová cena analytikov (free tier).
-    Vracia dict kompatibilný s out['price_target'], alebo None keď kľúč chýba / odpoveď prázdna."""
+def _fmp_price_target_raw(sym: str) -> tuple[dict | list | None, str, int | None]:
+    """Volá FMP price-target endpoint — najprv stable, potom v3 ako fallback.
+    Vracia (raw_payload, endpoint_used, http_status). Vždy bez throw."""
     api_key = os.getenv("FMP_API_KEY", "").strip()
     if not api_key:
+        return (None, "no_key", None)
+    urls = [
+        "https://financialmodelingprep.com/stable/price-target-consensus",
+        "https://financialmodelingprep.com/api/v3/price-target-consensus",
+        "https://financialmodelingprep.com/api/v4/price-target-consensus",
+    ]
+    last_status = None
+    for url in urls:
+        try:
+            r = requests.get(url, params={"symbol": sym, "apikey": api_key}, timeout=10)
+            last_status = r.status_code
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            if isinstance(data, dict) and data.get("Error Message"):
+                continue
+            if isinstance(data, list) and not data:
+                continue
+            return (data, url, r.status_code)
+        except Exception as e:
+            print(f"[insights] FMP {url} {sym} failed: {e}")
+    return (None, "all_failed", last_status)
+
+
+def _fmp_price_target(sym: str) -> dict | None:
+    """Cieľová cena analytikov z FMP — kompatibilná s out['price_target']."""
+    data, _url, _status = _fmp_price_target_raw(sym)
+    if data is None:
         return None
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    mean = data.get("targetConsensus") or data.get("priceTargetAverage") or data.get("targetMean")
+    high = data.get("targetHigh") or data.get("priceTargetHigh")
+    low  = data.get("targetLow")  or data.get("priceTargetLow")
+    med  = data.get("targetMedian")
     try:
-        r = requests.get(
-            "https://financialmodelingprep.com/stable/price-target-consensus",
-            params={"symbol": sym, "apikey": api_key},
-            timeout=10,
-        )
-        r.raise_for_status()
-        data = r.json()
-        # Stable API vracia list s jedným objektom alebo priamy objekt
-        if isinstance(data, list):
-            data = data[0] if data else {}
-        mean = data.get("targetConsensus") or data.get("priceTargetAverage")
-        high = data.get("targetHigh") or data.get("priceTargetHigh")
-        low  = data.get("targetLow")  or data.get("priceTargetLow")
-        med  = data.get("targetMedian")
-        if not mean:
+        if not mean or float(mean) <= 0:
             return None
-        return {"mean": mean, "low": low, "high": high, "median": med, "source": "fmp"}
-    except Exception as e:
-        print(f"[insights] FMP price target {sym} failed: {e}")
+    except (TypeError, ValueError):
         return None
+    return {"mean": mean, "low": low, "high": high, "median": med, "source": "fmp"}
+
+
+@app.get("/api/diagnostics/fmp/{symbol}")
+def diag_fmp(symbol: str):
+    """Vráti surovú FMP odpoveď pre debugovanie price-target chyby. Kľúč nikdy v odpovedi."""
+    sym = symbol.upper()
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        return {"ticker": sym, "error": "FMP_API_KEY nie je nastavený"}
+    data, url_used, status = _fmp_price_target_raw(sym)
+    return {
+        "ticker": sym,
+        "endpoint": url_used,
+        "http_status": status,
+        "raw": data,
+        "parsed": _fmp_price_target(sym),
+    }
 
 
 # ── Ticker → SPDR sektorový ETF (Finnhub profile2) ────────────────────────────
