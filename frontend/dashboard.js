@@ -1470,7 +1470,7 @@ function fmtPortVal(val, fmt) {
   if (fmt === 'analystTarget') {
     if (!val || typeof val !== 'object') return '<span style="color:var(--muted)">—</span>';
     const target = Number(val.target);
-    const targetText = Number.isFinite(target) ? fmtPrice(target) : 'N/A';
+    const targetText = Number.isFinite(target) && target > 0 ? fmtPrice(target) : '—';
     const title = `Buy / Hold / Sell: ${val.buy}/${val.hold}/${val.sell}${val.updatedAt ? ` · ${val.updatedAt}` : ''}`;
     return `<div class="port-analyst-target ${val.cls || 'neutral'}" title="${escHtml(title)}">
       <strong>${targetText}</strong><span>${val.buy}/${val.hold}/${val.sell}</span>
