@@ -5530,6 +5530,35 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     return out
 
 
+def _fmp_price_target(sym: str) -> dict | None:
+    """FMP /stable/price-target-consensus — cieľová cena analytikov (free tier).
+    Vracia dict kompatibilný s out['price_target'], alebo None keď kľúč chýba / odpoveď prázdna."""
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        r = requests.get(
+            "https://financialmodelingprep.com/stable/price-target-consensus",
+            params={"symbol": sym, "apikey": api_key},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        # Stable API vracia list s jedným objektom alebo priamy objekt
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        mean = data.get("targetConsensus") or data.get("priceTargetAverage")
+        high = data.get("targetHigh") or data.get("priceTargetHigh")
+        low  = data.get("targetLow")  or data.get("priceTargetLow")
+        med  = data.get("targetMedian")
+        if not mean:
+            return None
+        return {"mean": mean, "low": low, "high": high, "median": med, "source": "fmp"}
+    except Exception as e:
+        print(f"[insights] FMP price target {sym} failed: {e}")
+        return None
+
+
 # ── Ticker → SPDR sektorový ETF (Finnhub profile2) ────────────────────────────
 # Finnhub vracia hrubú finnhubIndustry; mapujeme ju kľúčovými slovami na 11 SPDR
 # sektorov, aby RS karta vedela porovnať ticker aj voči vlastnému sektoru, nie len
@@ -5715,6 +5744,13 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 enriched = True
             if enriched:
                 core["source"] = "finnhub+yahoo"
+        # FMP ako záloha keď Yahoo price target tiež chýba
+        if not (core or {}).get("price_target"):
+            fmp_pt = _fmp_price_target(sym)
+            if fmp_pt:
+                core["price_target"] = fmp_pt
+                if "fmp" not in core.get("source", ""):
+                    core["source"] = core.get("source", "finnhub") + "+fmp"
     if core is None:
         qs = _yahoo_quote_summary(
             sym,
