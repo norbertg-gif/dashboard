@@ -47,9 +47,8 @@ def fetch_with_retry(url: str, headers: dict = None, timeout: int = 10,
             _time_module.sleep(backoff ** attempt)
     raise last_exc
 import uvicorn
-from scipy.optimize import minimize
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.calibration import CalibratedClassifierCV
+# scipy/sklearn importované lazy vnútri funkcií (train_ml_model, optimalizácia
+# váh) — ušetrí ~60–80 MB RAM pri štarte; načítajú sa až keď ich treba.
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_ROOT = BASE_DIR.parent if BASE_DIR.name == "backend" else BASE_DIR
@@ -252,6 +251,8 @@ def train_ml_model(df, cache_key=None):
     n = len(usable)
 
     def make_model():
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.calibration import CalibratedClassifierCV
         base = RandomForestClassifier(
             n_estimators=50, max_depth=4,
             min_samples_leaf=5, random_state=42, n_jobs=1
@@ -638,6 +639,7 @@ def optimize_weights(df) -> dict:
         r = r / r.sum()
         starts.append(r.tolist())
 
+    from scipy.optimize import minimize  # lazy — len pri prepočte váh
     for x0 in starts:
         res = minimize(neg_accuracy, x0, method="SLSQP",
                        bounds=bounds, constraints=constraints,
@@ -1156,7 +1158,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 (CACHE_DIR / "portfolio").mkdir(exist_ok=True)
 _cache_mem: dict[str, tuple[float, dict]] = {}   # key → (mtime, data)
 _cache_mem_lock = threading.Lock()
-_CACHE_MEM_MAX = 75    # max položiek v RAM cache (25 tickerov × 3 intervaly)
+_CACHE_MEM_MAX = 50    # max položiek v RAM cache (znížené z 75 — RAM rezerva)
 WATCHLIST_PATH = _Path(DATA_ROOT) / "watchlist.json"
 _watchlist_lock = threading.Lock()
 
@@ -4455,7 +4457,7 @@ def get_dip_status():
 _YF_CACHE: dict = {}
 _YF_CACHE_LOCK = threading.Lock()
 _YF_CACHE_TTL = 1800   # s
-_YF_CACHE_MAX = 150    # entries (DataFrames sú malé: ~126 riadkov × 6 stĺpcov)
+_YF_CACHE_MAX = 60     # entries (znížené z 150 — RAM rezerva; ~126 riadkov × 6 stĺpcov)
 
 # ── Massive denné/týždenné bary (Polygon-style) — yfinance alternatíva ─────────
 # yfinance je na free tieri najkrehkejší zdroj (rate-limit, timeouty → prázdne
