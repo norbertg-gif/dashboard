@@ -5337,7 +5337,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 3
+INSIGHTS_SCHEMA_VERSION = 4
 
 
 def _insights_parse(qs: dict) -> dict:
