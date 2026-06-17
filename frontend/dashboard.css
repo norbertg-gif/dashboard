@@ -3078,6 +3078,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 12px; padding: 0 4px; margin-left: 4px; opacity: .55;
 }
 .news-btn:hover { opacity: 1; }
+
+/* ── Google Finance link (portfólio + skener) ──────────────── */
+.gf-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; margin-left: 5px;
+  border: 1px solid var(--border2); border-radius: 3px;
+  font-family: var(--font-ui); font-size: 10px; font-weight: 700;
+  line-height: 1; color: var(--muted); text-decoration: none;
+  vertical-align: middle; transition: all .15s;
+}
+.gf-link:hover { color: var(--blue); border-color: var(--blue); }
+
 .news-row .news-cell {
   background: var(--bg2); padding: 8px 14px; cursor: default;
 }

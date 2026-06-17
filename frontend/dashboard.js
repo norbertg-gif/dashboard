@@ -1861,7 +1861,7 @@ function renderPortPanel(pid) {
           html += `<td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;">
             ${getLogoWrapper(sym, 26, (row.pnl||0)>=0?'var(--green)':'var(--red)')}
             <div style="display:flex;flex-direction:column;gap:1px;flex:1;">
-              <span class="port-sym">${sym}${count}</span>
+              <span class="port-sym">${sym}${count}${gfLinkHtml(sym)}</span>
               <span class="port-name">${row.name||''}</span>
             </div>
           </div></td>`;
@@ -3066,6 +3066,21 @@ function toggleTheme() {
 function etoroTradeUrl(sym) {
   return `https://www.etoro.com/markets/${(sym||'').toLowerCase()}`;
 }
+
+// ── GOOGLE FINANCE LINK ──────────────────────────────────────────────────────
+// Bez burzy — Google si primárny listing dohľadá sám (nemáme spoľahlivý exchange
+// per ticker). BRK-B → BRK.B (Finviz dash forma vs Google dot forma).
+function googleFinanceUrl(sym) {
+  const t = String(sym || '').trim().toUpperCase().replace(/-/g, '.');
+  return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+}
+function gfLinkHtml(sym) {
+  if (!sym) return '';
+  const t = String(sym).trim().toUpperCase();
+  return `<a href="${googleFinanceUrl(sym)}" target="_blank" rel="noopener"
+    class="gf-link" title="Otvoriť ${escHtml(t)} na Google Finance"
+    onclick="event.stopPropagation()">G</a>`;
+}
 function etoroTradeBtnHtml(sym, style = '') {
   if (!sym) return '';
   return `<a href="${etoroTradeUrl(sym)}" target="_blank" rel="noopener"
@@ -3178,6 +3193,7 @@ async function toggleRecommendations() {
 
 async function loadEtoroPositions(forceRefresh = false) {
   const inner = document.getElementById('etoro-list-inner');
+  if (!inner) return;   // eTORO sidebar panel odstránený — žiadne redundantné fetchovanie pozícií
   inner.innerHTML = '<div class="etoro-loading">Načítava pozície…</div>';
   try {
     const url = `${API}/api/etoro/positions?account=${activeAccount}${forceRefresh?'&refresh=1':''}`;
@@ -6822,7 +6838,7 @@ function renderOpportunities(rows, days) {
     ).join('');
     return `<div class="opp-item" onclick="openScannerTicker('${r.ticker}')">
       <div class="opp-top">
-        <span class="opp-sym">${r.ticker}</span>
+        <span class="opp-sym">${r.ticker}${gfLinkHtml(r.ticker)}</span>
         <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
       </div>
       <div class="opp-meta">
@@ -7075,7 +7091,7 @@ async function loadFinvizHtmlPreview() {
               <th>Perf Half</th><th>Beta</th><th>SMA50</th><th>SMA200</th><th>52W High</th><th>RSI</th><th>Rel Vol</th><th>Price</th>
             </tr></thead>
             <tbody>${rows.map(row => `<tr>
-              <td>${row.Rank}</td><td class="ticker" onclick="openScannerTicker('${escHtml(row.Ticker)}')">${escHtml(row.Ticker)}</td>
+              <td>${row.Rank}</td><td class="ticker" onclick="openScannerTicker('${escHtml(row.Ticker)}')">${escHtml(row.Ticker)}${gfLinkHtml(row.Ticker)}</td>
               <td>${escHtml(row.Company || '')}</td><td>${row.FA}</td><td>${row.TA}</td><td class="total">${row.TOTAL}</td>
               <td>${fmtFinvizPreview(row['Forward P/E'])}</td><td>${fmtFinvizPreview(row.PEG)}</td>
               <td>${fmtFinvizPreview(row['P/S'])}</td><td>${fmtFinvizPreview(row['P/B'])}</td><td>${fmtFinvizPreview(row['P/FCF'])}</td>
@@ -7256,7 +7272,7 @@ ${escHtml(copyText)}</textarea>
         </span>`
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b>${gfLinkHtml(r.ticker)}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button></td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
