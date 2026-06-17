@@ -5585,11 +5585,33 @@ def diag_fmp(symbol: str):
     api_key = os.getenv("FMP_API_KEY", "").strip()
     if not api_key:
         return {"ticker": sym, "error": "FMP_API_KEY nie je nastavený"}
+
+    def _scrub(text: str) -> str:
+        return str(text).replace(api_key, "***")[:500]
+
+    attempts = []
+    for url in (
+        "https://financialmodelingprep.com/stable/price-target-consensus",
+        "https://financialmodelingprep.com/api/v3/price-target-consensus",
+        "https://financialmodelingprep.com/api/v4/price-target-consensus",
+    ):
+        rec = {"url": url.rsplit("/", 1)[-1] + (" (stable)" if "/stable/" in url else
+               " (v3)" if "/v3/" in url else " (v4)")}
+        try:
+            r = requests.get(url, params={"symbol": sym, "apikey": api_key}, timeout=10)
+            rec["status"] = r.status_code
+            rec["body"] = _scrub(r.text)
+        except Exception as e:
+            rec["status"] = "exception"
+            rec["body"] = _scrub(e)
+        attempts.append(rec)
+
     data, url_used, status = _fmp_price_target_raw(sym)
     return {
         "ticker": sym,
         "endpoint": url_used,
         "http_status": status,
+        "attempts": attempts,
         "raw": data,
         "parsed": _fmp_price_target(sym),
     }
