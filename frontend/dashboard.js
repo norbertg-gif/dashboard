@@ -1957,6 +1957,7 @@ function renderPortPanel(pid) {
   html += `</div>`;
   cont.innerHTML = html;
   if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);
+  resolveGfLinks();
 }
 
 // Portfolio akcie
@@ -3068,18 +3069,53 @@ function etoroTradeUrl(sym) {
 }
 
 // ── GOOGLE FINANCE LINK ──────────────────────────────────────────────────────
-// Bez burzy — Google si primárny listing dohľadá sám (nemáme spoľahlivý exchange
-// per ticker). BRK-B → BRK.B (Finviz dash forma vs Google dot forma).
-function googleFinanceUrl(sym) {
-  const t = String(sym || '').trim().toUpperCase().replace(/-/g, '.');
-  return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+// Google Finance quote URL vyžaduje burzu (TICKER:NASDAQ). Tú dotiahneme dávkovo
+// z /api/ticker/exchanges (Finnhub profile2, cache 90d) a href upgrade-neme.
+// Kým burzu nepoznáme (alebo je neznáma), fallback je Google search — vždy funguje
+// a ukáže ten istý finance panel. BRK-B → BRK.B normalizácia.
+const _gfExchange = {};   // { TICKER: 'NASDAQ' | null }
+let _gfResolving = false;
+
+function gfNormSym(sym) {
+  return String(sym || '').trim().toUpperCase().replace(/-/g, '.');
+}
+function googleFinanceSearchUrl(t) {
+  return `https://www.google.com/search?q=${encodeURIComponent(t + ' stock')}`;
+}
+function googleFinanceQuoteUrl(t, exch) {
+  return `https://www.google.com/finance/quote/${encodeURIComponent(t)}:${encodeURIComponent(exch)}`;
 }
 function gfLinkHtml(sym) {
   if (!sym) return '';
-  const t = String(sym).trim().toUpperCase();
-  return `<a href="${googleFinanceUrl(sym)}" target="_blank" rel="noopener"
-    class="gf-link" title="Otvoriť ${escHtml(t)} na Google Finance"
+  const t = gfNormSym(sym);
+  const exch = _gfExchange[t];
+  const href = exch ? googleFinanceQuoteUrl(t, exch) : googleFinanceSearchUrl(t);
+  return `<a href="${href}" target="_blank" rel="noopener"
+    class="gf-link" data-gf="${escHtml(t)}"
+    title="Otvoriť ${escHtml(t)} na Google Finance"
     onclick="event.stopPropagation()">G</a>`;
+}
+function applyGfLinks() {
+  document.querySelectorAll('a.gf-link[data-gf]').forEach(a => {
+    const exch = _gfExchange[a.dataset.gf];
+    if (exch) a.href = googleFinanceQuoteUrl(a.dataset.gf, exch);
+  });
+}
+async function resolveGfLinks() {
+  const links = [...document.querySelectorAll('a.gf-link[data-gf]')];
+  const need = [...new Set(links.map(a => a.dataset.gf).filter(t => t && !(t in _gfExchange)))];
+  if (!need.length || _gfResolving) return;
+  _gfResolving = true;
+  try {
+    for (let i = 0; i < need.length; i += 60) {
+      const chunk = need.slice(i, i + 60);
+      const r = await fetch(`${API}/api/ticker/exchanges?tickers=${encodeURIComponent(chunk.join(','))}`);
+      if (!r.ok) break;
+      const data = await r.json();
+      Object.assign(_gfExchange, data.exchanges || {});
+      applyGfLinks();
+    }
+  } catch(e) {} finally { _gfResolving = false; }
 }
 function etoroTradeBtnHtml(sym, style = '') {
   if (!sym) return '';
@@ -6859,6 +6895,7 @@ function renderOpportunities(rows, days) {
   el.className = 'opp-list';
   el.innerHTML = ranked.map(renderItem).join('')
     + `<div class="opp-empty" style="font-size:10px;padding-top:2px;">Zobrazené ${ranked.length} z ${clean.length} tickerov${errorCount ? `, ${errorCount} s chybou dát` : ''}.${toggleBtn}</div>`;
+  resolveGfLinks();
 }
 
 function toggleOppExpanded() {
@@ -7105,6 +7142,7 @@ async function loadFinvizHtmlPreview() {
           </table>
         </div>
       </details>`;
+    resolveGfLinks();
   } catch(e) {
     wrap.innerHTML = `<div class="error-msg">Kontrola HTML importu: ${escHtml(e.message)}</div>`;
   }
@@ -7306,6 +7344,7 @@ ${escHtml(copyText)}</textarea>
   attachScannerExportResize();
   attachScannerNotesPanel();
   applyScannerBadges();
+  resolveGfLinks();
   ensureScannerMetaLoaded(ranked.map(r => r.ticker));
 }
 

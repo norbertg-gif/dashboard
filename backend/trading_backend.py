@@ -5654,8 +5654,48 @@ def _industry_to_etf(industry: str) -> str | None:
     return None
 
 
+# Finnhub profile2 'exchange' (hrubý text) → Google Finance burzový kód.
+# Poradie záleží: špecifické varianty (ARCA/AMERICAN) pred generickým NYSE.
+_FINNHUB_EXCH_TO_GOOGLE = [
+    ("ARCA", "NYSEARCA"),
+    ("NYSE AMERICAN", "NYSEAMERICAN"),
+    ("NYSE MKT", "NYSEAMERICAN"),
+    ("AMEX", "NYSEAMERICAN"),
+    ("NASDAQ", "NASDAQ"),
+    ("NEW YORK STOCK EXCHANGE", "NYSE"),
+    ("NYSE", "NYSE"),
+    ("TORONTO", "TSE"),
+    ("XETRA", "ETR"),
+    ("FRANKFURT", "FRA"),
+    ("LONDON", "LON"),
+    ("EURONEXT PARIS", "EPA"),
+    ("EURONEXT AMSTERDAM", "AMS"),
+    ("EURONEXT BRUSSELS", "EBR"),
+    ("SWISS", "SWX"),
+    ("TOKYO", "TYO"),
+    ("HONG KONG", "HKG"),
+    ("AUSTRALIAN", "ASX"),
+]
+
+
+def _finnhub_exch_to_google(raw: str) -> str | None:
+    up = (raw or "").upper()
+    for needle, code in _FINNHUB_EXCH_TO_GOOGLE:
+        if needle in up:
+            return code
+    return None
+
+
 def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
-    """Vráti (etf, finnhub_industry) pre ticker. Cache 90d na disku, fail-soft."""
+    """Vráti (etf, finnhub_industry) pre ticker. Cache 90d na disku, fail-soft.
+    Pri fetchi uloží aj surovú burzu ('exchange') pre Google Finance odkazy."""
+    etf, industry, _exch = _finnhub_profile_cached(sym)
+    return etf, industry
+
+
+def _finnhub_profile_cached(sym: str) -> tuple[str | None, str | None, str | None]:
+    """Spoločný resolver na Finnhub profile2 — vracia (etf, industry, exchange_raw).
+    Jedno volanie pokrýva sektorové mapovanie aj burzu pre Google odkaz."""
     sym = sym.upper()
     with _sector_cache_lock:
         cache = {}
@@ -5669,18 +5709,21 @@ def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
             try:
                 age = (datetime.now(timezone.utc)
                        - datetime.fromisoformat(hit["fetched_at"])).days
-                if age < _SECTOR_TTL_DAYS:
-                    return hit.get("etf"), hit.get("industry")
+                # exchange pribudol neskôr — keď ho starý záznam nemá, refetchni
+                if age < _SECTOR_TTL_DAYS and "exchange" in hit:
+                    return hit.get("etf"), hit.get("industry"), hit.get("exchange")
             except Exception:
                 pass
     api_key = os.getenv("FINNHUB_API_KEY", "")
     if not api_key:
-        return None, None
+        return None, None, None
     try:
         r = requests.get("https://finnhub.io/api/v1/stock/profile2",
                          params={"symbol": sym, "token": api_key}, timeout=15)
         r.raise_for_status()
-        industry = (r.json() or {}).get("finnhubIndustry") or ""
+        prof = r.json() or {}
+        industry = prof.get("finnhubIndustry") or ""
+        exchange = prof.get("exchange") or ""
         etf = _industry_to_etf(industry)
         with _sector_cache_lock:
             cache = {}
@@ -5689,16 +5732,50 @@ def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
                     cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
                 except Exception:
                     cache = {}
-            cache[sym] = {"etf": etf, "industry": industry,
+            cache[sym] = {"etf": etf, "industry": industry, "exchange": exchange,
                           "fetched_at": datetime.now(timezone.utc).isoformat()}
             try:
                 SECTOR_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
             except Exception:
                 pass
-        return etf, industry
+        return etf, industry, exchange
     except Exception as e:
         print(f"[sector] profile2 {sym}: {_scrub_token(e)}")
-        return None, None
+        return None, None, None
+
+
+@app.get("/api/ticker/exchanges")
+def get_ticker_exchanges(tickers: str = Query(""), limit: int = Query(60)):
+    """Mapuje tickery na Google Finance burzový kód (NASDAQ/NYSE/…). Z 90d cache;
+    chýbajúce dorieši cez Finnhub profile2 so stropom `limit` volaní na request,
+    aby veľký skener nezahltil free tier (60 req/min). Neznáma burza → None."""
+    syms = [t.strip().upper() for t in tickers.split(",") if t.strip()][:300]
+    out: dict[str, str | None] = {}
+    budget = max(0, limit)
+    # Najprv lacné cache hity bez fetchu
+    with _sector_cache_lock:
+        cache = {}
+        if SECTOR_CACHE_FILE.exists():
+            try:
+                cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cache = {}
+    misses = []
+    for sym in syms:
+        hit = cache.get(sym)
+        if hit and "exchange" in hit:
+            out[sym] = _finnhub_exch_to_google(hit.get("exchange"))
+        else:
+            misses.append(sym)
+    # Zvyšok dorieš v rámci rozpočtu (každé je jeden profile2 fetch)
+    for sym in misses:
+        if budget <= 0:
+            out[sym] = None
+            continue
+        _etf, _ind, exch = _finnhub_profile_cached(sym)
+        out[sym] = _finnhub_exch_to_google(exch)
+        budget -= 1
+    return {"exchanges": out}
 
 
 @app.get("/api/ticker/rs/{symbol}")
