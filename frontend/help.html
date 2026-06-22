@@ -564,7 +564,7 @@
     <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Dá sa zvýšiť <code>SCANNER_YF_TIMEOUT</code>.</td></tr>
     <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
     <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
-    <tr><td>Market recommendations 502</td><td>Free eToro API tier — tiché zlyhanie.</td></tr>
+    <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Opportunities a Alerty.</td></tr>
     <tr><td>Massive / Trh ukazuje n/a</td><td>Skontroluj <code>MASSIVE_API_KEY</code> na Renderi. EOD dáta sú dostupné až po uzavretí trhu; vrstva je interpretačná a výpadok nemení C1–C4.</td></tr>
     <tr><td>P/L sa mierne líši od eToro</td><td>Dashboard medzi snapshotmi robí live odhad z cien. eToro môže započítať konverziu meny, spread, poplatky a interné zaokrúhlenie. Malá odchýlka je očakávaná.</td></tr>
     <tr><td>Po deployi vidím staré UI</td><td>Počkaj na dokončenie Render deployu a obnov stránku. Statické súbory majú cache verziu; pri nezvyčajnom stave pomôže anonymné okno alebo vymazanie dát webu.</td></tr>

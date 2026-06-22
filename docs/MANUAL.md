@@ -754,7 +754,7 @@ jazykom.
 | **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Dá sa zvýšiť `SCANNER_YF_TIMEOUT`. |
 | **Regime = n/a** | `hmmlearn` nie je nainštalovaný alebo málo histórie (min. 60 sviečok). |
 | **Portfólio stratené pri výpadku eToro** | Cache padá späť na disk (stale-while-erroring), je to zámerné. |
-| **Market recommendations 502** | Free eToro API tier — niektoré endpointy vracajú 502, momentálne tiché zlyhanie. |
+| **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Opportunities a Alerty. |
 | **Staré signály majú zlú farbu** | Log sa neprepisuje; prefarbia sa po novom vyhodnotení tickera. |
 
 ---

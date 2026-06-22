@@ -74,7 +74,7 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 4. ~~LWC v5~~ done — voliteľné: native panes pre subpanely, `setSeriesOrder()`, data conflation
 5. ~~Volume Profile~~ done — vizuálne overiť na prode (kreslenie netestované v browseri)
 6. ~~Kumo canvas po resize~~ fixed — redraw počká na dokončenie LWC layoutu.
-7. Bad-gateway indikátor pre `get_market_recommendations`
+7. ~~Legacy eToro recommendations~~ odstranene 2026-06-22
 8. Earnings retry drobnosť: `_earningsDates = {}` po chybe sa drží do reloadu (zvážiť TTL reset)
 
 ## Doplnené 2026-06-12 — Investor Verdikt
@@ -93,7 +93,7 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 - **Predictive features (#1)**: roc_4 (4-period ROC) + pos_52w (pozicia v rolling 52-period high/low rozsahu, 0-1, min_periods=20) pridane do ML_FEATURES (teraz 12). ADX/DI features znova zive po fixe duplicit.
 - **Makro rezim kvadrant** (analyticky plan #2): _mc_regime_quadrant() -> Goldilocks/Prehriatie/Risk-off/Utlm/Neutral z QQQ/SPY trendu + VIX + breadth. Pole market_regime v /api/market/context, chip na cele TRH listy. NEOVPLYVNUJE C1-C4.
 - **Relativna sila** (analyticky plan #1, ciastocne): GET /api/ticker/rs/{symbol} = RS voci QQQ/SPY (1M/3M), karta #rsCard v Predictive (pc_loadRS). Sektorove ETF RS este chyba (treba ticker->sektor mapu).
-- **Bad-gateway indikator (#7)**: get_market_recommendations vracia {unavailable, reason} s HTTP 200; frontend ukaze cistu hlasku.
+- **Legacy eToro recommendations (#7)**: neskor odstranene; free eToro API tier endpoint nepodporoval a UI ho uz nepouzivalo.
 - **Manualy**: Volume Profile + Insider & EPS doplnene do help.html/MANUAL.md.
 
 ## Zostava otvorene
@@ -132,3 +132,11 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
   push notifik?cie a nemen? predik?n? sk?re ani portf?lio v?po?ty.
 - Portf?lio alert vznikne pri dennom pohybe nad 10 USD alebo 1% z invest?cie.
 - Cache verzia frontendu: `?v=20260622-alert1`.
+
+## Doplnené 2026-06-22 - cleanup legacy eToro recommendations
+
+- Odstraneny nepouzivany frontend `toggleRecommendations()` a backend endpoint
+  `/api/etoro/recommendations`.
+- Dovod: free eToro API tier endpoint nepodporuje a v aktualnom HTML uz
+  neexistoval ovladaci prvok, ktory by tuto funkciu volal.
+- Cache verzia frontendu: `?v=20260622-alert2`.

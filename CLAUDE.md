@@ -92,7 +92,7 @@ These were already in the codebase and need to stay fixed:
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
 6. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
    until LWC finishes layout; manual drag uses a double animation frame.
-7. **💡 Bad-gateway indicator.** ✅ HOTOVO. `get_market_recommendations` vracia `{unavailable: true, reason}` s HTTP 200 namiesto surového 502 (free eToro tier endpoint nepodporuje); frontend `toggleRecommendations` ukáže čistú info hlášku namiesto kryptickej chyby / tichého zlyhania.
+7. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
 

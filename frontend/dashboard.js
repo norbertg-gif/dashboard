@@ -3210,43 +3210,6 @@ function switchAccount(id) {
   loadEtoroPositions();
 }
 
-async function toggleRecommendations() {
-  const el = document.getElementById('etoro-recommendations');
-  const btn = document.getElementById('rec-toggle-btn');
-  if (el.style.display !== 'none') {
-    el.style.display = 'none';
-    btn.style.color = 'var(--muted)';
-    return;
-  }
-  btn.style.color = 'var(--yellow)';
-  el.style.display = 'block';
-  el.innerHTML = '<div class="etoro-loading">Načítavam odporúčania…</div>';
-  try {
-    const r = await fetch(`${API}/api/etoro/recommendations?account=${activeAccount||'1'}&count=15`);
-    if (!r.ok) throw new Error(r.statusText);
-    const items = await r.json();
-    if (items && items.unavailable) {
-      el.innerHTML = `<div class="etoro-loading" title="${escHtml(items.reason || '')}">ℹ Odporúčania nie sú dostupné na tomto eToro API tieri</div>`;
-      return;
-    }
-    if (!items.length) { el.innerHTML = '<div class="etoro-loading">Žiadne odporúčania</div>'; return; }
-    el.innerHTML = items.map(item => {
-      const inWl = watchlist.some(w => w.symbol === item.symbol);
-      return `<div style="display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:pointer;"
-        onclick="onSbTickerClick('${item.symbol}')">
-        <span style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:#dde8ff;flex:1;">${item.symbol}</span>
-        <span style="font-size:10px;color:var(--muted2);">${item.name || ''}</span>
-        <button onclick="event.stopPropagation();${inWl?`removeFromWatchlist('${item.symbol}')`:`addToWatchlist('${item.symbol}','${(item.name||'').replace(/'/g,"\'")}',${item.instrumentId||'null'})`}"
-          style="font-size:9px;padding:2px 6px;border-radius:3px;border:1px solid ${inWl?'var(--red)':'var(--border2)'};background:transparent;color:${inWl?'var(--red)':'var(--muted)'};cursor:pointer;">
-          ${inWl ? '−' : '+'}
-        </button>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    el.innerHTML = `<div class="etoro-loading">⚠ ${e.message}</div>`;
-  }
-}
-
 async function loadEtoroPositions(forceRefresh = false) {
   const inner = document.getElementById('etoro-list-inner');
   if (!inner) return;   // eTORO sidebar panel odstránený — žiadne redundantné fetchovanie pozícií
