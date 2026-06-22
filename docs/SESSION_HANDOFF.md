@@ -121,3 +121,14 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 - Massive kontext je interpretačný a nemení C1–C4, DIP, ML ani tier.
 - Endpointy: `/api/market/massive`, rozšírený `/api/market/context`;
   diagnostika ostáva `/api/diagnostics/massive`.
+
+
+## Doplnen? 2026-06-22 - Alert center v1
+
+- Horn? tla?idlo **Udalosti** je premenovan? na **Alerty**.
+- `/api/events` ost?va pull-based endpoint, ale okrem sign?lov a Nasdaq scanneru
+  vracia aj earnings do 3 dn? a v?razn? denn? eToro portf?lio pohyby.
+- Alert center je iba naviga?no-interpreta?n? vrstva: nesp???a scan, neposiela
+  push notifik?cie a nemen? predik?n? sk?re ani portf?lio v?po?ty.
+- Portf?lio alert vznikne pri dennom pohybe nad 10 USD alebo 1% z invest?cie.
+- Cache verzia frontendu: `?v=20260622-alert1`.

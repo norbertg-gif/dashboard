@@ -51,13 +51,17 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
 
-### Udalosti a samostatné karty
+### Alerty a samostatn? karty
 
-- Tlačidlo **Udalosti** pri hlavných záložkách zobrazí uložené signály a výsledky
-  posledného Nasdaq scanu za **24 alebo 48 hodín**. Panel nespúšťa nový scan.
-- Klik na ticker v udalostiach ho otvorí v záložke Prediktívny.
-- Ikona **↗** pri Grafy / Portfólio / História / Risk / Prediktívny / Scanner otvorí
-  danú sekciu v novej karte. Aktívna sekcia je uložená v URL parametri `tab`.
+- Tla?idlo **Alerty** pri hlavn?ch z?lo?k?ch zobraz? pull-based upozornenia za
+  posledn?ch **24 alebo 48 hod?n**. Panel neposiela push notifik?cie a nesp???a
+  nov? scan; pri otvoren? iba pre??ta existuj?ce cache/logy.
+- Do Alert centra patria nov? predikt?vne sign?ly, kandid?ti z posledn?ho Nasdaq
+  scanneru, earnings do 3 dn? a v?razn? denn? pohyby v eToro portf?liu.
+- Klik na ticker v alerte otvor? dan? titul v z?lo?ke **Predikt?vny**, kde vid??
+  pln? kontext a d?kazy.
+- Ikona **?** pri Grafy / Portf?lio / Hist?ria / Risk / Predikt?vny / Scanner otvor?
+  dan? sekciu v novej karte. Akt?vna sekcia je ulo?en? v URL parametri `tab`.
 
 ---
 

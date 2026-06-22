@@ -262,6 +262,19 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - **Manuálne uzavretie:** tlačidlo `Zavri` pri každej otvorenej pozícii → `POST /api/bot/close/{ticker}`.
 - **Súbory na disku:** `bot_portfolio.json` — nikdy necommitovať, je v `.renderignore`.
 
+
+## Alert center - key architecture
+
+- Pull-based only: no push infra, no scheduler. UI button **Alerty** calls
+  `GET /api/events?hours=24|48` and reads already available caches/logs.
+- Sources: signal log, Nasdaq scanner cache, earnings lookup, and eToro portfolio
+  cache. Keep every source fail-soft; one broken source must not break the panel.
+- Current rules: new predictive signal, scanner candidate, earnings within 3 days,
+  or portfolio daily P/L move over 10 USD or 1%.
+- Alert center is interpretation/navigation only. It must not change C1-C4,
+  scanner tier, prediction scoring, or portfolio accounting.
+- Clicking an alert opens Predictive through `openEventTicker()`.
+
 ## Data flow worth knowing
 
 - **`_yf_download_cached` skúša Massive pred yfinance.** yfinance je na free tieri najkrehkejší zdroj (rate-limit → prázdne grafy, scanner "chyby"). `_massive_daily_bars(ticker, period, interval)` ťahá denné/týždenné bary z Massive `/v2/aggs/ticker/.../range/1/{day|week}/...` (Polygon-style), yfinance je fallback. Intraday (1h/4h) ostáva na yfinance (free Massive plán ho nemá). Po prvom `NOT_AUTHORIZED` sa Massive bary vypnú flagom `_massive_bars_disabled` (žiadny opakovaný latency hit). `get_chart` (weekly predictive) má Massive len ako fallback keď yfinance vráti prázdno. **Over cez `/api/diagnostics/massive`, či free plán per-ticker agregáty vôbec dáva** — ak nie, všetko padá späť na yfinance bez zmeny správania.

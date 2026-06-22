@@ -784,9 +784,27 @@ body.sidebar-collapsed #sb-resizer {
 .event-item.buy .event-dot { background: var(--up); }
 .event-item.watch .event-dot { background: var(--yellow); }
 .event-item.counter .event-dot { background: var(--down); }
+.event-item.info .event-dot { background: var(--muted2); }
 .event-item.scanner .event-dot { box-shadow: 0 0 0 2px var(--accent-soft); }
+.event-item.earnings .event-dot { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25); }
+.event-item.portfolio .event-dot { box-shadow: 0 0 0 2px rgba(0, 194, 255, 0.2); }
 .event-main { min-width: 0; }
-.event-title { color: var(--text); font: 700 10px var(--font-mono); }
+.event-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text);
+  font: 700 10px var(--font-mono);
+}
+.event-source {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: var(--muted);
+  font: 700 8px var(--font-sans);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .event-detail {
   overflow: hidden;
   color: var(--muted);

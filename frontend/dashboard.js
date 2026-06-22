@@ -210,30 +210,50 @@ function eventTimeLabel(value) {
 
 function renderRecentEvents(payload) {
   const events = payload?.events || [];
+  const counts = payload?.counts || {};
   const count = document.getElementById('event-center-count');
   const meta = document.getElementById('event-center-meta');
   const list = document.getElementById('event-center-list');
   if (count) count.textContent = String(events.length);
-  if (meta) meta.textContent = `${events.length} udalostí za posledných ${eventWindowHours} hodín`;
+  if (meta) {
+    const parts = [
+      counts.signals ? `${counts.signals} signál` : '',
+      counts.scanner ? `${counts.scanner} scanner` : '',
+      counts.earnings ? `${counts.earnings} earnings` : '',
+      counts.portfolio ? `${counts.portfolio} portfólio` : '',
+    ].filter(Boolean).join(' · ');
+    meta.textContent = parts
+      ? `${events.length} alertov za ${eventWindowHours} h · ${parts}`
+      : `${events.length} alertov za posledných ${eventWindowHours} hodín`;
+  }
   if (!list) return;
   if (!events.length) {
-    list.innerHTML = '<div class="event-empty">Za zvolené obdobie nie sú uložené žiadne nové signály ani výsledky scanneru.</div>';
+    list.innerHTML = '<div class="event-empty">Za zvolené obdobie nie sú nové signály, blízke earnings ani výrazné portfólio pohyby.</div>';
     return;
   }
   list.innerHTML = events.map(item => {
-    const tier = ['buy','watch','counter'].includes(item.tier) ? item.tier : 'watch';
-    const source = item.type === 'scanner' ? 'Nasdaq scanner' : 'Prediktívny signál';
+    const tier = ['buy','watch','counter','info'].includes(item.severity || item.tier) ? (item.severity || item.tier) : 'watch';
+    const category = ['signal','scanner','earnings','portfolio'].includes(item.category || item.type) ? (item.category || item.type) : 'info';
+    const labels = {
+      signal: 'Prediktívny signál',
+      scanner: 'Nasdaq scanner',
+      earnings: 'Earnings',
+      portfolio: 'Portfólio',
+      info: 'Info',
+    };
+    const source = labels[category] || labels.info;
     const score = item.score ? `${item.score}/4` : '';
     const dip = item.dip_label && item.dip_label !== 'TECH ONLY'
       ? ` · ${item.dip_label}${item.dip_total != null ? ` ${item.dip_total}` : ''}`
       : '';
     const price = item.price != null ? ` · entry ${Number(item.price).toFixed(2)}` : '';
-    return `<div class="event-item ${tier} ${item.type === 'scanner' ? 'scanner' : ''}"
+    const detail = item.detail || `${source}${score ? ` · ${score}` : ''}${price}${dip}`;
+    return `<div class="event-item ${tier} ${category}"
       onclick="openEventTicker('${escHtml(item.ticker)}')">
       <span class="event-dot"></span>
       <div class="event-main">
-        <div class="event-title">${escHtml(item.ticker)} · ${escHtml(item.title || source)}</div>
-        <div class="event-detail">${source}${score ? ` · ${score}` : ''}${price}${dip}</div>
+        <div class="event-title"><span class="event-source">${escHtml(source)}</span>${escHtml(item.ticker)} · ${escHtml(item.title || source)}</div>
+        <div class="event-detail">${escHtml(detail)}${score ? ` · ${score}` : ''}${price}${dip}</div>
       </div>
       <span class="event-time">${eventTimeLabel(item.time)}</span>
     </div>`;
@@ -242,13 +262,13 @@ function renderRecentEvents(payload) {
 
 async function loadRecentEvents() {
   const meta = document.getElementById('event-center-meta');
-  if (meta) meta.textContent = 'Načítavam udalosti...';
+  if (meta) meta.textContent = 'Načítavam alerty...';
   try {
     const response = await fetch(`${API}/api/events?hours=${eventWindowHours}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     renderRecentEvents(await response.json());
   } catch(e) {
-    if (meta) meta.textContent = `Udalosti sa nepodarilo načítať: ${e.message}`;
+    if (meta) meta.textContent = `Alerty sa nepodarilo načítať: ${e.message}`;
   }
 }
 

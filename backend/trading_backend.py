@@ -4753,6 +4753,89 @@ def get_nasdaq_scanner_results():
     return {"state": state, "cache": enrich_scanner_payload(load_scanner_cache())}
 
 
+ALERT_EARNINGS_DAYS = 3
+ALERT_PORT_DAILY_USD = 10.0
+ALERT_PORT_DAILY_PCT = 1.0
+
+
+def _event_add(events: list, payload: dict):
+    if payload.get("ticker"):
+        payload["ticker"] = str(payload["ticker"]).upper()
+    payload.setdefault("category", payload.get("type") or "info")
+    payload.setdefault("severity", payload.get("tier") or "info")
+    events.append(payload)
+
+
+def _portfolio_alert_events(now: datetime) -> list:
+    events = []
+    for account in ("1", "2"):
+        payload = _positions_cache.get(account)
+        if not payload:
+            payload = cache_read(CACHE_DIR / "portfolio" / f"portfolio_{account}", PORTFOLIO_CACHE_TTL)
+        rows = (payload or {}).get("positions") or []
+        grouped = {}
+        for row in rows:
+            ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
+            if not ticker:
+                continue
+            daily = _num_or_none(row.get("dailyPnl") or row.get("dailyPL") or row.get("daily_pnl")) or 0.0
+            invested = _num_or_none(row.get("amount") or row.get("invested") or row.get("investment")) or 0.0
+            item = grouped.setdefault(ticker, {"daily": 0.0, "invested": 0.0})
+            item["daily"] += daily
+            item["invested"] += invested
+        for ticker, item in grouped.items():
+            daily = item["daily"]
+            invested = item["invested"]
+            daily_pct = (daily / invested * 100.0) if invested else 0.0
+            if abs(daily) < ALERT_PORT_DAILY_USD and abs(daily_pct) < ALERT_PORT_DAILY_PCT:
+                continue
+            severity = "buy" if daily >= 0 else "counter"
+            _event_add(events, {
+                "id": f"portfolio:{account}:{ticker}:{now.date().isoformat()}",
+                "type": "portfolio",
+                "category": "portfolio",
+                "severity": severity,
+                "tier": severity,
+                "ticker": ticker,
+                "time": now.isoformat(),
+                "title": "Denný P/L pohyb",
+                "detail": f"Account {account} | denný P/L {daily:+.2f} USD ({daily_pct:+.2f}%)",
+            })
+    return events
+
+
+def _earnings_alert_events(symbols: list[str], now: datetime) -> list:
+    events = []
+    seen = set()
+    for symbol in symbols:
+        ticker = str(symbol or "").upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        try:
+            event = _earnings_next_date(ticker)
+            raw_date = event.get("date") if isinstance(event, dict) else None
+            if not raw_date:
+                continue
+            report_date = datetime.fromisoformat(str(raw_date)[:10]).replace(tzinfo=timezone.utc)
+            days = (report_date.date() - now.date()).days
+            if 0 <= days <= ALERT_EARNINGS_DAYS:
+                _event_add(events, {
+                    "id": f"earnings:{ticker}:{raw_date}",
+                    "type": "earnings",
+                    "category": "earnings",
+                    "severity": "watch",
+                    "tier": "watch",
+                    "ticker": ticker,
+                    "time": now.isoformat(),
+                    "title": f"Earnings {raw_date}",
+                    "detail": f"Earnings za {days} dni | zdroj: {event.get('source') or 'calendar'}",
+                })
+        except Exception:
+            continue
+    return events
+
+
 @app.get("/api/events")
 def get_recent_events(hours: int = Query(24, ge=1, le=168)):
     now = datetime.now(timezone.utc)
@@ -4773,15 +4856,18 @@ def get_recent_events(hours: int = Query(24, ge=1, le=168)):
                 continue
             score = int(signal.get("score") or 0)
             tier = str(signal.get("tier") or signal_tier(score)).lower()
-            events.append({
+            _event_add(events, {
                 "id": f"signal:{ticker}:{date_key}",
                 "type": "signal",
+                "category": "signal",
                 "ticker": str(ticker).upper(),
                 "time": signal_time.isoformat(),
                 "tier": tier,
+                "severity": tier,
                 "score": score,
                 "price": _num_or_none(signal.get("close")),
                 "title": f"{tier.title()} signal {score}/4",
+                "detail": f"Prediktívny signál | {score}/4",
             })
 
     scanner = enrich_scanner_payload(load_scanner_cache())
@@ -4796,31 +4882,50 @@ def get_recent_events(hours: int = Query(24, ge=1, le=168)):
             ticker = str(row.get("ticker") or "").upper()
             if not ticker:
                 continue
-            events.append({
+            _event_add(events, {
                 "id": f"scanner:{ticker}:{generated_at}",
                 "type": "scanner",
+                "category": "scanner",
                 "ticker": ticker,
                 "time": scan_time.isoformat(),
                 "tier": str(recent.get("tier") or "").lower(),
+                "severity": str(recent.get("tier") or "watch").lower(),
                 "score": int(row.get("setup_score") or recent.get("score") or 0),
                 "dip_label": row.get("dip_label"),
                 "dip_total": _num_or_none(row.get("dip_total")),
                 "title": "Nasdaq scanner",
+                "detail": "Nasdaq scanner kandidát",
             })
 
-    priority = {"buy": 0, "watch": 1, "counter": 2}
+    events.extend(_portfolio_alert_events(now))
+    earnings_symbols = [event.get("ticker") for event in events if event.get("ticker")]
+    try:
+        earnings_symbols.extend([row.get("ticker") for row in _get_portfolio_holdings() if row.get("ticker")])
+    except Exception:
+        pass
+    try:
+        earnings_symbols.extend([row.get("ticker") for row in (scanner.get("results") or [])[:25] if row.get("ticker")])
+    except Exception:
+        pass
+    events.extend(_earnings_alert_events(earnings_symbols[:40], now))
+
+    priority = {"buy": 0, "watch": 1, "counter": 2, "info": 3}
+    category_priority = {"signal": 0, "scanner": 1, "earnings": 2, "portfolio": 3}
     events.sort(
         key=lambda event: (
             event.get("time") or "",
-            -priority.get(event.get("tier"), 9),
+            -category_priority.get(event.get("category") or event.get("type"), 9),
+            -priority.get(event.get("severity") or event.get("tier"), 9),
             event.get("score") or 0,
         ),
         reverse=True,
     )
     counts = {
         "total": len(events),
-        "signals": sum(1 for event in events if event["type"] == "signal"),
-        "scanner": sum(1 for event in events if event["type"] == "scanner"),
+        "signals": sum(1 for event in events if event.get("category") == "signal"),
+        "scanner": sum(1 for event in events if event.get("category") == "scanner"),
+        "earnings": sum(1 for event in events if event.get("category") == "earnings"),
+        "portfolio": sum(1 for event in events if event.get("category") == "portfolio"),
     }
     return {"hours": hours, "generated_at": now.isoformat(), "counts": counts, "events": events[:100]}
 
