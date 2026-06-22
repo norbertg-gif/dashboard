@@ -1843,6 +1843,7 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
 
     by_type = {}
     by_symbol = {}
+    by_sector = {}
     risk_flags = []
     for p in positions:
         typ = p.get("type") or "Other"
@@ -1858,6 +1859,35 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
         by_symbol[sym]["pnl"] += p.get("pnl") or 0
         by_symbol[sym]["dailyPnl"] += p.get("dailyPnl") or 0
         by_symbol[sym]["count"] += 1
+
+        sector_key = "Other"
+        sector_name = "Nezaradené"
+        sector_etf = None
+        if str(typ).lower() in ("stock", "etf"):
+            try:
+                sector_etf, sector_industry = _ticker_sector_etf(sym)
+                if sector_etf:
+                    sector_key = sector_etf
+                    sector_name = _SECTOR_ETFS.get(sector_etf) or sector_industry or sector_etf
+                elif sector_industry:
+                    sector_key = "Other"
+                    sector_name = sector_industry
+            except Exception:
+                pass
+        by_sector.setdefault(sector_key, {
+            "sector": sector_key,
+            "name": sector_name,
+            "amount": 0,
+            "pnl": 0,
+            "dailyPnl": 0,
+            "count": 0,
+            "symbols": set(),
+        })
+        by_sector[sector_key]["amount"] += p.get("amount") or 0
+        by_sector[sector_key]["pnl"] += p.get("pnl") or 0
+        by_sector[sector_key]["dailyPnl"] += p.get("dailyPnl") or 0
+        by_sector[sector_key]["count"] += 1
+        by_sector[sector_key]["symbols"].add(sym)
 
         amount = p.get("amount") or 0
         weight = amount / equity * 100 if equity else 0
@@ -1880,7 +1910,19 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
                 risk_flags.append({"level": "good", "symbol": sym, "message": f"Blizko TP ({dist:.1f}%)"})
 
     top_positions = sorted(by_symbol.values(), key=lambda x: x["amount"], reverse=True)
-    for row in list(by_type.values()) + top_positions:
+    sector_rows = list(by_sector.values())
+    for row in sector_rows:
+        row["symbols"] = sorted(row["symbols"])
+        row["symbolCount"] = len(row["symbols"])
+        if equity:
+            sector_weight = row["amount"] / equity * 100
+            if sector_weight >= 35:
+                risk_flags.append({
+                    "level": "warn",
+                    "symbol": row["sector"],
+                    "message": f"Sektorova koncentracia {sector_weight:.1f}% equity",
+                })
+    for row in list(by_type.values()) + top_positions + sector_rows:
         row["weightPct"] = round(row["amount"] / equity * 100, 2) if equity else 0
         row["pnlPct"] = round(row["pnl"] / row["amount"] * 100, 2) if row["amount"] else 0
         row["dailyPct"] = round(row["dailyPnl"] / row["amount"] * 100, 2) if row["amount"] else 0
@@ -1895,6 +1937,7 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
             "symbols": len(by_symbol),
         },
         "byType": sorted(by_type.values(), key=lambda x: x["amount"], reverse=True),
+        "bySector": sorted(sector_rows, key=lambda x: x["amount"], reverse=True),
         "topPositions": top_positions,
         "riskFlags": risk_flags[:100],
     }

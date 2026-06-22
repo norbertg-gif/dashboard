@@ -124,8 +124,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - Stĺpce možno zapínať, radiť a nezávisle meniť ich šírku. Nastavenie sa uloží.
   Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
 - **História** je záznam uzavretých obchodov. **Risk** ukazuje koncentráciu,
-  najväčšie pozície, rizikové príznaky a heatmapu: veľkosť = podiel na equity,
-  farba = denný P/L, doplnkový údaj = celkový P/L.
+  najväčšie pozície, rizikové príznaky, sektorovú expozíciu a heatmapu:
+  veľkosť = podiel na equity, farba = denný P/L, doplnkový údaj = celkový P/L.
 - Malé rozdiely oproti eToro sú možné kvôli spreadu, konverzii meny, poplatkom
   a zaokrúhleniu.
 

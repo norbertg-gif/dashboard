@@ -92,7 +92,7 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 
 - **Predictive features (#1)**: roc_4 (4-period ROC) + pos_52w (pozicia v rolling 52-period high/low rozsahu, 0-1, min_periods=20) pridane do ML_FEATURES (teraz 12). ADX/DI features znova zive po fixe duplicit.
 - **Makro rezim kvadrant** (analyticky plan #2): _mc_regime_quadrant() -> Goldilocks/Prehriatie/Risk-off/Utlm/Neutral z QQQ/SPY trendu + VIX + breadth. Pole market_regime v /api/market/context, chip na cele TRH listy. NEOVPLYVNUJE C1-C4.
-- **Relativna sila** (analyticky plan #1, ciastocne): GET /api/ticker/rs/{symbol} = RS voci QQQ/SPY (1M/3M), karta #rsCard v Predictive (pc_loadRS). Sektorove ETF RS este chyba (treba ticker->sektor mapu).
+- **Relativna sila** (analyticky plan #1, ciastocne): GET /api/ticker/rs/{symbol} = RS voci QQQ/SPY (1M/3M), karta #rsCard v Predictive (pc_loadRS). Sektorove ETF RS je hotove cez Finnhub profile2/SPDR mapu.
 - **Legacy eToro recommendations (#7)**: neskor odstranene; free eToro API tier endpoint nepodporoval a UI ho uz nepouzivalo.
 - **Manualy**: Volume Profile + Insider & EPS doplnene do help.html/MANUAL.md.
 
@@ -100,7 +100,7 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 
 - **#2 Regime-aware signal analytics** - backfill historickych signalov (download OHLCV per ticker, slice pri datume signalu, recompute kontext bez look-ahead). Potrebuje zive data + rozhodnutie o pristupe.
 - **News clustering** (analyticky plan #3) - az ked bude news cache naplnena.
-- **Sektorove ETF RS** - treba ticker->sektor mapu (Finnhub /stock/profile2).
+- **Sektorove ETF RS** - hotove cez Finnhub profile2/SPDR mapu; Risk tab pouziva rovnaky sektorovy kontext pre expoziciu.
 
 ## Cache verzia
 
@@ -140,3 +140,13 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 - Dovod: free eToro API tier endpoint nepodporuje a v aktualnom HTML uz
   neexistoval ovladaci prvok, ktory by tuto funkciu volal.
 - Cache verzia frontendu: `?v=20260622-alert2`.
+
+
+## Doplnen? 2026-06-22 - Risk sektorova expozicia
+
+- `/api/etoro/analytics` vracia nove pole `bySector` agregovane podla SPDR sektora
+  z existujucej Finnhub `profile2` cache.
+- Risk tab zobrazuje kartu **Sektorova expozicia**: vaha sektora v equity,
+  sektorovy P/L a pocet titulov. Je to interpretacna vrstva, nemeni portfolio P/L.
+- Sektorova koncentracia nad 35% equity pridava risk flag.
+- Cache verzia frontendu: `?v=20260622-alert3`.

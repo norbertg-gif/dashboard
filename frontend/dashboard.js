@@ -997,6 +997,7 @@ async function renderRiskView(force = false) {
   }
   const s = riskData.summary || {};
   const byType = [...(riskData.byType || [])].sort((a, b) => compareBySort(a, b, riskTypeSort));
+  const bySector = [...(riskData.bySector || [])].sort((a, b) => (b.weightPct || 0) - (a.weightPct || 0));
   const topPositions = [...(riskData.topPositions || [])].sort((a, b) => compareBySort(a, b, riskPositionSort));
   const heatmapRows = [...(riskData.topPositions || [])].sort((a, b) => (b.weightPct || 0) - (a.weightPct || 0));
   el.innerHTML = `<div class="tool-panel">
@@ -1019,7 +1020,7 @@ async function renderRiskView(force = false) {
       </tr></thead><tbody>
         ${byType.map(x => `<tr><td>${escHtml(x.type)}</td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
       </tbody></table>${renderRiskHeatmap(heatmapRows)}</div>
-      <div><div class="tool-title" style="margin:0 0 8px;">Top pozicie</div><table class="tool-table"><thead><tr>
+      <div>${renderRiskSectorExposure(bySector)}<div class="tool-title" style="margin:12px 0 8px;">Top pozicie</div><table class="tool-table"><thead><tr>
         <th onclick="sortRisk('position','symbol')" style="cursor:pointer;">Symbol${sortMarker(riskPositionSort, 'symbol')}</th>
         <th onclick="sortRisk('position','amount')" style="cursor:pointer;">Amount${sortMarker(riskPositionSort, 'amount')}</th>
         <th onclick="sortRisk('position','weightPct')" style="cursor:pointer;">Weight${sortMarker(riskPositionSort, 'weightPct')}</th>
@@ -1030,6 +1031,40 @@ async function renderRiskView(force = false) {
     </div>
   </div>`;
   hydrateRiskHeatmapDaily(heatmapRows);
+}
+
+function renderRiskSectorExposure(rows) {
+  const clean = rows.filter(r => Number(r.weightPct || 0) > 0);
+  if (!clean.length) return '';
+  const max = Math.max(...clean.map(r => Number(r.weightPct || 0)), 1);
+  return `<div class="risk-sector-card">
+    <div class="risk-heatmap-head">
+      <div class="tool-title" style="margin:0;">Sektorová expozícia</div>
+      <div class="risk-heatmap-legend">velkost = % equity · farba = P/L sektora</div>
+    </div>
+    <div class="risk-sector-list">
+      ${clean.map(r => {
+        const w = Number(r.weightPct || 0);
+        const pnl = Number(r.pnl || 0);
+        const daily = Number(r.dailyPct || 0);
+        const pnlCls = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
+        const bar = Math.max(5, Math.round(w / max * 100));
+        const symbols = (r.symbols || []).slice(0, 8).join(', ');
+        const more = (r.symbols || []).length > 8 ? ` +${(r.symbols || []).length - 8}` : '';
+        return `<div class="risk-sector-row" title="${escHtml(symbols + more)}">
+          <div class="risk-sector-main">
+            <span class="risk-sector-name">${escHtml(r.name || r.sector || 'Nezaradene')}</span>
+            <span class="risk-sector-meta">${escHtml(r.sector || '')} · ${Number(r.symbolCount || 0)} titulov</span>
+          </div>
+          <div class="risk-sector-bar"><span style="width:${bar}%;background:${riskHeatColor(daily)};"></span></div>
+          <div class="risk-sector-stats">
+            <span>${w.toFixed(1)}%</span>
+            <span class="${pnlCls}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 
 function riskHeatColor(pct) {
