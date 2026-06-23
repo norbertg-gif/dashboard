@@ -119,7 +119,8 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
 
 **Role:** Detail one ticker — "prečo áno/nie?"
 
-- **Decision Bar** (top): `predictiveDecisionFromData()` → Buy/Watch/Counter/No signal badge + sila x/4 + weekly bias + regime + vek signálu. Rendered above charts via `#pcDecisionBar`.
+- **Decision Bar** (top): `predictiveDecisionFromData()` → Buy/Watch/Counter/No signal badge + sila x/4 + weekly trend label + regime + vek signálu. Rendered above charts via `#pcDecisionBar`.
+- **Weekly trend label** (`_weekly_trend(df_w)`): 5-stupňový label cez Donchian 20w pozíciu + SMA50w + EMA10/20 — nahradil pôvodný prísny `composite > 0.05 AND nad Kumo AND EMA10>EMA20`, ktorý dával "bear" aj pri AAPL/AMD v zjavnom uptrende. Stupne: `strong_up` (Donch ≥ 0.80 + SMA50), `up` (≥ 0.55 + SMA50), `range` (default), `down` (< 0.30, pod SMA50), `strong_down` (< 0.15, pod SMA50, EMA bear). Backend vracia `weekly_trend: {key, label, icon, score, donchian_pos, above_sma50, ema_bull, ...}` v scanner aj predict payload. Stará `weekly_bullish: bool` ostáva ako derivát `score >= 1` pre ML kontext, signal log, backfill — žiadny downstream consumer sa nelámal. `_weekly_bullish_asof()` (backfill regime kontextu) tiež prepnutý na novú logiku → historické signály budú konzistentné s novými pri budúcom backfille.
 - **Left column (Dôkazy):** C1–C4 aktuálny setup, história signálov, 30D/60D/90D validácia, Signal Analytics, Timeframe alignment. Collapsed by default on narrow screens.
 - **Main chart** (weekly/daily): `pc_realChartInst` / `pc_realSeries`. eToro
   open-position markers (circles) are injected in `renderCharts()` alongside

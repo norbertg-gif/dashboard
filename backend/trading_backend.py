@@ -543,6 +543,87 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
         }
     }
 
+# ── Weekly trend label (Donchian 20w + SMA50w + EMA10/20 konfirmácia) ────────
+# Nahrádza pôvodné bool weekly_bullish za 5-stupňový label. Bool ostáva
+# k dispozícii ako derivát (score >= 3) pre ML kontext a signal log
+# kompatibilitu — táto funkcia je čisto prezentačná vrstva nad weekly DF.
+
+WEEKLY_TREND_LABELS = {
+    2:  {"key": "strong_up",   "label": "Strong uptrend",   "icon": "⬆⬆", "dir": "up"},
+    1:  {"key": "up",          "label": "Uptrend",          "icon": "⬆",  "dir": "up"},
+    0:  {"key": "range",       "label": "Range / sideways", "icon": "→",  "dir": "side"},
+    -1: {"key": "down",        "label": "Downtrend",        "icon": "⬇",  "dir": "down"},
+    -2: {"key": "strong_down", "label": "Strong downtrend", "icon": "⬇⬇", "dir": "down"},
+}
+
+
+def _weekly_trend(df_w, asof_index: int | None = None) -> dict | None:
+    """Vyhodnotí dlhodobý týždenný trend pomocou 20-týždňového Donchian
+    kanála + 50-týždňovej SMA + EMA10/EMA20 ako momentum konfirmácie.
+
+    asof_index = None znamená posledná sviečka. Vracia None keď je málo dát
+    (potrebujeme aspoň 20 týždňov pre Donchian)."""
+    if df_w is None or len(df_w) < 20:
+        return None
+    idx = len(df_w) - 1 if asof_index is None else asof_index
+    if idx < 19:
+        return None
+    window = df_w.iloc[max(0, idx - 19): idx + 1]
+    if len(window) < 20:
+        return None
+    high20 = float(window["High"].max())
+    low20  = float(window["Low"].min())
+    close  = float(df_w["Close"].iloc[idx])
+    rng = high20 - low20
+    donchian_pos = (close - low20) / rng if rng > 0 else 0.5
+
+    # SMA50 (long-term trend filter) — fail-soft pri kratšej histórii
+    sma50 = None
+    if idx >= 49:
+        sma50 = float(df_w["Close"].iloc[idx - 49: idx + 1].mean())
+    above_sma50 = (sma50 is not None and close > sma50)
+
+    ema10 = float(df_w["ema10"].iloc[idx]) if "ema10" in df_w.columns else None
+    ema20 = float(df_w["ema20"].iloc[idx]) if "ema20" in df_w.columns else None
+    ema_bull = (ema10 is not None and ema20 is not None and ema10 > ema20)
+
+    # 5-stupňové skóre — Donchian pozícia primárna, SMA50/EMA len ako gating
+    if donchian_pos >= 0.80 and (above_sma50 or sma50 is None):
+        score = 2
+    elif donchian_pos >= 0.55 and (above_sma50 or sma50 is None):
+        score = 1
+    elif donchian_pos < 0.15 and (not above_sma50) and (not ema_bull):
+        score = -2
+    elif donchian_pos < 0.30 and (not above_sma50):
+        score = -1
+    else:
+        score = 0
+
+    meta = WEEKLY_TREND_LABELS[score]
+    return {
+        "score": score,
+        "label": meta["label"],
+        "key": meta["key"],
+        "icon": meta["icon"],
+        "direction": meta["dir"],
+        "donchian_pos": round(donchian_pos, 3),
+        "donchian_high": round(high20, 4),
+        "donchian_low":  round(low20, 4),
+        "above_sma50": above_sma50,
+        "ema_bull": ema_bull,
+        "close": round(close, 4),
+        "sma50": round(sma50, 4) if sma50 is not None else None,
+    }
+
+
+def _weekly_trend_to_bullish(trend: dict | None) -> bool | None:
+    """Derivát starého bool weekly_bullish — score >= 1 znamená Uptrend alebo
+    Strong uptrend. Používa sa pre ML kontext, signal log a stará scanner UI."""
+    if trend is None:
+        return None
+    return trend.get("score", 0) >= 1
+
+
 # ── Backtesting ───────────────────────────────────────────────────────────────
 
 def calc_raw_signals(df_slice):
@@ -3362,21 +3443,16 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             if len(raw_d) >= 20:
                 df_d = add_indicators(raw_d)
 
-                # --- Weekly bias check ---
-                last_w       = df.iloc[-1]
-                lc_w         = float(last_w["Close"])
-                w_composite  = pred["composite"]
-                w_above_kumo = lc_w > max(
-                    float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w,
-                    float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w
-                )
-                w_ema_bull   = float(last_w["ema10"]) > float(last_w["ema20"])
-                weekly_bullish = w_composite > 0.05 and w_above_kumo and w_ema_bull
-                weekly_bias  = {
+                # --- Weekly bias check (Donchian 20w + SMA50w + EMA10/20) ---
+                weekly_trend = _weekly_trend(df)
+                weekly_bullish = _weekly_trend_to_bullish(weekly_trend) or False
+                w_composite = pred["composite"]
+                weekly_bias = {
                     "bullish":     weekly_bullish,
                     "composite":   round(w_composite * 100, 1),
-                    "above_kumo":  w_above_kumo,
-                    "ema_bull":    w_ema_bull,
+                    "trend":       weekly_trend,  # nový 5-stupňový label
+                    "above_kumo":  None,
+                    "ema_bull":    weekly_trend.get("ema_bull") if weekly_trend else False,
                 }
 
                 # --- Daily signal computation ---
@@ -3937,26 +4013,17 @@ def _normalize_ts(value):
 
 def _weekly_bullish_asof(raw_w: pd.DataFrame, signal_date) -> bool | None:
     """Reprodukuje weekly bias k dátumu signálu — rovnaká logika ako live
-    (composite > 0.05 AND nad kumo AND EMA10 > EMA20), ale na weekly dátach
-    orezaných po signal_date (žiadny look-ahead)."""
+    (Donchian 20w + SMA50w + EMA10/20), ale na weekly dátach orezaných po
+    signal_date (žiadny look-ahead)."""
     if raw_w is None or raw_w.empty:
         return None
     cutoff = _normalize_ts(signal_date)
     hist = raw_w.loc[[_normalize_ts(ix) <= cutoff for ix in raw_w.index]]
-    if len(hist) < 30:
+    if len(hist) < 20:
         return None
     df_w = add_indicators(hist)
-    last_w = df_w.iloc[-1]
-    lc_w = float(last_w["Close"])
-    try:
-        w_comp = predict_next_candle(df_w)["composite"]
-    except Exception:
-        return None
-    sa = float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w
-    sb = float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w
-    w_above_kumo = lc_w > max(sa, sb)
-    w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
-    return bool(w_comp > 0.05 and w_above_kumo and w_ema_bull)
+    trend = _weekly_trend(df_w)
+    return _weekly_trend_to_bullish(trend)
 
 
 def _backfill_ticker_context(ticker: str, entries: dict, force: bool = False) -> dict:
@@ -4702,19 +4769,13 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     raw_w = _yf_download_cached(ticker, "1y", "1wk")
     weekly_bullish = None
     weekly_status = "insufficient_history"
-    if len(raw_w) >= 30:
+    weekly_trend = None
+    if len(raw_w) >= 20:
         df_w = add_indicators(raw_w)
-        last_w = df_w.iloc[-1]
-        lc_w = float(last_w["Close"])
-        pred_w = predict_next_candle(df_w)
-        w_comp = pred_w["composite"]
-        w_above_kumo = lc_w > max(
-            float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w,
-            float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w,
-        )
-        w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
-        weekly_bullish = w_comp > 0.05 and w_above_kumo and w_ema_bull
-        weekly_status = "bullish" if weekly_bullish else "not_bullish"
+        weekly_trend = _weekly_trend(df_w)
+        weekly_bullish = _weekly_trend_to_bullish(weekly_trend)
+        if weekly_trend is not None:
+            weekly_status = weekly_trend.get("key") or ("bullish" if weekly_bullish else "not_bullish")
 
     today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
     latest_closed_date = latest_closed_daily_date(df_d)
@@ -4775,6 +4836,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         "ticker": ticker,
         "weekly_bullish": weekly_bullish,
         "weekly_status": weekly_status,
+        "weekly_trend": weekly_trend,
         "recent_signal": recent_signal,
         "signal_count": len(all_signals),
         "last_close": last_close,
@@ -6817,21 +6879,14 @@ def run_checklist(tickers: str = "", days: int = 10):
 
             df_d = add_indicators(raw_d)
 
-            # Weekly data for bias
+            # Weekly data for bias (Donchian 20w + SMA50w + EMA10/20)
             raw_w = _yf_download_cached(ticker, "1y", "1wk")
             weekly_bullish = False
-            if len(raw_w) >= 30:
-                df_w   = add_indicators(raw_w)
-                last_w = df_w.iloc[-1]
-                lc_w   = float(last_w["Close"])
-                pred_w = predict_next_candle(df_w)
-                w_comp = pred_w["composite"]
-                w_above_kumo = lc_w > max(
-                    float(last_w["ichi_sa"]) if not math.isnan(float(last_w["ichi_sa"])) else lc_w,
-                    float(last_w["ichi_sb"]) if not math.isnan(float(last_w["ichi_sb"])) else lc_w
-                )
-                w_ema_bull = float(last_w["ema10"]) > float(last_w["ema20"])
-                weekly_bullish = w_comp > 0.05 and w_above_kumo and w_ema_bull
+            weekly_trend = None
+            if len(raw_w) >= 20:
+                df_w = add_indicators(raw_w)
+                weekly_trend = _weekly_trend(df_w)
+                weekly_bullish = bool(_weekly_trend_to_bullish(weekly_trend))
 
             # Score closed candles
             today_date = pd.Timestamp.now("UTC").tz_localize(None).normalize().tz_localize(None)
@@ -6883,6 +6938,7 @@ def run_checklist(tickers: str = "", days: int = 10):
             results.append({
                 "ticker":         ticker,
                 "weekly_bullish": weekly_bullish,
+                "weekly_trend":   weekly_trend,
                 "recent_signal":  recent_signal,
                 "signal_count":   len(all_signals),
                 "last_close":     round(float(df_d.iloc[-1]["Close"]), 2),

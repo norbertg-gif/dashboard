@@ -456,6 +456,39 @@ function predictiveDecisionFromData(data) {
   return 'watch';
 }
 
+// 5-stupňový label dlhodobého trendu (Donchian 20w + SMA50w + EMA10/20).
+// Nahrádza pôvodný bull/bear chip. Vstup je objekt z backendu (weekly_trend),
+// volajúci nemusí kontrolovať null — vždy vráti aspoň fallback.
+function weeklyTrendChipHtml(trend, fallbackBullish) {
+  if (!trend || !trend.key) {
+    // fallback keď backend ešte nevracia nový label
+    const cls = fallbackBullish ? 'good' : 'bad';
+    const txt = fallbackBullish ? 'weekly up' : 'weekly down';
+    return `<span class="opp-pill ${cls}">${txt}</span>`;
+  }
+  const map = {
+    strong_up:   { cls: 'good',  label: 'Strong uptrend',   icon: '⬆⬆' },
+    up:          { cls: 'good',  label: 'Uptrend',          icon: '⬆'  },
+    range:       { cls: 'neutral', label: 'Range',          icon: '→'  },
+    down:        { cls: 'bad',   label: 'Downtrend',        icon: '⬇'  },
+    strong_down: { cls: 'bad',   label: 'Strong downtrend', icon: '⬇⬇' },
+  };
+  const meta = map[trend.key] || map.range;
+  const pos = trend.donchian_pos != null ? ` ${(trend.donchian_pos * 100).toFixed(0)}%` : '';
+  const tip = `Donchian 20w pozícia ${(trend.donchian_pos * 100).toFixed(0)}%`
+    + (trend.above_sma50 != null ? ` · ${trend.above_sma50 ? 'nad' : 'pod'} SMA50w` : '')
+    + (trend.ema_bull != null ? ` · EMA10${trend.ema_bull ? '>' : '<'}EMA20` : '');
+  return `<span class="opp-pill ${meta.cls}" title="${escHtml(tip)}">${meta.icon} ${escHtml(meta.label)}${pos}</span>`;
+}
+function weeklyTrendShortText(trend, fallbackBullish) {
+  if (!trend || !trend.key) return fallbackBullish ? 'Uptrend' : 'Downtrend / nepotvrdený';
+  const txt = {
+    strong_up: 'Strong uptrend', up: 'Uptrend', range: 'Range',
+    down: 'Downtrend', strong_down: 'Strong downtrend',
+  };
+  return txt[trend.key] || trend.label || 'n/a';
+}
+
 function predictiveMissingSetup(details) {
   if (!details) return [];
   const labels = [
@@ -6101,7 +6134,15 @@ function pc_renderDailyExtra(data) {
   }
   const trendWeekly = trendFromCandles(data.candles, 20);
   const trendDaily  = trendFromCandles(daily, 20);
-  const weeklyBias  = data.weekly_bias;   // 'bullish' / 'bearish' / null
+  const weeklyBias  = data.weekly_bias;   // {bullish, composite, trend:{key,...}, ...}
+  // Pre arrow() — strong_up/up = 'up', range = null, down/strong_down = 'down'
+  const weeklyBiasDir = (() => {
+    const k = weeklyBias?.trend?.key;
+    if (k === 'strong_up' || k === 'up') return 'up';
+    if (k === 'down' || k === 'strong_down') return 'down';
+    if (k === 'range') return null;
+    return weeklyBias?.bullish === true ? 'up' : weeklyBias?.bullish === false ? 'down' : null;
+  })();
 
   // ── Render ──────────────────────────────────────────────────────────────
   const arrow = (t) => t === 'up' ? '<span style="color:#26a69a">▲</span>'
@@ -6242,7 +6283,7 @@ function pc_renderDailyExtra(data) {
           <span class="signal-current-title">Aktuálny setup</span>
           <span class="pc-decision-badge ${decisionMeta.cls}">${decisionMeta.label}</span>
         </div>
-        <div class="signal-current-status">Sila ${rawScore}/4 · Trend ${details.trend || 'n/a'} · Weekly bias ${data.weekly_bias?.bullish ? 'bullish' : 'nepotvrdený'}</div>
+        <div class="signal-current-status">Sila ${rawScore}/4 · Trend ${details.trend || 'n/a'} · Týždeň: ${escHtml(weeklyTrendShortText(data.weekly_bias?.trend, data.weekly_bias?.bullish))}</div>
         <div class="signal-check-grid">${setupChecks}</div>
         <div class="signal-current-note">${currentNote}</div>
         ${latestSignal ? `<div class="signal-current-note">Posledný uzavretý signál: <strong>${new Date(latestSignal.time * 1000).toLocaleDateString('sk-SK')}</strong> · ${sigTierLabel(latestSignal.tier, latestSignal.score)} ${latestSignal.score}/4${latestSignalReturn != null ? ` · voči aktuálnej cene ${fmtSigned(latestSignalReturn)}` : ''}</div>` : ''}
@@ -6317,7 +6358,7 @@ function pc_renderDailyExtra(data) {
                       border:1px solid var(--border);display:flex;
                       justify-content:space-between;align-items:center;">
             <span style="color:var(--muted);">Weekly bias</span>
-            <span>${weeklyBias === 'bullish' ? arrow('up') : weeklyBias === 'bearish' ? arrow('down') : arrow(null)}</span>
+            <span>${arrow(weeklyBiasDir)}</span>
           </div>
           <div style="background:var(--bg);padding:5px 8px;border-radius:4px;
                       border:1px solid var(--border);display:flex;
@@ -6341,7 +6382,7 @@ function pc_renderDailyExtra(data) {
         ${(() => {
           // Alignment score: koľko z indikátorov je up
           const trends = [
-            weeklyBias === 'bullish' ? 'up' : weeklyBias === 'bearish' ? 'down' : null,
+            weeklyBiasDir,
             trendWeekly, trendDaily,
             data.daily_signal > 0.05 ? 'up' : data.daily_signal < -0.05 ? 'down' : null
           ];
@@ -6637,20 +6678,25 @@ function pc_renderDecisionBar(data) {
   const regimeText = regime.regime
     ? `${regime.regime}${regime.confidence != null ? ` ${Math.round(regime.confidence * 100)}%` : ''}`
     : 'n/a';
+  const wt = wb.trend;
+  const wtShort = weeklyTrendShortText(wt, wb.bullish);
   let summary = '';
   if (!wb.bullish) {
-    summary = `Weekly bias zatiaľ nepotvrdzuje nový vstup. Technická sila je ${rawScore}/4${missing.length ? `, chýba ešte ${missing.join(', ')}.` : '.'}`;
+    summary = `Dlhodobý trend je ${wtShort.toLowerCase()} — nový long vstup zatiaľ nemá potvrdenie. Technická sila ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
   } else if (rawScore < 2) {
-    summary = `Nový signál ešte nevznikol. Aktuálna sila je ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
+    summary = `Trend ${wtShort.toLowerCase()}, ale nový signál ešte nevznikol. Aktuálna sila ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
   } else {
-    summary = `${meta.label} setup je aktívny. Trend je ${details.trend || 'n/a'} a ${latestSignal ? `posledný uzavretý signál bol ${predictiveSignalAgeLabel(latestSignal)}.` : 'zatiaľ bez staršieho uzavretého signálu.'}`;
+    summary = `${meta.label} setup je aktívny v trende ${wtShort.toLowerCase()}. ${latestSignal ? `Posledný uzavretý signál bol ${predictiveSignalAgeLabel(latestSignal)}.` : 'Zatiaľ bez staršieho uzavretého signálu.'}`;
   }
+  const wtChip = wt && wt.key
+    ? `<span class="pc-decision-chip" title="Donchian 20w ${(wt.donchian_pos*100).toFixed(0)}%${wt.above_sma50 != null ? ` · ${wt.above_sma50 ? 'nad' : 'pod'} SMA50w` : ''}">${wt.icon || ''} <strong>${escHtml(wtShort)}</strong></span>`
+    : `<span class="pc-decision-chip">Weekly <strong>${wb.bullish ? 'up' : 'off'}</strong></span>`;
   el.innerHTML = `
     <span class="pc-decision-symbol">${ticker}</span>
     <span class="pc-decision-badge ${meta.cls}">${meta.label}</span>
     <span class="pc-decision-chip">Sila <strong>${rawScore}/4</strong></span>
     <span class="pc-decision-chip">Trend <strong>${details.trend || 'n/a'}</strong></span>
-    <span class="pc-decision-chip">Weekly <strong>${wb.bullish ? 'bullish' : 'off'}</strong></span>
+    ${wtChip}
     <span class="pc-decision-chip">Regime <strong>${regimeText}</strong></span>
     <span class="pc-decision-chip">Posledný <strong>${predictiveSignalAgeLabel(latestSignal)}</strong></span>
     ${latestReturn != null ? `<span class="pc-decision-chip">Od signálu <strong>${latestReturn >= 0 ? '+' : ''}${latestReturn.toFixed(1)}%</strong></span>` : ''}
@@ -7069,7 +7115,16 @@ function opportunityReasons(row, pos, days) {
   (row.positive_factors || []).slice(0, 3).forEach(text => reasons.push({ cls: 'good', text }));
   (row.risk_flags || []).slice(0, 2).forEach(text => reasons.push({ cls: 'warn', text }));
   if (reasons.length >= 4) return reasons.slice(0, 4);
-  reasons.push({ cls: row.weekly_bullish ? 'good' : 'bad', text: row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup' });
+  const wt = row.weekly_trend;
+  const wtKey = wt?.key;
+  const wtCls = (wtKey === 'strong_up' || wtKey === 'up') ? 'good'
+               : (wtKey === 'range') ? 'warn'
+               : (wtKey === 'down' || wtKey === 'strong_down') ? 'bad'
+               : (row.weekly_bullish ? 'good' : 'bad');
+  const wtText = wt && wt.label
+    ? `Týždenný trend: ${wt.label} (Donchian ${(wt.donchian_pos * 100).toFixed(0)}%)`
+    : (row.weekly_bullish ? 'Weekly trend podporuje long setup' : 'Weekly trend zatiaľ brzdí long setup');
+  reasons.push({ cls: wtCls, text: wtText });
   if (sig) {
     const t = sigTier(sig.tier, sig.score);
     const cls = t === 'buy' ? 'good' : t === 'counter' ? 'bad' : 'warn';
@@ -7112,7 +7167,6 @@ function renderOpportunities(rows, days) {
   const renderItem = r => {
     const sig = r.recent_signal;
     const pos = r._pos;
-    const biasCls = r.weekly_bullish ? 'good' : 'bad';
     const sigT = sig ? sigTier(sig.tier, sig.score) : '';
     const sigCls = sig ? (sigT === 'buy' ? 'good' : sigT === 'counter' ? 'bad' : 'warn') : '';
     const posCls = pos ? (pos.pnl >= 0 ? 'good' : 'bad') : '';
@@ -7128,7 +7182,7 @@ function renderOpportunities(rows, days) {
         <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
       </div>
       <div class="opp-meta">
-        <span class="opp-pill ${biasCls}">${r.weekly_bullish ? 'weekly bull' : 'weekly bear'}</span>
+        ${weeklyTrendChipHtml(r.weekly_trend, r.weekly_bullish)}
         <span class="opp-pill ${sigCls}">${sigTxt}</span>
         <span class="opp-pill ${posCls}">${posTxt}</span>
       </div>
@@ -8246,12 +8300,14 @@ function buildInvestorVerdict(ticker, data, insights, market) {
   const details = data?.today_details || {};
   const rawScore = Number(data?.today_raw_score ?? data?.today_score ?? 0) || 0;
   const weeklyBullish = !!data?.weekly_bias?.bullish;
+  const weeklyTrend = data?.weekly_bias?.trend || null;
+  const weeklyLabel = weeklyTrendShortText(weeklyTrend, weeklyBullish);
   const technical = predictiveDecisionFromData(data);
   const close = Number(data?.daily_candles?.at(-1)?.close || data?.candles?.at(-1)?.close);
   const missing = predictiveMissingSetup(details);
 
-  if (weeklyBullish) verdictPush(positives, `Weekly trend je rastový a DIP signál má silu ${rawScore}/4.`);
-  else verdictPush(risks, 'Weekly trend zatiaľ nepotvrdzuje rast.');
+  if (weeklyBullish) verdictPush(positives, `Týždenný trend: ${weeklyLabel}; DIP signál má silu ${rawScore}/4.`);
+  else verdictPush(risks, `Týždenný trend: ${weeklyLabel} — long vstup zatiaľ nemá potvrdenie.`);
 
   if (technical === 'buy' && rawScore >= 3) {
     verdictPush(positives, 'Technický setup je potvrdený a je v súlade s trendom.');
@@ -8704,8 +8760,15 @@ async function runChecklist() {
       }
       const hasSig  = !!r.recent_signal;
       const rowCls  = hasSig ? 'has-signal' : '';
-      const biasCol = r.weekly_bullish ? '#26a69a' : '#ef5350';
-      const biasLbl = r.weekly_bullish ? '▲ Bullish' : '▼ Bearish';
+      const wt = r.weekly_trend;
+      const wtKey = wt?.key;
+      const biasCol = (wtKey === 'strong_up' || wtKey === 'up') ? '#26a69a'
+                    : (wtKey === 'range') ? '#94a3b8'
+                    : (wtKey === 'down' || wtKey === 'strong_down') ? '#ef5350'
+                    : (r.weekly_bullish ? '#26a69a' : '#ef5350');
+      const wtIcon = wt?.icon || (r.weekly_bullish ? '▲' : '▼');
+      const wtLbl  = wt?.label || (r.weekly_bullish ? 'Uptrend' : 'Downtrend');
+      const biasLbl = `${wtIcon} ${wtLbl}`;
       const sigDate = r.recent_signal ? r.recent_signal.date : '—';
       const sigBadge = !hasSig ? '<span class="cl-badge none">—</span>'
         : '<span class="cl-badge" style="background:' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + '22;color:' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + ';border:1px solid ' + sigTierColor(r.recent_signal.tier, r.recent_signal.score) + '55;">' + r.recent_signal.score + '/4 ' + sigTierLabel(r.recent_signal.tier, r.recent_signal.score) + '</span>';
