@@ -1943,6 +1943,136 @@ def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
     }
 
 
+@app.get("/api/etoro/correlation")
+def get_portfolio_correlation(
+    account: str = Query("1"),
+    days: int = Query(60, ge=20, le=180),
+    limit: int = Query(20, ge=2, le=40),
+    refresh: int = Query(0),
+):
+    """Pearson korelácia denných log returns medzi top N pozíciami účtu.
+    Interpretačná vrstva — pomáha vidieť, či viac pozícií reaguje na rovnaké
+    pohyby (skrytá koncentrácia, ktorú single-name váha neuvidí). NEOVPLYVŇUJE
+    C1–C4 ani portfolio účtovníctvo. OHLCV z existujúcej cache, žiadne nové
+    API volania nad rámec scanner prefetchu."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    positions = portfolio.get("positions", [])
+    equity = (portfolio.get("summary") or {}).get("equity") or 0
+
+    # Stock/ETF only, agreguj viac vstupov na ten istý symbol, zoraď podľa equity podielu
+    by_sym: dict[str, dict] = {}
+    for pos in positions:
+        typ = str(pos.get("type") or "").lower()
+        if typ not in ("stock", "etf"):
+            continue
+        sym = pos.get("symbol") or str(pos.get("instrumentId"))
+        if not sym:
+            continue
+        entry = by_sym.setdefault(sym, {"symbol": sym, "name": pos.get("name"), "amount": 0.0})
+        entry["amount"] += pos.get("amount") or 0
+    if len(by_sym) < 2:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": None,
+                "warning": "Potrebujeme aspoň 2 stock/ETF pozície."}
+
+    universe = sorted(by_sym.values(), key=lambda x: x["amount"], reverse=True)[:limit]
+
+    # Stiahni Close pre každý symbol z OHLCV cache; potrebujeme aspoň ~30 spoločných sviečok
+    period_label = "1y" if days > 90 else ("6mo" if days > 30 else "3mo")
+    closes: dict[str, pd.Series] = {}
+    skipped: list[dict] = []
+    for entry in universe:
+        sym = entry["symbol"]
+        try:
+            raw = _yf_download_cached(sym, period_label, "1d")
+        except Exception as e:
+            skipped.append({"symbol": sym, "reason": f"fetch: {str(e)[:80]}"})
+            continue
+        if raw is None or len(raw) < 30:
+            skipped.append({"symbol": sym, "reason": "málo dát"})
+            continue
+        s = raw["Close"].astype(float).tail(days + 5).dropna()
+        if len(s) < 30:
+            skipped.append({"symbol": sym, "reason": "málo dát"})
+            continue
+        s.index = pd.to_datetime(s.index)
+        closes[sym] = s
+
+    if len(closes) < 2:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": None,
+                "skipped": skipped,
+                "warning": "Nedostatok historických dát v cache."}
+
+    # Align na spoločný kalendár → log returns → korelačná matica
+    df = pd.DataFrame(closes).sort_index().dropna(how="any")
+    if len(df) < 20:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": len(df),
+                "skipped": skipped,
+                "warning": f"Len {len(df)} spoločných sviečok — málo na koreláciu."}
+    df = df.tail(days)
+    returns = np.log(df / df.shift(1)).dropna()
+    if len(returns) < 15:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": len(returns),
+                "skipped": skipped,
+                "warning": f"Len {len(returns)} returns — málo na koreláciu."}
+
+    corr = returns.corr().round(3)
+    syms = list(corr.columns)
+    # Zoraď podľa sektoru, aby sa klastre v matici držali pohromade (vizuálna pomoc)
+    sector_of: dict[str, str] = {}
+    for sym in syms:
+        try:
+            etf, _ = _ticker_sector_etf(sym)
+            sector_of[sym] = etf or "ZZZ"
+        except Exception:
+            sector_of[sym] = "ZZZ"
+    weight_of = {entry["symbol"]: (entry["amount"] / equity * 100) if equity else 0
+                 for entry in universe}
+    syms_sorted = sorted(syms, key=lambda s: (sector_of.get(s, "ZZZ"), -weight_of.get(s, 0)))
+    corr = corr.loc[syms_sorted, syms_sorted]
+
+    matrix = [[float(corr.iat[i, j]) for j in range(len(syms_sorted))]
+              for i in range(len(syms_sorted))]
+
+    # Top korelované páry (off-diagonal), max 12
+    pairs = []
+    for i in range(len(syms_sorted)):
+        for j in range(i + 1, len(syms_sorted)):
+            pairs.append({
+                "a": syms_sorted[i],
+                "b": syms_sorted[j],
+                "corr": float(corr.iat[i, j]),
+            })
+    pairs.sort(key=lambda p: abs(p["corr"]), reverse=True)
+    top_pairs = pairs[:12]
+
+    # Mean off-diagonal absolútna korelácia — agregátny "skupinový" pohyb
+    off_diag = [abs(p["corr"]) for p in pairs]
+    avg_abs_corr = round(sum(off_diag) / len(off_diag), 3) if off_diag else None
+    high_count = sum(1 for p in pairs if p["corr"] >= 0.7)
+
+    return {
+        "account": account,
+        "days": days,
+        "lookback_used": len(returns),
+        "symbols": [
+            {"symbol": s,
+             "name": next((u["name"] for u in universe if u["symbol"] == s), s),
+             "weightPct": round(weight_of.get(s, 0), 2),
+             "sector": sector_of.get(s, None) if sector_of.get(s) != "ZZZ" else None}
+            for s in syms_sorted
+        ],
+        "matrix": matrix,
+        "pairs": top_pairs,
+        "avgAbsCorr": avg_abs_corr,
+        "highCorrCount": high_count,
+        "skipped": skipped,
+    }
+
+
 @app.get("/api/summary")
 def get_summary(symbol: str = Query(...)):
     """Yahoo Finance quote — 52w High/Low, analyst recommendation, názov."""

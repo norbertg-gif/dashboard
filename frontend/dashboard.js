@@ -1125,8 +1125,112 @@ async function renderRiskView(force = false) {
         ${topPositions.map(x => `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;"><td><span class="port-sym">${escHtml(x.symbol)}</span></td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
       </tbody></table></div>
     </div>
+    <div id="risk-correlation" style="padding:10px;border-top:1px solid var(--border);">
+      <div class="tool-title" style="margin:0 0 8px;">Korelačná matica
+        <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">posledných 60 dní · Pearson denných returns</span>
+      </div>
+      <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
+    </div>
   </div>`;
   hydrateRiskHeatmapDaily(heatmapRows);
+  loadCorrelationMatrix();
+}
+
+let _corrCache = { account: null, data: null };
+async function loadCorrelationMatrix(force = false) {
+  const account = activeAccount || '1';
+  const wrap = document.getElementById('risk-correlation');
+  if (!wrap) return;
+  if (!force && _corrCache.account === account && _corrCache.data) {
+    renderCorrelationCard(_corrCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/etoro/correlation?account=${account}&days=60&limit=20`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    _corrCache = { account, data };
+    renderCorrelationCard(data);
+  } catch(e) {
+    wrap.innerHTML = `<div class="tool-title" style="margin:0 0 8px;">Korelačná matica</div>
+      <div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderCorrelationCard(data) {
+  const wrap = document.getElementById('risk-correlation');
+  if (!wrap) return;
+  const head = `<div class="risk-corr-head">
+    <div class="tool-title" style="margin:0;">Korelačná matica
+      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${data.lookback_used || data.days} dní · Pearson denných returns</span>
+    </div>
+    <button class="btn" onclick="loadCorrelationMatrix(true)" style="font-size:10px;">Refresh</button>
+  </div>`;
+  if (!data.symbols || data.symbols.length < 2) {
+    wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:6px 0;">${escHtml(data.warning || 'Nedostatok dát.')}</div>`;
+    return;
+  }
+  const syms = data.symbols;
+  const matrix = data.matrix;
+  // Verdikt — agregátny pohyb skupiny
+  const avg = data.avgAbsCorr;
+  const high = data.highCorrCount || 0;
+  let level = 'good';
+  let verdict = 'Pozície sa pohybujú prevažne nezávisle.';
+  if (avg != null && avg >= 0.7) {
+    level = 'danger';
+    verdict = 'Skupina sa hýbe veľmi synchrónne — jedna negatívna správa pravdepodobne dopadne na väčšinu pozícií.';
+  } else if ((avg != null && avg >= 0.5) || high >= 3) {
+    level = 'warn';
+    verdict = 'Viacero pozícií sa pohybuje podobne — koncentrácia sa môže prejaviť silnejšie, než ukazuje samotná váha.';
+  }
+  const facts = [];
+  if (avg != null) facts.push(`Priem. |korelácia|: ${avg.toFixed(2)}`);
+  if (high) facts.push(`${high} pár(ov) s ρ ≥ 0.70`);
+  facts.push(`${syms.length} pozícií`);
+  if (data.skipped && data.skipped.length) facts.push(`${data.skipped.length} preskočených (málo dát)`);
+
+  // Build matrix table
+  const cell = (v) => {
+    if (v == null || Number.isNaN(v)) return '<td class="rc-na">—</td>';
+    const x = Math.max(-1, Math.min(1, Number(v)));
+    // diverging colormap: red (+1) → neutral (0) → blue (-1)
+    let bg, fg = 'var(--text)';
+    if (x >= 0) {
+      const t = x;  // 0..1
+      const r = 220, g = Math.round(220 - 170 * t), b = Math.round(220 - 170 * t);
+      bg = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.55 * t})`;
+    } else {
+      const t = -x;
+      const r = Math.round(220 - 170 * t), g = Math.round(220 - 100 * t), b = 220;
+      bg = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.45 * t})`;
+    }
+    if (Math.abs(x) >= 0.6) fg = '#0f172a';
+    return `<td class="rc-val" style="background:${bg};color:${fg};">${x.toFixed(2)}</td>`;
+  };
+  const header = `<tr><th></th>${syms.map(s => `<th class="rc-th">${escHtml(s.symbol)}</th>`).join('')}</tr>`;
+  const rows = syms.map((s, i) => {
+    const w = s.weightPct ? ` ${s.weightPct.toFixed(0)}%` : '';
+    return `<tr>
+      <th class="rc-th rc-th-row" title="${escHtml(s.name || '')} · váha ${s.weightPct || 0}%">${escHtml(s.symbol)}<span class="rc-w">${w}</span></th>
+      ${matrix[i].map((v, j) => i === j ? '<td class="rc-diag">·</td>' : cell(v)).join('')}
+    </tr>`;
+  }).join('');
+
+  const pairs = (data.pairs || []).slice(0, 6).map(p => {
+    const cls = p.corr >= 0.7 ? 'danger' : p.corr >= 0.4 ? 'warn' : p.corr <= -0.4 ? 'good' : '';
+    return `<span class="rc-pair ${cls}"><b>${escHtml(p.a)}–${escHtml(p.b)}</b> ${p.corr.toFixed(2)}</span>`;
+  }).join('');
+
+  wrap.innerHTML = `${head}
+    <div class="risk-summary ${level}" style="margin:8px 0;">
+      <div class="risk-summary-verdict">${escHtml(verdict)}</div>
+      <div class="risk-summary-facts">${facts.map(f => `<span>${escHtml(f)}</span>`).join('')}</div>
+    </div>
+    ${pairs ? `<div class="rc-pairs">${pairs}</div>` : ''}
+    <div class="rc-matrix-wrap">
+      <table class="rc-matrix"><thead>${header}</thead><tbody>${rows}</tbody></table>
+    </div>`;
 }
 
 function renderRiskSummary(summary, riskData, sectors, positions) {
@@ -3364,6 +3468,7 @@ function switchAccount(id) {
   ratesData = null;
   historyData = null;
   riskData = null;
+  _corrCache = { account: null, data: null };
   applyAccountTint(id);
   renderAccountTabs();
   // Ak máme cache pre tento účet, zobraz okamžite

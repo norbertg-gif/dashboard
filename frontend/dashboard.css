@@ -1662,6 +1662,56 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--bg);
   padding: 10px;
 }
+
+/* ── Correlation matrix ─────────────────────────────────────── */
+.risk-corr-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 6px;
+}
+.rc-pairs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 4px 0 10px;
+}
+.rc-pair {
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  border-radius: 4px;
+  font: 700 10px var(--font-mono);
+  padding: 3px 7px;
+  color: var(--muted);
+}
+.rc-pair.danger { border-color: var(--down); color: var(--down); }
+.rc-pair.warn   { border-color: var(--yellow); color: var(--yellow); }
+.rc-pair.good   { border-color: var(--up); color: var(--up); }
+
+.rc-matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.rc-matrix {
+  border-collapse: collapse;
+  font: 700 10px var(--font-mono);
+}
+.rc-matrix th, .rc-matrix td {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  text-align: center;
+  min-width: 36px;
+  white-space: nowrap;
+}
+.rc-th {
+  background: var(--bg-input);
+  color: var(--muted);
+  font-weight: 700;
+  position: sticky; top: 0; z-index: 2;
+}
+.rc-th-row { text-align: left; position: sticky; left: 0; z-index: 1; }
+.rc-th-row .rc-w { color: var(--muted2); font-weight: 400; margin-left: 4px; font-size: 9px; }
+.rc-val { font-variant-numeric: tabular-nums; }
+.rc-diag { background: var(--bg-input); color: var(--muted2); }
+.rc-na { color: var(--muted2); }
 .risk-sector-list {
   display: flex;
   flex-direction: column;
