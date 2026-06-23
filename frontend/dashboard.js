@@ -98,6 +98,70 @@ let activePanelId = null;
 let activeMainTab = 'charts';
 let eventWindowHours = Number(localStorage.getItem('td_event_window_hours')) === 48 ? 48 : 24;
 
+// ── ALERT DISMISS STATE ─────────────────────────────────────────────────────
+// Alert ID-čka su stabilné cez requesty (signal:TICK:YYYY-MM-DD, scanner:TICK:gen_at,
+// earnings:TICK:date, portfolio:acct:TICK:date), takže dismiss prežije reload.
+// Auto-prune po 60 dňoch, aby localStorage nerástol donekonečna.
+const EVENT_DISMISS_KEY = 'td_event_dismissed';
+const EVENT_DISMISS_TTL_DAYS = 60;
+const EVENT_SHOW_DISMISSED_KEY = 'td_event_show_dismissed';
+let _eventDismissed = null;
+let _eventShowDismissed = localStorage.getItem(EVENT_SHOW_DISMISSED_KEY) === '1';
+
+function loadEventDismissed() {
+  if (_eventDismissed) return _eventDismissed;
+  try {
+    const raw = JSON.parse(localStorage.getItem(EVENT_DISMISS_KEY) || '{}');
+    const cutoff = Date.now() - EVENT_DISMISS_TTL_DAYS * 24 * 3600 * 1000;
+    _eventDismissed = {};
+    for (const [id, entry] of Object.entries(raw)) {
+      if (entry && typeof entry.ts === 'number' && entry.ts >= cutoff) {
+        _eventDismissed[id] = entry;
+      }
+    }
+  } catch(e) { _eventDismissed = {}; }
+  return _eventDismissed;
+}
+function saveEventDismissed() {
+  try { localStorage.setItem(EVENT_DISMISS_KEY, JSON.stringify(_eventDismissed || {})); } catch(e) {}
+}
+function isEventDismissed(id) {
+  if (!id) return false;
+  return !!loadEventDismissed()[id];
+}
+function dismissEvent(id, event) {
+  if (event) { event.stopPropagation(); }
+  if (!id) return;
+  loadEventDismissed()[id] = { ts: Date.now() };
+  saveEventDismissed();
+  if (_lastEventPayload) renderRecentEvents(_lastEventPayload);
+}
+function undismissEvent(id, event) {
+  if (event) { event.stopPropagation(); }
+  if (!id) return;
+  const map = loadEventDismissed();
+  delete map[id];
+  saveEventDismissed();
+  if (_lastEventPayload) renderRecentEvents(_lastEventPayload);
+}
+function dismissAllEvents(event) {
+  if (event) { event.stopPropagation(); }
+  if (!_lastEventPayload) return;
+  const now = Date.now();
+  const map = loadEventDismissed();
+  for (const item of (_lastEventPayload.events || [])) {
+    if (item.id) map[item.id] = { ts: now };
+  }
+  saveEventDismissed();
+  renderRecentEvents(_lastEventPayload);
+}
+function toggleShowDismissed(event) {
+  if (event) { event.stopPropagation(); }
+  _eventShowDismissed = !_eventShowDismissed;
+  localStorage.setItem(EVENT_SHOW_DISMISSED_KEY, _eventShowDismissed ? '1' : '0');
+  if (_lastEventPayload) renderRecentEvents(_lastEventPayload);
+}
+let _lastEventPayload = null;
 function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
   activeMainTab = tab;
@@ -209,12 +273,31 @@ function eventTimeLabel(value) {
 }
 
 function renderRecentEvents(payload) {
-  const events = payload?.events || [];
+  _lastEventPayload = payload || null;
+  const allEvents = payload?.events || [];
   const counts = payload?.counts || {};
+  const active = allEvents.filter(item => !isEventDismissed(item.id));
+  const dismissed = allEvents.filter(item => isEventDismissed(item.id));
+  const visible = _eventShowDismissed ? allEvents : active;
+  const dismissedCount = allEvents.length - active.length;
+
   const count = document.getElementById('event-center-count');
   const meta = document.getElementById('event-center-meta');
   const list = document.getElementById('event-center-list');
-  if (count) count.textContent = String(events.length);
+  if (count) {
+    count.textContent = String(active.length);
+    count.classList.toggle('event-count-zero', active.length === 0);
+  }
+  const dismissAllBtn = document.getElementById('event-dismiss-all');
+  if (dismissAllBtn) dismissAllBtn.disabled = !active.length;
+  const showDismissedBtn = document.getElementById('event-show-dismissed');
+  if (showDismissedBtn) {
+    showDismissedBtn.classList.toggle('active', _eventShowDismissed);
+    showDismissedBtn.textContent = _eventShowDismissed
+      ? `Skryť prečítané (${dismissedCount})`
+      : (dismissedCount ? `Zobraziť prečítané (${dismissedCount})` : 'Žiadne prečítané');
+    showDismissedBtn.disabled = !dismissedCount;
+  }
   if (meta) {
     const parts = [
       counts.signals ? `${counts.signals} signál` : '',
@@ -222,16 +305,19 @@ function renderRecentEvents(payload) {
       counts.earnings ? `${counts.earnings} earnings` : '',
       counts.portfolio ? `${counts.portfolio} portfólio` : '',
     ].filter(Boolean).join(' · ');
-    meta.textContent = parts
-      ? `${events.length} alertov za ${eventWindowHours} h · ${parts}`
-      : `${events.length} alertov za posledných ${eventWindowHours} hodín`;
+    const tail = dismissedCount ? ` · ${dismissedCount} prečítaných` : '';
+    const summary = parts ? `${active.length} aktívnych za ${eventWindowHours} h · ${parts}${tail}`
+      : `${active.length} alertov za posledných ${eventWindowHours} hodín${tail}`;
+    meta.textContent = summary;
   }
   if (!list) return;
-  if (!events.length) {
-    list.innerHTML = '<div class="event-empty">Za zvolené obdobie nie sú nové signály, blízke earnings ani výrazné portfólio pohyby.</div>';
+  if (!visible.length) {
+    list.innerHTML = active.length
+      ? '<div class="event-empty">Všetky aktívne alerty sú prečítané. Použi "Zobraziť prečítané" pre pohľad späť.</div>'
+      : '<div class="event-empty">Za zvolené obdobie nie sú nové signály, blízke earnings ani výrazné portfólio pohyby.</div>';
     return;
   }
-  list.innerHTML = events.map(item => {
+  list.innerHTML = visible.map(item => {
     const tier = ['buy','watch','counter','info'].includes(item.severity || item.tier) ? (item.severity || item.tier) : 'watch';
     const category = ['signal','scanner','earnings','portfolio'].includes(item.category || item.type) ? (item.category || item.type) : 'info';
     const labels = {
@@ -248,14 +334,19 @@ function renderRecentEvents(payload) {
       : '';
     const price = item.price != null ? ` · entry ${Number(item.price).toFixed(2)}` : '';
     const detail = item.detail || `${source}${score ? ` · ${score}` : ''}${price}${dip}`;
-    return `<div class="event-item ${tier} ${category}"
-      onclick="openEventTicker('${escHtml(item.ticker)}')">
+    const dismissed = isEventDismissed(item.id);
+    const actionBtn = dismissed
+      ? `<button class="event-action event-undismiss" title="Označiť ako neprečítané" onclick="undismissEvent('${escHtml(item.id || '')}', event)">↩</button>`
+      : `<button class="event-action event-dismiss" title="Označiť ako prečítané" onclick="dismissEvent('${escHtml(item.id || '')}', event)">✓</button>`;
+    return `<div class="event-item ${tier} ${category}${dismissed ? ' dismissed' : ''}"
+      onclick="openEventTicker('${escHtml(item.ticker)}', '${escHtml(item.id || '')}')">
       <span class="event-dot"></span>
       <div class="event-main">
         <div class="event-title"><span class="event-source">${escHtml(source)}</span>${escHtml(item.ticker)} · ${escHtml(item.title || source)}</div>
         <div class="event-detail">${escHtml(detail)}${score ? ` · ${score}` : ''}${price}${dip}</div>
       </div>
       <span class="event-time">${eventTimeLabel(item.time)}</span>
+      ${actionBtn}
     </div>`;
   }).join('');
 }
@@ -272,7 +363,11 @@ async function loadRecentEvents() {
   }
 }
 
-function openEventTicker(ticker) {
+function openEventTicker(ticker, eventId) {
+  if (eventId) {
+    loadEventDismissed()[eventId] = { ts: Date.now() };
+    saveEventDismissed();
+  }
   toggleEventCenter(false);
   switchMainTab('predictive');
   setTimeout(() => pc_selectTicker(ticker), 120);

@@ -780,6 +780,50 @@ body.sidebar-collapsed #sb-resizer {
   cursor: pointer;
 }
 .event-item:hover { background: var(--bg-input); }
+.event-item.dismissed { opacity: 0.45; }
+.event-item.dismissed .event-title,
+.event-item.dismissed .event-detail { text-decoration: line-through; text-decoration-color: var(--muted2); }
+.event-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted2);
+  cursor: pointer;
+  font: 700 11px var(--font-mono);
+  padding: 2px 6px;
+  margin-left: 4px;
+  opacity: 0.45;
+  transition: opacity .15s, border-color .15s, color .15s;
+}
+.event-item:hover .event-action { opacity: 1; }
+.event-action:hover { border-color: var(--accent); color: var(--accent); }
+.event-action.event-undismiss:hover { border-color: var(--yellow); color: var(--yellow); }
+
+.event-center-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.event-center-actions button {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--muted);
+  cursor: pointer;
+  font: 700 9px var(--font-mono);
+  padding: 4px 6px;
+  transition: border-color .15s, color .15s;
+}
+.event-center-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.event-center-actions button.active { border-color: var(--accent); color: var(--accent); }
+.event-center-actions button:disabled { opacity: 0.4; cursor: default; }
+
+#event-center-count.event-count-zero {
+  opacity: 0.55;
+}
 .event-dot { width: 7px; height: 7px; border-radius: 50%; }
 .event-item.buy .event-dot { background: var(--up); }
 .event-item.watch .event-dot { background: var(--yellow); }
