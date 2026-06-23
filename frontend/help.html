@@ -94,6 +94,7 @@
     <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania.</td></tr>
   </table>
   <p><strong>Alerty</strong> zobrazia ulo?en? sign?ly, v?sledky posledn?ho Nasdaq scanu, earnings do 3 dn? a v?razn? denn? portf?lio pohyby za 24 alebo 48 hod?n. Panel je pull-based: pri otvoren? ??ta existuj?ce cache/logy, nesp???a nov? scan a neposiela push notifik?cie. Klik na ticker otvor? Predikt?vny tab. Ikona <strong>?</strong> pri hlavnej z?lo?ke otvor? dan? sekciu v novej karte.</p>
+  <p><strong>Označovanie prečítaných alertov.</strong> Tlačidlo <strong>✓</strong> pri každom riadku ho označí ako prečítaný (preškrtnutý, stlmený); <strong>↩</strong> ho vráti späť. Klik na samotný riadok (otvorenie Predictive) ho zároveň označí prečítaným — netreba dva kliky. Tlačidlo <strong>✓ Označiť všetko prečítané</strong> v hlavičke vyčistí celý zoznam; <strong>Zobraziť prečítané (N)</strong> prepne pohľad späť. Badge <strong>Alerty N</strong> v hornej lište počíta len aktívne (neprečítané). Stav je v prehliadači, prežije reload, po 60 dňoch sa vymaže. Nová udalosť (napr. nový denný signál ďalší deň) má vlastné ID a zobrazí sa znova, aj keď si predošlú variantu odbavil.</p>
 
   <h2 id="tabs">3. Záložky</h2>
   <ul>
@@ -191,6 +192,7 @@
     <li><strong>Sektorová expozícia</strong> ukazuje, v ktorých sektoroch je viazaný kapitál. Veľká váha v jednom sektore znamená, že viac titulov môže reagovať na rovnakú správu alebo makro pohyb.</li>
     <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
     <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
+    <li><strong>Korelačná matica</strong> (pod Top pozíciami) zobrazuje 60-dňovú Pearsonovu koreláciu denných výnosov medzi top 20 pozíciami. Červená pri +1 = pozície sa pohybujú spolu, modrá pri −1 = pohybujú sa opačne, sivá pri 0 = nezávisle. Tickery sú zoradené podľa SPDR sektora — vizuálne klastre. Slovný verdikt nad maticou hovorí, či sa portfólio hýbe ako jedna skupina (priemerná absolútna korelácia ≥ 0.7 = jedna zlá správa zasiahne väčšinu pozícií). Zoznam najsilnejších párov pomáha vidieť skrytú koncentráciu, ktorú váha pozícií sama neukáže — napríklad NVDA + AMD + MU + AVGO bývajú korelované nad 0.7 aj keď ich Sektorová expozícia rozdeľuje. Dáta tečú z OHLCV cache, nesťahujú sa cez API.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -214,14 +216,14 @@
     <tr><td><strong>Ticker</strong></td><td>Symbol alebo názov (s autodoplňovaním).</td></tr>
     <tr><td><strong>Obdobie</strong></td><td>1 rok / 2 roky histórie.</td></tr>
     <tr><td><strong>Načítať</strong></td><td>Spustí výpočet.</td></tr>
-    <tr><td><strong>Decision Bar</strong></td><td>Rýchle rozhodnutie pre aktuálny ticker: Buy / Watch / Counter / No signal, sila setupu, weekly bias, regime a vzdialenosť od posledného signálu.</td></tr>
+    <tr><td><strong>Decision Bar</strong></td><td>Rýchle rozhodnutie pre aktuálny ticker: Buy / Watch / Counter / No signal, sila setupu, <strong>týždenný trend</strong> (5-stupňový label, viď nižšie), regime a vzdialenosť od posledného signálu.</td></tr>
     <tr><td><strong>Backtest overlay</strong></td><td>Prekryje historickú predikciu (hit/miss).</td></tr>
     <tr><td><strong>Export snapshot</strong></td><td>Uloží HTML snapshot stavu.</td></tr>
     <tr><td><strong>Prepočítať váhy</strong></td><td>Preučí váhy indikátorov pre ticker.</td></tr>
     <tr><td><strong>Fibonacci interactive</strong></td><td>Automaticky vyberie posledný swing. Oba kotevné body (low = cyan, high = oranžová) možno ťahať myšou. Línie sa tiahnu po pravý okraj grafu — vždy viditeľné aj pri scrollovaní. Labely s cenou sú pri pravom okraji s tmavým pozadím. Manuálne zadanie cez <em>Swing low / Swing high → Draw</em> nájde najbližšiu sviečku k zadanej cene. Uložené per ticker + timeframe.</td></tr>
     <tr><td><strong>30D / 60D / 90D validácia</strong></td><td>Výnos, win rate, MFE a MAE historických signálov po obchodných sviečkach; nemení scoring.</td></tr>
     <tr><td><strong>Signal Analytics</strong></td><td>Porovnanie 30D/60D/90D výsledkov podľa tieru, sily a <strong>režimu trhu</strong> (Bull/Sideways/Bear/Vysoká vol., z HMM kontextu signálu). Režimová tabuľka sa zobrazí až keď signály majú backfillnutý kontext.</td></tr>
-    <tr><td><strong>Kontext nových signálov</strong></td><td>Backend ukladá režim, momentum, volatilitu, ATR, 52W pozíciu, weekly bias a C1–C4 pre budúcu analytiku; scoring sa nemení.</td></tr>
+    <tr><td><strong>Kontext nových signálov</strong></td><td>Backend ukladá režim, momentum, volatilitu, ATR, 52W pozíciu, weekly trend (bool derivovaný z 5-stupňového labelu, score ≥ 1) a C1–C4 pre budúcu analytiku; scoring sa nemení.</td></tr>
   </table>
 
   <h3>Graf</h3>
@@ -248,9 +250,9 @@
   <h3>Ľavý signálový panel</h3>
   <ul>
     <li>Celá výška ľavého stĺpca je vyhradená pre dôkazy signálu: aktuálny setup, históriu a analytiku.</li>
-    <li><strong>Aktuálny setup</strong> — C1 až C4, trend, weekly bias a vysvetlenie, čo ešte chýba k novému signálu.</li>
+    <li><strong>Aktuálny setup</strong> — C1 až C4, trend, <strong>týždenný trend label</strong> a vysvetlenie, čo ešte chýba k novému signálu.</li>
     <li><strong>HISTÓRIA SIGNÁLOV</strong> — časová os signálov s úspešnosťou.</li>
-    <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Weekly bias, Weekly trend, Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
+    <li><strong>ZHODA ČASOVÝCH RÁMCOV</strong> — Týždenný trend (5-stupňový), Weekly trend (z C1–C4), Daily trend, Daily signal → <strong>PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ</strong>.</li>
   </ul>
 
   <h3>Analytika signálov — detailný popis tabuliek</h3>
@@ -278,6 +280,24 @@
     <li><strong>MAE — Maximum Adverse Excursion</strong> je najväčší priebežný pokles od vstupu. Výsledok +10 % s MAE −14 % bol úspešný, ale cesta k nemu bola riziková.</li>
     <li><strong>Regime: High Vol</strong> neznamená Buy ani Sell. Model iba rozpoznal režim neobvykle veľkých pohybov. Cena môže prudko rásť aj klesať; pozícia preto vyžaduje väčšiu rezervu, menšiu veľkosť alebo trpezlivejší vstup.</li>
     <li><strong>High Vol · 100 %</strong> znamená vysokú istotu HMM modelu, že aktuálne dáta patria do režimu vysokej volatility. Nie je to 100 % istota smeru ani zisku.</li>
+  </ul>
+
+  <h3>Týždenný trend label (Donchian 20w + SMA50w + EMA10/20)</h3>
+  <p>Label sa zobrazuje v Decision Bare, na Opportunity kartách v Scanneri, v stĺpci Weekly bias Checklistu a vo Verdikte. Nahradil binárny „Bullish / Bearish", ktorý bol postavený na predikcii ďalšej týždennej sviečky a často svietil červenou aj pri zjavne uptrendových tituloch.</p>
+  <table>
+    <tr><th>Label</th><th>Donchian pozícia</th><th>Filter</th><th>Význam</th></tr>
+    <tr><td>⬆⬆ <strong>Strong uptrend</strong></td><td>≥ 80 %</td><td>nad SMA50w</td><td>blízko 52-týždňového maxima</td></tr>
+    <tr><td>⬆ <strong>Uptrend</strong></td><td>≥ 55 %</td><td>nad SMA50w</td><td>pevný uptrend</td></tr>
+    <tr><td>→ <strong>Range</strong></td><td>30 – 55 %</td><td>—</td><td>sideways, žiadny jasný smer</td></tr>
+    <tr><td>⬇ <strong>Downtrend</strong></td><td>&lt; 30 %</td><td>pod SMA50w</td><td>pokles</td></tr>
+    <tr><td>⬇⬇ <strong>Strong downtrend</strong></td><td>&lt; 15 %</td><td>pod SMA50, EMA10 &lt; EMA20</td><td>blízko 52w minima</td></tr>
+  </table>
+  <p><strong>Donchian pozícia</strong> = <code>(Close − 20w low) / (20w high − 20w low)</code> — v ktorej časti dlhšieho kanála sa cena nachádza. 0 % = na minime, 100 % = na maxime. <strong>SMA50w</strong> filtruje falošné breakouty (rebound v downtrende). <strong>EMA10/20</strong> je dodatočná konfirmácia pre extrémne Strong downtrend. Tooltip ukazuje presnú Donchian pozíciu v percentách.</p>
+  <p><strong>Ako to čítať pri rozhodovaní:</strong></p>
+  <ul>
+    <li><strong>Strong uptrend / Uptrend</strong> — bullish kontext, Buy signál ho potvrdzuje.</li>
+    <li><strong>Range</strong> — trh sa nerozhodol, vstupy ostávajú špekulatívne aj pri vysokom C1–C4 skóre.</li>
+    <li><strong>Downtrend / Strong downtrend</strong> — long vstup nemá kontextovú oporu; Counter signál má naopak vetra v chrbte.</li>
   </ul>
 
   <h3>Farby signálov (tier)</h3>
@@ -465,7 +485,7 @@
 
   <h3>Čo tvorí verdikt</h3>
   <ul>
-    <li><strong>Technika</strong> — rozhodnutie Buy/Watch/Counter, sila C1–C4, weekly bias, trend a stav signálu.</li>
+    <li><strong>Technika</strong> — rozhodnutie Buy/Watch/Counter, sila C1–C4, týždenný trend label, denný trend a stav signálu.</li>
     <li><strong>Trh</strong> — QQQ/SPY, breadth, VIX, sektory a Massive EOD kontext.</li>
     <li><strong>Firma</strong> — analytický konsenzus, cieľová cena, short interest, insider transakcie a EPS história, ak sú dostupné.</li>
     <li><strong>Earnings</strong> — blízkosť najbližšieho reportu, ktorý môže technický setup okamžite zmeniť.</li>

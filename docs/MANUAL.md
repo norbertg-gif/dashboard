@@ -63,6 +63,27 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - Ikona **?** pri Grafy / Portf?lio / Hist?ria / Risk / Predikt?vny / Scanner otvor?
   dan? sekciu v novej karte. Akt?vna sekcia je ulo?en? v URL parametri `tab`.
 
+**Označovanie prečítaných alertov.** Bez tohto by ti panel ukazoval tie isté
+upozornenia každý deň, kým udalosť skutočne nepríde (napr. earnings 3 dni
+vopred sa zobrazia 3-krát).
+
+- Pri každom riadku je tlačidlo **✓** — označí ho ako prečítaný. Riadok
+  zostane v paneli, ale je preškrtnutý a stlmený. Tlačidlo **↩** ho vráti
+  späť na neprečítaný.
+- **Klik na samotný riadok** (otvorenie Predictive) ho zároveň označí
+  prečítaným — netreba dva kliky.
+- Tlačidlo **✓ Označiť všetko prečítané** v hlavičke panela vyčistí celý
+  zoznam jedným klikom.
+- Tlačidlo **Zobraziť prečítané (N)** prepne na pohľad späť. Keď je
+  zapnuté, vidíš aj archivované alerty (preškrtnuté).
+- Badge **Alerty N** v hornej lište ukazuje len **aktívne** (neprečítané)
+  počty — keď je N malé, máš skutočne len nové veci.
+- Stav je uložený v prehliadači (localStorage), prežije reload aj redeploy.
+  Po 60 dňoch sa staré záznamy automaticky vymažú. Keď príde nová udalosť
+  rovnakého typu (napr. nový signál na NVDA ďalší deň), dostane vlastné ID
+  a zobrazí sa ako neprečítaná, aj keď si predošlú variantu označil za
+  prečítanú.
+
 ---
 
 ## 3. Záložky
@@ -93,7 +114,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 ### Odporúčaný pracovný postup
 
 1. V **Scanneri** skontroluj stav trhu a nájdi Buy/Watch kandidátov.
-2. V **Predikcii** otvor konkrétny ticker a pozri C1–C4, trend, weekly bias,
+2. V **Predikcii** otvor konkrétny ticker a pozri C1–C4, trend, týždenný trend,
    earnings, správy a firemné očakávania.
 3. Vo **Verdikte** si nechaj dôkazy zhrnúť do ÁNO / POČKAŤ / NIE.
 4. Ak titul už vlastníš, v **Portfóliu** skontroluj P/L, denný pohyb,
@@ -128,6 +149,17 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   veľkosť = podiel na equity, farba = denný P/L, doplnkový údaj = celkový P/L.
   Hore je aj krátky risk briefing, ktorý ľudsky zhrnie, či je portfólio
   rozložené alebo koncentrované.
+- **Korelačná matica** (pod tabuľkou Top pozícií) ukazuje 60-dňovú Pearsonovu
+  koreláciu denných výnosov medzi top 20 pozíciami. Červená pri **+1**
+  (pohybujú sa rovnako), modrá pri **−1** (pohybujú sa opačne), neutrálna pri
+  **0** (nezávislé). Tickery sú zoradené podľa SPDR sektora, aby boli klastre
+  vizuálne pohromade. Karta má aj **slovný verdikt**: ak je priemerná
+  absolútna korelácia ≥ 0.7, portfólio sa hýbe ako jedna skupina (jedna zlá
+  správa zasiahne väčšinu pozícií). Pod verdiktom je tiež zoznam **najsilnejších
+  párov** — pomáha vidieť skrytú koncentráciu, ktorú samotná váha pozície
+  neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
+  v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
+  tab nesťahuje nové API volania.
 - Malé rozdiely oproti eToro sú možné kvôli spreadu, konverzii meny, poplatkom
   a zaokrúhleniu.
 
@@ -172,8 +204,8 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **Obdobie** — 1 rok / 2 roky histórie.
 - **Načítať** — spustí výpočet.
 - **Decision Bar** — okamžité zhrnutie pre aktuálny ticker: rozhodnutie
-  Buy / Watch / Counter / No signal, sila setupu, weekly bias, regime a
-  vzdialenosť od posledného signálu.
+  Buy / Watch / Counter / No signal, sila setupu, **týždenný trend** (5-stupňový
+  label, viď nižšie), regime a vzdialenosť od posledného signálu.
 - **Backtest overlay** — prekryje historickú predikciu na graf (hit/miss).
 - **Export snapshot** — uloží HTML snapshot aktuálneho stavu.
 - **Prepočítať váhy** — preučí váhy indikátorov pre daný ticker.
@@ -271,13 +303,53 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 
 - Celá výška ľavého stĺpca je vyhradená pre dôkazy signálu: aktuálny setup,
   históriu a analytiku.
-- **Aktuálny setup** — C1 až C4, trend, weekly bias a vysvetlenie, čo ešte
-  chýba k novému signálu.
+- **Aktuálny setup** — C1 až C4, trend, **týždenný trend label** a vysvetlenie,
+  čo ešte chýba k novému signálu.
 - **HISTÓRIA SIGNÁLOV** — časová os signálov s úspešnosťou.
 - **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
   horizonty zostávajú `pending`.
-- **ZHODA ČASOVÝCH RÁMCOV** — zhoda timeframeov: Weekly bias, Weekly trend, Daily
-  trend, Daily signal → súhrn **PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ**.
+- **ZHODA ČASOVÝCH RÁMCOV** — zhoda timeframeov: Týždenný trend (5-stupňový),
+  Weekly trend (z C1–C4), Daily trend, Daily signal → súhrn
+  **PLNÁ ZHODA BULL / BEAR / ZMIEŠANÉ**.
+
+### Týždenný trend label (Donchian 20w + SMA50w + EMA10/20)
+
+Tento label sa zobrazuje v Predictive Decision Bare, na Opportunity kartách
+v Scanneri, v stĺpci „Weekly bias" Checklistu watchlistu a vo Verdikte. Nahradil
+pôvodný binárny „Bullish / Bearish", ktorý bol postavený na predikcii ďalšej
+týždennej sviečky a často svietil červenou aj pri zjavne uptrendových tituloch.
+
+**5 stupňov podľa pozície v 20-týždňovom Donchian kanáli:**
+
+| Label | Donchian pozícia | Filter | Význam |
+|---|---|---|---|
+| ⬆⬆ **Strong uptrend** | ≥ 80 % | nad 50-týždňovou SMA | blízko 52-týždňového maxima |
+| ⬆ **Uptrend** | ≥ 55 % | nad 50-týždňovou SMA | pevný uptrend |
+| → **Range / sideways** | 30 – 55 % | — | sideways, žiadny jasný smer |
+| ⬇ **Downtrend** | < 30 % | pod 50-týždňovou SMA | pokles |
+| ⬇⬇ **Strong downtrend** | < 15 % | pod SMA50, EMA10 < EMA20 | blízko 52w minima |
+
+- **Donchian pozícia** je hodnota *(Close − 20w low) / (20w high − 20w low)*. Hovorí,
+  v ktorej časti dlhšieho kanála sa cena nachádza. 0 % = na minime, 100 % =
+  na maxime.
+- **50-týždňová SMA** funguje ako filter falošných breakoutov — bez nej by
+  rebound v rámci downtrendu mohol vyzerať ako Strong uptrend.
+- **EMA10 vs EMA20** je dodatočná konfirmácia pre extrémne Strong downtrend.
+- Tooltip pri labele ukazuje presnú Donchian pozíciu v percentách.
+
+**Ako to čítať pri rozhodovaní:**
+
+- **Strong uptrend** alebo **Uptrend** → titul má bullish kontext, **Buy
+  signál ho potvrdzuje**.
+- **Range** → trh sa nerozhodol, vstupy ostávajú špekulatívne aj pri vysokom
+  C1–C4 skóre. Watch alebo Counter signál je tu vážnejší.
+- **Downtrend** alebo **Strong downtrend** → long vstup nemá kontextovú
+  oporu. Aj pri 4/4 skóre by si mal byť opatrný; Counter signál (krátko)
+  má naopak vetra v chrbte.
+
+Stará logika (`composite > 0.05 AND nad Kumo AND EMA10 > EMA20`) sa
+nepoužíva — bola príliš prísna a zahodila informáciu, lebo stačilo, aby
+jedna z troch podmienok padla a celý titul dostal nálepku „bear".
 
 ### Analytika signálov — detailný popis tabuliek
 

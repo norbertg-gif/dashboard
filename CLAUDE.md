@@ -275,6 +275,16 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - Alert center is interpretation/navigation only. It must not change C1-C4,
   scanner tier, prediction scoring, or portfolio accounting.
 - Clicking an alert opens Predictive through `openEventTicker()`.
+- **Dismiss state** is frontend-only (`localStorage` key `td_event_dismissed`,
+  map of `eventId → {ts}`, auto-prune older than 60 days). Alert IDs from the
+  backend are stable across requests (`signal:TICK:YYYY-MM-DD`,
+  `scanner:TICK:generated_at`, `earnings:TICK:date`,
+  `portfolio:acct:TICK:date`), so a dismiss survives reload and redeploy and
+  comes back only when the event ID changes (next day's signal, fresh scan,
+  next earnings call). Clicking a row dismisses it as a side effect — opening
+  Predictive counts as "I saw it". `td_event_show_dismissed` flag toggles the
+  archive view; `↩` un-dismisses individual rows. The `Alerty N` header badge
+  shows ACTIVE count only.
 
 ## Data flow worth knowing
 
