@@ -150,3 +150,11 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
   sektorovy P/L a pocet titulov. Je to interpretacna vrstva, nemeni portfolio P/L.
 - Sektorova koncentracia nad 35% equity pridava risk flag.
 - Cache verzia frontendu: `?v=20260622-alert3`.
+
+
+## Doplnen? 2026-06-23 - Risk briefing
+
+- Risk tab dostal kratky slovny zaver `renderRiskSummary()` nad existujucimi
+  datami: koncentracia Top 5, najvacsi sektor, najvacsia pozicia a pocet flagov.
+- Je to interpretacna vrstva nad `/api/etoro/analytics`; nemeni P/L ani scoring.
+- Cache verzia frontendu: `?v=20260623-risk-summary`.

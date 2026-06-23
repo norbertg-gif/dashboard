@@ -1002,6 +1002,7 @@ async function renderRiskView(force = false) {
   const heatmapRows = [...(riskData.topPositions || [])].sort((a, b) => (b.weightPct || 0) - (a.weightPct || 0));
   el.innerHTML = `<div class="tool-panel">
     <div class="tool-toolbar"><div class="tool-title">Risk analytics</div><button class="btn primary" onclick="renderRiskView(true)">Refresh</button></div>
+    ${renderRiskSummary(s, riskData, bySector, heatmapRows)}
     <div class="tool-kpis">
       <div class="tool-kpi"><div class="tool-kpi-label">Equity</div><div class="tool-kpi-val">$${Number(s.equity || 0).toFixed(2)}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Top 5 koncentracia</div><div class="tool-kpi-val">${Number(s.top5ConcentrationPct || 0).toFixed(1)}%</div></div>
@@ -1031,6 +1032,37 @@ async function renderRiskView(force = false) {
     </div>
   </div>`;
   hydrateRiskHeatmapDaily(heatmapRows);
+}
+
+function renderRiskSummary(summary, riskData, sectors, positions) {
+  const top5 = Number(summary?.top5ConcentrationPct || 0);
+  const flags = riskData?.riskFlags || [];
+  const topSector = (sectors || []).find(s => Number(s.weightPct || 0) > 0);
+  const topPosition = (positions || []).find(p => Number(p.weightPct || 0) > 0);
+  const dangerCount = flags.filter(f => f.level === 'danger').length;
+  const warnCount = flags.filter(f => f.level === 'warn').length;
+  let level = 'good';
+  let verdict = 'Portfólio pôsobí relatívne rozložene.';
+  if (dangerCount || top5 >= 65 || Number(topSector?.weightPct || 0) >= 45) {
+    level = 'danger';
+    verdict = 'Portfólio je výrazne koncentrované, pozri najväčšie váhy pred ďalším vstupom.';
+  } else if (warnCount || top5 >= 45 || Number(topSector?.weightPct || 0) >= 35) {
+    level = 'warn';
+    verdict = 'Portfólio má zvýšenú koncentráciu, nový obchod by mal mať jasný dôvod.';
+  }
+  const facts = [];
+  if (topSector) {
+    facts.push(`Najväčší sektor: ${topSector.name || topSector.sector} ${Number(topSector.weightPct || 0).toFixed(1)}% equity`);
+  }
+  if (topPosition) {
+    facts.push(`Najväčšia pozícia: ${topPosition.symbol} ${Number(topPosition.weightPct || 0).toFixed(1)}% equity`);
+  }
+  facts.push(`Top 5 pozícií: ${top5.toFixed(1)}% equity`);
+  if (flags.length) facts.push(`Risk flagy: ${flags.length}`);
+  return `<div class="risk-summary ${level}">
+    <div class="risk-summary-verdict">${escHtml(verdict)}</div>
+    <div class="risk-summary-facts">${facts.map(f => `<span>${escHtml(f)}</span>`).join('')}</div>
+  </div>`;
 }
 
 function renderRiskSectorExposure(rows) {
