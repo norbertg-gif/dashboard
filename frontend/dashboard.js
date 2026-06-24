@@ -1140,6 +1140,10 @@ async function renderRiskView(force = false) {
     <div style="padding:10px;border-bottom:1px solid var(--border);">
       ${(riskData.riskFlags || []).map(f => `<span class="risk-flag ${escHtml(f.level)}"><b>${escHtml(f.symbol)}</b> ${escHtml(f.message)}</span>`).join('') || '<span style="color:var(--muted);">Bez vyraznych flagov.</span>'}
     </div>
+    <div id="risk-dca" style="padding:10px;border-bottom:1px solid var(--border);">
+      <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+      <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px;">
       <div><div class="tool-title" style="margin:0 0 8px;">Podla typu</div><table class="tool-table"><thead><tr>
         <th onclick="sortRisk('type','type')" style="cursor:pointer;">Typ${sortMarker(riskTypeSort, 'type')}</th>
@@ -1157,10 +1161,6 @@ async function renderRiskView(force = false) {
       </tr></thead><tbody>
         ${topPositions.map(x => `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;"><td><span class="port-sym">${escHtml(x.symbol)}</span></td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
       </tbody></table></div>
-    </div>
-    <div id="risk-dca" style="padding:10px;border-top:1px solid var(--border);">
-      <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
-      <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
     </div>
     <div id="risk-correlation" style="padding:10px;border-top:1px solid var(--border);">
       <div class="tool-title" style="margin:0 0 8px;">Korelačná matica
