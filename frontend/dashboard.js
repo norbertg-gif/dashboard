@@ -7495,7 +7495,7 @@ async function loadFinvizHtmlPreview() {
     }
     const pageErrors = (data.pages || []).filter(page => page.error);
     wrap.innerHTML = `
-      <details class="finviz-preview-details" open>
+      <details class="finviz-preview-details">
         <summary>Kontrola Finviz importu
           <span>${data.unique_tickers} titulov · ${data.files} suborov · ${data.duplicates} duplicit${pageErrors.length ? ` · ${pageErrors.length} chyb stranok` : ''}</span>
         </summary>
