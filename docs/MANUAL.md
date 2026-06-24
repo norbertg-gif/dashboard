@@ -160,6 +160,24 @@ vopred sa zobrazia 3-krát).
   neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
   v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
   tab nesťahuje nové API volania.
+- **DCA kandidáti** (karta v Risk tabe) spája agregovaný P/L pozície s DIP
+  rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
+  pozície v strate **≥ 15 %** a oflaguje ich:
+  - 🟢 **DCA** — strata ≥ 15 %, DIP ≥ 90 a váha pozície pod 10 % equity →
+    kvalitný dip, dokúpenie znižuje breakeven bez prílišnej koncentrácie.
+  - 🟡 **Veľká váha** — DCA podmienky splnené, ale pozícia je už ≥ 10 % equity →
+    dokúpenie by zvýšilo koncentračné riziko.
+  - 🔴 **Pozor** — strata ≥ 15 %, ale DIP < 90 → trigger splnený, slabé skóre,
+    možný value trap; radšej posúď manuálne.
+  - ⚪ **Mimo dát** — v strate, ale ticker nie je v DIP datasete (napr. európske
+    tituly) → DIP filter sa nedá použiť, rozhodni sám.
+  - Rozhoduje sa podľa **agregovaného P/L celej pozície** (súčet všetkých tranží),
+    nie podľa jednej tranže. Prahy (15 % / DIP 90 / 10 % váha) sú zladené so
+    zvyškom appky (bot dokupuje tiež až pri −15 %, DIP 90 = pásmo STRONG).
+  - Karta ukazuje **vek DIP dát** — skóre je z manuálneho Finviz importu, takže
+    pri starých dátach ber DCA flag s rezervou (pokles mohol prísť práve preto,
+    že sa fundament zmenil po importe).
+  - Je to čisto interpretačná pomôcka — nevstupuje do žiadneho skóre ani do bota.
 - Malé rozdiely oproti eToro sú možné kvôli spreadu, konverzii meny, poplatkom
   a zaokrúhleniu.
 

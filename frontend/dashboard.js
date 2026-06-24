@@ -1158,6 +1158,10 @@ async function renderRiskView(force = false) {
         ${topPositions.map(x => `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;"><td><span class="port-sym">${escHtml(x.symbol)}</span></td><td>$${x.amount.toFixed(2)}</td><td>${x.weightPct.toFixed(1)}%</td><td><span class="${x.pnl>=0?'port-pos':'port-neg'}">${fmtMoney(x.pnl)}</span></td></tr>`).join('')}
       </tbody></table></div>
     </div>
+    <div id="risk-dca" style="padding:10px;border-top:1px solid var(--border);">
+      <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+      <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
+    </div>
     <div id="risk-correlation" style="padding:10px;border-top:1px solid var(--border);">
       <div class="tool-title" style="margin:0 0 8px;">Korelačná matica
         <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">posledných 60 dní · Pearson denných returns</span>
@@ -1166,7 +1170,79 @@ async function renderRiskView(force = false) {
     </div>
   </div>`;
   hydrateRiskHeatmapDaily(heatmapRows);
+  loadDcaCandidates();
   loadCorrelationMatrix();
+}
+
+let _dcaCache = { account: null, data: null };
+async function loadDcaCandidates(force = false) {
+  const account = activeAccount || '1';
+  const wrap = document.getElementById('risk-dca');
+  if (!wrap) return;
+  if (!force && _dcaCache.account === account && _dcaCache.data) {
+    renderDcaCard(_dcaCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/dca?account=${account}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    _dcaCache = { account, data };
+    renderDcaCard(data);
+  } catch(e) {
+    wrap.innerHTML = `<div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+      <div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(e.message)}</div>`;
+  }
+}
+
+const DCA_FLAG_META = {
+  dca:          { cls: 'good',    label: 'DCA',          tip: 'Kvalitný dip — strata ≥ prah, DIP ≥ prah, váha pod limitom' },
+  concentrated: { cls: 'warn',    label: 'Veľká váha',   tip: 'DCA podmienky OK, ale pozícia je už veľká časť equity — koncentračné riziko' },
+  value_trap:   { cls: 'bad',     label: 'Pozor',        tip: 'Trigger splnený, ale slabé DIP skóre — možný value trap' },
+  no_data:      { cls: 'neutral', label: 'Mimo dát',     tip: 'V strate, ale ticker nie je v DIP datasete — posúď manuálne' },
+};
+
+function renderDcaCard(data) {
+  const wrap = document.getElementById('risk-dca');
+  if (!wrap) return;
+  const th = data.thresholds || {};
+  const ageTxt = data.dip_updated_at ? ` · DIP dáta ${fmtImportTime(data.dip_updated_at)}` : '';
+  const head = `<div class="risk-corr-head">
+    <div class="tool-title" style="margin:0;">DCA kandidáti
+      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">strata ≥ ${th.loss_pct}% · DIP ≥ ${th.dip_min} · váha &lt; ${th.max_weight}%${ageTxt}</span>
+    </div>
+    <button class="btn" onclick="loadDcaCandidates(true)" style="font-size:10px;">Refresh</button>
+  </div>`;
+  const list = data.candidates || [];
+  if (!list.length) {
+    wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:6px 0;">Žiadna pozícia nie je v strate ≥ ${th.loss_pct}%. Nič na zvažovanie DCA.</div>`;
+    return;
+  }
+  const c = data.counts || {};
+  const summary = [
+    c.dca ? `<span class="dca-pill good">${c.dca}× DCA</span>` : '',
+    c.concentrated ? `<span class="dca-pill warn">${c.concentrated}× veľká váha</span>` : '',
+    c.value_trap ? `<span class="dca-pill bad">${c.value_trap}× pozor</span>` : '',
+    c.no_data ? `<span class="dca-pill neutral">${c.no_data}× mimo dát</span>` : '',
+  ].filter(Boolean).join('');
+  const rows = list.map(x => {
+    const meta = DCA_FLAG_META[x.flag] || DCA_FLAG_META.no_data;
+    const dipTxt = x.dip_total != null ? `${x.dip_total} ${x.dip_label}` : '—';
+    return `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;" title="${escHtml(meta.tip)}">
+      <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
+      <td><span class="port-sym">${escHtml(x.symbol)}</span></td>
+      <td class="r"><span class="port-neg">${x.pnl_pct.toFixed(1)}%</span></td>
+      <td class="r">${x.weight_pct.toFixed(1)}%</td>
+      <td class="r">${escHtml(dipTxt)}</td>
+      <td class="r" style="color:var(--muted);">${x.trades}×</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `${head}
+    <div class="dca-summary">${summary}</div>
+    <table class="tool-table"><thead><tr>
+      <th>Flag</th><th>Ticker</th><th class="r">Strata</th><th class="r">Váha</th><th class="r">DIP</th><th class="r">Tranže</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu ani bota.</div>`;
 }
 
 let _corrCache = { account: null, data: null };
@@ -3502,6 +3578,7 @@ function switchAccount(id) {
   historyData = null;
   riskData = null;
   _corrCache = { account: null, data: null };
+  _dcaCache = { account: null, data: null };
   applyAccountTint(id);
   renderAccountTabs();
   // Ak máme cache pre tento účet, zobraz okamžite

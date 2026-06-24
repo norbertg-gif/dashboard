@@ -2154,6 +2154,98 @@ def get_portfolio_correlation(
     }
 
 
+@app.get("/api/portfolio/dca")
+def get_dca_candidates(
+    account: str = Query("1"),
+    loss_pct: float = Query(15.0, ge=1, le=90),
+    dip_min: float = Query(90.0, ge=0, le=200),
+    max_weight: float = Query(10.0, ge=1, le=100),
+    refresh: int = Query(0),
+):
+    """DCA kandidáti — pozície v strate ≥ loss_pct, klasifikované podľa DIP skóre
+    a váhy. Spája agregovaný per-ticker P/L (eToro) s DIP rankingom (Finviz import).
+
+    Flagy:
+      dca          → strata ≥ loss_pct, DIP ≥ dip_min, váha < max_weight (kvalitný dip)
+      value_trap   → strata ≥ loss_pct, DIP < dip_min (trigger OK, slabé skóre)
+      no_data      → strata ≥ loss_pct, ticker mimo DIP datasetu
+      concentrated → dca podmienky OK, ALE váha ≥ max_weight (koncentračné riziko)
+
+    Interpretačná vrstva — NEOVPLYVŇUJE C1–C4, scanner, bota ani portfolio účtovníctvo.
+    DCA skóre je z manuálneho importu → vraciame aj vek dát (dip_updated_at)."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    positions = portfolio.get("positions", [])
+    equity = (portfolio.get("summary") or {}).get("equity") or 0
+
+    # Agreguj per ticker (viac tranží jedného titulu = jedna pozícia)
+    by_sym: dict[str, dict] = {}
+    for pos in positions:
+        typ = str(pos.get("type") or "").lower()
+        if typ not in ("stock", "etf"):
+            continue
+        sym = (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
+        entry = by_sym.setdefault(sym, {
+            "symbol": sym, "name": pos.get("name"), "amount": 0.0, "pnl": 0.0, "count": 0,
+        })
+        entry["amount"] += pos.get("amount") or 0
+        entry["pnl"] += pos.get("pnl") or 0
+        entry["count"] += 1
+
+    dip_raw = load_dip_scores()
+    dip_scores = {k.upper(): v for k, v in dip_raw.items() if not k.startswith("_")}
+    dip_meta = dip_raw.get("_meta") if isinstance(dip_raw.get("_meta"), dict) else {}
+    dip_updated_at = (dip_meta or {}).get("updated_at")
+
+    candidates = []
+    for sym, e in by_sym.items():
+        amount = e["amount"]
+        pnl_pct = (e["pnl"] / amount * 100) if amount else 0.0
+        if pnl_pct > -loss_pct:
+            continue  # nie je dosť v strate na DCA úvahu
+        weight = (amount / equity * 100) if equity else 0.0
+        dip = dip_scores.get(sym)
+        dip_total = _num_or_none(dip.get("total")) if dip else None
+
+        if dip_total is None:
+            flag = "no_data"
+        elif dip_total < dip_min:
+            flag = "value_trap"
+        elif weight >= max_weight:
+            flag = "concentrated"
+        else:
+            flag = "dca"
+
+        candidates.append({
+            "symbol": sym,
+            "name": e["name"],
+            "pnl": round(e["pnl"], 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "amount": round(amount, 2),
+            "weight_pct": round(weight, 2),
+            "trades": e["count"],
+            "dip_total": dip_total,
+            "dip_label": _dip_label(dip_total),
+            "flag": flag,
+        })
+
+    # Najhoršie straty hore; v rámci toho DCA pred value_trap
+    flag_order = {"dca": 0, "concentrated": 1, "value_trap": 2, "no_data": 3}
+    candidates.sort(key=lambda c: (flag_order.get(c["flag"], 9), c["pnl_pct"]))
+
+    return {
+        "account": account,
+        "thresholds": {"loss_pct": loss_pct, "dip_min": dip_min, "max_weight": max_weight},
+        "dip_updated_at": dip_updated_at,
+        "candidates": candidates,
+        "counts": {
+            "dca": sum(1 for c in candidates if c["flag"] == "dca"),
+            "concentrated": sum(1 for c in candidates if c["flag"] == "concentrated"),
+            "value_trap": sum(1 for c in candidates if c["flag"] == "value_trap"),
+            "no_data": sum(1 for c in candidates if c["flag"] == "no_data"),
+        },
+    }
+
+
 @app.get("/api/summary")
 def get_summary(symbol: str = Query(...)):
     """Yahoo Finance quote — 52w High/Low, analyst recommendation, názov."""
