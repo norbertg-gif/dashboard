@@ -1807,12 +1807,23 @@ def get_trade_history(
                           - timedelta(days=365 + CLOSE_LOOKBACK_DAYS)).date().isoformat()
     instruments = load_instruments()
 
-    # Stránkujeme kým eToro vracia ASPOŇ JEDEN záznam (NIE kým vracia plnú stránku
-    # — eToro v strede behu môže vrátiť menej ako pageSize, ale ďalšie stránky
-    # ešte obsahujú novšie obchody. Breaknúť na "< pageSize" by nás stratilo
-    # všetko novšie). Dedup cez positionId/orderId, hard cap proti runaway loopu.
+    # Stránkujeme kým eToro vracia ASPOŇ JEDEN NOVÝ záznam. NEbreakujeme na
+    # "< pageSize" (eToro môže vrátiť kratšiu stránku v strede behu).
+    # POZOR: dedup MUSÍ byť na orderId / per-riadok kľúč, NIE na positionId —
+    # jedna pozícia má pri čiastočných uzavretiach viac history riadkov so
+    # zhodným positionId; dedup cez positionId by ich zlial a pri celej stránke
+    # "rovnakých" pozícií by new_count=0 predčasne ukončil paging.
+    def _row_key(it):
+        oid = it.get("orderId") or it.get("orderID") or it.get("OrderID")
+        if oid is not None:
+            return ("o", oid)
+        return ("c",
+                it.get("positionId") or it.get("positionID") or it.get("PositionID"),
+                it.get("closeTimestamp") or it.get("closeDateTime") or it.get("CloseTimestamp"),
+                it.get("openTimestamp") or it.get("openDateTime") or it.get("OpenTimestamp"))
+
     items: list = []
-    seen_ids: set = set()
+    seen_keys: set = set()
     MAX_PAGES = 100   # = 20 000 obchodov pri pageSize=200, dosť aj pre 10-rokovú históriu
     truncated = False
     cur_page = page
@@ -1833,15 +1844,13 @@ def get_trade_history(
             break
         new_count = 0
         for it in page_items:
-            iid = it.get("positionId") or it.get("positionID") or it.get("PositionID") \
-                  or it.get("orderId") or it.get("orderID") or it.get("OrderID")
-            if iid is not None:
-                if iid in seen_ids:
-                    continue
-                seen_ids.add(iid)
+            k = _row_key(it)
+            if k in seen_keys:
+                continue
+            seen_keys.add(k)
             items.append(it)
             new_count += 1
-        # Ak stránka nepriniesla NIČ nové (samé duplikáty), eToro nás zacyklil → koniec
+        # Stránka nepriniesla NIČ nové (samé duplikáty) → eToro zacyklil / koniec
         if new_count == 0:
             break
         cur_page += 1
