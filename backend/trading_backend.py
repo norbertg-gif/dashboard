@@ -1786,20 +1786,19 @@ def get_trade_history(
     """Uzavrete obchody z eToro trade history, obohatene o symbol/name.
     Interval je podla DATUMU UZAVRETIA (closeTimestamp) v [minDate, maxDate].
 
-    eToro endpoint minDate filtruje podla DATUMU OTVORENIA — obchody otvorene
-    pred minDate ale uzavrete v intervale by sa nevratili. Preto posielame eToru
-    posunuty minDate (CLOSE_LOOKBACK_DAYS spat) a presny close-filter robime
-    lokalne. Cez stranky idem dokym eToro vracia plnu stranku alebo kym sa
-    nedostanem k obchodom otvorenym pred lookback prahom."""
+    Defenzivny prefetch: posielame eToru minDate posunuty CLOSE_LOOKBACK_DAYS
+    (10 rokov) spat, lokalny close-filter potom oreze presne. Pokryva aj velmi
+    stare pozicie zatvorene v zvolenom intervale. Cez stranky idem dokym eToro
+    vracia plnu stranku (hard cap MAX_PAGES proti runaway loopu)."""
     if not minDate:
         minDate = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
     if not maxDate:
         maxDate = datetime.now(timezone.utc).date().isoformat()
     pageSize = max(1, min(pageSize, 200))
-    # Posun eToro minDate o 2 roky spat — pokryje aj swing/long obchody otvorene
-    # pred zvolenym intervalom ale uzavrete v nom. Pri extremne dlhych poziciach
-    # (>2 roky) sa moze obchod nezachytit — vtedy treba ist na vyssi lookback.
-    CLOSE_LOOKBACK_DAYS = 730
+    # Posun eToro minDate o 10 rokov spat — pokryje aj velmi stare swing/long
+    # pozicie (uzivatel ma napr. 5-rocne krypto obchody, takze eToro endpoint
+    # vie velmi stare obchody vratit). Lokalny close-filter potom oreze presne.
+    CLOSE_LOOKBACK_DAYS = 3650
     try:
         etoro_min_date = (datetime.fromisoformat(minDate)
                           - timedelta(days=CLOSE_LOOKBACK_DAYS)).date().isoformat()
