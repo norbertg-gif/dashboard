@@ -1807,10 +1807,17 @@ def get_trade_history(
                           - timedelta(days=365 + CLOSE_LOOKBACK_DAYS)).date().isoformat()
     instruments = load_instruments()
 
+    # Stránkujeme kým eToro vracia ASPOŇ JEDEN záznam (NIE kým vracia plnú stránku
+    # — eToro v strede behu môže vrátiť menej ako pageSize, ale ďalšie stránky
+    # ešte obsahujú novšie obchody. Breaknúť na "< pageSize" by nás stratilo
+    # všetko novšie). Dedup cez positionId/orderId, hard cap proti runaway loopu.
     items: list = []
-    MAX_PAGES = 25  # 25 × 200 = 5000 obchodov, hard cap proti runaway loopu
+    seen_ids: set = set()
+    MAX_PAGES = 100   # = 20 000 obchodov pri pageSize=200, dosť aj pre 10-rokovú históriu
+    truncated = False
     cur_page = page
-    while cur_page < page + MAX_PAGES:
+    last_page_size = 0
+    for _ in range(MAX_PAGES):
         url = (
             f"{ETORO_PROXY}/etoro/trading/info/trade/history"
             f"?minDate={requests.utils.quote(etoro_min_date)}&page={cur_page}&pageSize={pageSize}&account={account}"
@@ -1821,12 +1828,25 @@ def get_trade_history(
         except Exception as e:
             raise HTTPException(502, f"eToro trade history zlyhalo: {e}")
         page_items = raw if isinstance(raw, list) else raw.get("items", raw.get("trades", []))
+        last_page_size = len(page_items)
         if not page_items:
             break
-        items.extend(page_items)
-        if len(page_items) < pageSize:
+        new_count = 0
+        for it in page_items:
+            iid = it.get("positionId") or it.get("positionID") or it.get("PositionID") \
+                  or it.get("orderId") or it.get("orderID") or it.get("OrderID")
+            if iid is not None:
+                if iid in seen_ids:
+                    continue
+                seen_ids.add(iid)
+            items.append(it)
+            new_count += 1
+        # Ak stránka nepriniesla NIČ nové (samé duplikáty), eToro nás zacyklil → koniec
+        if new_count == 0:
             break
         cur_page += 1
+    else:
+        truncated = True
 
     def pick(row, *keys, default=None):
         for key in keys:
@@ -1898,7 +1918,9 @@ def get_trade_history(
         "avgDaysHeld": round(sum(x.get("daysHeld") or 0 for x in result if x.get("daysHeld") is not None) / max(1, len([x for x in result if x.get("daysHeld") is not None])), 2) if result else 0,
     }
     return {"trades": result, "summary": summary,
-            "pageSize": pageSize, "pagesFetched": cur_page - page + 1,
+            "pageSize": pageSize, "pagesFetched": cur_page - page,
+            "lastPageSize": last_page_size,
+            "truncated": truncated,
             "etoroMinDate": etoro_min_date,
             "minDate": minDate, "maxDate": maxDate}
 
