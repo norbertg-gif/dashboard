@@ -636,6 +636,16 @@ function csvCell(v) {
   return `"${String(v).replace(/"/g, '""')}"`;
 }
 
+// SK lokalizovaná bunka — čísla s desatinnou čiarkou, separátor stĺpcov je ;
+// Excel v SK locale otvorí priamo bez "Text to columns" preprocessingu.
+function csvCellSk(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    return `"${String(v).replace('.', ',')}"`;
+  }
+  return `"${String(v).replace(/"/g, '""')}"`;
+}
+
 let ratesData = null;
 let historyData = null;
 let riskData = null;
@@ -964,14 +974,16 @@ function exportHistoryCSV() {
     ['takeProfitRate', 'Take Profit'],
     ['trailingStopLoss', 'Trailing SL'],
   ];
-  const lines = [cols.map(c => csvCell(c[1])).join(',')];
+  // SK-friendly CSV: separátor ;, čísla s desatinnou čiarkou, BOM pre UTF-8
+  const SEP = ';';
+  const lines = [cols.map(c => csvCellSk(c[1])).join(SEP)];
   for (const t of trades) {
     lines.push(cols.map(([key]) => {
       const val = key === 'isBuy' ? (t[key] ? 'BUY' : 'SELL') : t[key];
-      return csvCell(val);
-    }).join(','));
+      return csvCellSk(val);
+    }).join(SEP));
   }
-  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
   const acct = activeAccount || '1';
   const minDate = historyData?.minDate || 'history';
