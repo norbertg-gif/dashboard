@@ -639,12 +639,9 @@ function csvCell(v) {
 let ratesData = null;
 let historyData = null;
 let riskData = null;
-let journalCache = null;
 let historySort = { key: 'closeTimestamp', dir: -1 };
-let journalSort = { key: 'updatedAt', dir: -1 };
 let riskTypeSort = { key: 'amount', dir: -1 };
 let riskPositionSort = { key: 'amount', dir: -1 };
-let journalArchiveCollapsed = localStorage.getItem('td_journal_archive_collapsed') === '1';
 
 // Cache pre 52w + sentiment dáta
 let ratesExtCache = {};   // { symbol: { w52h, w52l, sentiment, _ts } }
@@ -833,46 +830,6 @@ async function renderRatesView(force = false) {
   </div>`;
 }
 
-async function loadJournal() {
-  if (journalCache) return journalCache;
-  try {
-    const r = await fetch(`${API}/api/journal`);
-    journalCache = r.ok ? await r.json() : {};
-  } catch(e) { journalCache = {}; }
-  return journalCache;
-}
-
-function tradeJournalKey(t) {
-  return `trade:${t.positionId || t.orderId || t.symbol}`;
-}
-
-function positionJournalKey(p) {
-  return `position:${p.positionId || p.positionID || p.symbol}`;
-}
-
-function journalDomId(key) {
-  return String(key).replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-async function saveJournalNote(key, symbol) {
-  const did = journalDomId(key);
-  const note = document.getElementById(`note-${did}`)?.value || '';
-  const plan = document.getElementById(`plan-${did}`)?.value || '';
-  const tags = document.getElementById(`tags-${did}`)?.value || '';
-  const r = await fetch(`${API}/api/journal/${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({symbol, note, plan, tags})
-  });
-  if (r.ok) {
-    const data = await r.json();
-    journalCache = journalCache || {};
-    journalCache[key] = data.entry;
-    const btn = document.getElementById(`save-${did}`);
-    if (btn) { btn.textContent = 'Saved'; setTimeout(() => btn.textContent = 'Save', 1200); }
-  }
-}
-
 async function renderHistoryView(force = false) {
   const el = document.getElementById('main-history');
   if (!el) return;
@@ -1023,99 +980,6 @@ function exportHistoryCSV() {
   a.download = `trade_history_account_${acct}_${minDate}_${maxDate}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
-}
-
-async function renderJournalView(force = false) {
-  const el = document.getElementById('main-journal');
-  if (!el) return;
-  if (force) journalCache = null;
-  const journal = await loadJournal();
-  let openPositions = [];
-  try {
-    const r = await fetch(`${API}/api/etoro/portfolio?account=${activeAccount||'1'}`);
-    if (r.ok) openPositions = (await r.json()).positions || [];
-  } catch(e) {}
-  openPositions = openPositions.sort((a, b) => compareBySort(a, b, journalSort));
-  const openKeys = new Set(openPositions.map(p => positionJournalKey(p)));
-  const allEntries = Object.values(journal).sort((a, b) => compareBySort(a, b, journalSort));
-  const archivedOpenEntries = allEntries.filter(e => String(e.key || '').startsWith('position:') && !openKeys.has(e.key));
-  const closedTradeEntries = allEntries.filter(e => String(e.key || '').startsWith('trade:'));
-  const archiveEntries = [...closedTradeEntries, ...archivedOpenEntries].sort((a, b) => compareBySort(a, b, journalSort));
-  const journalHeaders = [
-    ['symbol', 'Symbol'],
-    ['pnl', 'P/L'],
-    ['note', 'Poznamka'],
-    ['plan', 'Plan'],
-    ['tags', 'Tagy'],
-    ['updatedAt', 'Update'],
-  ];
-  el.innerHTML = `<div class="tool-panel">
-    <div class="tool-toolbar"><div class="tool-title">Trade journal (${allEntries.length})</div><button class="btn primary" onclick="renderJournalView(true)">Refresh</button></div>
-    <div style="padding:10px;border-bottom:1px solid var(--border);">
-      <div class="tool-title" style="margin:0 0 8px;">Otvorene pozicie</div>
-      <div class="tool-table-wrap" style="max-height:calc(100vh - 220px);">
-      <table class="tool-table"><thead><tr>
-        ${journalHeaders.slice(0,5).map(([key, label]) => `<th onclick="sortJournal('${key}')" style="cursor:pointer;">${label}${sortMarker(journalSort, key)}</th>`).join('')}
-        <th></th>
-      </tr></thead><tbody>
-        ${openPositions.map(p => {
-          const key = positionJournalKey(p);
-          const did = journalDomId(key);
-          const j = journal[key] || {};
-          const pnl = Number(p.pnl || 0);
-          return `<tr>
-            <td><span class="port-sym">${escHtml(p.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(p.name || '')}</div></td>
-            <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
-            <td><textarea class="tool-note" id="note-${did}" placeholder="Teza, dovod vstupu...">${escHtml(j.note || '')}</textarea></td>
-            <td><textarea class="tool-note" id="plan-${did}" placeholder="Plan vystupu / invalidacia...">${escHtml(j.plan || '')}</textarea></td>
-            <td><input id="tags-${did}" value="${escHtml(j.tags || '')}" placeholder="tagy" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;"></td>
-            <td><button class="btn" id="save-${did}" onclick="saveJournalNote('${escHtml(key)}','${escHtml(p.symbol)}')">Save</button></td>
-          </tr>`;
-        }).join('') || `<tr><td colspan="6" style="color:var(--muted);padding:12px;">Ziadne otvorene pozicie.</td></tr>`}
-      </tbody></table>
-      </div>
-    </div>
-    <div class="journal-archive-bar">
-      <div class="tool-title" style="margin:0;flex:1;">Archiv journalu (${archiveEntries.length})</div>
-      <button class="btn" onclick="toggleJournalArchive()">${journalArchiveCollapsed ? 'Zobrazit' : 'Schovat'}</button>
-    </div>
-    ${journalArchiveCollapsed ? `` : `
-      <div class="tool-table-wrap">
-      <table class="tool-table"><thead><tr>
-        <th onclick="sortJournal('symbol')" style="cursor:pointer;">Symbol${sortMarker(journalSort, 'symbol')}</th>
-        <th>Typ</th>
-        <th onclick="sortJournal('note')" style="cursor:pointer;">Poznamka${sortMarker(journalSort, 'note')}</th>
-        <th onclick="sortJournal('plan')" style="cursor:pointer;">Plan${sortMarker(journalSort, 'plan')}</th>
-        <th onclick="sortJournal('tags')" style="cursor:pointer;">Tagy${sortMarker(journalSort, 'tags')}</th>
-        <th onclick="sortJournal('updatedAt')" style="cursor:pointer;">Update${sortMarker(journalSort, 'updatedAt')}</th>
-      </tr></thead><tbody>
-        ${archiveEntries.map(e => {
-          const typ = String(e.key || '').startsWith('trade:') ? 'uzavrety obchod' : 'archiv pozicie';
-          return `<tr>
-            <td><span class="port-sym">${escHtml(e.symbol || '')}</span></td>
-            <td style="color:var(--muted);">${typ}</td>
-            <td>${escHtml(e.note || '')}</td>
-            <td>${escHtml(e.plan || '')}</td>
-            <td>${escHtml(e.tags || '')}</td>
-            <td style="color:var(--muted);">${escHtml((e.updatedAt || '').slice(0,19).replace('T',' '))}</td>
-          </tr>`;
-        }).join('') || `<tr><td colspan="6" style="color:var(--muted);padding:16px;">Zatial ziadne archivovane journal poznamky.</td></tr>`}
-      </tbody></table>
-      </div>
-    `}
-  </div>`;
-}
-
-function sortJournal(key) {
-  if (journalSort.key === key) journalSort.dir *= -1;
-  else journalSort = { key, dir: ['pnl','updatedAt'].includes(key) ? -1 : 1 };
-  renderJournalView(false);
-}
-
-function toggleJournalArchive() {
-  journalArchiveCollapsed = !journalArchiveCollapsed;
-  localStorage.setItem('td_journal_archive_collapsed', journalArchiveCollapsed ? '1' : '0');
-  renderJournalView(false);
 }
 
 async function renderRiskView(force = false) {

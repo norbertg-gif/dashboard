@@ -7,7 +7,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 - **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 5.2.0, SheetJS for XLSX import — no build step
-- **Storage:** `/data` (Render disk) holds `presets.json`, `trade_journal.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
+- **Storage:** `/data` (Render disk) holds `presets.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
 - **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`).
 
 ## Layout
@@ -302,6 +302,6 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 
 ## File touch policy
 
-- **`presets.json`, `trade_journal.json`, `scanner_notes.json`, `bot_portfolio.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them.
+- **`presets.json`, `scanner_notes.json`, `bot_portfolio.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them. (Pôvodný `trade_journal.json` z Trade Journal funkcie už appka nepoužíva — feature bola odstránená; existujúci súbor na disku ostáva, no žiadny kód ho už nečíta ani neprepisuje.)
 - **eToro instrument metadata** — cache it (`cache/instruments`), don't fetch on every request; the response is ~11 MB.
 - **`cache/` directory in repo** — excluded from deploy via `.renderignore`. Local cache is fine to keep but ignore in commits.

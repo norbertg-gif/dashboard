@@ -1017,7 +1017,6 @@ def get_public_portfolio(
         raise HTTPException(502, f"Portfolio nedostupné ({err_type}) — skontrolujte eToro proxy")
 
 PRESETS_FILE = str(DATA_ROOT / "presets.json")
-JOURNAL_FILE = str(DATA_ROOT / "trade_journal.json")
 DAILY_INTERVALS = {"1d", "5d", "1wk", "1mo", "3mo"}
 YF_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -1038,23 +1037,6 @@ def write_presets(data: dict):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise HTTPException(500, f"Chyba zapisu presetov: {e}")
-
-def read_journal() -> dict:
-    try:
-        with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        return {}
-    except Exception as e:
-        raise HTTPException(500, f"Chyba citania journalu: {e}")
-
-def write_journal(data: dict):
-    try:
-        with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        raise HTTPException(500, f"Chyba zapisu journalu: {e}")
 
 @app.get("/api/presets")
 def get_presets():
@@ -1080,40 +1062,6 @@ def delete_preset(name: str):
     del presets[name]
     write_presets(presets)
     return {"ok": True, "deleted": name}
-
-# ── TRADE JOURNAL ─────────────────────────────────────────────────────────────
-
-@app.get("/api/journal")
-def get_journal():
-    return read_journal()
-
-@app.get("/api/journal/{key}")
-def get_journal_entry(key: str):
-    return read_journal().get(key, {})
-
-@app.post("/api/journal/{key}")
-async def upsert_journal_entry(key: str, request: Request):
-    body = await request.json()
-    journal = read_journal()
-    existing = journal.get(key, {})
-    now = datetime.now(timezone.utc).isoformat()
-    journal[key] = {
-        **existing,
-        **body,
-        "key": key,
-        "updatedAt": now,
-        "createdAt": existing.get("createdAt") or now,
-    }
-    write_journal(journal)
-    return {"ok": True, "key": key, "entry": journal[key]}
-
-@app.delete("/api/journal/{key}")
-def delete_journal_entry(key: str):
-    journal = read_journal()
-    if key in journal:
-        del journal[key]
-        write_journal(journal)
-    return {"ok": True, "deleted": key}
 
 # ── NEWS ─────────────────────────────────────────────────────────────────────
 

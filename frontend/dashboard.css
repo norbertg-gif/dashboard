@@ -1521,19 +1521,6 @@ body.sidebar-collapsed #sb-resizer {
   margin-top: 4px;
   color: var(--text);
 }
-.tool-note {
-  width: 100%;
-  min-height: 60px;
-  resize: vertical;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--radius-sm);
-  padding: 8px;
-  font-family: var(--font-ui);
-  font-size: 13px;
-  outline: none;
-}
 .risk-summary {
   margin: 10px;
   padding: 11px 12px;
