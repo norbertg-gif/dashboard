@@ -92,7 +92,7 @@ vopred sa zobrazia 3-krát).
 - **📈 Grafy** — mriežka panelov s grafmi tickerov z watchlistu. Klik na panel
   ho aktivuje, dvojklik otvára detail.
 - **📊 Portfólio** — aktuálne eToro pozície, summary (Cash / Invested / P&L / **Dnes P/L** / Equity).
-- **História** — uzavreté obchody a journal.
+- **História** — uzavreté obchody s filtrom dátumového intervalu od–do.
 - **Risk** — riziková analýza portfólia.
 - **📈 Prediktívny** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
   história, validácia a predikcia ďalšej sviečky
@@ -145,7 +145,9 @@ vopred sa zobrazia 3-krát).
   eToro dáta. Per ticker agreguje viac obchodov; Per trade ich rozbalí.
 - Stĺpce možno zapínať, radiť a nezávisle meniť ich šírku. Nastavenie sa uloží.
   Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
-- **História** je záznam uzavretých obchodov. **Risk** ukazuje koncentráciu,
+- **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
+  intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
+  net P/L, fees) sa prepočítajú pre zvolený interval. **Risk** ukazuje koncentráciu,
   najväčšie pozície, rizikové príznaky, sektorovú expozíciu a heatmapu:
   veľkosť = podiel na equity, farba = denný P/L, doplnkový údaj = celkový P/L.
   Hore je aj krátky risk briefing, ktorý ľudsky zhrnie, či je portfólio

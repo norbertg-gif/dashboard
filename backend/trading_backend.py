@@ -1831,12 +1831,16 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
 def get_trade_history(
     account: str = Query("1"),
     minDate: str = Query(""),
+    maxDate: str = Query(""),
     page: int = Query(0),
     pageSize: int = Query(100),
 ):
-    """Uzavrete obchody z eToro trade history, obohatene o symbol/name."""
+    """Uzavrete obchody z eToro trade history, obohatene o symbol/name.
+    Interval je podla DATUMU UZAVRETIA (closeTimestamp) v [minDate, maxDate]."""
     if not minDate:
         minDate = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
+    if not maxDate:
+        maxDate = datetime.now(timezone.utc).date().isoformat()
     pageSize = max(1, min(pageSize, 200))
     instruments = load_instruments()
     url = (
@@ -1896,6 +1900,15 @@ def get_trade_history(
             "trailingStopLoss": pick(t, "trailingStopLoss", "TrailingStopLoss"),
         })
 
+    # Filter na interval podla close dátumu (minDate poslaný aj eToru, maxDate len tu)
+    def _close_in_range(x):
+        ts = x.get("closeTimestamp") or ""
+        if not ts:
+            return True
+        d = ts[:10]
+        return minDate <= d <= maxDate
+    result = [x for x in result if _close_in_range(x)]
+
     wins = [x for x in result if (x.get("netProfit") or 0) > 0]
     losses = [x for x in result if (x.get("netProfit") or 0) < 0]
     total_profit = sum(x.get("netProfit") or 0 for x in result)
@@ -1910,7 +1923,8 @@ def get_trade_history(
         "fees": round(sum(x.get("fees") or 0 for x in result), 2),
         "avgDaysHeld": round(sum(x.get("daysHeld") or 0 for x in result if x.get("daysHeld") is not None) / max(1, len([x for x in result if x.get("daysHeld") is not None])), 2) if result else 0,
     }
-    return {"trades": result, "summary": summary, "page": page, "pageSize": pageSize, "minDate": minDate}
+    return {"trades": result, "summary": summary, "page": page, "pageSize": pageSize,
+            "minDate": minDate, "maxDate": maxDate}
 
 
 @app.get("/api/etoro/analytics")

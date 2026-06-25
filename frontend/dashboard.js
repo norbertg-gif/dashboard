@@ -880,7 +880,8 @@ async function renderHistoryView(force = false) {
     el.innerHTML = '<div class="tool-panel"><div class="tool-toolbar"><div class="tool-title">Historia obchodov</div></div><div style="padding:16px;color:var(--muted);">Nacitavam historiu...</div></div>';
     try {
       const minDate = localStorage.getItem('td_hist_min_date') || new Date(Date.now() - 365*86400000).toISOString().slice(0,10);
-      const r = await fetch(`${API}/api/etoro/trade-history?account=${activeAccount||'1'}&minDate=${encodeURIComponent(minDate)}&pageSize=150`);
+      const maxDate = localStorage.getItem('td_hist_max_date') || new Date().toISOString().slice(0,10);
+      const r = await fetch(`${API}/api/etoro/trade-history?account=${activeAccount||'1'}&minDate=${encodeURIComponent(minDate)}&maxDate=${encodeURIComponent(maxDate)}&pageSize=150`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       historyData = await r.json();
     } catch(e) {
@@ -888,7 +889,6 @@ async function renderHistoryView(force = false) {
       return;
     }
   }
-  await loadJournal();
   const s = historyData.summary || {};
   const trades = [...(historyData.trades || [])].sort((a, b) => compareHistoryRows(a, b));
   const histHeaders = [
@@ -903,8 +903,13 @@ async function renderHistoryView(force = false) {
   el.innerHTML = `<div class="tool-panel">
     <div class="tool-toolbar">
       <div class="tool-title">Historia obchodov</div>
-      <input id="hist-min-date" type="date" value="${escHtml(historyData.minDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;">
-      <button class="btn primary" onclick="localStorage.setItem('td_hist_min_date',document.getElementById('hist-min-date').value);renderHistoryView(true)">Nacitat</button>
+      <label style="color:var(--muted);font-size:11px;">od
+        <input id="hist-min-date" type="date" value="${escHtml(historyData.minDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
+      </label>
+      <label style="color:var(--muted);font-size:11px;">do
+        <input id="hist-max-date" type="date" value="${escHtml(historyData.maxDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
+      </label>
+      <button class="btn primary" onclick="applyHistoryRange()">Nacitat</button>
       <button class="btn" onclick="exportHistoryCSV()">Export CSV</button>
     </div>
     <div class="tool-kpis">
@@ -915,12 +920,8 @@ async function renderHistoryView(force = false) {
     </div>
     <table class="tool-table"><thead><tr>
       ${histHeaders.map(([key, label]) => `<th onclick="sortHistory('${key}')" style="cursor:pointer;">${label}${historySort.key === key ? (historySort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>`).join('')}
-      <th>Journal</th>
     </tr></thead><tbody>
       ${trades.map(t => {
-        const key = tradeJournalKey(t);
-        const did = journalDomId(key);
-        const j = journalCache[key] || {};
         const pnl = Number(t.netProfit || 0);
         return `<tr>
           <td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>
@@ -930,15 +931,22 @@ async function renderHistoryView(force = false) {
           <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
           <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
           <td>${t.daysHeld ?? '-'}</td>
-          <td style="min-width:260px;">
-            <textarea class="tool-note" id="note-${did}" placeholder="Poznamka...">${escHtml(j.note || '')}</textarea>
-            <input id="tags-${did}" value="${escHtml(j.tags || '')}" placeholder="tagy" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;">
-            <button class="btn" id="save-${did}" onclick="saveJournalNote('${escHtml(key)}','${escHtml(t.symbol)}')" style="margin-top:4px;">Save</button>
-          </td>
         </tr>`;
       }).join('')}
     </tbody></table>
   </div>`;
+}
+
+function applyHistoryRange() {
+  const minEl = document.getElementById('hist-min-date');
+  const maxEl = document.getElementById('hist-max-date');
+  let min = minEl?.value || '';
+  let max = maxEl?.value || '';
+  // Ak je od > do, prehoď ich (nech sa interval nezmýli)
+  if (min && max && min > max) { [min, max] = [max, min]; }
+  if (min) localStorage.setItem('td_hist_min_date', min);
+  if (max) localStorage.setItem('td_hist_max_date', max);
+  renderHistoryView(true);
 }
 
 function compareHistoryRows(a, b) {
@@ -1010,8 +1018,9 @@ function exportHistoryCSV() {
   const a = document.createElement('a');
   const acct = activeAccount || '1';
   const minDate = historyData?.minDate || 'history';
+  const maxDate = historyData?.maxDate || '';
   a.href = URL.createObjectURL(blob);
-  a.download = `trade_history_account_${acct}_${minDate}.csv`;
+  a.download = `trade_history_account_${acct}_${minDate}_${maxDate}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
