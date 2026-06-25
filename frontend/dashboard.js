@@ -5344,12 +5344,15 @@ async function loadMovers() {
   if (_moversLoading) return;
   const up = document.getElementById('movers-up')?.checked;
   const direction = up ? 'up' : 'down';
+  // Počet grafov = 2 riadky podľa nastavenia STĹPCE (3 stĺpce → 6, 4 → 8)
+  const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
+  const n = Math.max(2, cols * 2);
   const btn = document.getElementById('movers-btn');
   _moversLoading = true;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Hľadám…'; }
   try {
     switchMainTab('charts');
-    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=6&direction=${direction}`);
+    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const movers = data.movers || [];
