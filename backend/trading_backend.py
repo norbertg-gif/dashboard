@@ -1784,24 +1784,51 @@ def get_trade_history(
     pageSize: int = Query(100),
 ):
     """Uzavrete obchody z eToro trade history, obohatene o symbol/name.
-    Interval je podla DATUMU UZAVRETIA (closeTimestamp) v [minDate, maxDate]."""
+    Interval je podla DATUMU UZAVRETIA (closeTimestamp) v [minDate, maxDate].
+
+    eToro endpoint minDate filtruje podla DATUMU OTVORENIA — obchody otvorene
+    pred minDate ale uzavrete v intervale by sa nevratili. Preto posielame eToru
+    posunuty minDate (CLOSE_LOOKBACK_DAYS spat) a presny close-filter robime
+    lokalne. Cez stranky idem dokym eToro vracia plnu stranku alebo kym sa
+    nedostanem k obchodom otvorenym pred lookback prahom."""
     if not minDate:
         minDate = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
     if not maxDate:
         maxDate = datetime.now(timezone.utc).date().isoformat()
     pageSize = max(1, min(pageSize, 200))
-    instruments = load_instruments()
-    url = (
-        f"{ETORO_PROXY}/etoro/trading/info/trade/history"
-        f"?minDate={requests.utils.quote(minDate)}&page={page}&pageSize={pageSize}&account={account}"
-    )
+    # Posun eToro minDate o 2 roky spat — pokryje aj swing/long obchody otvorene
+    # pred zvolenym intervalom ale uzavrete v nom. Pri extremne dlhych poziciach
+    # (>2 roky) sa moze obchod nezachytit — vtedy treba ist na vyssi lookback.
+    CLOSE_LOOKBACK_DAYS = 730
     try:
-        resp = fetch_with_retry(url, timeout=12, retries=2)
-        raw = resp.json()
-    except Exception as e:
-        raise HTTPException(502, f"eToro trade history zlyhalo: {e}")
+        etoro_min_date = (datetime.fromisoformat(minDate)
+                          - timedelta(days=CLOSE_LOOKBACK_DAYS)).date().isoformat()
+    except Exception:
+        etoro_min_date = (datetime.now(timezone.utc)
+                          - timedelta(days=365 + CLOSE_LOOKBACK_DAYS)).date().isoformat()
+    instruments = load_instruments()
 
-    items = raw if isinstance(raw, list) else raw.get("items", raw.get("trades", []))
+    items: list = []
+    MAX_PAGES = 25  # 25 × 200 = 5000 obchodov, hard cap proti runaway loopu
+    cur_page = page
+    while cur_page < page + MAX_PAGES:
+        url = (
+            f"{ETORO_PROXY}/etoro/trading/info/trade/history"
+            f"?minDate={requests.utils.quote(etoro_min_date)}&page={cur_page}&pageSize={pageSize}&account={account}"
+        )
+        try:
+            resp = fetch_with_retry(url, timeout=12, retries=2)
+            raw = resp.json()
+        except Exception as e:
+            raise HTTPException(502, f"eToro trade history zlyhalo: {e}")
+        page_items = raw if isinstance(raw, list) else raw.get("items", raw.get("trades", []))
+        if not page_items:
+            break
+        items.extend(page_items)
+        if len(page_items) < pageSize:
+            break
+        cur_page += 1
+
     def pick(row, *keys, default=None):
         for key in keys:
             if key in row and row.get(key) is not None:
@@ -1871,7 +1898,9 @@ def get_trade_history(
         "fees": round(sum(x.get("fees") or 0 for x in result), 2),
         "avgDaysHeld": round(sum(x.get("daysHeld") or 0 for x in result if x.get("daysHeld") is not None) / max(1, len([x for x in result if x.get("daysHeld") is not None])), 2) if result else 0,
     }
-    return {"trades": result, "summary": summary, "page": page, "pageSize": pageSize,
+    return {"trades": result, "summary": summary,
+            "pageSize": pageSize, "pagesFetched": cur_page - page + 1,
+            "etoroMinDate": etoro_min_date,
             "minDate": minDate, "maxDate": maxDate}
 
 
