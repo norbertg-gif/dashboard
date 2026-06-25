@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260624-finviz-collapse">
+<link rel="stylesheet" href="/dashboard.css?v=20260624-movers">
 </head>
 <body>
 
@@ -32,6 +32,10 @@
   <div class="sep"></div>
   <button class="btn primary" onclick="loadAll()">⟳ LOAD ALL</button>
   <button class="btn danger" onclick="clearAllPanels()" title="Vymaž všetky grafy">✕ VYMAŽ</button>
+  <button class="btn" id="movers-btn" onclick="loadMovers()" title="Otvor 6 grafov s najväčším denným pohybom (stock/ETF z watchlistu + portfólia)">📉 Top pohyby</button>
+  <label id="movers-up-lbl" title="Prepnúť na najväčšie rasty" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
+    <input type="checkbox" id="movers-up" onchange="updateMoversLabel()" style="cursor:pointer;">Rast
+  </label>
   <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>
   <a href="/help" target="_blank" title="Manuál k dashboardu" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">?</a>
 
@@ -516,6 +520,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260624-finviz-collapse"></script>
+  <script src="/dashboard.js?v=20260624-movers"></script>
 </body>
 </html>

@@ -2246,6 +2246,68 @@ def get_dca_candidates(
     }
 
 
+@app.get("/api/movers")
+def get_movers(
+    account: str = Query("1"),
+    n: int = Query(6, ge=1, le=20),
+    direction: str = Query("down"),
+):
+    """Top N titulov podľa denného % pohybu naprieč watchlistom + portfóliom.
+    Len stock/ETF (crypto vynechané). Denný % z OHLCV cache (žiadne nové API
+    volania — cold tituly bez cache sa preskočia, zahrejú sa prefetchom).
+
+    direction=down → najväčšie poklesy (default), up → najväčšie rasty.
+    Pre 'dynamický preset' v Grafoch — frontend otvorí grafy vrátených tickerov."""
+    down = str(direction).lower() != "up"
+
+    # Watchlist beriem celý (sú to akcie); portfólio filtrujem na stock/ETF cez type
+    universe: dict[str, str] = {}   # symbol -> source
+    for item in _read_watchlist_file():
+        sym = str(item.get("symbol") or "").upper()
+        if sym:
+            universe[sym] = "watchlist"
+    try:
+        portfolio = get_portfolio(account=account)
+        for pos in portfolio.get("positions", []):
+            typ = str(pos.get("type") or "").lower()
+            if typ not in ("stock", "etf"):
+                continue
+            sym = str(pos.get("symbol") or "").upper()
+            if not sym:
+                continue
+            universe[sym] = "both" if sym in universe else "portfolio"
+    except Exception as e:
+        print(f"[movers] portfolio error: {_scrub_token(e)}")
+
+    rows = []
+    skipped = 0
+    for sym, source in universe.items():
+        dc = _daily_change_from_cache(sym)
+        if dc is None:
+            skipped += 1
+            continue
+        change_pct, last_close = dc
+        rows.append({
+            "symbol": sym,
+            "change_pct": round(change_pct, 2),
+            "last_close": round(last_close, 4),
+            "source": source,
+        })
+
+    rows.sort(key=lambda r: r["change_pct"], reverse=not down)
+    top = rows[:n]
+
+    return {
+        "account": account,
+        "direction": "down" if down else "up",
+        "n": n,
+        "movers": top,
+        "universe_size": len(universe),
+        "evaluated": len(rows),
+        "skipped": skipped,
+    }
+
+
 @app.get("/api/summary")
 def get_summary(symbol: str = Query(...)):
     """Yahoo Finance quote — 52w High/Low, analyst recommendation, názov."""
@@ -2678,6 +2740,25 @@ def _get_prev_close(sym: str) -> float | None:
         if not closed:
             return None
         return float(closed[-1].get("close") or closed[-1].get("c") or 0) or None
+    except Exception:
+        return None
+
+
+def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
+    """Posledný denný % pohyb z OHLCV cache (cache-only, žiadne API volanie).
+    Vracia (change_pct, last_close) alebo None keď nie je dosť dát."""
+    try:
+        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneDay")
+        if not raw:
+            return None
+        candles = _flatten_ohlcv(raw)
+        if len(candles) < 2:
+            return None
+        last = float(candles[-1].get("close") or candles[-1].get("c") or 0)
+        prev = float(candles[-2].get("close") or candles[-2].get("c") or 0)
+        if not prev or not last:
+            return None
+        return (last - prev) / prev * 100, last
     except Exception:
         return None
 

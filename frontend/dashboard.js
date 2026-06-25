@@ -5330,6 +5330,48 @@ function clearAllPanels() {
   setStatus('Grafy vymazané', '');
 }
 
+// Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
+// z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
+let _moversLoading = false;
+function moversBtnLabel() {
+  return document.getElementById('movers-up')?.checked ? '📈 Top pohyby' : '📉 Top pohyby';
+}
+function updateMoversLabel() {
+  const btn = document.getElementById('movers-btn');
+  if (btn && !_moversLoading) btn.textContent = moversBtnLabel();
+}
+async function loadMovers() {
+  if (_moversLoading) return;
+  const up = document.getElementById('movers-up')?.checked;
+  const direction = up ? 'up' : 'down';
+  const btn = document.getElementById('movers-btn');
+  _moversLoading = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Hľadám…'; }
+  try {
+    switchMainTab('charts');
+    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=6&direction=${direction}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const movers = data.movers || [];
+    if (!movers.length) {
+      setStatus(`Žiadne dáta pre Top pohyby (z ${data.universe_size||0} titulov sa nevyhodnotil žiadny — cache ešte nezahriata?)`, 'err');
+      return;
+    }
+    [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
+    setActivePanel(null);
+    movers.forEach(m => createPanel({ symbol: m.symbol, interval: '1d' }));
+    saveLayout();
+    loadAll();
+    const dirTxt = up ? 'rast' : 'pokles';
+    setStatus(`Top ${movers.length} — ${dirTxt} (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
+  } catch(e) {
+    setStatus(`Top pohyby zlyhali: ${e.message}`, 'err');
+  } finally {
+    _moversLoading = false;
+    if (btn) { btn.disabled = false; btn.textContent = moversBtnLabel(); }
+  }
+}
+
 // Jednorázový cache naplnený z batch fetchu — loadChart ho spotrebuje a zmaže
 const _ohlcvBatchCache = new Map();
 
