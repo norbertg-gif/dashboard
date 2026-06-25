@@ -1794,7 +1794,6 @@ def get_trade_history(
         minDate = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
     if not maxDate:
         maxDate = datetime.now(timezone.utc).date().isoformat()
-    pageSize = max(1, min(pageSize, 200))
     # Posun eToro minDate o 10 rokov spat — pokryje aj velmi stare swing/long
     # pozicie (uzivatel ma napr. 5-rocne krypto obchody, takze eToro endpoint
     # vie velmi stare obchody vratit). Lokalny close-filter potom oreze presne.
@@ -1807,12 +1806,15 @@ def get_trade_history(
                           - timedelta(days=365 + CLOSE_LOOKBACK_DAYS)).date().isoformat()
     instruments = load_instruments()
 
-    # Stránkujeme kým eToro vracia ASPOŇ JEDEN NOVÝ záznam. NEbreakujeme na
-    # "< pageSize" (eToro môže vrátiť kratšiu stránku v strede behu).
-    # POZOR: dedup MUSÍ byť na orderId / per-riadok kľúč, NIE na positionId —
-    # jedna pozícia má pri čiastočných uzavretiach viac history riadkov so
-    # zhodným positionId; dedup cez positionId by ich zlial a pri celej stránke
-    # "rovnakých" pozícií by new_count=0 predčasne ukončil paging.
+    # Veľký pageSize — eToro `page` parameter je cez náš proxy nespoľahlivý
+    # (vracia stále prvú stránku; možno je 1-indexovaný takže page 0 == page 1).
+    # Veľký fetch znižuje počet requestov; paging je len poistka. Cap 1000 je
+    # bezpečný (eToro by mal honorovať aspoň do nízkych tisícov).
+    FETCH_PAGE_SIZE = 1000
+
+    # Dedup na per-riadok kľúč (orderId; fallback positionId+close+open). Jedna
+    # pozícia má pri čiastočných uzavretiach viac history riadkov so zhodným
+    # positionId, preto positionId NIE je vhodný dedup kľúč.
     def _row_key(it):
         oid = it.get("orderId") or it.get("orderID") or it.get("OrderID")
         if oid is not None:
@@ -1824,24 +1826,27 @@ def get_trade_history(
 
     items: list = []
     seen_keys: set = set()
-    MAX_PAGES = 100   # = 20 000 obchodov pri pageSize=200, dosť aj pre 10-rokovú históriu
+    MAX_PAGES = 50    # × 1000 = 50 000 obchodov, hard cap
+    # Tolerujeme 2 po sebe duplicitné/prázdne stránky než ukončíme — ak je eToro
+    # `page` 1-indexovaný, page 0 a page 1 vrátia tú istú prvú stránku (0 nových),
+    # ale page 2 už nesie nové dáta. Break až po MAX_CONSEC_EMPTY za sebou.
+    MAX_CONSEC_EMPTY = 2
     truncated = False
     cur_page = page
     last_page_size = 0
+    consec_empty = 0
     for _ in range(MAX_PAGES):
         url = (
             f"{ETORO_PROXY}/etoro/trading/info/trade/history"
-            f"?minDate={requests.utils.quote(etoro_min_date)}&page={cur_page}&pageSize={pageSize}&account={account}"
+            f"?minDate={requests.utils.quote(etoro_min_date)}&page={cur_page}&pageSize={FETCH_PAGE_SIZE}&account={account}"
         )
         try:
-            resp = fetch_with_retry(url, timeout=12, retries=2)
+            resp = fetch_with_retry(url, timeout=15, retries=2)
             raw = resp.json()
         except Exception as e:
             raise HTTPException(502, f"eToro trade history zlyhalo: {e}")
         page_items = raw if isinstance(raw, list) else raw.get("items", raw.get("trades", []))
         last_page_size = len(page_items)
-        if not page_items:
-            break
         new_count = 0
         for it in page_items:
             k = _row_key(it)
@@ -1850,9 +1855,12 @@ def get_trade_history(
             seen_keys.add(k)
             items.append(it)
             new_count += 1
-        # Stránka nepriniesla NIČ nové (samé duplikáty) → eToro zacyklil / koniec
         if new_count == 0:
-            break
+            consec_empty += 1
+            if consec_empty >= MAX_CONSEC_EMPTY:
+                break
+        else:
+            consec_empty = 0
         cur_page += 1
     else:
         truncated = True
@@ -1927,8 +1935,8 @@ def get_trade_history(
         "avgDaysHeld": round(sum(x.get("daysHeld") or 0 for x in result if x.get("daysHeld") is not None) / max(1, len([x for x in result if x.get("daysHeld") is not None])), 2) if result else 0,
     }
     return {"trades": result, "summary": summary,
-            "pageSize": pageSize, "pagesFetched": cur_page - page,
-            "lastPageSize": last_page_size,
+            "fetchPageSize": FETCH_PAGE_SIZE, "pagesFetched": cur_page - page,
+            "rawFetched": len(seen_keys), "lastPageSize": last_page_size,
             "truncated": truncated,
             "etoroMinDate": etoro_min_date,
             "minDate": minDate, "maxDate": maxDate}
