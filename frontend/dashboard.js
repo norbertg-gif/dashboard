@@ -861,7 +861,9 @@ async function renderHistoryView(force = false) {
   const histHeaders = [
     ['symbol', 'Symbol'],
     ['openTimestamp', 'Open'],
+    ['openRate', 'Vstup'],
     ['closeTimestamp', 'Close'],
+    ['closeRate', 'Výstup'],
     ['investment', 'Investment'],
     ['netProfit', 'P/L'],
     ['profitPct', '%'],
@@ -893,7 +895,9 @@ async function renderHistoryView(force = false) {
         return `<tr>
           <td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>
           <td>${escHtml((t.openTimestamp || '').slice(0,10))}</td>
+          <td class="r">${t.openRate != null ? fmtPrice(Number(t.openRate)) : '-'}</td>
           <td>${escHtml((t.closeTimestamp || '').slice(0,10))}</td>
+          <td class="r">${t.closeRate != null ? fmtPrice(Number(t.closeRate)) : '-'}</td>
           <td>$${Number(t.investment || 0).toFixed(2)}</td>
           <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
           <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
