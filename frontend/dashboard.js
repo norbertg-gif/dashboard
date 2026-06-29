@@ -3677,13 +3677,17 @@ async function fetchPresets() {
 }
 async function refreshPresetDropdown(sel) {
   const presets = await fetchPresets();
-  const names = Object.keys(presets).sort();
+  const names = Object.keys(presets)
+    .filter(n => !String(n).startsWith('__'))
+    .sort();
+  const selected = names.includes(sel) ? sel : '';
   document.getElementById('preset-sel').innerHTML =
     '<option value="">— vyber —</option>' +
-    names.map(n => `<option value="${n}"${n===sel?' selected':''}>${n}</option>`).join('');
+    names.map(n => `<option value="${n}"${n===selected?' selected':''}>${n}</option>`).join('');
 }
 async function loadPreset() {
   const name = document.getElementById('preset-sel').value; if (!name) return;
+  if (String(name).startsWith('__')) return;
   const presets = await fetchPresets();
   const cfg = presets[name]; if (!cfg?.length) return;
   [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
@@ -3694,6 +3698,7 @@ async function loadPreset() {
 }
 async function deletePreset() {
   const name = document.getElementById('preset-sel').value;
+  if (String(name).startsWith('__')) return;
   if (!name || !confirm(`Zmazať preset „${name}"?`)) return;
   await fetch(`${API}/api/presets/${encodeURIComponent(name)}`, { method:'DELETE' });
   refreshPresetDropdown('');
@@ -3707,6 +3712,10 @@ function openSaveModal() {
 function closeModal() { document.getElementById('modal-bg').classList.remove('open'); }
 async function confirmSave() {
   const name = document.getElementById('modal-input').value.trim(); if (!name) return;
+  if (name.startsWith('__')) {
+    alert('Názvy začínajúce "__" sú interné nastavenia dashboardu.');
+    return;
+  }
   await fetch(`${API}/api/presets/${encodeURIComponent(name)}`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(getCurrentConfig()),
   });

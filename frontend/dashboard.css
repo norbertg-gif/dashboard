@@ -206,6 +206,10 @@ select.sel {
   outline: none;
   transition: var(--transition);
 }
+select.sel option {
+  background: var(--bg-card);
+  color: var(--text);
+}
 select.sel:focus {
   border-color: var(--border-focus);
 }
@@ -331,7 +335,7 @@ select.sel:focus {
 #preset-sel {
   min-width: 140px;
   border: none;
-  background: transparent;
+  background: var(--bg-input);
   padding-left: 0;
 }
 
