@@ -7374,27 +7374,15 @@ async function renderScannerView() {
   el.innerHTML = `
     <div class="scanner-page">
       <div id="marketCtxBar" class="market-ctx-bar" title="Kontext trhu — neovplyvňuje skóre signálov, len ich interpretáciu"></div>
-      <section class="scanner-candidate-radar">
-        <div class="scanner-section-head">
-          <div>
-            <div class="scanner-section-kicker">Čo pozrieť</div>
-            <div class="tool-title">Kandidáti</div>
-          </div>
-          <div class="scanner-section-actions">
-            <button class="btn" onclick="openChecklist()">☰ Checklist watchlistu</button>
-            <button class="btn" onclick="refreshOpportunities(true)">⟳ Obnoviť Opportunities</button>
-          </div>
-        </div>
-        <div class="scanner-section-note">Opportunities vyberá kandidátov z watchlistu a eToro pozícií. Klik otvorí vysvetlenie v Prediktívnom tabe.</div>
-        <div id="opportunitiesInfo" class="opp-empty">Načítavam Opportunities...</div>
-      </section>
       <div class="tool-panel fill">
         <div class="tool-toolbar">
           <div>
-            <div class="scanner-section-kicker">Širší trh</div>
-            <div class="tool-title">Nasdaq Scanner + DIP crossover</div>
+            <div class="scanner-section-kicker">Čo pozrieť dnes</div>
+            <div class="tool-title">Kandidáti</div>
           </div>
-            <div class="scanner-actions">
+          <div class="scanner-actions">
+            <button class="btn" onclick="openChecklist()">☰ Skenuj watchlist</button>
+            <button class="btn" onclick="refreshOpportunities(true)">⟳ Obnoviť watchlist/eToro</button>
             <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
             <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
             <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
@@ -7403,6 +7391,23 @@ async function renderScannerView() {
         <div class="scanner-meta-row">
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
+        </div>
+        <section class="scanner-candidate-radar scanner-candidate-radar-inline">
+          <div class="scanner-source-head">
+            <div>
+              <div class="scanner-section-kicker">Watchlist / eToro</div>
+              <div class="scanner-source-title">Rýchly radar držaných a sledovaných titulov</div>
+            </div>
+            <span class="scanner-source-note">Klik otvorí detail v Predikcii</span>
+          </div>
+          <div id="opportunitiesInfo" class="opp-empty">Načítavam watchlist/eToro kandidátov...</div>
+        </section>
+        <div class="scanner-source-head scanner-nasdaq-head">
+          <div>
+            <div class="scanner-section-kicker">Nasdaq + DIP</div>
+            <div class="scanner-source-title">Širší skener nových príležitostí</div>
+          </div>
+          <span class="scanner-source-note">Technický signál + importovaný DIP ranking</span>
         </div>
         <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
       </div>
@@ -7475,18 +7480,14 @@ function renderNasdaqScanner(payload) {
   };
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
-    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}</div>
+    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}
+      <span class="scanner-compact-kpis">Signály ${kpis.total} · Crossover ${kpis.crossover} · Strong ${kpis.strong} · Tech only ${kpis.techOnly}</span>
+    </div>
     <details class="scanner-export">
       <summary>Export / kopírovanie</summary>
       <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tMarket\tReason
 ${escHtml(copyText)}</textarea>
     </details>
-    <div class="scanner-kpis">
-      <div class="tool-kpi"><div class="tool-kpi-label">Signály</div><div class="tool-kpi-val">${kpis.total}</div></div>
-      <div class="tool-kpi"><div class="tool-kpi-label">Crossover</div><div class="tool-kpi-val">${kpis.crossover}</div></div>
-      <div class="tool-kpi"><div class="tool-kpi-label">Strong</div><div class="tool-kpi-val">${kpis.strong}</div></div>
-      <div class="tool-kpi"><div class="tool-kpi-label">Tech only</div><div class="tool-kpi-val">${kpis.techOnly}</div></div>
-    </div>
     <div class="scanner-main-row">
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">

@@ -103,7 +103,7 @@
     <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody s filtrom dátumového intervalu od–do.</li>
     <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
-    <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
+    <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
     <li><strong>Verdikt</strong> — zjednodušená odpoveď ÁNO / POČKAŤ / NIE pre horizont 30–90 dní. Ukáže najviac dva argumenty pre, dva proti a jednu podmienku, ktorá môže rozhodnutie zmeniť. Indikátory Technika / Trh / Firma / Earnings ukazujú dostupnosť podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa 10 minút cachuje. Nepridáva nové skóre ani nemení C1–C4 alebo ML.</li>
   </ul>
 
@@ -312,7 +312,7 @@
   <blockquote><p>Historické signály sa neprepisujú — staré záznamy bez tieru sa dočasne zobrazia ako watch a prefarbia sa po novom vyhodnotení tickera.</p></blockquote>
 
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
-  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. Horný blok <strong>Kandidáti</strong> obsahuje Opportunities z watchlistu/eToro pozícií a vstup do Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály s externým <strong>DIP rankingom</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
+  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>Nasdaq + DIP</strong> hľadá nové širšie príležitosti cez Nasdaq-100 a externý <strong>DIP ranking</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
 
   <h3>Kontext trhu — lišta TRH</h3>
   <p>Úplne hore v Scanneri je riadok chipov <strong>TRH</strong>. Odpovedá na otázku: <em>„Má môj Buy signál podporu širšieho trhu, alebo idem proti prúdu?“</em> Dôležité: lišta <strong>nevstupuje do C1–C4 skóre</strong> — signály počíta rovnako v býčom aj medveďom trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom trhu vyššiu šancu na úspech než v klesajúcom.</p>
@@ -339,22 +339,23 @@
 
   <h3>Ovládanie</h3>
   <ul>
-    <li><strong>Opportunities</strong> — kompaktný radar titulov z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.</li>
-    <li><strong>Checklist watchlistu</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
+    <li><strong>Watchlist / eToro radar</strong> — kompaktný radar titulov z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.</li>
+    <li><strong>Skenuj watchlist</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
     <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX, ideálne zo záložky <code>Ranking</code>.</li>
     <li>Import je zámerne manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom nahráš súbor.</li>
     <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre Nasdaq scanner a DCA kartu.</li>
     <li><strong>Spustiť scanner</strong> — paralelný sken Nasdaq-100 (progress bar, beží na pozadí).</li>
   </ul>
 
-  <h3>KPI dlaždice</h3>
+  <h3>Kompaktný status scanu</h3>
   <table>
-    <tr><th>KPI</th><th>Význam</th></tr>
+    <tr><th>Hodnota</th><th>Význam</th></tr>
     <tr><td><strong>Signály</strong></td><td>Počet tickerov s čerstvým signálom.</td></tr>
     <tr><td><strong>Crossover</strong></td><td>Stretnutie technického signálu s vysokým DIP rankingom.</td></tr>
     <tr><td><strong>Strong</strong></td><td>Tickery s labelom STRONG / VERY STRONG.</td></tr>
     <tr><td><strong>Tech only</strong></td><td>Signály bez DIP dát (len technické).</td></tr>
   </table>
+  <p>Tieto hodnoty sú v UI zobrazené ako jeden status riadok nad tabuľkou, nie ako veľké rozhodovacie karty.</p>
 
   <h3>Stĺpce tabuľky</h3>
   <table>
@@ -455,7 +456,7 @@
   </ul>
 
   <h3>Export / kopírovanie</h3>
-  <p>Nad KPI dlaždicami je zbalený blok <strong>Export / kopírovanie</strong> — TSV formát pripravený na vloženie do Excelu / Google Sheets.</p>
+  <p>Nad tabuľkou je zbalený blok <strong>Export / kopírovanie</strong> — TSV formát pripravený na vloženie do Excelu / Google Sheets.</p>
 
   <h3>Watch vs. Buy</h3>
   <p>Signál sa zaznamenáva od <strong>2/4</strong> podmienok. Či je buy/watch/counter rozhoduje trendový kontext (viď farby vyššie), nie len počet podmienok.</p>
@@ -525,7 +526,7 @@
 
   <h2 id="presets">8. Presety, watchlist, eToro</h2>
   <ul>
-    <li><strong>Watchlist</strong> — sledované tickery (Grafy, Opportunities, prefetch).</li>
+    <li><strong>Watchlist</strong> — sledované tickery (Grafy, Watchlist / eToro radar, prefetch).</li>
     <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>
     <li><strong>eToro pozície</strong> — Portfólio tab ukazuje živé pozície a P&amp;L. Equity sa počíta jednotne ako <code>cash + invested + total_pnl</code>.</li>
     <li><strong>Dnes P/L</strong> — live odhad denného pohybu v USD v summary bare aj ako stĺpec v tabuľke pozícií. Vypočítané z OHLCV cache <code>(currentRate − prevClose) × units × direction</code>. Zahŕňa priame pozície; Smart/Copy denný pohyb bez spoľahlivého eToro baseline nie je dopočítaný.</li>
@@ -538,7 +539,7 @@
     <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Dá sa zvýšiť <code>SCANNER_YF_TIMEOUT</code>.</td></tr>
     <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
     <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
-    <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Opportunities a Alerty.</td></tr>
+    <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty.</td></tr>
     <tr><td>Massive / Trh ukazuje n/a</td><td>Skontroluj <code>MASSIVE_API_KEY</code> na Renderi. EOD dáta sú dostupné až po uzavretí trhu; vrstva je interpretačná a výpadok nemení C1–C4.</td></tr>
     <tr><td>P/L sa mierne líši od eToro</td><td>Dashboard medzi snapshotmi robí live odhad z cien. eToro môže započítať konverziu meny, spread, poplatky a interné zaokrúhlenie. Malá odchýlka je očakávaná.</td></tr>
     <tr><td>Po deployi vidím staré UI</td><td>Počkaj na dokončenie Render deployu a obnov stránku. Statické súbory majú cache verziu; pri nezvyčajnom stave pomôže anonymné okno alebo vymazanie dát webu.</td></tr>

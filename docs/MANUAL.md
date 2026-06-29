@@ -96,8 +96,8 @@ vopred sa zobrazia 3-krát).
 - **📈 Prediktívny** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
   história, validácia a predikcia ďalšej sviečky
   (viď [sekcia 4](#4-prediktívny-tab--ako-čítať-signály)).
-- **Scanner** — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu
-  a Nasdaq skener s DIP crossover stratégiou
+- **Scanner** — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie
+  watchlistu a Nasdaq skener s DIP crossover stratégiou
   (viď [sekcia 5](#5-scanner--dip-stratégia)).
 
 - **Verdikt** — stručná rozhodovacia vrstva pre jeden ticker. Z existujúcej
@@ -428,10 +428,11 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 
 ## 5. Scanner + DIP stratégia
 
-Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. Horný blok
-**Kandidáti** obsahuje Opportunities z watchlistu/eToro pozícií a vstup do
-Checklistu. Spodný blok prechádza Nasdaq-100 a kombinuje technické signály
-s externým **DIP rankingom**. Klik na kandidáta otvorí jeho detail v Predikcii.
+Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
+do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**
+je rýchly radar titulov, ktoré už sleduješ alebo držíš. Spodný podblok
+**Nasdaq + DIP** hľadá nové širšie príležitosti cez Nasdaq-100 a externý
+**DIP ranking**. Klik na kandidáta otvorí jeho detail v Predikcii.
 
 ### Kontext trhu — lišta TRH
 
@@ -472,10 +473,11 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 
 ### Ovládanie
 
-- **Opportunities** — kompaktný radar najzaujímavejších titulov z watchlistu
-  a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.
-- **Checklist watchlistu** — kontrola tickerov z watchlistu za zvolený počet
-  dní. Výsledok je samostatná fullscreen tabuľka; klik otvorí detail v Predikcii.
+- **Watchlist / eToro radar** — kompaktný radar najzaujímavejších titulov
+  z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext
+  a stručné dôvody.
+- **Skenuj watchlist** — kontrola tickerov z watchlistu za zvolený počet dní.
+  Výsledok je samostatná fullscreen tabuľka; klik otvorí detail v Predikcii.
 - **Vybrať súbor → Import DIP Excel** — nahrá DIP ranking (FA/TA skóre) z XLSX,
   ideálne zo záložky `Ranking` v tvojom pracovnom súbore. Import je zámerne
   manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom
@@ -486,13 +488,11 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 - **Spustiť scanner** — spustí paralelný sken Nasdaq-100 (progress bar ukazuje
   priebeh). Beží na pozadí, výsledky sa priebežne dopĺňajú.
 
-### KPI dlaždice
+### Kompaktný status scanu
 
-- **Signály** — počet tickerov s čerstvým signálom.
-- **Crossover** — počet tickerov, kde sa stretol technický signál s vysokým DIP
-  rankingom.
-- **Strong** — tickery s DIP labelom STRONG / VERY STRONG.
-- **Tech only** — signály bez DIP dát (len technické).
+Veľké KPI dlaždice boli zjednodušené do jedného status riadku nad tabuľkou:
+**Signály / Crossover / Strong / Tech only**. Ide o rýchly súhrn, nie primárny
+rozhodovací výstup.
 
 ### Stĺpce tabuľky
 
@@ -690,7 +690,7 @@ tickerov — jeden zdieľaný blok textu pre celý scanner).
 
 ### Export / kopírovanie
 
-Nad KPI dlaždicami je zbalený blok **Export / kopírovanie** — `Ticker\tTech\t…`
+Nad tabuľkou je zbalený blok **Export / kopírovanie** — `Ticker\tTech\t…`
 formát pripravený na vloženie do Excelu / Google Sheets.
 
 ### Watch vs. Buy
@@ -777,7 +777,7 @@ jazykom.
 ## 8. Presety, watchlist, eToro
 
 - **Watchlist** — zoznam sledovaných tickerov, ktoré sa zobrazujú v Grafoch a
-  vstupujú do Opportunities a prefetchu.
+  vstupujú do Watchlist / eToro radaru a prefetchu.
 - **Presety** — uložené rozloženia (watchlist + usporiadanie panelov). Ulož cez
   **Ulož ako…**, načítaj cez **PRESET**.
 - **eToro pozície** — Portfólio tab ukazuje živé pozície a P&L. Sidebar a
@@ -801,7 +801,7 @@ jazykom.
 | **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Dá sa zvýšiť `SCANNER_YF_TIMEOUT`. |
 | **Regime = n/a** | `hmmlearn` nie je nainštalovaný alebo málo histórie (min. 60 sviečok). |
 | **Portfólio stratené pri výpadku eToro** | Cache padá späť na disk (stale-while-erroring), je to zámerné. |
-| **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Opportunities a Alerty. |
+| **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty. |
 | **Staré signály majú zlú farbu** | Log sa neprepisuje; prefarbia sa po novom vyhodnotení tickera. |
 
 ---
