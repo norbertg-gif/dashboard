@@ -4135,6 +4135,9 @@ function createPanel(cfg) {
     abortController: null, loadSeq: 0,
     _rawChartData: [], hasMoreHistory: false, historyLoading: false,
     _markerMeta: {},
+    moverChangePct: Number.isFinite(Number(cfg.moverChangePct)) ? Number(cfg.moverChangePct) : null,
+    moverLastPrice: Number.isFinite(Number(cfg.moverLastPrice)) ? Number(cfg.moverLastPrice) : null,
+    moverPriceSource: cfg.moverPriceSource || null,
   };
   attachMarkerTooltip(mainChart, mainCont, objectId => registry[id]?._markerMeta?.[objectId]);
 
@@ -4889,6 +4892,19 @@ function applyPanelSeriesData(r, data) {
   r.volSeries.setData(volumeData);
 }
 
+function applyMoverLiveClose(r, data, interval) {
+  const livePrice = Number(r?.moverLastPrice);
+  if (!Array.isArray(data) || !data.length || interval !== '1d' || !Number.isFinite(livePrice) || livePrice <= 0) {
+    return data;
+  }
+  const patched = data.map(d => ({ ...d }));
+  const last = patched[patched.length - 1];
+  last.close = livePrice;
+  last.high = Math.max(Number(last.high) || livePrice, livePrice);
+  last.low = Math.min(Number(last.low) || livePrice, livePrice);
+  return patched;
+}
+
 async function loadOlderChartData(id) {
   const panel = document.getElementById(id);
   const r = registry[id];
@@ -5046,6 +5062,7 @@ async function loadChart(id, opts = {}) {
       return;
     }
 
+    data = applyMoverLiveClose(r, data, interval);
     r._rawChartData = data;
     applyPanelSeriesData(r, data);
     const restoredView = r.viewRange && Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
@@ -5078,6 +5095,10 @@ async function loadChart(id, opts = {}) {
 
     const last = data[data.length-1], prev = data.length>1?data[data.length-2]:null;
     const pct  = prev ? (last.close-prev.close)/prev.close*100 : 0;
+    const displayPct = Number.isFinite(Number(r.moverChangePct)) ? Number(r.moverChangePct) : pct;
+    const displayPctTitle = Number.isFinite(Number(r.moverChangePct))
+      ? `Top pohyby: denný pohyb (${r.moverPriceSource === 'etoro_live' ? 'eToro live' : 'OHLCV cache'})`
+      : 'Denný pohyb podľa posledných sviečok grafu';
     // eToro P&L badge — vypočítame po applyEtoroMarkers
     const ePct = r.etoroPct;
     const haBadge = r.indicators.ha
@@ -5105,7 +5126,7 @@ async function loadChart(id, opts = {}) {
     infoEl.innerHTML = `
       ${(name&&name!==sym)?`<span class="p-name">${name}</span>`:''}
       <span class="p-price">${fmtPrice(last.close)}</span>
-      <span class="p-chg ${pct>=0?'up':'down'}">${pct>=0?'▲':'▼'} ${Math.abs(pct).toFixed(2)}%</span>
+      <span class="p-chg ${displayPct>=0?'up':'down'}" title="${displayPctTitle}">${displayPct>=0?'▲':'▼'} ${Math.abs(displayPct).toFixed(2)}%</span>
       ${haBadge}
       ${eBadge}
       ${ePosBadge}
@@ -5249,7 +5270,13 @@ async function loadMovers() {
     }
     [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
     setActivePanel(null);
-    movers.forEach(m => createPanel({ symbol: m.symbol, interval: '1d' }));
+    movers.forEach(m => createPanel({
+      symbol: m.symbol,
+      interval: '1d',
+      moverChangePct: Number(m.change_pct),
+      moverLastPrice: Number(m.last_close),
+      moverPriceSource: m.price_source || null
+    }));
     saveLayout();
     loadAll();
     const dirTxt = up ? 'rast' : 'pokles';

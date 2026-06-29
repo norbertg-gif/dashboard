@@ -2360,6 +2360,7 @@ def get_movers(
 
     # Watchlist beriem celý (sú to akcie); portfólio filtrujem na stock/ETF cez type
     universe: dict[str, str] = {}   # symbol -> source
+    live_rates: dict[str, float] = {}
     for item in _read_watchlist_file():
         sym = str(item.get("symbol") or "").upper()
         if sym:
@@ -2374,13 +2375,24 @@ def get_movers(
             if not sym:
                 continue
             universe[sym] = "both" if sym in universe else "portfolio"
+            current_rate = pos.get("currentRate")
+            if isinstance(current_rate, (int, float)) and current_rate > 0:
+                live_rates[sym] = float(current_rate)
     except Exception as e:
         print(f"[movers] portfolio error: {_scrub_token(e)}")
 
     rows = []
     skipped = 0
     for sym, source in universe.items():
-        dc = _daily_change_from_cache(sym)
+        dc = None
+        price_source = "ohlcv_cache"
+        live_rate = live_rates.get(sym)
+        prev_close = _get_prev_close(sym) if live_rate else None
+        if live_rate and prev_close:
+            dc = ((live_rate - prev_close) / prev_close * 100, live_rate)
+            price_source = "etoro_live"
+        if dc is None:
+            dc = _daily_change_from_cache(sym)
         if dc is None:
             skipped += 1
             continue
@@ -2390,6 +2402,7 @@ def get_movers(
             "change_pct": round(change_pct, 2),
             "last_close": round(last_close, 4),
             "source": source,
+            "price_source": price_source,
         })
 
     rows.sort(key=lambda r: r["change_pct"], reverse=not down)
