@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Trading Dashboard Backend — port 8766
 pip install fastapi uvicorn yfinance pandas requests
@@ -910,9 +910,7 @@ ALLOWED_CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        # finviz.* — aby bookmarklet (beží v origine finviz.com) mohol POST-núť
-        # nazbierané HTML na /api/public/finviz/import-html a prečítať výsledok.
-        "https://dashboard-yvb5.onrender.com,https://finviz.com,https://elite.finviz.com",
+        "https://dashboard-yvb5.onrender.com",
     ).split(",")
     if origin.strip()
 ]
@@ -4862,9 +4860,7 @@ def _store_finviz_html_import(files):
 
 @app.post("/api/scanner/dip/import-html")
 async def import_dip_html(request: Request):
-    body = await request.json()
-    files = body.get("files") if isinstance(body, dict) else None
-    return _store_finviz_html_import(files)
+    raise HTTPException(status_code=410, detail="Finviz HTML import je vypnuty; pouzi XLSX import DIP rankingu.")
 
 
 @app.post("/api/public/finviz/import-html")
@@ -4874,17 +4870,8 @@ async def public_import_finviz_html(
     x_api_token: str | None = Header(None, alias="X-API-Token"),
     token: str | None = Query(None),
 ):
-    """
-    Verejný (token-chránený) import Finviz HTML — pre bookmarklet bežiaci
-    v prihlásenej finviz.com session. Telo: {"files": [{"name", "html"}, ...]}.
-    """
-    _check_public_rate_limit(request)
-    provided_token = _public_token_from_headers(authorization, x_api_token, token)
-    if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
-        raise HTTPException(status_code=403, detail="Invalid token")
-    body = await request.json()
-    files = body.get("files") if isinstance(body, dict) else None
-    return _store_finviz_html_import(files)
+    """Legacy endpoint. HTML/Finviz import je vypnutý; DIP ranking sa importuje cez XLSX."""
+    raise HTTPException(status_code=410, detail="Finviz public HTML import je vypnuty; pouzi XLSX import DIP rankingu.")
 
 
 def _parse_finviz_screener_urls(text):
@@ -4913,22 +4900,12 @@ def _load_finviz_screeners():
 
 @app.get("/api/scanner/finviz/screeners")
 def get_finviz_screeners():
-    data = _load_finviz_screeners()
-    return {
-        "content": "\n".join(data.get("urls", [])),
-        "urls": data.get("urls", []),
-        "count": len(data.get("urls", [])),
-        "updated_at": data.get("updated_at"),
-    }
+    raise HTTPException(status_code=410, detail="Finviz screener URL zoznam je vypnuty.")
 
 
 @app.post("/api/scanner/finviz/screeners")
 async def save_finviz_screeners(request: Request):
-    body = await request.json()
-    urls = _parse_finviz_screener_urls(body.get("content", ""))
-    payload = {"urls": urls, "updated_at": datetime.now(timezone.utc).isoformat()}
-    FINVIZ_SCREENERS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "count": len(urls), "updated_at": payload["updated_at"]}
+    raise HTTPException(status_code=410, detail="Finviz screener URL zoznam je vypnuty.")
 
 
 @app.get("/api/public/finviz/screeners")
@@ -4938,22 +4915,13 @@ def public_finviz_screeners(
     x_api_token: str | None = Header(None, alias="X-API-Token"),
     token: str | None = Query(None),
 ):
-    """Token-chránený zoznam screener URL pre bookmarklet (beží v finviz.com session)."""
-    _check_public_rate_limit(request)
-    provided_token = _public_token_from_headers(authorization, x_api_token, token)
-    if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
-        raise HTTPException(status_code=403, detail="Invalid token")
-    return {"urls": _load_finviz_screeners().get("urls", [])}
+    """Legacy endpoint. Finviz screener URL list je vypnutý spolu s HTML importom."""
+    raise HTTPException(status_code=410, detail="Finviz public screener URL zoznam je vypnuty.")
 
 
 @app.get("/api/scanner/dip/html-preview")
 def get_dip_html_preview():
-    if not FINVIZ_IMPORT_FILE.exists():
-        return {"rows": [], "pages": [], "unique_tickers": 0}
-    try:
-        return json.loads(FINVIZ_IMPORT_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {"rows": [], "pages": [], "unique_tickers": 0, "error": "Import preview sa neda nacitat"}
+    raise HTTPException(status_code=410, detail="Finviz HTML preview je vypnuty; pouzi XLSX import DIP rankingu.")
 
 
 @app.get("/api/scanner/dip/status")

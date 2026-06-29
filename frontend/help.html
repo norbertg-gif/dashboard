@@ -341,23 +341,11 @@
   <ul>
     <li><strong>Opportunities</strong> — kompaktný radar titulov z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext a stručné dôvody.</li>
     <li><strong>Checklist watchlistu</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
-    <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX.</li>
-    <li><strong>Import Finviz HTML folder</strong> — vyberie priečinok so stránkami uloženými cez Save Page WE, spojí Finviz tabuľky, odstráni duplicity a vypočíta rovnaké FA/TA/TOTAL skóre ako Excel.</li>
-    <li>Kontrolná tabuľka pod importom zobrazuje raw Finviz hodnoty aj výsledný ranking. XLSX a HTML cesta aktualizujú rovnakú DIP cache.</li>
+    <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX, ideálne zo záložky <code>Ranking</code>.</li>
+    <li>Import je zámerne manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom nahráš súbor.</li>
+    <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre Nasdaq scanner a DCA kartu.</li>
     <li><strong>Spustiť scanner</strong> — paralelný sken Nasdaq-100 (progress bar, beží na pozadí).</li>
   </ul>
-
-  <h3>Finviz bookmarklet — import na jeden klik</h3>
-  <p>Namiesto ručného ukladania HTML stránok môžeš použiť <strong>bookmarklet</strong> (záložku so skriptom). Beží priamo v prehliadači v tvojej <strong>prihlásenej</strong> Finviz session, takže dostane presne tvoj custom column preset — to, čo serverové sťahovanie z Renderu nedokáže (neprihlásená datacenter IP).</p>
-  <ol>
-    <li>Prihlás sa na <strong>finviz.com</strong> v prehliadači a over, že je aktívny tvoj column preset.</li>
-    <li><strong>Bookmarklet spúšťaj výhradne na otvorenom finviz.com tabe</strong> — používa tvoju prihlásenú session cez same-origin fetch. Na inej doméne (Google a pod.) skončí chybou „Finviz 404“; skript to dnes rovno odhalí hláškou, na akej doméne si.</li>
-    <li>Klikni na záložku <strong>📥 Finviz → Dashboard</strong>. Skript najprv overí, či Finviz vracia tvoje custom stĺpce (kontrola prihlásenia); ak nie, zastaví sa s hláškou.</li>
-    <li>Stiahne si zoznam screener URL z dashboardu (spravuješ ho v paneli <strong>⚙ Finviz URL zoznam</strong> v Scanneri), postupne doťahá každú URL vo tvojej session, spojí ich a jedným POST-om pošle do dashboardu.</li>
-    <li>Na konci ukáže hlášku s počtom naimportovaných tickerov.</li>
-  </ol>
-  <p><strong>Konfigurácia URL:</strong> v Scanneri klikni na <strong>⚙ Finviz URL zoznam</strong> a vlož svoje Finviz screener URL — jednu na riadok (vrátane stránok <code>r=21, r=41…</code>). Uloží sa na dashboard, takže bookmarklet nie je viazaný na konkrétne PC a zmena filtra = úprava v jednom paneli, nie editovanie záložky.</p>
-  <p><strong>Bezpečnosť:</strong> bookmarklet komunikuje s <code>/api/public/finviz/*</code> chránenými tokenom <code>PUBLIC_API_TOKEN</code> (rovnaký model ako news clientkey). Token je v texte záložky — drž ho len vo svojom prehliadači. URL dashboardu je jediná ďalšia premenná v skripte.</p>
 
   <h3>KPI dlaždice</h3>
   <table>
