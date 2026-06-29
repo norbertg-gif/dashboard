@@ -61,7 +61,7 @@
       <li><a href="#tabs">Záložky</a></li>
       <li><a href="#workflow">Odporúčaný pracovný postup</a></li>
       <li><a href="#charts">Grafy</a></li>
-      <li><a href="#portfolio">Portfólio, História a Risk</a></li>
+      <li><a href="#portfolio">Portfólio a História</a></li>
       <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
       <li><a href="#verdict">Investičný verdikt</a></li>
@@ -102,7 +102,6 @@
     <li><strong>📈 Grafy</strong> — mriežka panelov s grafmi tickerov z watchlistu. Klik aktivuje panel.</li>
     <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody s filtrom dátumového intervalu od–do.</li>
-    <li><strong>Risk</strong> — riziková analýza portfólia.</li>
     <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
     <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
     <li><strong>Verdikt</strong> — zjednodušená odpoveď ÁNO / POČKAŤ / NIE pre horizont 30–90 dní. Ukáže najviac dva argumenty pre, dva proti a jednu podmienku, ktorá môže rozhodnutie zmeniť. Indikátory Technika / Trh / Firma / Earnings ukazujú dostupnosť podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa 10 minút cachuje. Nepridáva nové skóre ani nemení C1–C4 alebo ML.</li>
@@ -122,7 +121,7 @@
     <li><strong>Kandidáti:</strong> vyber Buy/Watch titul s rozumnou silou a DIP kvalitou. Stĺpec Trh ti povie, či titul v posledný deň rástol, kde zatvoril voči VWAP a aká bola jeho relatívna obchodná aktivita.</li>
     <li><strong>Prediktívny:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 30D/60D/90D validáciu, earnings a firemný kontext.</li>
     <li><strong>Verdikt:</strong> použi ho ako záverečné zhrnutie, nie ako náhradu vlastného rozhodnutia. Rozklikni dôkazy, ak záver nie je jasný.</li>
-    <li><strong>Portfólio a Risk:</strong> pred vstupom over koncentráciu, veľkosť existujúcej pozície a či už nemáš priveľa kapitálu v rovnakom type aktív.</li>
+    <li><strong>Portfólio:</strong> pred vstupom over veľkosť existujúcej pozície, P/L a prípadných DCA kandidátov.</li>
   </ol>
   <blockquote><p>Dashboard nehľadá istotu. Skladá nezávislé dôkazy: technický setup, trend, širší trh, história podobných signálov a firemné riziká. Jeden zelený údaj nikdy nie je dostatočný dôvod na nákup.</p></blockquote>
 
@@ -157,7 +156,7 @@
   </ul>
   <blockquote><p>Profil z našich OHLCV dát nevie presne rozdeliť objem na Buy a Sell. Modrý pruh je celkový zobchodovaný objem. Skutočná order-flow delta by potrebovala tickové obchody synchronizované s bid/ask dátami, ktoré free zdroje neposkytujú.</p></blockquote>
 
-  <h2 id="portfolio">Portfólio, História a Risk</h2>
+  <h2 id="portfolio">Portfólio a História</h2>
   <h3>Portfólio — summary</h3>
   <table>
     <tr><th>Údaj</th><th>Čo znamená</th></tr>
@@ -183,7 +182,7 @@
   <h3>História</h3>
   <p>Zobrazuje uzavreté obchody z eToro, filtrovateľné <strong>dátumovým intervalom od–do</strong> (podľa dátumu uzatvorenia). KPI nad tabuľkou (počet, win rate, net P/L, fees) sa prepočítajú pre zvolený interval; ak je „od" väčšie ako „do", interval sa automaticky prehodí. Stĺpce možno radiť; P/L je realizovaný výsledok, nie aktuálny odhad. Dátum otvorenia a zatvorenia pomáha spätne porovnať obchod so signálmi a stavom trhu.</p>
 
-  <h3>Risk</h3>
+  <h3>DCA kandidáti v Portfóliu</h3>
   <ul>
     <li><strong>Risk briefing</strong> je krátky slovný záver nad tabuľkami: povie, či portfólio pôsobí rozložene alebo koncentrovane, a vypichne najväčší sektor, najväčšiu pozíciu a Top 5 váhu.</li>
     <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>

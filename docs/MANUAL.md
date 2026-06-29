@@ -16,7 +16,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 3. [Záložky](#3-záložky)
    - [Odporúčaný pracovný postup](#odporúčaný-pracovný-postup)
    - [Bežné grafy](#bežné-grafy)
-   - [Portfólio, História a Risk](#portfólio-história-a-risk)
+   - [Portfólio a História](#portfólio-a-história)
 4. [Prediktívny tab — ako čítať signály](#4-prediktívny-tab--ako-čítať-signály)
 5. [Scanner + DIP stratégia](#5-scanner--dip-stratégia)
 6. [Prev?dzka a pam??ov? profil](#6-prev?dzka-a-pam??ov?-profil)
@@ -93,7 +93,6 @@ vopred sa zobrazia 3-krát).
   ho aktivuje, dvojklik otvára detail.
 - **📊 Portfólio** — aktuálne eToro pozície, summary (Cash / Invested / P&L / **Dnes P/L** / Equity).
 - **História** — uzavreté obchody s filtrom dátumového intervalu od–do.
-- **Risk** — riziková analýza portfólia.
 - **📈 Prediktívny** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
   história, validácia a predikcia ďalšej sviečky
   (viď [sekcia 4](#4-prediktívny-tab--ako-čítať-signály)).
@@ -134,7 +133,7 @@ vopred sa zobrazia 3-krát).
 - Live cena upravuje poslednú sviečku. Uzavreté sviečky sa používajú z cache,
   aby sa graf zobrazil rýchlo a zbytočne sa nesťahovala celá história.
 
-### Portfólio, História a Risk
+### Portfólio a História
 
 - **Cash** je voľná hotovosť, **Invested** vložený kapitál, **P/L** otvorený
   zisk/strata, **Dnes P/L** odhad dnešného pohybu a **Equity** približná hodnota
@@ -145,11 +144,7 @@ vopred sa zobrazia 3-krát).
   Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
   intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
-  net P/L, fees) sa prepočítajú pre zvolený interval. **Risk** ukazuje koncentráciu,
-  najväčšie pozície, rizikové príznaky, sektorovú expozíciu a heatmapu:
-  veľkosť = podiel na equity, farba = denný P/L, doplnkový údaj = celkový P/L.
-  Hore je aj krátky risk briefing, ktorý ľudsky zhrnie, či je portfólio
-  rozložené alebo koncentrované.
+  net P/L, fees) sa prepočítajú pre zvolený interval.
 - **Korelačná matica** (pod tabuľkou Top pozícií) ukazuje 60-dňovú Pearsonovu
   koreláciu denných výnosov medzi top 20 pozíciami. Červená pri **+1**
   (pohybujú sa rovnako), modrá pri **−1** (pohybujú sa opačne), neutrálna pri
@@ -161,7 +156,7 @@ vopred sa zobrazia 3-krát).
   neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
   v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
   tab nesťahuje nové API volania.
-- **DCA kandidáti** (karta v Risk tabe) spája agregovaný P/L pozície s DIP
+- **DCA kandidáti** (karta v Portfóliu) spája agregovaný P/L pozície s DIP
   rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
   pozície v strate **≥ 15 %** a oflaguje ich:
   - 🟢 **DCA** — strata ≥ 15 %, DIP ≥ 90 a váha pozície pod 10 % equity →

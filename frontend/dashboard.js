@@ -205,7 +205,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','history','risk','predictive','scanner','verdict'].forEach(name => {
+  ['charts','portfolio','history','predictive','scanner','verdict'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -223,8 +223,6 @@ function switchMainTab(tab) {
     setTimeout(fixupChartSizes, 60);
   } else if (tab === 'history') {
     renderHistoryView();
-  } else if (tab === 'risk') {
-    renderRiskView();
   } else if (tab === 'scanner') {
     renderScannerView();
   } else if (tab === 'verdict') {
@@ -1063,8 +1061,8 @@ async function renderRiskView(force = false) {
 
 let _dcaCache = { account: null, data: null };
 async function loadDcaCandidates(force = false) {
-  const account = activeAccount || '1';
-  const wrap = document.getElementById('risk-dca');
+  const account = String(portState?.main?.account || activeAccount || '1');
+  const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
   if (!wrap) return;
   if (!force && _dcaCache.account === account && _dcaCache.data) {
     renderDcaCard(_dcaCache.data);
@@ -1090,7 +1088,7 @@ const DCA_FLAG_META = {
 };
 
 function renderDcaCard(data) {
-  const wrap = document.getElementById('risk-dca');
+  const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
   if (!wrap) return;
   const th = data.thresholds || {};
   const ageTxt = data.dip_updated_at ? ` · DIP dáta ${fmtImportTime(data.dip_updated_at)}` : '';
@@ -1129,7 +1127,7 @@ function renderDcaCard(data) {
     <table class="tool-table"><thead><tr>
       <th>Flag</th><th>Ticker</th><th class="r">Strata</th><th class="r">Váha</th><th class="r">DIP</th><th class="r">Tranže</th>
     </tr></thead><tbody>${rows}</tbody></table>
-    <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu ani bota.</div>`;
+    <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu.</div>`;
 }
 
 let _corrCache = { account: null, data: null };
@@ -2114,6 +2112,13 @@ function renderPortPanel(pid) {
   // Výkonnostný panel (gain)
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
+  if (pid === 'main') {
+    html += `<div id="portfolio-dca" style="padding:10px 16px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+    <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+    <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
+  </div>`;
+    setTimeout(() => loadDcaCandidates(), 0);
+  }
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
@@ -2245,6 +2250,7 @@ function renderPortPanel(pid) {
 // Portfolio akcie
 function portSetAccount(pid, acc) {
   const s = getPortState(pid); s.account = acc; s.data = null;
+  if (pid === 'main') _dcaCache = { account: null, data: null };
   // Aplikuj tint na portfolio tab podľa zvoleného účtu
   const portEl = document.getElementById('main-portfolio');
   if (portEl) {
@@ -5498,7 +5504,9 @@ Sheet: ${sheetName}`);
   applyTheme();
   setEventWindow(eventWindowHours);
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
-  if (['charts','portfolio','history','risk','predictive','scanner','verdict'].includes(requestedTab)) {
+  if (requestedTab === 'risk') {
+    switchMainTab('portfolio');
+  } else if (['charts','portfolio','history','predictive','scanner','verdict'].includes(requestedTab)) {
     switchMainTab(requestedTab);
   }
 
