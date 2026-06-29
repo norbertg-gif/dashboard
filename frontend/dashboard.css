@@ -2863,7 +2863,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .sig-horizon.unavailable { opacity: .65; }
 #predictiveTab .signal-outcome-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 6px;
 }
 #predictiveTab .signal-outcome-card {
@@ -2872,6 +2872,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   background: var(--bg);
   padding: 7px;
   min-width: 0;
+}
+#predictiveTab .signal-outcome-card.primary-90 {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+#predictiveTab .signal-outcome-card.primary-90 .signal-outcome-head strong {
+  font-size: 13px;
 }
 #predictiveTab .signal-outcome-head,
 #predictiveTab .signal-outcome-main,

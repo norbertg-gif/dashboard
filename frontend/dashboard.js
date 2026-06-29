@@ -1,4 +1,4 @@
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+﻿const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8766' : '';
 const PERIODS = ['auto'];
 const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
@@ -5612,7 +5612,7 @@ let pc_oppLoading = false;
 let pc_oppLoadedAt = 0;
 let pc_scannerPollTimer = null;
 let pc_scannerLoading = false;
-let pc_signalSegmentHorizon = 60;
+let pc_signalSegmentHorizon = 90;
 
 // Overlay series refs
 let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
@@ -6223,13 +6223,13 @@ function pc_renderDailyExtra(data) {
     return `<span class="sig-horizon ${cls}" title="MFE ${fmtSigned(result.mfe_pct)} · MAE ${fmtSigned(result.mae_pct)}">${horizon}D ${fmtSigned(pct)}</span>`;
   };
   const fmtMetric = value => value != null && Number.isFinite(Number(value)) ? fmtSigned(Number(value)) : '--';
-  const horizonCards = [30, 60, 90].map(horizon => {
+  const horizonCards = [90].map(horizon => {
     const row = outcomeSummary[String(horizon)] || {};
     const completedCount = Number(row.completed) || 0;
     const winRateText = row.win_rate != null && Number.isFinite(Number(row.win_rate))
       ? `${Number(row.win_rate).toFixed(0)}%`
       : '--';
-    return `<div class="signal-outcome-card">
+    return `<div class="signal-outcome-card${horizon === 90 ? ' primary-90' : ''}">
       <div class="signal-outcome-head">
         <strong>${horizon}D</strong>
         <span>${completedCount} vyhodn. · ${Number(row.pending) || 0} pending</span>
@@ -6264,7 +6264,7 @@ function pc_renderDailyExtra(data) {
       </div>`;
     }).join('') || '<div class="signal-segment-empty">Zatiaľ bez dát</div>';
   };
-  const segmentHorizonButtons = [30, 60, 90].map(horizon =>
+  const segmentHorizonButtons = [90].map(horizon =>
     `<button class="signal-segment-horizon${pc_signalSegmentHorizon === horizon ? ' active' : ''}"
       onclick="setSignalSegmentHorizon(${horizon})">${horizon}D</button>`
   ).join('');
@@ -6299,8 +6299,6 @@ function pc_renderDailyExtra(data) {
         <span style="color:${col};">${label} ${pct}</span>
       </div>
       <div class="sig-outcome-horizons">
-        ${formatHorizonOutcome(s, 30)}
-        ${formatHorizonOutcome(s, 60)}
         ${formatHorizonOutcome(s, 90)}
       </div>
     </div>`;
@@ -6371,10 +6369,10 @@ function pc_renderDailyExtra(data) {
       <div>
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
                     letter-spacing:0.06em;margin-bottom:6px;">
-          30D / 60D / 90D VALIDÁCIA
+          90D+ VALIDÁCIA
         </div>
         <div class="signal-outcome-grid">${horizonCards}</div>
-        <div class="signal-outcome-note">Obchodné sviečky · MFE = maximálny rast · MAE = maximálny pokles</div>
+        <div class="signal-outcome-note">Primárny horizont pre tvoje rozhodovanie. Kratšie 30D/60D ostávajú v dátach, ale UI ich netlačí dopredu.</div>
       </div>
 
       <details class="signal-segments" open>

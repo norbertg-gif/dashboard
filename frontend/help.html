@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="sk">
 <head>
 <meta charset="UTF-8">
@@ -119,7 +119,7 @@
   <ol>
     <li><strong>Scanner:</strong> pozri najprv lištu TRH. Porovnaj NDX a SPX Pulse, Breadth a VIX. Tým zistíš, či trh kandidátom pomáha alebo ideš proti prúdu.</li>
     <li><strong>Kandidáti:</strong> vyber Buy/Watch titul s rozumnou silou a DIP kvalitou. Stĺpec Trh ti povie, či titul v posledný deň rástol, kde zatvoril voči VWAP a aká bola jeho relatívna obchodná aktivita.</li>
-    <li><strong>Prediktívny:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 30D/60D/90D validáciu, earnings a firemný kontext.</li>
+    <li><strong>Prediktívny:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 90D+ validáciu, earnings a firemný kontext.</li>
     <li><strong>Verdikt:</strong> použi ho ako záverečné zhrnutie, nie ako náhradu vlastného rozhodnutia. Rozklikni dôkazy, ak záver nie je jasný.</li>
     <li><strong>Portfólio:</strong> pred vstupom over veľkosť existujúcej pozície, P/L a prípadných DCA kandidátov.</li>
   </ol>
@@ -204,7 +204,7 @@
     <tr><td><strong>Sila</strong></td><td>Hodnota 0/4 až 4/4: počet splnených podmienok C1–C4.</td></tr>
     <tr><td><strong>Trend</strong></td><td>Uptrend / sideways / downtrend. Určuje, či je dip kupovateľný alebo proti trendu.</td></tr>
     <tr><td><strong>Výsledok</strong></td><td>Úspešný / neúspešný / neutrálny / čaká na vyhodnotenie.</td></tr>
-    <tr><td><strong>Horizont</strong></td><td>30D / 60D / 90D obchodných dní použitých na validáciu.</td></tr>
+    <tr><td><strong>Horizont</strong></td><td>90D+ obchodných dní použitých na validáciu.</td></tr>
     <tr><td><strong>DIP kvalita</strong></td><td>Externý Finviz ranking, samostatný od technického signálu.</td></tr>
     <tr><td><strong>Setup score 0–100</strong></td><td>Interné pomocné skóre na radenie kandidátov; nie je hlavným obchodným rozhodnutím.</td></tr>
   </table>
@@ -221,8 +221,8 @@
     <tr><td><strong>Export snapshot</strong></td><td>Uloží HTML snapshot stavu.</td></tr>
     <tr><td><strong>Prepočítať váhy</strong></td><td>Preučí váhy indikátorov pre ticker.</td></tr>
     <tr><td><strong>Fibonacci interactive</strong></td><td>Automaticky vyberie posledný swing. Oba kotevné body (low = cyan, high = oranžová) možno ťahať myšou. Línie sa tiahnu po pravý okraj grafu — vždy viditeľné aj pri scrollovaní. Labely s cenou sú pri pravom okraji s tmavým pozadím. Manuálne zadanie cez <em>Swing low / Swing high → Draw</em> nájde najbližšiu sviečku k zadanej cene. Uložené per ticker + timeframe.</td></tr>
-    <tr><td><strong>30D / 60D / 90D validácia</strong></td><td>Výnos, win rate, MFE a MAE historických signálov po obchodných sviečkach; nemení scoring.</td></tr>
-    <tr><td><strong>Signal Analytics</strong></td><td>Porovnanie 30D/60D/90D výsledkov podľa tieru, sily a <strong>režimu trhu</strong> (Bull/Sideways/Bear/Vysoká vol., z HMM kontextu signálu). Režimová tabuľka sa zobrazí až keď signály majú backfillnutý kontext.</td></tr>
+    <tr><td><strong>90D+ validácia</strong></td><td>Výnos, win rate, MFE a MAE historických signálov po obchodných sviečkach; nemení scoring.</td></tr>
+    <tr><td><strong>Signal Analytics</strong></td><td>Porovnanie 90D+ výsledkov podľa tieru, sily a <strong>režimu trhu</strong> (Bull/Sideways/Bear/Vysoká vol., z HMM kontextu signálu). Režimová tabuľka sa zobrazí až keď signály majú backfillnutý kontext.</td></tr>
     <tr><td><strong>Kontext nových signálov</strong></td><td>Backend ukladá režim, momentum, volatilitu, ATR, 52W pozíciu, weekly trend (bool derivovaný z 5-stupňového labelu, score ≥ 1) a C1–C4 pre budúcu analytiku; scoring sa nemení.</td></tr>
   </table>
 
@@ -256,7 +256,7 @@
   </ul>
 
   <h3>Analytika signálov — detailný popis tabuliek</h3>
-  <p>Sekcia <strong>ANALYTIKA SIGNÁLOV</strong> v ľavom paneli obsahuje tri tabuľky a tlačidlá <strong>30D / 60D / 90D</strong> na prepínanie horizontu. Klik na horizont prepne všetky tri tabuľky súčasne.</p>
+  <p>Sekcia <strong>ANALYTIKA SIGNÁLOV</strong> v ľavom paneli je zjednodušená na primárny <strong>90D+</strong> horizont. Kratšie 30D/60D ostávajú analyticky dostupné v dátach, ale nie sú hlavný rozhodovací výstup.</p>
   <p>Každá tabuľka má rovnaké stĺpce:</p>
   <table>
     <tr><th>Stĺpec</th><th>Čo znamená</th></tr>
@@ -502,7 +502,7 @@
       <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnos? v Predikcii.</td></tr>
       <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
-      <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>30D/60D/90D analytika sign?lov.</td></tr>
+      <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika sign?lov.</td></tr>
       <tr><td><code>ENABLE_CORRELATION</code></td><td>0</td><td>Korela?n? matica v Risk tabe.</td></tr>
       <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth v?po?et.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 ?as? Massive market snapshotu.</td></tr>

@@ -1,4 +1,4 @@
-# Trading Dashboard — Používateľský manuál
+﻿# Trading Dashboard — Používateľský manuál
 
 Lokálny dashboard na monitorovanie eToro účtu a technickú analýzu. Rozhranie je
 v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplikácie
@@ -205,7 +205,7 @@ Dashboard používa pri signáloch tieto pojmy jednotne:
 | **Sila** | Hodnota `0/4` až `4/4`: počet splnených denných podmienok C1–C4. |
 | **Trend** | Uptrend / sideways / downtrend. Rozhoduje, či je dip kupovateľný alebo proti trendu. |
 | **Výsledok** | Úspešný / neúspešný / neutrálny / čaká na vyhodnotenie. |
-| **Horizont** | Počet obchodných dní použitý na validáciu výsledku: 30D / 60D / 90D. |
+| **Horizont** | Počet obchodných dní použitý na validáciu výsledku: 90D+. |
 | **DIP kvalita** | Externý Finviz ranking. Je to samostatná os, nie sila technického signálu. |
 | **Setup score 0–100** | Interné pomocné skóre na radenie kandidátov. Nie je hlavným obchodným rozhodnutím a v kompaktnom UI sa nezobrazuje. |
 
@@ -231,13 +231,13 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   Labely s cenou sú kotvené na pravý okraj s tmavým pozadím pre čitateľnosť.
   Manuálne zadanie cien cez inputy Swing low / Swing high (Draw tlačidlo) nájde
   najbližšiu sviečku k zadanej cene. Ukladajú sa osobitne pre ticker a timeframe.
-- **30D / 60D / 90D validácia** — historické signály sa analyticky vyhodnocujú
+- **90D+ validácia** — historické signály sa analyticky vyhodnocujú
   po 30, 60 a 90 obchodných sviečkach. Zobrazuje výnos, win rate, priemer,
   medián, MFE (maximálny rast) a MAE (maximálny pokles). Táto vrstva zatiaľ
   nemení skóre ani generovanie signálov.
 - **MFE** je najväčší priebežný zisk počas horizontu; **MAE** je najväčší
   priebežný pokles. Ukazujú kvalitu cesty, nie iba konečný výsledok.
-- **Signal Analytics** — výsledky možno prepínať medzi 30D/60D/90D a porovnať
+- **Signal Analytics** — výsledky možno prepínať medzi 90D+ a porovnať
   podľa tieru (Buy/Watch/Counter), sily signálu (2/4, 3/4, 4/4) a **režimu trhu**
   (Bull/Sideways/Bear/Vysoká vol. — z HMM kontextu uloženého pri signále). Vzorka
   menšia než päť vyhodnotených signálov je vizuálne označená ako predbežná.
@@ -320,7 +320,7 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **Aktuálny setup** — C1 až C4, trend, **týždenný trend label** a vysvetlenie,
   čo ešte chýba k novému signálu.
 - **HISTÓRIA SIGNÁLOV** — časová os signálov s úspešnosťou.
-- **30D / 60D / 90D VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
+- **90D+ VALIDÁCIA** — dlhodobejšia úspešnosť setupov; nevyzreté
   horizonty zostávajú `pending`.
 - **ZHODA ČASOVÝCH RÁMCOV** — zhoda timeframeov: Týždenný trend (5-stupňový),
   Weekly trend (z C1–C4), Daily trend, Daily signal → súhrn
@@ -367,9 +367,7 @@ jedna z troch podmienok padla a celý titul dostal nálepku „bear".
 
 ### Analytika signálov — detailný popis tabuliek
 
-Sekcia **ANALYTIKA SIGNÁLOV** v ľavom paneli obsahuje tri tabuľky a tlačidlá
-**30D / 60D / 90D** na prepínanie horizontu. Klik na horizont prepne všetky tri
-tabuľky súčasne.
+Sekcia **ANALYTIKA SIGNÁLOV** v ľavom paneli je zjednodušená na primárny **90D+** horizont. Kratšie 30D/60D ostávajú v dátach, ale UI ich netlačí ako rovnocenný rozhodovací výstup.
 
 Každá tabuľka má rovnaké stĺpce:
 
@@ -517,7 +515,7 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 
 Massive údaje sú zatiaľ iba **interpretačné**. Nevstupujú do C1–C4, DIP skóre,
 ML ani rozhodnutia Buy/Watch/Counter. Denné snapshoty sa priebežne archivujú,
-aby bolo možné neskôr overiť ich prínos na 30D/60D/90D výsledkoch.
+aby bolo možné neskôr overiť ich prínos na 90D+ výsledkoch.
 
 ### Správy a sentiment (📰)
 
@@ -625,7 +623,7 @@ ktorý môže byť starý alebo sa po výsledkoch prudko zmeniť. Čítaj ho spo
 s počtom Buy/Hold/Sell, aktuálnou cenou a termínom earnings.
 
 Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 ani
-do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 30D/60D/90D výsledky.
+do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 90D+ výsledky.
 Vysoký short interest nie je automaticky bullish: môže zosilniť odraz, ale aj
 upozorňovať na fundamentálne riziko.
 
@@ -724,7 +722,7 @@ V low-memory re?ime ost?va zapnut? jadro aplik?cie:
 | `ENABLE_PREDICTIVE_ML` | `0` | RandomForest/ML pravdepodobnos? v Predikcii. |
 | `ENABLE_PREDICTIVE_HMM` | `0` | HMM regime diagnostiku. |
 | `ENABLE_SIGNAL_CONTEXT_BACKFILL` | `0` | Automatick? dop??anie regime kontextu star??ch sign?lov pri otvoren? grafu. |
-| `ENABLE_SIGNAL_ANALYTICS` | `1` | 30D/60D/90D analytiku sign?lov. |
+| `ENABLE_SIGNAL_ANALYTICS` | `1` | 90D+ analytiku sign?lov. |
 | `ENABLE_CORRELATION` | `0` | Korela?n? maticu v Risk tabe. |
 | `ENABLE_MARKET_BREADTH` | `0` | Background v?po?et Nasdaq breadth. |
 | `ENABLE_MASSIVE_SP500` | `0` | S&P 500 ?as? Massive market snapshotu. |
