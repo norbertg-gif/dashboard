@@ -3304,18 +3304,19 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   position: absolute;
   z-index: 30;
   pointer-events: none;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
+  background: rgba(3, 5, 8, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 6px;
   padding: 6px 9px;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.55;
-  color: var(--text);
-  box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  color: #f8fafc;
+  box-shadow: 0 8px 22px rgba(0,0,0,.55);
   white-space: nowrap;
+  backdrop-filter: blur(2px);
 }
-.pc-marker-tip .tip-muted { color: var(--muted); }
+.pc-marker-tip .tip-muted { color: #94a3b8; }
 
 /* ── Market context bar (Scanner) ──────────────────────────────────────────── */
 .market-ctx-bar {
