@@ -7,6 +7,8 @@ pip install fastapi uvicorn yfinance pandas requests
 import asyncio
 import gc, json, os, math, threading
 import re
+import hashlib
+import hmac
 from io import BytesIO
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -928,23 +930,38 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as _SR
 
 class _BasicAuth(BaseHTTPMiddleware):
+    COOKIE_NAME = "td_auth"
+
     def __init__(self, app):
         super().__init__(app)
         # Render values are read when the middleware instance is created.
         # Strip accidental spaces/newlines added while editing secret env vars.
         self._user = os.getenv("DASH_USER", "").strip()
         self._pass = os.getenv("DASH_PASS", "").strip()
+        self._cookie_value = self._make_cookie_value()
         print(
             "  Basic Auth middleware: "
             f"{'zapnuta' if self._user else 'vypnuta'} "
             f"(user_len={len(self._user)}, pass_len={len(self._pass)})"
         )
 
+    def _make_cookie_value(self):
+        if not self._user or not self._pass:
+            return ""
+        secret = f"{self._user}:{self._pass}".encode("utf-8")
+        return hmac.new(secret, b"trading-dashboard-basic-session", hashlib.sha256).hexdigest()
+
+    def _has_session_cookie(self, request):
+        cookie = request.cookies.get(self.COOKIE_NAME, "")
+        return bool(self._cookie_value and hmac.compare_digest(cookie, self._cookie_value))
+
     async def dispatch(self, request, call_next):
         # Verejné endpointy — preskočiť Basic Auth (chránené vlastným tokenom)
         if request.url.path.startswith("/api/public/"):
             return await call_next(request)
         if not self._user:          # Auth vypnutá ak DASH_USER nie je nastavený
+            return await call_next(request)
+        if self._has_session_cookie(request):
             return await call_next(request)
         auth = request.headers.get("Authorization", "")
         scheme, _, encoded = auth.partition(" ")
@@ -953,7 +970,16 @@ class _BasicAuth(BaseHTTPMiddleware):
                 u, p = _b64.b64decode(encoded, validate=True).decode("utf-8").split(":", 1)
                 if (_secrets.compare_digest(u, self._user) and
                         _secrets.compare_digest(p, self._pass)):
-                    return await call_next(request)
+                    response = await call_next(request)
+                    response.set_cookie(
+                        self.COOKIE_NAME,
+                        self._cookie_value,
+                        max_age=60 * 60 * 24 * 30,
+                        httponly=True,
+                        samesite="lax",
+                        secure=request.url.scheme == "https",
+                    )
+                    return response
             except Exception:
                 pass
         return _SR(status_code=401,
