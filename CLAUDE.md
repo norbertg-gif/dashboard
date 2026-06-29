@@ -7,7 +7,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 - **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 5.2.0, SheetJS for XLSX import — no build step
-- **Storage:** `/data` (Render disk) holds `presets.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `bot_portfolio.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
+- **Storage:** `/data` (Render disk) holds `presets.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
 - **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`).
 
 ## Layout
@@ -240,28 +240,9 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   metadata only and never includes the key or raw request URL.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
-## Virtual trading bot — key architecture
+## Removed virtual trading bot
 
-**Role:** Paper-trading simulation — backtesting-lite na live dátach.
-
-- **Spustenie:** manuálne cez ▶ Spustiť kolo v Bot tabe (žiadny scheduler). Ideálny čas: večer po 22:00 SK keď je US daily sviečka uzavretá.
-- **Zdroj tickerov:** watchlist + eToro portfólio (oba účty) + Nasdaq 100 — funkcia `_bot_get_tickers()`, duplikáty odfiltrované. Scanner pred spustením spúšťať netreba — bot stiahne dáta sám cez `_yf_download_cached`.
-- **Vstupná logika:** score ≥ `entry_score_min` (default 3/4) AND tier = `buy`. Nedokupuje existujúci titul pokiaľ strata < 15 % (averaging down len pri ≥ 15 %).
-- **Výstupná logika:** stop-loss a take-profit podľa `exit_mode` — `atr` (násobky ATR pri vstupe) alebo `pct` (fixné percentá). Fallback na fixné % keď ATR chýba. Counter signál (score ≥ 3, tier = counter) tiež zavrie pozíciu.
-- **Finviz filter:** voliteľný (`use_finviz`). Keď zapnutý, vstup len pre tickery s `dip_total ≥ finviz_min_score` v `dip_scores.json`. Ticker bez Finviz dát = skip. Pred kolom importovať čerstvý Finviz export.
-- **Konfigurácia:** uložená v `bot_portfolio.json` pod kľúčom `config`. Prežíva reset bota. Meniteľná cez `GET/POST /api/bot/config` alebo UI panel ⚙️ Exit nastavenia.
-- **Defaultná konfigurácia:**
-  ```
-  exit_mode = "atr"
-  atr_sl_mult = 1.5, atr_tp_mult = 2.5
-  sl_pct = 7.0, tp_pct = 12.0      ← aj fallback keď ATR chýba
-  pos_size_pct = 5.0                ← % počiatočného kapitálu / obchod
-  entry_score_min = 3
-  use_finviz = false, finviz_min_score = 90.0
-  ```
-- **Max pozícií:** `BOT_MAX_POSITIONS = 20`. Pri 5 % vstupe = celý kapitál na 20 pozíciách.
-- **Manuálne uzavretie:** tlačidlo `Zavri` pri každej otvorenej pozícii → `POST /api/bot/close/{ticker}`.
-- **Súbory na disku:** `bot_portfolio.json` — nikdy necommitovať, je v `.renderignore`.
+Bot UI and `/api/bot/*` endpoints were removed on 2026-06-29 to reduce memory surface in the single 512 MB Render process. If revived, treat it as a separate project/service, not an always-imported dashboard module. Existing `/data/bot_portfolio.json` may remain on disk but no active code reads or writes it.
 
 
 ## Alert center - key architecture
@@ -294,7 +275,7 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - **Risk briefing.** `renderRiskSummary()` summarizes existing Risk data into one human-readable concentration verdict. Interpretive UI only; no backend/accounting changes.
 - **Risk sector exposure.** `/api/etoro/analytics` returns `bySector` from cached Finnhub `profile2`/SPDR mapping. UI card is interpretive only; it does not change portfolio P/L or prediction scoring.
 - **Portfolio correlation matrix.** `/api/etoro/correlation?account=&days=60&limit=20` returns the Pearson correlation matrix of daily log returns for the top-N stock/ETF positions. OHLCV comes from the existing `_yf_download_cached` (Massive → yfinance fallback), no extra API quota burnt. Symbols are sorted by SPDR sector so visual clusters stay together. Interpretive only — surfaces hidden concentration that single-name weight cannot see; NEVER feeds back into C1–C4, portfolio P/L, or scanner scoring.
-- **DCA candidates.** `/api/portfolio/dca?account=&loss_pct=15&dip_min=90&max_weight=10` joins aggregated per-ticker position P/L (eToro) with the DIP ranking (Finviz import). Flags positions at a loss ≥ `loss_pct`: `dca` (DIP ≥ dip_min, weight < max_weight — quality dip), `concentrated` (dca conditions met but weight ≥ max_weight), `value_trap` (trigger met, DIP < dip_min), `no_data` (in loss but ticker outside DIP dataset). Decision metric is **aggregate position P/L** (sum of all tranches), NOT newest trade. Defaults aligned with the app: `loss_pct=15` matches the bot's averaging-down gate, `dip_min=90` matches `DIP_STRONG_THRESHOLD`. Returns `dip_updated_at` so the UI can show DIP data age (manual import can be stale). Rendered as a card in the Risk tab (`loadDcaCandidates`/`renderDcaCard`). Interpretation only — NEVER feeds C1–C4, scanner tier, the bot, or portfolio accounting. Deliberately NOT an Alert Center source: DCA is a standing state, not a time-windowed event.
+- **DCA candidates.** `/api/portfolio/dca?account=&loss_pct=15&dip_min=90&max_weight=10` joins aggregated per-ticker position P/L (eToro) with the DIP ranking (Finviz import). Flags positions at a loss ≥ `loss_pct`: `dca` (DIP ≥ dip_min, weight < max_weight — quality dip), `concentrated` (dca conditions met but weight ≥ max_weight), `value_trap` (trigger met, DIP < dip_min), `no_data` (in loss but ticker outside DIP dataset). Decision metric is **aggregate position P/L** (sum of all tranches), NOT newest trade. Defaults aligned with the app: `loss_pct=15` marks a deeper loss threshold, `dip_min=90` matches `DIP_STRONG_THRESHOLD`. Returns `dip_updated_at` so the UI can show DIP data age (manual import can be stale). Rendered as a card in the Risk tab (`loadDcaCandidates`/`renderDcaCard`). Interpretation only — NEVER feeds C1–C4, scanner tier, the bot, or portfolio accounting. Deliberately NOT an Alert Center source: DCA is a standing state, not a time-windowed event.
 - **Portfolio cache TTL = 120s RAM, falls back to disk on eToro proxy outage.** Stale-while-erroring is intentional.
 - **WebSocket** (`wss://ws.etoro.com/ws`) drives live prices for chart last candle, rates tab, portfolio P/L, and predictive daily/weekly last candle. REST refresh runs every 15s as fallback only.
 - **Background prefetch** (`/api/prefetch`) warms OHLCV cache for watchlist + portfolio symbols across all 4 timeframes (`OneDay`, `OneWeek`, `OneHour`, `FourHours`) at startup.
@@ -302,6 +283,6 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 
 ## File touch policy
 
-- **`presets.json`, `scanner_notes.json`, `bot_portfolio.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them. (Pôvodný `trade_journal.json` z Trade Journal funkcie už appka nepoužíva — feature bola odstránená; existujúci súbor na disku ostáva, no žiadny kód ho už nečíta ani neprepisuje.)
+- **`presets.json`, `scanner_notes.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them. (Pôvodný `trade_journal.json` z Trade Journal funkcie už appka nepoužíva — feature bola odstránená; existujúci súbor na disku ostáva, no žiadny kód ho už nečíta ani neprepisuje.)
 - **eToro instrument metadata** — cache it (`cache/instruments`), don't fetch on every request; the response is ~11 MB.
 - **`cache/` directory in repo** — excluded from deploy via `.renderignore`. Local cache is fine to keep but ignore in commits.

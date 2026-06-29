@@ -158,3 +158,12 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
   datami: koncentracia Top 5, najvacsi sektor, najvacsia pozicia a pocet flagov.
 - Je to interpretacna vrstva nad `/api/etoro/analytics`; nemeni P/L ani scoring.
 - Cache verzia frontendu: `?v=20260623-risk-summary`.
+
+
+## Doplnen? 2026-06-29 - memory trim / 512 MB profil
+
+- Odstr?nen? Virtual Trading Bot z UI aj backendu (`/api/bot/*`). Ak sa vr?ti, rie?i? ako samostatn? projekt/slu?bu.
+- Backend m? nov? predvolen? `DASH_MEMORY_PROFILE=low` pre Render 512 MB.
+- ?a?k? vrstvy s? za env prep?na?mi: `ENABLE_PREDICTIVE_ML`, `ENABLE_PREDICTIVE_HMM`, `ENABLE_SIGNAL_CONTEXT_BACKFILL`, `ENABLE_CORRELATION`, `ENABLE_MARKET_BREADTH`, `ENABLE_MASSIVE_SP500`.
+- Nov? diagnostick? endpoint `/api/admin/memory` vracia RSS/feature flags/cache sizes.
+- Cache verzia frontendu: `?v=20260629-memory-trim`.

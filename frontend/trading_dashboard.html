@@ -113,7 +113,6 @@
     <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny <button class="tab-popout" onclick="openMainTabWindow(event,'predictive')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner <button class="tab-popout" onclick="openMainTabWindow(event,'scanner')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-verdict" onclick="switchMainTab('verdict')">Verdikt <button class="tab-popout" onclick="openMainTabWindow(event,'verdict')" title="Otvoriť v novej karte">↗</button></div>
-    <div class="main-tab" id="tab-bot" onclick="switchMainTab('bot')">🤖 Bot <button class="tab-popout" onclick="openMainTabWindow(event,'bot')" title="Otvoriť v novej karte">↗</button></div>
     <button id="event-center-toggle" onclick="toggleEventCenter()" title="Alerty a udalosti za posledných 24/48 hodín">
       Alerty <span id="event-center-count">0</span>
     </button>
@@ -164,103 +163,6 @@
     </div>
   </div>
 
-  <!-- BOT TAB -->
-  <div id="main-bot" style="display:none;flex:1;min-height:0;overflow-y:auto;padding:16px;flex-direction:column;gap:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
-      <div>
-        <div class="tool-title" style="margin-bottom:6px;">🤖 Virtuálny Trading Bot</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.6;max-width:520px;">
-          Papierové obchodovanie podľa signálov dashboardu. Vstup: skóre ≥ 3/4 + tier <strong>Buy</strong>.
-          Výstup: Stop-loss −7 %, Take-profit +12 %, Counter-signál, alebo manuálne.<br>
-          Veľkosť obchodu = konfigurovateľné % počiatočného kapitálu, max 8 pozícií.
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <button class="btn primary" id="bot-run-btn" onclick="botRun()">▶ Spustiť kolo</button>
-        <button class="btn" id="bot-refresh-btn" onclick="botRefresh()">⟳ Obnoviť</button>
-        <button class="btn" id="bot-liveprice-btn" onclick="botRefresh(true)" title="Načíta aktuálne ceny cez yfinance (pomalšie)">⟳ Live ceny</button>
-        <button class="btn danger" id="bot-reset-btn" onclick="botReset()">✕ Reset</button>
-      </div>
-    </div>
-
-    <div class="bot-config-panel">
-      <div class="section-header" style="margin-bottom:8px;">⚙️ Exit nastavenia</div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;">
-        <label class="bot-cfg-field">
-          <span>Režim</span>
-          <select class="sel" id="bot-cfg-mode" onchange="botCfgModeChanged()">
-            <option value="atr">ATR násobky</option>
-            <option value="pct">Fixné %</option>
-          </select>
-        </label>
-        <label class="bot-cfg-field" data-cfg-mode="atr">
-          <span>Stop-loss (×ATR)</span>
-          <input class="sel" type="number" id="bot-cfg-atr-sl" min="0.5" max="10" step="0.1" style="width:80px;">
-        </label>
-        <label class="bot-cfg-field" data-cfg-mode="atr">
-          <span>Take-profit (×ATR)</span>
-          <input class="sel" type="number" id="bot-cfg-atr-tp" min="0.5" max="10" step="0.1" style="width:80px;">
-        </label>
-        <label class="bot-cfg-field" data-cfg-mode="pct">
-          <span>Stop-loss (%)</span>
-          <input class="sel" type="number" id="bot-cfg-sl" min="0.5" max="30" step="0.5" style="width:80px;">
-        </label>
-        <label class="bot-cfg-field" data-cfg-mode="pct">
-          <span>Take-profit (%)</span>
-          <input class="sel" type="number" id="bot-cfg-tp" min="0.5" max="50" step="0.5" style="width:80px;">
-        </label>
-        <label class="bot-cfg-field">
-          <span>Vstup (% kapitálu)</span>
-          <input class="sel" type="number" id="bot-cfg-pos-size" min="1" max="50" step="1" style="width:80px;">
-        </label>
-        <label class="bot-cfg-field">
-          <span>Min. score (x/4)</span>
-          <select class="sel" id="bot-cfg-score-min">
-            <option value="1">1/4</option>
-            <option value="2">2/4</option>
-            <option value="3">3/4</option>
-            <option value="4">4/4</option>
-          </select>
-        </label>
-        <label class="bot-cfg-field">
-          <span>Finviz filter</span>
-          <label style="display:flex;align-items:center;gap:6px;height:26px;font-size:12px;cursor:pointer;">
-            <input type="checkbox" id="bot-cfg-use-finviz" onchange="botCfgFinvizChanged()"> použiť
-          </label>
-        </label>
-        <label class="bot-cfg-field" id="bot-cfg-finviz-min-wrap">
-          <span>Min. DIP skóre</span>
-          <input class="sel" type="number" id="bot-cfg-finviz-min" min="0" max="200" step="5" style="width:80px;">
-        </label>
-        <button class="btn primary" id="bot-cfg-save-btn" onclick="botCfgSave()">Ulož</button>
-        <span id="bot-cfg-msg" style="font-size:11px;color:var(--muted);"></span>
-      </div>
-      <div style="font-size:10px;color:var(--muted2);margin-top:6px;">
-        ATR režim: prahy sa počítajú z ATR pri vstupe (volatilnejší titul = širší stop). Fixné % sa použijú aj ako fallback keď ATR chýba. Zmeny platia pre existujúce aj nové pozície pri ďalšom kole.
-        Finviz filter: vstup len pre tickery s importovaným DIP skóre ≥ min (STRONG = 90, VERY STRONG = 100). Ticker bez Finviz dát neprejde — importuj aktuálny export pred kolom.
-      </div>
-    </div>
-
-    <div id="bot-kpi-bar" class="bot-kpi-bar"></div>
-
-    <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;">
-      <div>
-        <div class="section-header" style="margin-bottom:8px;">📂 Otvorené pozície</div>
-        <div id="bot-open-table"></div>
-      </div>
-      <div>
-        <div class="section-header" style="margin-bottom:8px;">📈 Equity krivka</div>
-        <div id="bot-equity-chart" style="height:160px;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;"></div>
-      </div>
-    </div>
-
-    <div>
-      <div class="section-header" style="margin-bottom:8px;">📋 História obchodov</div>
-      <div id="bot-history-table"></div>
-    </div>
-
-    <div id="bot-status-msg" style="font-size:11px;color:var(--muted);padding-top:4px;"></div>
-  </div>
 <!-- ══ PREDICTIVE CHART TAB ══ -->
 <div id="main-predictive" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;position:relative;">
   <div id="predictiveTab" style="display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden;">
@@ -520,6 +422,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260624-hist-prices"></script>
+  <script src="/dashboard.js?v=20260629-memory-trim"></script>
 </body>
 </html>

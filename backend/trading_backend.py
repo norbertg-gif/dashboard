@@ -57,6 +57,75 @@ DATA_ROOT = Path(os.getenv("DATA_DIR", str(APP_ROOT))).resolve()
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Trading Dashboard API")
 
+
+# ?? Memory profile / feature flags ???????????????????????????????????????????
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+DASH_MEMORY_PROFILE = os.getenv("DASH_MEMORY_PROFILE", "low").strip().lower()
+_LOW_MEMORY = DASH_MEMORY_PROFILE in ("low", "512", "512mb", "render-free")
+
+# Heavy analytical layers. Low profile keeps the dashboard usable under 512 MB:
+# core charts/portfolio/signals remain, but fit-heavy diagnostics run only when enabled.
+ENABLE_PREDICTIVE_ML = _env_bool("ENABLE_PREDICTIVE_ML", not _LOW_MEMORY)
+ENABLE_PREDICTIVE_HMM = _env_bool("ENABLE_PREDICTIVE_HMM", not _LOW_MEMORY)
+ENABLE_SIGNAL_CONTEXT_BACKFILL = _env_bool("ENABLE_SIGNAL_CONTEXT_BACKFILL", not _LOW_MEMORY)
+ENABLE_SIGNAL_ANALYTICS = _env_bool("ENABLE_SIGNAL_ANALYTICS", True)
+ENABLE_CORRELATION = _env_bool("ENABLE_CORRELATION", not _LOW_MEMORY)
+ENABLE_MARKET_BREADTH = _env_bool("ENABLE_MARKET_BREADTH", not _LOW_MEMORY)
+ENABLE_MASSIVE_SP500 = _env_bool("ENABLE_MASSIVE_SP500", not _LOW_MEMORY)
+ENABLE_MASSIVE_MARKET = _env_bool("ENABLE_MASSIVE_MARKET", True)
+
+
+def _process_memory_mb() -> dict:
+    """Best-effort process memory snapshot without psutil dependency."""
+    rss_mb = None
+    source = None
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux reports KB, macOS reports bytes. Render is Linux, keep guard anyway.
+        rss_mb = rss / 1024 if rss < 10_000_000 else rss / (1024 * 1024)
+        source = "resource.ru_maxrss"
+    except Exception:
+        try:
+            import tracemalloc
+            if not tracemalloc.is_tracing():
+                tracemalloc.start()
+            current, peak = tracemalloc.get_traced_memory()
+            return {"rss_mb": None, "tracemalloc_current_mb": round(current / 1024 / 1024, 1),
+                    "tracemalloc_peak_mb": round(peak / 1024 / 1024, 1), "source": "tracemalloc"}
+        except Exception:
+            pass
+    return {"rss_mb": round(rss_mb, 1) if rss_mb is not None else None, "source": source}
+
+
+@app.get("/api/admin/memory")
+def admin_memory():
+    return {
+        "memory": _process_memory_mb(),
+        "profile": DASH_MEMORY_PROFILE,
+        "feature_flags": {
+            "predictive_ml": ENABLE_PREDICTIVE_ML,
+            "predictive_hmm": ENABLE_PREDICTIVE_HMM,
+            "signal_context_backfill": ENABLE_SIGNAL_CONTEXT_BACKFILL,
+            "signal_analytics": ENABLE_SIGNAL_ANALYTICS,
+            "correlation": ENABLE_CORRELATION,
+            "market_breadth": ENABLE_MARKET_BREADTH,
+            "massive_sp500": ENABLE_MASSIVE_SP500,
+            "massive_market": ENABLE_MASSIVE_MARKET,
+        },
+        "cache_sizes": {
+            "model": len(_MODEL_CACHE) if "_MODEL_CACHE" in globals() else None,
+            "yf": len(_YF_CACHE) if "_YF_CACHE" in globals() else None,
+            "disk_mem": len(_cache_mem) if "_cache_mem" in globals() else None,
+            "positions": len(_positions_cache) if "_positions_cache" in globals() else None,
+        },
+    }
+
 # ── Public API token (pre Claude / externý prístup bez Basic Auth) ────────────
 PUBLIC_API_TOKEN = os.getenv("PUBLIC_API_TOKEN", "")
 PUBLIC_ALLOW_QUERY_TOKEN = os.getenv("PUBLIC_ALLOW_QUERY_TOKEN", "0").lower() in ("1", "true", "yes")
@@ -209,7 +278,7 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
 # na Render free tieri); regime ukladá celý dict (malý).
 _MODEL_CACHE: dict = {}
 _MODEL_CACHE_LOCK = threading.Lock()
-_MODEL_CACHE_MAX = 256
+_MODEL_CACHE_MAX = 48 if _LOW_MEMORY else 256
 
 
 def _model_cache_get(kind: str, cache_key):
@@ -3519,18 +3588,25 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             _model_key = None
 
         print("[CHART] Step 11: ML training...", flush=True)
-        # Train ML confidence model (skip if taking too long)
-        try:
-            _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
-            print("[CHART] Step 12: ML done", flush=True)
-        except Exception:
+        if ENABLE_PREDICTIVE_ML:
+            try:
+                _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
+                print("[CHART] Step 12: ML done", flush=True)
+            except Exception:
+                ml_acc, ml_bull_prob = None, 0.5
+        else:
             ml_acc, ml_bull_prob = None, 0.5
+            print("[CHART] Step 12: ML skipped (ENABLE_PREDICTIVE_ML=0)", flush=True)
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
-        try:
-            regime_info = detect_market_regime(df, cache_key=_model_key)
-        except Exception as e:
-            regime_info = {"error": str(e)[:80]}
+        if ENABLE_PREDICTIVE_HMM:
+            try:
+                regime_info = detect_market_regime(df, cache_key=_model_key)
+            except Exception as e:
+                regime_info = {"error": str(e)[:80]}
+        else:
+            regime_info = {"label": "disabled", "disabled": True,
+                           "reason": "ENABLE_PREDICTIVE_HMM=0"}
 
         pred        = predict_next_candle(df, weights=final_weights, ml_bull_prob=ml_bull_prob)
         pred_default = predict_next_candle(df, weights=DEFAULT_WEIGHTS)
@@ -3683,7 +3759,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                 # (okrem poslednej sviečky, ktorá ho dostane vždy). Drží /api/chart
                 # svižné a zároveň postupne dopĺňa kontext do starých signálov pri
                 # bežnom prezeraní — manuálny backfill tak nie je nutný.
-                _ctx_budget = 4
+                _ctx_budget = 4 if ENABLE_SIGNAL_CONTEXT_BACKFILL else 0
 
                 for i in range(5, len(df_score)):
                     row      = df_score.iloc[i]
@@ -3710,7 +3786,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                         # záznam). Posledná uzavretá sviečka vždy; staršie do vyčerpania
                         # rozpočtu. Žiadny look-ahead — build_signal_context si dáta oreže.
                         entry = ticker_slog[date_key]
-                        if not entry.get("context"):
+                        if ENABLE_SIGNAL_CONTEXT_BACKFILL and not entry.get("context"):
                             is_latest = latest_closed_date is not None and row_date.normalize() == latest_closed_date
                             if is_latest or _ctx_budget > 0:
                                 ctx = build_signal_context(df_d, row_date, details, zscore, weekly_bullish)
@@ -3762,9 +3838,13 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     _reg = (_ctx.get("regime") or {}).get("label")
                     if _reg:
                         _s["regime"] = _reg
-                daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
-                    df_d, daily_buy_signals
-                )
+                if ENABLE_SIGNAL_ANALYTICS:
+                    daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
+                        df_d, daily_buy_signals
+                    )
+                else:
+                    signal_outcome_summary = {"disabled": True, "reason": "ENABLE_SIGNAL_ANALYTICS=0"}
+                    signal_outcome_segments = {}
 
                 # All candles for chart (last 90 days)
                 for ts, row in df_d.iloc[-90:].iterrows():
@@ -4875,7 +4955,7 @@ def get_dip_status():
 _YF_CACHE: dict = {}
 _YF_CACHE_LOCK = threading.Lock()
 _YF_CACHE_TTL = 1800   # s
-_YF_CACHE_MAX = 60     # entries (znížené z 150 — RAM rezerva; ~126 riadkov × 6 stĺpcov)
+_YF_CACHE_MAX = 30 if _LOW_MEMORY else 60     # entries; low profile keeps RAM headroom
 
 # ── Massive denné/týždenné bary (Polygon-style) — yfinance alternatíva ─────────
 # yfinance je na free tieri najkrehkejší zdroj (rate-limit, timeouty → prázdne
@@ -6736,11 +6816,13 @@ def _massive_universe_context(
 
 
 def _massive_market_context(refresh: bool = False) -> dict | None:
+    if not ENABLE_MASSIVE_MARKET:
+        return None
     snapshot = _massive_load_snapshot(refresh=refresh)
     if not snapshot:
         return None
     nasdaq = _massive_universe_context(snapshot, NASDAQ100_TICKERS, "Nasdaq-100")
-    sp500_tickers = _sp500_universe()
+    sp500_tickers = _sp500_universe() if ENABLE_MASSIVE_SP500 else []
     sp500 = _massive_universe_context(snapshot, sp500_tickers, "S&P 500") if sp500_tickers else None
     if not nasdaq and not sp500:
         return None
@@ -6986,7 +7068,7 @@ def get_market_context(refresh: int = Query(0)):
             MARKET_CTX_FILE.write_text(json.dumps(data), encoding="utf-8")
         except Exception:
             pass
-    if not _market_breadth_running:
+    if ENABLE_MARKET_BREADTH and not _market_breadth_running:
         _market_breadth_running = True
         threading.Thread(target=_mc_breadth_worker, daemon=True).start()
     return data
@@ -7248,421 +7330,8 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
 
 # ══ END PREDICTIVE CHART routes ══════════════════════════
 
-# ══ VIRTUAL TRADING BOT ═══════════════════════════════════════════════════════
-
-BOT_FILE = DATA_ROOT / "bot_portfolio.json"
-BOT_INITIAL_CAPITAL   = 10_000.0
-BOT_MAX_POSITIONS     = 20
-
-# Default exit konfigurácia — prepísateľná cez /api/bot/config, uložená v bot_portfolio.json
-BOT_DEFAULT_CONFIG = {
-    "exit_mode":   "atr",   # "atr" = násobky ATR, "pct" = fixné percentá
-    "atr_sl_mult": 1.5,     # stop-loss = 1.5×ATR od vstupu
-    "atr_tp_mult": 2.5,     # take-profit = 2.5×ATR od vstupu
-    "sl_pct":      7.0,     # fixný stop-loss % (aj fallback keď ATR chýba)
-    "tp_pct":      12.0,    # fixný take-profit %
-    "pos_size_pct": 5.0,    # % počiatočného kapitálu na jeden obchod
-    "entry_score_min": 3,   # min score (x/4) na otvorenie pozície
-    "use_finviz": False,    # filtrovať vstupy podľa importovaného Finviz/DIP skóre
-    "finviz_min_score": 90.0,  # min DIP total (STRONG=90, VERY STRONG=100)
-}
-
-
-def _bot_config(portfolio: dict) -> dict:
-    cfg = dict(BOT_DEFAULT_CONFIG)
-    saved = portfolio.get("config")
-    if isinstance(saved, dict):
-        for key in cfg:
-            if key in saved:
-                cfg[key] = saved[key]
-    return cfg
-
-
-def _bot_load() -> dict:
-    try:
-        if BOT_FILE.exists():
-            return json.loads(BOT_FILE.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"  BOT load error: {e}")
-    return {
-        "cash": BOT_INITIAL_CAPITAL,
-        "initial_capital": BOT_INITIAL_CAPITAL,
-        "open_positions": {},
-        "closed_trades": [],
-        "equity_curve": [],
-        "last_run": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-def _bot_save(portfolio: dict):
-    try:
-        tmp = BOT_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(portfolio, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(BOT_FILE)
-    except Exception as e:
-        print(f"  BOT save error: {e}")
-
-
-def _bot_kpis(portfolio: dict, current_prices: dict) -> dict:
-    open_pos = portfolio.get("open_positions", {})
-    closed    = portfolio.get("closed_trades", [])
-    cash      = float(portfolio.get("cash", 0))
-    initial   = float(portfolio.get("initial_capital", BOT_INITIAL_CAPITAL))
-
-    pos_value = sum(
-        current_prices.get(t, p["entry_price"]) * p["shares"]
-        for t, p in open_pos.items()
-    )
-    equity = cash + pos_value
-    total_return_pct = (equity / initial - 1) * 100 if initial > 0 else 0.0
-
-    wins   = [t for t in closed if t.get("pnl", 0) > 0]
-    losses = [t for t in closed if t.get("pnl", 0) <= 0]
-    win_rate = len(wins) / len(closed) * 100 if closed else 0.0
-    avg_win  = sum(t["pnl_pct"] for t in wins)   / len(wins)   if wins   else 0.0
-    avg_loss = sum(t["pnl_pct"] for t in losses)  / len(losses) if losses else 0.0
-
-    max_dd = 0.0
-    peak = initial
-    for pt in portfolio.get("equity_curve", []):
-        eq = pt.get("equity", initial)
-        if eq > peak:
-            peak = eq
-        dd = (peak - eq) / peak * 100 if peak > 0 else 0.0
-        if dd > max_dd:
-            max_dd = dd
-
-    return {
-        "equity":           round(equity, 2),
-        "cash":             round(cash, 2),
-        "invested":         round(pos_value, 2),
-        "total_return_pct": round(total_return_pct, 2),
-        "win_rate":         round(win_rate, 1),
-        "total_trades":     len(closed),
-        "wins":             len(wins),
-        "losses":           len(losses),
-        "avg_win_pct":      round(avg_win, 2),
-        "avg_loss_pct":     round(avg_loss, 2),
-        "max_drawdown_pct": round(max_dd, 2),
-        "open_count":       len(open_pos),
-    }
-
-
-def _bot_score_ticker(ticker: str) -> dict | None:
-    """Vráti score, tier, cenu a ATR. None ak chyba alebo málo dát."""
-    try:
-        raw = _yf_download_cached(ticker, "6mo", "1d")
-        if len(raw) < 20:
-            return None
-        df = add_indicators(raw)
-        last = df.iloc[-1]
-        price = float(last["Close"])
-        zscore = float(rolling_zscore(df["Close"]).iloc[-1])
-        sc, details = score_signal_day(last, zscore)
-        tier = signal_tier(sc, details["trend"])
-        try:
-            atr = float(last["atr"])
-            if math.isnan(atr) or atr <= 0:
-                atr = None
-        except (KeyError, TypeError, ValueError):
-            atr = None
-        return {"score": sc, "tier": tier, "price": price, "atr": atr, "details": details}
-    except Exception as e:
-        print(f"  BOT score error {ticker}: {e}")
-        return None
-
-
-def _bot_live_price(ticker: str, fallback: float) -> float:
-    """Aktuálna cena cez yfinance fast_info — pre bot status refresh."""
-    try:
-        p = yf.Ticker(ticker).fast_info.get("last_price") or yf.Ticker(ticker).fast_info.get("lastPrice")
-        if p and float(p) > 0:
-            return float(p)
-    except Exception:
-        pass
-    return fallback
-
-
-@app.get("/api/bot/status")
-def bot_status(refresh: int = Query(0)):
-    portfolio = _bot_load()
-    open_pos  = portfolio.get("open_positions", {})
-
-    current_prices: dict = {}
-    for ticker, pos in open_pos.items():
-        try:
-            if refresh:
-                current_prices[ticker] = _bot_live_price(ticker, pos["entry_price"])
-            else:
-                raw = _yf_download_cached(ticker, "5d", "1d")
-                current_prices[ticker] = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
-        except Exception:
-            current_prices[ticker] = pos["entry_price"]
-
-    kpis = _bot_kpis(portfolio, current_prices)
-
-    open_enriched = []
-    for ticker, pos in open_pos.items():
-        price   = current_prices.get(ticker, pos["entry_price"])
-        pnl     = (price - pos["entry_price"]) * pos["shares"]
-        pnl_pct = (price / pos["entry_price"] - 1) * 100 if pos["entry_price"] > 0 else 0.0
-        open_enriched.append({**pos,
-            "current_price": round(price, 2),
-            "pnl":           round(pnl, 2),
-            "pnl_pct":       round(pnl_pct, 2),
-        })
-    open_enriched.sort(key=lambda x: x.get("pnl_pct", 0), reverse=True)
-
-    return {
-        "kpis":            kpis,
-        "open_positions":  open_enriched,
-        "closed_trades":   list(reversed(portfolio.get("closed_trades", [])))[:50],
-        "equity_curve":    portfolio.get("equity_curve", []),
-        "last_run":        portfolio.get("last_run"),
-        "initial_capital": portfolio.get("initial_capital", BOT_INITIAL_CAPITAL),
-        "config":          _bot_config(portfolio),
-    }
-
-
-@app.get("/api/bot/config")
-def bot_get_config():
-    return _bot_config(_bot_load())
-
-
-@app.post("/api/bot/config")
-def bot_set_config(body: dict):
-    cfg = _bot_config({"config": body})
-    # Validácia rozsahov — chráni pred preklepmi (SL 50 % a pod.)
-    if cfg["exit_mode"] not in ("atr", "pct"):
-        raise HTTPException(400, "exit_mode musí byť 'atr' alebo 'pct'")
-    try:
-        cfg["atr_sl_mult"] = min(10.0, max(0.5, float(cfg["atr_sl_mult"])))
-        cfg["atr_tp_mult"] = min(10.0, max(0.5, float(cfg["atr_tp_mult"])))
-        cfg["sl_pct"]      = min(30.0, max(0.5, float(cfg["sl_pct"])))
-        cfg["tp_pct"]      = min(50.0, max(0.5, float(cfg["tp_pct"])))
-        cfg["pos_size_pct"] = min(50.0, max(1.0, float(cfg["pos_size_pct"])))
-        cfg["entry_score_min"] = min(4, max(1, int(cfg["entry_score_min"])))
-        cfg["use_finviz"] = bool(cfg["use_finviz"])
-        cfg["finviz_min_score"] = min(200.0, max(0.0, float(cfg["finviz_min_score"])))
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Neplatné číselné hodnoty")
-    portfolio = _bot_load()
-    portfolio["config"] = cfg
-    _bot_save(portfolio)
-    return cfg
-
-
-def _bot_get_tickers() -> list[str]:
-    """Zlúčenie: watchlist + portfóliové pozície + Nasdaq 100."""
-    seen: set = set()
-    result: list = []
-    for item in _read_watchlist_file():
-        sym = (item.get("symbol") or "").strip().upper()
-        if sym and sym not in seen:
-            seen.add(sym)
-            result.append(sym)
-    for sym in _get_portfolio_symbols():
-        sym = sym.strip().upper()
-        if sym and sym not in seen:
-            seen.add(sym)
-            result.append(sym)
-    for sym in NASDAQ100_TICKERS:
-        sym = sym.strip().upper()
-        if sym and sym not in seen:
-            seen.add(sym)
-            result.append(sym)
-    return result
-
-
-@app.post("/api/bot/run")
-def bot_run():
-    """Jedno kolo bota: skenuj watchlist+portfólio+Nasdaq, otvori/zavri virtuálne pozície."""
-    tickers = _bot_get_tickers()
-    if not tickers:
-        raise HTTPException(400, "Zdroj tickerov je prázdny")
-
-    portfolio = _bot_load()
-    cfg       = _bot_config(portfolio)
-    open_pos  = portfolio["open_positions"]
-    closed    = portfolio["closed_trades"]
-    cash      = float(portfolio["cash"])
-    initial   = float(portfolio["initial_capital"])
-    pos_size  = initial * float(cfg["pos_size_pct"]) / 100.0
-    dip_scores = {}
-    if cfg["use_finviz"]:
-        dip_scores = {k.upper(): v for k, v in load_dip_scores().items() if not k.startswith("_")}
-
-    today_str    = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    current_prices: dict = {}
-    actions: list = []
-
-    for ticker in tickers:
-        sig = _bot_score_ticker(ticker)
-        if sig is None:
-            continue
-        score = sig["score"]
-        tier  = sig["tier"]
-        price = sig["price"]
-        current_prices[ticker] = price
-
-        if ticker in open_pos:
-            # ── Kontrola výstupu ─────────────────────────────────────────────
-            pos     = open_pos[ticker]
-            entry   = pos["entry_price"]
-            pnl_pct = (price / entry - 1) * 100 if entry > 0 else 0.0
-
-            # Exit prahy podľa konfigurácie: ATR násobky alebo fixné %
-            entry_atr = pos.get("entry_atr")
-            if cfg["exit_mode"] == "atr" and entry_atr and entry_atr > 0 and entry > 0:
-                sl_pct = -(cfg["atr_sl_mult"] * entry_atr / entry * 100)
-                tp_pct =  (cfg["atr_tp_mult"] * entry_atr / entry * 100)
-            else:
-                sl_pct = -float(cfg["sl_pct"])
-                tp_pct =  float(cfg["tp_pct"])
-
-            exit_reason = None
-            if pnl_pct <= sl_pct:
-                exit_reason = "stop_loss"
-            elif pnl_pct >= tp_pct:
-                exit_reason = "take_profit"
-
-            if exit_reason:
-                pnl  = (price - entry) * pos["shares"]
-                cash += price * pos["shares"]
-                closed.append({
-                    "ticker":       ticker,
-                    "entry_date":   pos["entry_date"],
-                    "exit_date":    today_str,
-                    "entry_price":  round(entry, 4),
-                    "exit_price":   round(price, 4),
-                    "shares":       round(pos["shares"], 4),
-                    "pnl":          round(pnl, 2),
-                    "pnl_pct":      round(pnl_pct, 2),
-                    "exit_reason":  exit_reason,
-                })
-                del open_pos[ticker]
-                actions.append({"action": "close", "ticker": ticker,
-                                 "reason": exit_reason, "pnl_pct": round(pnl_pct, 2)})
-
-        elif score >= int(cfg["entry_score_min"]) and tier == "buy":
-            # ── Otvorenie novej pozície ──────────────────────────────────────
-            # Nedokupujeme titul, ktorý už máme — pokiaľ nie je strata >= 15 %
-            if ticker in open_pos:
-                existing_entry = open_pos[ticker]["entry_price"]
-                existing_pnl   = (price / existing_entry - 1) * 100 if existing_entry > 0 else 0.0
-                if existing_pnl > -15.0:
-                    continue
-            if cfg["use_finviz"]:
-                # Ticker bez Finviz dát neprejde — filter má zmysel len keď je striktný
-                dip_total = _num_or_none((dip_scores.get(ticker.upper()) or {}).get("total"))
-                if dip_total is None or dip_total < float(cfg["finviz_min_score"]):
-                    continue
-            if len(open_pos) >= BOT_MAX_POSITIONS:
-                continue
-            if cash < pos_size * 0.5:
-                continue
-            alloc  = min(pos_size, cash)
-            shares = alloc / price
-            cash  -= alloc
-            pos_entry: dict = {
-                "ticker":      ticker,
-                "entry_price": round(price, 4),
-                "entry_date":  today_str,
-                "shares":      round(shares, 6),
-                "entry_score": score,
-                "entry_tier":  tier,
-                "alloc":       round(alloc, 2),
-            }
-            if sig.get("atr"):
-                pos_entry["entry_atr"] = round(sig["atr"], 4)
-            open_pos[ticker] = pos_entry
-            actions.append({"action": "open", "ticker": ticker,
-                             "price": round(price, 2), "alloc": round(alloc, 2)})
-
-    # ── Equity snapshot ──────────────────────────────────────────────────────
-    pos_value = sum(
-        current_prices.get(t, p["entry_price"]) * p["shares"]
-        for t, p in open_pos.items()
-    )
-    equity_val = round(cash + pos_value, 2)
-    equity_curve = portfolio.get("equity_curve", [])
-    # Jeden bod na deň — prepíš ak dnes už máme
-    if equity_curve and equity_curve[-1].get("date") == today_str:
-        equity_curve[-1]["equity"] = equity_val
-    else:
-        equity_curve.append({"date": today_str, "equity": equity_val})
-    if len(equity_curve) > 365:
-        equity_curve = equity_curve[-365:]
-
-    portfolio["cash"]          = round(cash, 2)
-    portfolio["open_positions"] = open_pos
-    portfolio["closed_trades"] = closed
-    portfolio["equity_curve"]  = equity_curve
-    portfolio["last_run"]      = datetime.now(timezone.utc).isoformat()
-    _bot_save(portfolio)
-
-    return {
-        "actions":        actions,
-        "equity":         equity_val,
-        "open_count":     len(open_pos),
-        "cash":           round(cash, 2),
-        "tickers_scanned": len(tickers),
-    }
-
-
-@app.post("/api/bot/close/{ticker}")
-def bot_close_position(ticker: str):
-    ticker = ticker.upper()
-    portfolio = _bot_load()
-    if ticker not in portfolio["open_positions"]:
-        raise HTTPException(404, f"{ticker} nie je v otvorených pozíciách")
-
-    pos = portfolio["open_positions"][ticker]
-    try:
-        raw   = _yf_download_cached(ticker, "5d", "1d")
-        price = float(raw.iloc[-1]["Close"]) if len(raw) > 0 else pos["entry_price"]
-    except Exception:
-        price = pos["entry_price"]
-
-    pnl     = (price - pos["entry_price"]) * pos["shares"]
-    pnl_pct = (price / pos["entry_price"] - 1) * 100 if pos["entry_price"] > 0 else 0.0
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    portfolio["closed_trades"].append({
-        "ticker":      ticker,
-        "entry_date":  pos["entry_date"],
-        "exit_date":   today_str,
-        "entry_price": round(pos["entry_price"], 4),
-        "exit_price":  round(price, 4),
-        "shares":      round(pos["shares"], 6),
-        "pnl":         round(pnl, 2),
-        "pnl_pct":     round(pnl_pct, 2),
-        "exit_reason": "manual",
-    })
-    portfolio["cash"] = round(portfolio["cash"] + price * pos["shares"], 2)
-    del portfolio["open_positions"][ticker]
-    _bot_save(portfolio)
-    return {"ok": True, "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2)}
-
-
-@app.post("/api/bot/reset")
-def bot_reset():
-    # Konfigurácia prežíva reset — maže sa len portfólio a história
-    cfg = _bot_config(_bot_load())
-    _bot_save({
-        "cash":             BOT_INITIAL_CAPITAL,
-        "initial_capital":  BOT_INITIAL_CAPITAL,
-        "open_positions":   {},
-        "closed_trades":    [],
-        "equity_curve":     [],
-        "last_run":         None,
-        "created_at":       datetime.now(timezone.utc).isoformat(),
-        "config":           cfg,
-    })
-    return {"ok": True}
-
-# ══ END VIRTUAL TRADING BOT ════════════════════════════════════════════════════
+# Virtual trading bot bol odstr?nen? z dashboardu (2026-06-29).
+# Ak sa vr?ti, bude d?va? v???? zmysel ako samostatn? projekt/slu?ba.
 
 @app.get("/api/health")
 def health():

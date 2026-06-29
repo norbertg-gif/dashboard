@@ -3221,64 +3221,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .panel.tag-panel-3 { border-color: var(--up-soft); }
 .panel.tag-panel-4 { border-color: var(--down-soft); }
 
-/* ── VIRTUAL BOT TAB ── */
-.bot-kpi-bar {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.bot-kpi-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 16px;
-  min-width: 110px;
-  flex: 1;
-}
-.bot-kpi-label {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-.bot-kpi-val {
-  font-size: 18px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--text);
-  line-height: 1.2;
-}
-.bot-kpi-val small {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted);
-}
-.pnl-pos { color: var(--up); }
-.pnl-neg { color: var(--down); }
-
-.bot-config-panel {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 16px;
-}
-.bot-cfg-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.bot-cfg-field > span {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  text-transform: uppercase;
-}
-
 /* ── Ticker news sentiment (scanner) ───────────────────────── */
 .news-btn {
   background: none; border: none; cursor: pointer;

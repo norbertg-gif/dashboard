@@ -65,7 +65,7 @@
       <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
       <li><a href="#verdict">Investičný verdikt</a></li>
-      <li><a href="#bot">Virtuálny obchodný bot</a></li>
+      <li><a href="#memory">Prev?dzka a pam??ov? profil</a></li>
       <li><a href="#philosophy">Filozofia signálov</a></li>
       <li><a href="#presets">Presety, watchlist, eToro</a></li>
       <li><a href="#trouble">Troubleshooting</a></li>
@@ -106,7 +106,6 @@
     <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
     <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Opportunities, Checklist watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
     <li><strong>Verdikt</strong> — zjednodušená odpoveď ÁNO / POČKAŤ / NIE pre horizont 30–90 dní. Ukáže najviac dva argumenty pre, dva proti a jednu podmienku, ktorá môže rozhodnutie zmeniť. Indikátory Technika / Trh / Firma / Earnings ukazujú dostupnosť podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa 10 minút cachuje. Nepridáva nové skóre ani nemení C1–C4 alebo ML.</li>
-    <li><strong>Bot</strong> — virtuálny paper-trading bot na testovanie signálov bez rizika skutočného kapitálu.</li>
   </ul>
 
   <h3>Ovládanie grafov a markerov</h3>
@@ -194,7 +193,7 @@
     <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
     <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
     <li><strong>Korelačná matica</strong> (pod Top pozíciami) zobrazuje 60-dňovú Pearsonovu koreláciu denných výnosov medzi top 20 pozíciami. Červená pri +1 = pozície sa pohybujú spolu, modrá pri −1 = pohybujú sa opačne, sivá pri 0 = nezávisle. Tickery sú zoradené podľa SPDR sektora — vizuálne klastre. Slovný verdikt nad maticou hovorí, či sa portfólio hýbe ako jedna skupina (priemerná absolútna korelácia ≥ 0.7 = jedna zlá správa zasiahne väčšinu pozícií). Zoznam najsilnejších párov pomáha vidieť skrytú koncentráciu, ktorú váha pozícií sama neukáže — napríklad NVDA + AMD + MU + AVGO bývajú korelované nad 0.7 aj keď ich Sektorová expozícia rozdeľuje. Dáta tečú z OHLCV cache, nesťahujú sa cez API.</li>
-    <li><strong>DCA kandidáti</strong> spájajú agregovaný P/L pozície s DIP rankingom — pomáha rozhodnúť, či dokupovať stratový titul. Ukáže len pozície v strate ≥ 15 % a oflaguje ich: 🟢 <strong>DCA</strong> (DIP ≥ 90, váha &lt; 10 % equity — kvalitný dip), 🟡 <strong>Veľká váha</strong> (DCA OK, ale pozícia už ≥ 10 % equity — koncentrácia), 🔴 <strong>Pozor</strong> (slabé DIP skóre, možný value trap), ⚪ <strong>Mimo dát</strong> (ticker nie je v DIP datasete). Rozhoduje agregovaný P/L celej pozície, nie jedna tranža. Prahy sú zladené s appkou (bot dokupuje tiež od −15 %, DIP 90 = pásmo STRONG). Karta ukazuje vek DIP dát — pri starom importe ber flag s rezervou. Čisto interpretačná pomôcka, nevstupuje do skóre ani bota.</li>
+    <li><strong>DCA kandid?ti</strong> sp?jaj? agregovan? P/L poz?cie s DIP rankingom ? pom?ha rozhodn??, ?i dokupova? stratov? titul. Uk??e len poz?cie v strate ? 15 % a oflaguje ich: ?? <strong>DCA</strong> (DIP ? 90, v?ha &lt; 10 % equity ? kvalitn? dip), ?? <strong>Ve?k? v?ha</strong> (DCA OK, ale poz?cia u? ? 10 % equity ? koncentr?cia), ?? <strong>Pozor</strong> (slab? DIP sk?re, mo?n? value trap), ? <strong>Mimo d?t</strong> (ticker nie je v DIP datasete). Rozhoduje agregovan? P/L celej poz?cie, nie jedna tran?a. Prahy s? zladen? s appkou (?15 % = hlb?ia strata, DIP 90 = p?smo STRONG). Karta ukazuje vek DIP d?t ? pri starom importe ber flag s rezervou. ?isto interpreta?n? pom?cka, nevstupuje do sk?re.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -495,59 +494,23 @@
   <p>Výstup je zámerne krátky: najviac dva dôvody <strong>pre</strong>, dva dôvody <strong>proti</strong> a jedna podmienka, ktorá môže záver zmeniť. Tlačidlo na dôkazy otvorí detail v Prediktívnom tabe.</p>
   <blockquote><p>Verdikt nevytvára nový model ani tajné skóre. Len prekladá už existujúce dáta do ľudskej reči. Ak niektorý zdroj chýba, zobrazí sa jeho nedostupnosť a istota záveru sa zníži.</p></blockquote>
 
-  <h2 id="bot">6. Virtuálny obchodný bot</h2>
-  <p>Záložka <strong>Bot</strong> simuluje paper-trading na live dátach — overuje, ako by si sa obchodoval na základe technických signálov, bez rizika skutočného kapitálu.</p>
-
-  <h3>Spustenie a tok dát</h3>
-  <ul>
-    <li>Klikni <strong>▶ Spustiť kolo</strong> — bot stiahne denné dáta z yfinance sám. <strong>Scanner pred spustením spúšťať netreba.</strong></li>
-    <li>Bot prechádza: <strong>watchlist + eToro portfólio (oba účty) + celý Nasdaq 100</strong> (~160 tickerov, duplikáty odfiltrované).</li>
-    <li>Ideálny čas: večer po <strong>22:00 SK</strong> keď je US daily sviečka uzavretá. Spustenie cez deň hodnotí rozpracovanú sviečku — menej spoľahlivé.</li>
-    <li>Prvé kolo po dlhšej nečinnosti trvá 2–3 min. Ďalšie kolá v ten istý deň sú rýchlejšie vďaka 30-minútovej yfinance cache.</li>
-  </ul>
-
-  <h3>Vstupná logika</h3>
-  <p>Bot otvorí novú pozíciu ak sú splnené všetky podmienky:</p>
-  <ol>
-    <li>Technický score ≥ <strong>Min. score</strong> (konfigurovateľné, default 3/4)</li>
-    <li>Tier = <strong>buy</strong> (uptrend: EMA10 &gt; EMA20)</li>
-    <li>Ticker <strong>nie je</strong> v otvorených pozíciách — alebo je tam, ale v strate <strong>≥ 15 %</strong> (averaging down výnimka)</li>
-    <li>Je dostatok voľného cash a max. počet pozícií nie je dosiahnutý (default 20)</li>
-    <li>Ak je zapnutý <strong>Finviz filter</strong> — ticker musí mať importované DIP skóre ≥ min. Ticker bez Finviz dát = skip.</li>
-  </ol>
-
-  <h3>Výstupná logika</h3>
-  <p>Pozícia sa zavrie ak nastane jedno z:</p>
-  <ul>
-    <li><strong>Stop-loss</strong> — cena klesla pod prah</li>
-    <li><strong>Take-profit</strong> — cena stúpla nad prah</li>
-    <li><strong>Counter signál</strong> — score ≥ 3 a tier = counter (downtrend)</li>
-    <li><strong>Manuálne</strong> — tlačidlo <strong>Zavri</strong> v tabuľke otvorených pozícií</li>
-  </ul>
-
-  <h3>Nastavenia (⚙️ Exit nastavenia)</h3>
+  <h2 id="memory">6. Prev?dzka a pam??ov? profil</h2>
+  <p>Dashboard je nastaven? tak, aby sa zmestil do lacn?ho Render pl?nu s limitom pribli?ne <strong>512 MB RAM</strong>. Predvolen? backend re?im je <code>DASH_MEMORY_PROFILE=low</code>.</p>
+  <p>Zapnut? ost?va jadro: grafy, portf?lio, live P/L, C1?C4 sign?ly, Scanner, Verdikt, news/earnings a cache-first na??tavanie svie?ok.</p>
   <table>
-    <tr><th>Nastavenie</th><th>Popis</th><th>Default</th></tr>
-    <tr><td><strong>Režim</strong></td><td>ATR násobky = prahy relatívne k volatilite; Fixné % = pevné percentá</td><td>ATR násobky</td></tr>
-    <tr><td><strong>Stop-loss (×ATR)</strong></td><td>Koľko ATR pod vstupom sa zavrie</td><td>1.5</td></tr>
-    <tr><td><strong>Take-profit (×ATR)</strong></td><td>Koľko ATR nad vstupom sa zavrie</td><td>2.5</td></tr>
-    <tr><td><strong>Stop-loss (%)</strong></td><td>Fixný stop (aj fallback keď ATR chýba)</td><td>7 %</td></tr>
-    <tr><td><strong>Take-profit (%)</strong></td><td>Fixný take-profit</td><td>12 %</td></tr>
-    <tr><td><strong>Vstup (% kapitálu)</strong></td><td>Koľko % počiatočného kapitálu na jeden obchod</td><td>5 %</td></tr>
-    <tr><td><strong>Min. score (x/4)</strong></td><td>Minimálne technické skóre pre vstup</td><td>3/4</td></tr>
-    <tr><td><strong>Finviz filter</strong></td><td>Zapnúť/vypnúť filter podľa DIP skóre</td><td>vypnuté</td></tr>
-    <tr><td><strong>Min. DIP skóre</strong></td><td>Minimálna hodnota DIP total (STRONG = 90, VERY STRONG = 100)</td><td>90</td></tr>
+    <thead><tr><th>Prep?na?</th><th>Default</th><th>V?znam</th></tr></thead>
+    <tbody>
+      <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnos? v Predikcii.</td></tr>
+      <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
+      <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
+      <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>30D/60D/90D analytika sign?lov.</td></tr>
+      <tr><td><code>ENABLE_CORRELATION</code></td><td>0</td><td>Korela?n? matica v Risk tabe.</td></tr>
+      <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth v?po?et.</td></tr>
+      <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 ?as? Massive market snapshotu.</td></tr>
+      <tr><td><code>ENABLE_MASSIVE_MARKET</code></td><td>1</td><td>Massive EOD kontext ako celok.</td></tr>
+    </tbody>
   </table>
-  <p><strong>ATR režim</strong> — stop a take-profit sa vypočítajú z ATR uloženého pri otvorení pozície. Fixné % slúžia ako fallback keď ATR chýba. Nastavenia prežívajú aj Reset bota (reset maže len pozície a históriu).</p>
-  <p><strong>Finviz filter</strong> — keď zapnutý, pred spustením kola importuj čerstvý Finviz export v Scanner tabe.</p>
-
-  <h3>KPI a história</h3>
-  <ul>
-    <li><strong>KPI dlaždice</strong> — equity, cash, otvorené pozície, closed trades, win rate, max drawdown.</li>
-    <li><strong>Otvorené pozície</strong> — tabuľka s aktuálnou cenou, P/L a tlačidlom <strong>Zavri</strong>. Klik na ticker otvorí detail v Prediktívnom tabe.</li>
-    <li><strong>História</strong> — posledných 40 uzavretých obchodov s dôvodom (Stop-loss / Take-profit / Counter / Manuálne).</li>
-    <li><strong>Equity krivka</strong> — vývoj hodnoty portfólia po jednotlivých obchodoch.</li>
-  </ul>
+  <p>Endpoint <code>/api/admin/memory</code> uk??e aktu?lny profil, stav prep?na?ov a ve?kos? hlavn?ch RAM cache. Virtu?lny paper-trading bot bol odstr?nen?; ak sa vr?ti, bude vhodnej?? ako samostatn? projekt/slu?ba.</p>
 
   <h2 id="philosophy">7. Filozofia signálov</h2>
 
