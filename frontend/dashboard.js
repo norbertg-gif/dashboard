@@ -7478,11 +7478,13 @@ function renderNasdaqScanner(payload) {
     strong: ranked.filter(r => String(r.dip_label || '').includes('STRONG')).length,
     techOnly: ranked.filter(r => (r.dip_label || 'TECH ONLY') === 'TECH ONLY').length,
   };
+  const errorDetails = renderScannerErrorDetails(cache);
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}
       <span class="scanner-compact-kpis">Signály ${kpis.total} · Crossover ${kpis.crossover} · Strong ${kpis.strong} · Tech only ${kpis.techOnly}</span>
     </div>
+    ${errorDetails}
     <details class="scanner-export">
       <summary>Export / kopírovanie</summary>
       <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tMarket\tReason
@@ -7554,6 +7556,29 @@ ${escHtml(copyText)}</textarea>
   applyScannerBadges();
   resolveGfLinks();
   ensureScannerMetaLoaded(ranked.map(r => r.ticker));
+}
+
+function renderScannerErrorDetails(cache) {
+  const samples = Array.isArray(cache?.error_samples) ? cache.error_samples : [];
+  const counts = cache?.error_counts && typeof cache.error_counts === 'object' ? cache.error_counts : {};
+  const total = Number(cache?.errors || 0);
+  if (!total) return '';
+  const countRows = Object.entries(counts)
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+    .slice(0, 5)
+    .map(([reason, count]) => `<li><b>${count}×</b> ${escHtml(reason)}</li>`)
+    .join('');
+  const sampleRows = samples.slice(0, 12)
+    .map(item => `<li><b>${escHtml(item.ticker || '?')}</b> — ${escHtml(item.error || 'chyba')}</li>`)
+    .join('');
+  return `<details class="scanner-error-details">
+    <summary>Diagnostika chýb (${total})</summary>
+    <div class="scanner-error-grid">
+      <div><div class="scanner-error-title">Najčastejšie dôvody</div><ul>${countRows || '<li>Bez detailu</li>'}</ul></div>
+      <div><div class="scanner-error-title">Vzorka tickerov</div><ul>${sampleRows || '<li>Bez detailu</li>'}</ul></div>
+    </div>
+    <div class="scanner-error-note">Ticker bez aktuálneho signálu sa v hlavnej tabuľke nezobrazí ani vtedy, keď má vysoké DIP skóre.</div>
+  </details>`;
 }
 
 // ── Earnings warning + agregovaný sentiment v scanner riadkoch ──────────────

@@ -2665,6 +2665,44 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-left: 10px;
   color: var(--muted2);
 }
+.scanner-error-details {
+  border: 1px solid color-mix(in srgb, var(--yellow) 35%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--yellow) 7%, var(--bg-card));
+  padding: 9px 10px;
+}
+.scanner-error-details summary {
+  cursor: pointer;
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.scanner-error-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+.scanner-error-grid ul {
+  margin: 4px 0 0 16px;
+}
+.scanner-error-grid li {
+  margin: 3px 0;
+}
+.scanner-error-title {
+  color: var(--text);
+  font-weight: 800;
+  font-family: var(--font-ui);
+}
+.scanner-error-note {
+  margin-top: 8px;
+  color: var(--muted2);
+  font-size: 10px;
+}
 .scanner-progress-bar {
   height: 3px;
   background: var(--border);

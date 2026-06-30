@@ -5071,7 +5071,8 @@ def _yf_download_cached(ticker: str, period: str, interval: str):
             return hit[1].copy()
     raw = _massive_daily_bars(ticker, period, interval)
     if raw is None or len(raw) < 2:
-        raw = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
+        yf_symbol = ticker.replace(".", "-")
+        raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
         raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
@@ -5242,6 +5243,10 @@ def _run_nasdaq_scanner(days: int):
         dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
         results = [enrich_with_dip(r, dip_scores) for r in results]
         results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
+        error_counts = {}
+        for err in errors:
+            reason = str(err.get("error") or "Unknown")
+            error_counts[reason] = error_counts.get(reason, 0) + 1
         payload = {
             "universe": "nasdaq100_plus_dip",
             "universe_label": "Nasdaq-100 + DIP import",
@@ -5250,6 +5255,8 @@ def _run_nasdaq_scanner(days: int):
             "total": len(tickers),
             "matches": len(results),
             "errors": len(errors),
+            "error_counts": error_counts,
+            "error_samples": errors[:25],
             "crossover_matches": sum(1 for r in results if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD),
             "results": results,
         }

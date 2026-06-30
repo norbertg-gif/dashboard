@@ -497,6 +497,11 @@ Veľké KPI dlaždice boli zjednodušené do jedného status riadku nad tabuľko
 **Signály / Crossover / Strong / Tech only**. Ide o rýchly súhrn, nie primárny
 rozhodovací výstup.
 
+Ak scanner hlási chyby, pod statusom sa zobrazí zbaliteľná **Diagnostika chýb**:
+najčastejšie dôvody a vzorka tickerov. Ticker s vysokým DIP skóre sa v hlavnej
+tabuľke zobrazí iba vtedy, keď má aktuálny technický signál; samotný vysoký rank
+v Exceli nestačí.
+
 ### Stĺpce tabuľky
 
 | Stĺpec | Význam |
