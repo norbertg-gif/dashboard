@@ -1,4 +1,4 @@
-﻿const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8766' : '';
 const PERIODS = ['auto'];
 const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
@@ -7298,8 +7298,9 @@ function scannerStatusLine(state, cache) {
   }
   if (cache && cache.generated_at) {
     const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
+    const universe = cache.universe_label ? ` · ${escHtml(cache.universe_label)}` : '';
     const errors = cache.errors ? ` · ${cache.errors} chýb` : '';
-    return `Posledný scan: ${dt} · ${cache.matches || 0}/${cache.total || 0} signálov${errors}`;
+    return `Posledný scan: ${dt}${universe} · ${cache.matches || 0}/${cache.total || 0} signálov${errors}`;
   }
   return 'Zatiaľ nie je spustený žiadny Nasdaq scan.';
 }
@@ -7447,7 +7448,7 @@ function renderNasdaqScanner(payload) {
 
   if (!rows.length) {
     el.className = 'opp-empty';
-    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre Nasdaq-100 + DIP import.</div>`;
+    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre importovaný DIP ranking. Bez importu sa použije Nasdaq-100 fallback.</div>`;
     return;
   }
 

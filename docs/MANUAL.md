@@ -1,4 +1,4 @@
-﻿# Trading Dashboard — Používateľský manuál
+# Trading Dashboard — Používateľský manuál
 
 Lokálny dashboard na monitorovanie eToro účtu a technickú analýzu. Rozhranie je
 v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplikácie
@@ -806,7 +806,7 @@ jazykom.
 | Príznak | Príčina / riešenie |
 |---|---|
 | **Prázdny graf / žiadne dáta** | yfinance rate-limit alebo timeout. Skús znova o chvíľu. |
-| **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Dá sa zvýšiť `SCANNER_YF_TIMEOUT`. |
+| **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Scanner používa kratší timeout, aby jeden ticker nezablokoval celý beh. Dá sa upraviť cez `SCANNER_YF_TIMEOUT` a `SCANNER_TICKER_TIMEOUT`. |
 | **Regime = n/a** | `hmmlearn` nie je nainštalovaný alebo málo histórie (min. 60 sviečok). |
 | **Portfólio stratené pri výpadku eToro** | Cache padá späť na disk (stale-while-erroring), je to zámerné. |
 | **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty. |
@@ -873,9 +873,9 @@ render.yaml            # web service + 1GB disk na /data
 | `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako **primárny zdroj denných/týždenných OHLCV** (yfinance fallback). |
 | `FRED_API_KEY` | Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva ticho vynechá. |
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
-| `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
-| `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu pridaných k Nasdaq-100 (default 300). |
-| `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |
+| `SCANNER_YF_TIMEOUT` | Timeout yfinance volania v scanneri (default 8 s). |
+| `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback. |
+| `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 18 s). |
 | `RENDER` | Príznak produkcie. |
 
 ### Signal scoring — kde žije

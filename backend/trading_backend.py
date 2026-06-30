@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Trading Dashboard Backend — port 8766
 pip install fastapi uvicorn yfinance pandas requests
@@ -4134,8 +4134,8 @@ NASDAQ100_TICKERS = [
 ]
 
 SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
-SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "30"))
-SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "15"))
+SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "18"))
+SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "8"))
 SCANNER_DIP_UNIVERSE_MAX = int(os.getenv("SCANNER_DIP_UNIVERSE_MAX", "300"))
 SCANNER_DEFAULT_DAYS = 3
 SIGNAL_PROXIMITY_TOL = 0.005     # fallback keď ATR nie je k dispozícii
@@ -4805,22 +4805,15 @@ def enrich_scanner_payload(payload: dict) -> dict:
     return out
 
 
-def scanner_universe_from_dip() -> list[str]:
-    """Scanner universe = Nasdaq-100 + manually imported DIP ranking.
+def scanner_universe_from_dip() -> tuple[list[str], str, str]:
+    """Scanner universe = imported DIP ranking, with Nasdaq-100 fallback.
 
-    The original scanner was Nasdaq-only. The DIP Excel can now contain NYSE
-    and other U.S. tickers too, so ignoring imported symbols makes the scanner
-    look inconsistent with the ranking sheet. Keep Nasdaq as a fallback/base and
-    add a capped number of imported DIP tickers to protect Render memory.
+    When a DIP Excel is imported, that file is the user's curated universe and
+    can include NYSE/non-Nasdaq stocks. Scanning Nasdaq-100 on top of it doubles
+    request volume, hides the imported names in timeout noise, and is wasteful on
+    the Render free/low-memory tier. Without an import we keep the old Nasdaq-100
+    behavior as a sensible fallback.
     """
-    out: list[str] = []
-    seen = set()
-    for ticker in NASDAQ100_TICKERS:
-        sym = str(ticker or "").strip().upper()
-        if sym and sym not in seen:
-            out.append(sym)
-            seen.add(sym)
-
     dip_scores = load_dip_scores()
     imported = [
         str(sym or "").strip().upper()
@@ -4829,13 +4822,18 @@ def scanner_universe_from_dip() -> list[str]:
     ]
     imported = [sym for sym in imported if re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym)]
 
-    # Preserve ranking order from the imported file when available. Dict order is
-    # insertion order; parse_dip_ranking_xlsx reads rows in Ranking order.
-    for sym in imported[:max(0, SCANNER_DIP_UNIVERSE_MAX)]:
-        if sym not in seen:
-            out.append(sym)
-            seen.add(sym)
-    return out
+    if imported:
+        out: list[str] = []
+        seen = set()
+        # Preserve ranking order from the imported file. Dict order is insertion
+        # order; parse_dip_ranking_xlsx reads rows in Ranking order.
+        for sym in imported[:max(0, SCANNER_DIP_UNIVERSE_MAX)]:
+            if sym not in seen:
+                out.append(sym)
+                seen.add(sym)
+        return out, "DIP import", "dip_import"
+
+    return NASDAQ100_TICKERS[:], "Nasdaq-100 fallback", "nasdaq100"
 
 
 def parse_dip_ranking_xlsx(raw: bytes, filename: str | None = None) -> dict:
@@ -5062,14 +5060,14 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
         return None
 
 
-def _yf_download_cached(ticker: str, period: str, interval: str):
+def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive: bool = True):
     key = (ticker, period, interval)
     now = time.time()
     with _YF_CACHE_LOCK:
         hit = _YF_CACHE.get(key)
         if hit and now - hit[0] < _YF_CACHE_TTL:
             return hit[1].copy()
-    raw = _massive_daily_bars(ticker, period, interval)
+    raw = _massive_daily_bars(ticker, period, interval) if prefer_massive else None
     if raw is None or len(raw) < 2:
         yf_symbol = ticker.replace(".", "-")
         raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
@@ -5086,13 +5084,13 @@ def _yf_download_cached(ticker: str, period: str, interval: str):
 
 
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
-    raw_d = _yf_download_cached(ticker, "6mo", "1d")
+    raw_d = _yf_download_cached(ticker, "6mo", "1d", prefer_massive=False)
     if len(raw_d) < 20:
         return {"ticker": ticker, "error": "Nedostatok dat"}
 
     df_d = add_indicators(raw_d)
 
-    raw_w = _yf_download_cached(ticker, "1y", "1wk")
+    raw_w = _yf_download_cached(ticker, "1y", "1wk", prefer_massive=False)
     weekly_bullish = None
     weekly_status = "insufficient_history"
     weekly_trend = None
@@ -5177,7 +5175,7 @@ def _run_nasdaq_scanner(days: int):
     results, errors = [], []
     slog_source = load_signals_log()
     slog_work = {k: dict(v) if isinstance(v, dict) else v for k, v in slog_source.items()}
-    tickers = scanner_universe_from_dip()
+    tickers, universe_label, universe_key = scanner_universe_from_dip()
 
     with _scanner_lock:
         _scanner_state.update({
@@ -5248,8 +5246,8 @@ def _run_nasdaq_scanner(days: int):
             reason = str(err.get("error") or "Unknown")
             error_counts[reason] = error_counts.get(reason, 0) + 1
         payload = {
-            "universe": "nasdaq100_plus_dip",
-            "universe_label": "Nasdaq-100 + DIP import",
+            "universe": universe_key,
+            "universe_label": universe_label,
             "days": days,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "total": len(tickers),
@@ -5284,7 +5282,8 @@ def start_nasdaq_scanner(days: int = Query(SCANNER_DEFAULT_DAYS, ge=1, le=10)):
     with _scanner_lock:
         if _scanner_state.get("running"):
             return {"status": "running", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
-        _scanner_state.update({"running": True, "progress": 0, "total": len(scanner_universe_from_dip()), "current": None, "error": None})
+        tickers, _, _ = scanner_universe_from_dip()
+        _scanner_state.update({"running": True, "progress": 0, "total": len(tickers), "current": None, "error": None})
     t = threading.Thread(target=_run_nasdaq_scanner, args=(days,), daemon=True)
     t.start()
     return {"status": "started", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}

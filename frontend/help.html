@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="sk">
 <head>
 <meta charset="UTF-8">
@@ -537,7 +537,7 @@
   <table>
     <tr><th>Príznak</th><th>Príčina / riešenie</th></tr>
     <tr><td>Prázdny graf / žiadne dáta</td><td>yfinance rate-limit alebo timeout. Skús znova o chvíľu.</td></tr>
-    <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Dá sa zvýšiť <code>SCANNER_YF_TIMEOUT</code>.</td></tr>
+    <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Scanner používa kratší timeout, aby jeden ticker nezablokoval celý beh. Dá sa upraviť cez <code>SCANNER_YF_TIMEOUT</code> a <code>SCANNER_TICKER_TIMEOUT</code>.</td></tr>
     <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
     <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
     <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty.</td></tr>
@@ -589,9 +589,9 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>MASSIVE_API_KEY</code></td><td>End-of-day trhový kontext Nasdaq-100 a S&amp;P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako primárny zdroj denných/týždenných OHLCV (yfinance fallback).</td></tr>
     <tr><td><code>FRED_API_KEY</code></td><td>Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva vynechá.</td></tr>
     <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM).</td></tr>
-    <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania (default 15 s).</td></tr>
-    <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 30 s).</td></tr>
-    <tr><td><code>SCANNER_DIP_UNIVERSE_MAX</code></td><td>Maximálny počet tickerov z importovaného DIP Excelu pridaných k Nasdaq-100 (default 300).</td></tr>
+    <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania v scanneri (default 8 s).</td></tr>
+    <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 18 s).</td></tr>
+    <tr><td><code>SCANNER_DIP_UNIVERSE_MAX</code></td><td>Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback.</td></tr>
     <tr><td><code>RENDER</code></td><td>Príznak produkcie.</td></tr>
   </table>
 

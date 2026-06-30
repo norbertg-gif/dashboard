@@ -1,4 +1,4 @@
-﻿# Trading Dashboard — Claude Code Context
+# Trading Dashboard — Claude Code Context
 
 Local trading dashboard for eToro account monitoring + technical analysis. Single-user, deployed on Render.com with a persistent `/data` disk. UI is Slovak, code/identifiers English.
 
@@ -139,7 +139,7 @@ Three source sections:
 1. **Unified Scanner UI** — one “Kandidáti” workflow. Watchlist/eToro radar is the upper source, Nasdaq+DIP discovery is the lower source. Keep new additions behind progressive disclosure.
 2. **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only).
 3. **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.
-4. **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but the scanned universe is now `Nasdaq-100 ∪ imported DIP ranking tickers` (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
+4. **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but an imported DIP ranking XLSX is now the primary scanned universe (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). Nasdaq-100 is only the fallback when no DIP import exists. This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks and scanning Nasdaq on top of it created avoidable timeouts. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
    Scanner cache now stores `error_counts` and `error_samples` so the UI can explain large error counts instead of showing only a number. Main table still shows only tickers with a current technical signal; high DIP rank alone is not enough to display a row.
 
 **Market context bar** (`#marketCtxBar`, chip-bar TRH nad Kandidátmi): `GET /api/market/context` → QQQ/SPY trend (EMA10/20 + 1M perf), VIX úroveň, 11 SPDR sektorov (1M ranking) synchrónne; Nasdaq-100 breadth (% nad EMA50/EMA200) v background threade (`_mc_breadth_worker`, sekvenčne — nie paralelne, OOM). Massive grouped EOD data add `Pulse`, A/D and `% above daily VWAP`. Disk cache `_market_context.json` (DATA_ROOT, 6h TTL, v .gitignore). **Zámerne NEOVPLYVŇUJE C1–C4 scoring** — čisto interpretačná vrstva; nemeniť bez explicitného rozhodnutia. JS: `loadMarketContext()` volaný z `ensureScannerMetaLoaded()`, breadth sa dotiahne retry-om po 60 s.
