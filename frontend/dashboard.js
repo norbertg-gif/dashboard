@@ -2113,7 +2113,7 @@ function renderPortPanel(pid) {
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
   if (pid === 'main') {
-    html += `<div id="portfolio-dca" style="padding:10px 16px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+    html += `<div id="portfolio-dca">
     <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
