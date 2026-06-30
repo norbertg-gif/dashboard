@@ -139,7 +139,7 @@ Three source sections:
 1. **Unified Scanner UI** — one “Kandidáti” workflow. Watchlist/eToro radar is the upper source, Nasdaq+DIP discovery is the lower source. Keep new additions behind progressive disclosure.
 2. **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only).
 3. **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.
-4. **Nasdaq DIP scanner** — `loadNasdaqScannerResults()`, `/api/scanner/nasdaq/results`. DIP crossover + manually imported XLSX Finviz/DIP ranking. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
+4. **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but the scanned universe is now `Nasdaq-100 ∪ imported DIP ranking tickers` (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
 
 **Market context bar** (`#marketCtxBar`, chip-bar TRH nad Kandidátmi): `GET /api/market/context` → QQQ/SPY trend (EMA10/20 + 1M perf), VIX úroveň, 11 SPDR sektorov (1M ranking) synchrónne; Nasdaq-100 breadth (% nad EMA50/EMA200) v background threade (`_mc_breadth_worker`, sekvenčne — nie paralelne, OOM). Massive grouped EOD data add `Pulse`, A/D and `% above daily VWAP`. Disk cache `_market_context.json` (DATA_ROOT, 6h TTL, v .gitignore). **Zámerne NEOVPLYVŇUJE C1–C4 scoring** — čisto interpretačná vrstva; nemeniť bez explicitného rozhodnutia. JS: `loadMarketContext()` volaný z `ensureScannerMetaLoaded()`, breadth sa dotiahne retry-om po 60 s.
 
@@ -190,7 +190,7 @@ Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureSc
 
 ## News sentiment — key architecture
 
-**Role:** Reality check k číslam — articles + ticker-specific sentiment v Nasdaq DIP scanneri (📰 button per row, lazy load).
+**Role:** Reality check k číslam — articles + ticker-specific sentiment v DIP universe scanneri (📰 button per row, lazy load).
 
 - **Source:** Alpha Vantage `NEWS_SENTIMENT`. `ALPHA_VANTAGE_API_KEY` from env only (free tier 25 req/day).
 - **Backend:** `_news_parse_feed(ticker, data)` — shared parsing (relevance filter ≥ 0.15, ticker-specific sentiment not overall, sort by time+relevance, max 10). Called by both `_news_fetch_av` (server fetch) and `POST /api/news/{ticker}/ingest` (browser-fetched raw JSON).
@@ -250,7 +250,7 @@ Bot UI and `/api/bot/*` endpoints were removed on 2026-06-29 to reduce memory su
 
 - Pull-based only: no push infra, no scheduler. UI button **Alerty** calls
   `GET /api/events?hours=24|48` and reads already available caches/logs.
-- Sources: signal log, Nasdaq scanner cache, earnings lookup, and eToro portfolio
+- Sources: signal log, DIP scanner cache, earnings lookup, and eToro portfolio
   cache. Keep every source fail-soft; one broken source must not break the panel.
 - Current rules: new predictive signal, scanner candidate, earnings within 3 days,
   or portfolio daily P/L move over 10 USD or 1%.

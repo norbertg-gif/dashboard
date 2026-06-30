@@ -97,7 +97,7 @@ vopred sa zobrazia 3-krát).
   história, validácia a predikcia ďalšej sviečky
   (viď [sekcia 4](#4-prediktívny-tab--ako-čítať-signály)).
 - **Scanner** — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie
-  watchlistu a Nasdaq skener s DIP crossover stratégiou
+  watchlistu a DIP universe scanner s crossover stratégiou
   (viď [sekcia 5](#5-scanner--dip-stratégia)).
 
 - **Verdikt** — stručná rozhodovacia vrstva pre jeden ticker. Z existujúcej
@@ -431,8 +431,9 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
 do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**
 je rýchly radar titulov, ktoré už sleduješ alebo držíš. Spodný podblok
-**Nasdaq + DIP** hľadá nové širšie príležitosti cez Nasdaq-100 a externý
-**DIP ranking**. Klik na kandidáta otvorí jeho detail v Predikcii.
+**DIP universe** hľadá nové širšie príležitosti cez Nasdaq-100 plus tickery
+z importovaného **DIP rankingu**. Klik na kandidáta otvorí jeho detail
+v Predikcii.
 
 ### Kontext trhu — lišta TRH
 
@@ -484,9 +485,11 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
   nahráš súbor.
 - Pod importom sa zobrazí kontrolná tabuľka raw hodnôt a výsledného rankingu.
   Chýbajúce hodnoty sú zvýraznené a ticker je klikateľný.
-- XLSX import aktualizuje DIP cache používanú Nasdaq scannerom a DCA kartou.
-- **Spustiť scanner** — spustí paralelný sken Nasdaq-100 (progress bar ukazuje
-  priebeh). Beží na pozadí, výsledky sa priebežne dopĺňajú.
+- XLSX import aktualizuje DIP cache používanú scannerom a DCA kartou. Tickery
+  z importu zároveň rozširujú skenované univerzum mimo Nasdaq-100 (napr. NYSE).
+- **Spustiť scanner** — spustí paralelný sken Nasdaq-100 + importovaných DIP
+  tickerov (progress bar ukazuje priebeh). Beží na pozadí, výsledky sa priebežne
+  dopĺňajú.
 
 ### Kompaktný status scanu
 
@@ -518,7 +521,7 @@ aby bolo možné neskôr overiť ich prínos na 90D+ výsledkoch.
 
 ### Správy a sentiment (📰)
 
-Každý riadok Nasdaq DIP scannera má tlačidlo **📰** — rozbalí pod riadkom
+Každý riadok DIP universe scannera má tlačidlo **📰** — rozbalí pod riadkom
 zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage
 NEWS_SENTIMENT).
 
@@ -540,7 +543,7 @@ NEWS_SENTIMENT).
 
 ### Reddit zmienky (r/N)
 
-V riadkoch Nasdaq DIP scannera sa vedľa tickera môže zobraziť badge
+V riadkoch DIP universe scannera sa vedľa tickera môže zobraziť badge
 **`r/N↑`** alebo **`r/N↓`** — počet nedávnych zmienok tickera v obchodných
 subredditoch. Zdroj: **ApeWisdom**, ktorý agreguje komunity r/WallStreetBets,
 r/stocks, r/investing a podobné.
@@ -866,6 +869,7 @@ render.yaml            # web service + 1GB disk na /data
 | `FRED_API_KEY` | Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva ticho vynechá. |
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania (default 15 s). |
+| `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu pridaných k Nasdaq-100 (default 300). |
 | `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 30 s). |
 | `RENDER` | Príznak produkcie. |
 

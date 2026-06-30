@@ -318,7 +318,7 @@ function renderRecentEvents(payload) {
     const category = ['signal','scanner','earnings','portfolio'].includes(item.category || item.type) ? (item.category || item.type) : 'info';
     const labels = {
       signal: 'Prediktívny signál',
-      scanner: 'Nasdaq scanner',
+      scanner: 'DIP scanner',
       earnings: 'Earnings',
       portfolio: 'Portfólio',
       info: 'Info',
@@ -7404,10 +7404,10 @@ async function renderScannerView() {
         </section>
         <div class="scanner-source-head scanner-nasdaq-head">
           <div>
-            <div class="scanner-section-kicker">Nasdaq + DIP</div>
+            <div class="scanner-section-kicker">DIP universe</div>
             <div class="scanner-source-title">Širší skener nových príležitostí</div>
           </div>
-          <span class="scanner-source-note">Technický signál + importovaný DIP ranking</span>
+          <span class="scanner-source-note">Nasdaq-100 + tickery z importovaného DIP Excelu</span>
         </div>
         <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
       </div>
@@ -7447,7 +7447,7 @@ function renderNasdaqScanner(payload) {
 
   if (!rows.length) {
     el.className = 'opp-empty';
-    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre Nasdaq 100.</div>`;
+    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre Nasdaq-100 + DIP import.</div>`;
     return;
   }
 
@@ -8136,7 +8136,7 @@ async function runNasdaqScanner() {
   if (!el || pc_scannerLoading) return;
   pc_scannerLoading = true;
   el.className = 'opp-empty';
-  el.innerHTML = '<span class="cl-spinner"></span>Spustam Nasdaq scanner...';
+  el.innerHTML = '<span class="cl-spinner"></span>Spúšťam DIP universe scanner...';
   try {
     const res = await fetch('/api/scanner/nasdaq/run?days=3', { method: 'POST' });
     if (!res.ok) throw new Error('HTTP ' + res.status);

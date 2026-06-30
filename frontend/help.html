@@ -103,7 +103,7 @@
     <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody s filtrom dátumového intervalu od–do.</li>
     <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
-    <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie watchlistu a Nasdaq skener s DIP crossover stratégiou.</li>
+    <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie watchlistu a DIP universe scanner s crossover stratégiou.</li>
     <li><strong>Verdikt</strong> — zjednodušená odpoveď ÁNO / POČKAŤ / NIE pre horizont 30–90 dní. Ukáže najviac dva argumenty pre, dva proti a jednu podmienku, ktorá môže rozhodnutie zmeniť. Indikátory Technika / Trh / Firma / Earnings ukazujú dostupnosť podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa 10 minút cachuje. Nepridáva nové skóre ani nemení C1–C4 alebo ML.</li>
   </ul>
 
@@ -312,7 +312,7 @@
   <blockquote><p>Historické signály sa neprepisujú — staré záznamy bez tieru sa dočasne zobrazia ako watch a prefarbia sa po novom vyhodnotení tickera.</p></blockquote>
 
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
-  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>Nasdaq + DIP</strong> hľadá nové širšie príležitosti cez Nasdaq-100 a externý <strong>DIP ranking</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
+  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>DIP universe</strong> hľadá nové širšie príležitosti cez Nasdaq-100 plus tickery z importovaného <strong>DIP rankingu</strong>. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
 
   <h3>Kontext trhu — lišta TRH</h3>
   <p>Úplne hore v Scanneri je riadok chipov <strong>TRH</strong>. Odpovedá na otázku: <em>„Má môj Buy signál podporu širšieho trhu, alebo idem proti prúdu?“</em> Dôležité: lišta <strong>nevstupuje do C1–C4 skóre</strong> — signály počíta rovnako v býčom aj medveďom trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom trhu vyššiu šancu na úspech než v klesajúcom.</p>
@@ -343,8 +343,8 @@
     <li><strong>Skenuj watchlist</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
     <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX, ideálne zo záložky <code>Ranking</code>.</li>
     <li>Import je zámerne manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom nahráš súbor.</li>
-    <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre Nasdaq scanner a DCA kartu.</li>
-    <li><strong>Spustiť scanner</strong> — paralelný sken Nasdaq-100 (progress bar, beží na pozadí).</li>
+    <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre scanner a DCA kartu. Tickery z importu zároveň rozširujú skenované univerzum mimo Nasdaq-100.</li>
+    <li><strong>Spustiť scanner</strong> — paralelný sken Nasdaq-100 + importovaných DIP tickerov (progress bar, beží na pozadí).</li>
   </ul>
 
   <h3>Kompaktný status scanu</h3>
@@ -376,7 +376,7 @@
   <p>Massive údaje sú interpretačné a zatiaľ nemenia C1–C4, DIP skóre, ML ani Buy/Watch/Counter.</p>
 
   <h3>Správy a sentiment (📰)</h3>
-  <p>Každý riadok Nasdaq DIP scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
+  <p>Každý riadok DIP universe scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
   <ul>
     <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
     <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
@@ -386,7 +386,7 @@
   </ul>
 
   <h3>Reddit zmienky (r/N)</h3>
-  <p>V riadkoch Nasdaq DIP scannera sa vedľa tickera môže zobraziť badge <strong><code>r/N↑</code></strong> alebo <strong><code>r/N↓</code></strong> — počet nedávnych zmienok tickera v obchodných subredditoch. Zdroj: <strong>ApeWisdom</strong>, ktorý agreguje komunity r/WallStreetBets, r/stocks, r/investing a podobné.</p>
+  <p>V riadkoch DIP universe scannera sa vedľa tickera môže zobraziť badge <strong><code>r/N↑</code></strong> alebo <strong><code>r/N↓</code></strong> — počet nedávnych zmienok tickera v obchodných subredditoch. Zdroj: <strong>ApeWisdom</strong>, ktorý agreguje komunity r/WallStreetBets, r/stocks, r/investing a podobné.</p>
   <ul>
     <li><strong>N</strong> — celkový počet zaznamenaných zmienok za sledované obdobie.</li>
     <li><strong>↑ žltá</strong> — rank tickera sa za posledných 24 hodín <em>zlepšil</em>: titul sa diskutuje aktívnejšie ako včera.</li>
@@ -590,6 +590,7 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM).</td></tr>
     <tr><td><code>SCANNER_YF_TIMEOUT</code></td><td>Timeout yfinance volania (default 15 s).</td></tr>
     <tr><td><code>SCANNER_TICKER_TIMEOUT</code></td><td>Wall-clock limit na ticker (default 30 s).</td></tr>
+    <tr><td><code>SCANNER_DIP_UNIVERSE_MAX</code></td><td>Maximálny počet tickerov z importovaného DIP Excelu pridaných k Nasdaq-100 (default 300).</td></tr>
     <tr><td><code>RENDER</code></td><td>Príznak produkcie.</td></tr>
   </table>
 
