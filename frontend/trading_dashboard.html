@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260630-chart-health">
+<link rel="stylesheet" href="/dashboard.css?v=20260630-watchlist-flow">
 </head>
 <body>
 
@@ -153,6 +153,7 @@
           <input id="verdictTickerInput" class="inp" type="text" maxlength="16" placeholder="Ticker" autocomplete="off"
                  onkeydown="if(event.key==='Enter') loadVerdict()">
           <button class="btn primary" id="verdictLoadBtn" onclick="loadVerdict()">Vyhodnotiť</button>
+          <button class="btn" onclick="addCurrentToWatchlist(null,event)" title="Pridať aktuálny ticker do watchlistu">+ WL</button>
         </div>
       </div>
       <div id="verdictContent" class="verdict-content">
@@ -184,6 +185,7 @@
     <option value="5y">5 rokov</option>
   </select>
   <button class="btn" id="loadBtn" onclick="loadData()">Načítať</button>
+  <button class="btn" onclick="addCurrentToWatchlist(null,event)" title="Pridať aktuálny ticker do watchlistu">+ WL</button>
   <button class="toggle-btn active" id="btToggle" onclick="toggleBacktest()">Backtest overlay</button>
   <button class="toggle-btn" id="exportBtn" onclick="exportSnapshot()" title="Ulozit staticky HTML snapshot">&#128190; Export snapshot</button>
   <button class="toggle-btn" id="reoptBtn" onclick="loadData(true)" title="Prepocitat optimalizovane vahy">&#9881; Prepočítať váhy</button>
@@ -420,6 +422,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260630-chart-health"></script>
+  <script src="/dashboard.js?v=20260630-watchlist-flow"></script>
 </body>
 </html>

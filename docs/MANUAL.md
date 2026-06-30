@@ -525,6 +525,11 @@ Massive údaje sú zatiaľ iba **interpretačné**. Nevstupujú do C1–C4, DIP 
 ML ani rozhodnutia Buy/Watch/Counter. Denné snapshoty sa priebežne archivujú,
 aby bolo možné neskôr overiť ich prínos na 90D+ výsledkoch.
 
+Pri tickeroch sa zobrazujú aj workflow značky: **PORT ±%** znamená, že titul už
+je v niektorom eToro portfóliu; **+ WL** pridá ticker do serverového watchlistu.
+Verdikt si pri otvorení z Grafov, Scannera alebo Predikcie preberá aktuálny
+ticker, aby nebolo nutné ho znova opisovať.
+
 ### Správy a sentiment (📰)
 
 Každý riadok DIP universe scannera má tlačidlo **📰** — rozbalí pod riadkom

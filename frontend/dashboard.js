@@ -164,6 +164,7 @@ function toggleShowDismissed(event) {
 let _lastEventPayload = null;
 function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
+  const previousContextTicker = currentContextTicker();
   activeMainTab = tab;
   document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab)?.classList.add('active');
@@ -226,7 +227,7 @@ function switchMainTab(tab) {
   } else if (tab === 'scanner') {
     renderScannerView();
   } else if (tab === 'verdict') {
-    initVerdictView();
+    initVerdictView(previousContextTicker);
   }
   const url = new URL(window.location.href);
   url.searchParams.set('tab', tab);
@@ -3018,11 +3019,49 @@ function addToWatchlist(symbol, name = null, instrumentId = null) {
   saveWatchlist();
   renderSidebar();
   fetchWatchlistPrice(symbol);
+  refreshWatchlistButtons(symbol);
 }
+
+function isInWatchlist(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  return !!sym && watchlist.some(w => String(w.symbol || '').toUpperCase() === sym);
+}
+
+function addCurrentToWatchlist(symbol, event) {
+  event?.stopPropagation();
+  const sym = String(symbol || currentContextTicker() || '').trim().toUpperCase();
+  if (!sym) return;
+  if (!isInWatchlist(sym)) addToWatchlist(sym);
+  refreshWatchlistButtons(sym);
+  setStatus?.(`${sym} je vo watchliste`, 'ok');
+}
+
+function watchlistButtonHtml(symbol = '', extraClass = '') {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const inWl = isInWatchlist(sym);
+  const label = inWl ? '✓ WL' : '+ WL';
+  const title = inWl ? `${sym || 'Ticker'} už je vo watchliste` : `Pridať ${sym || 'ticker'} do watchlistu`;
+  return `<button type="button" class="wl-add-btn ${extraClass} ${inWl ? 'in-watchlist' : ''}" data-wl-symbol="${escHtml(sym)}" title="${escHtml(title)}" onclick="addCurrentToWatchlist('${escHtml(sym)}', event)">${label}</button>`;
+}
+
+function refreshWatchlistButtons(symbol = null) {
+  const target = symbol ? String(symbol).toUpperCase() : null;
+  const selector = '[data-wl-symbol]';
+  document.querySelectorAll(selector).forEach(btn => {
+    const sym = btn.getAttribute('data-wl-symbol') || '';
+    if (target && sym !== target) return;
+    const inWl = isInWatchlist(sym);
+    btn.classList.toggle('in-watchlist', inWl);
+    btn.textContent = inWl ? '✓ WL' : '+ WL';
+    btn.title = inWl ? `${sym || 'Ticker'} už je vo watchliste` : `Pridať ${sym || 'ticker'} do watchlistu`;
+  });
+}
+
 function removeFromWatchlist(symbol) {
   watchlist = watchlist.filter(w => w.symbol !== symbol);
   saveWatchlist();
   renderSidebar();
+  refreshWatchlistButtons(symbol);
 }
 
 async function fetchWatchlistPrice(symbol) {
@@ -3280,6 +3319,24 @@ function onGridClick(e) {
 function getActivePanelSymbol() {
   if (!activePanelId) return null;
   return document.getElementById(activePanelId)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase() || null;
+}
+
+function currentContextTicker() {
+  if (activeMainTab === 'predictive') {
+    const pred = document.getElementById('tickerInput')?.value?.trim()?.toUpperCase();
+    if (pred) return pred;
+  }
+  if (activeMainTab === 'verdict') {
+    const verdict = document.getElementById('verdictTickerInput')?.value?.trim()?.toUpperCase();
+    if (verdict) return verdict;
+  }
+  const active = getActivePanelSymbol();
+  if (active) return active;
+  const pred = document.getElementById('tickerInput')?.value?.trim()?.toUpperCase();
+  if (pred) return pred;
+  const verdict = document.getElementById('verdictTickerInput')?.value?.trim()?.toUpperCase();
+  if (verdict) return verdict;
+  return verdictLastTicker || localStorage.getItem(VERDICT_TICKER_KEY) || '';
 }
 
 function onSbTickerClick(symbol) {
@@ -4069,6 +4126,7 @@ function createPanel(cfg) {
           color:var(--muted);text-decoration:none;display:none;"
         onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
         onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'">Trade ↗</a>
+      ${watchlistButtonHtml(cfg.symbol, 'chart-wl-btn')}
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
     <div class="p-inds" onclick="setActivePanel('${id}')">
@@ -5184,6 +5242,12 @@ async function loadChart(id, opts = {}) {
     if (tradeBtnEl && sym) {
       tradeBtnEl.href = etoroTradeUrl(sym);
       tradeBtnEl.style.display = 'inline';
+    }
+    const wlBtnEl = panel.querySelector('.chart-wl-btn');
+    if (wlBtnEl && sym) {
+      wlBtnEl.setAttribute('data-wl-symbol', sym);
+      wlBtnEl.setAttribute('onclick', `addCurrentToWatchlist('${sym}', event)`);
+      refreshWatchlistButtons(sym);
     }
     ovEl.classList.add('hidden');
     panel.classList.remove('loading-state','error-state');
@@ -7570,7 +7634,7 @@ ${escHtml(copyText)}</textarea>
         </span>`
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b>${gfLinkHtml(r.ticker)}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Predikcii" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Predikcia</button></td>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
@@ -7977,7 +8041,7 @@ function applyScannerBadges() {
       const pct = h.pnl_pct;
       const cls = !Number.isFinite(pct) ? 'flat' : pct >= 0 ? 'profit' : 'loss';
       const pctTxt = Number.isFinite(pct) ? ` ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '';
-      el.innerHTML = `<span class="hold-tag ${cls}" title="V portfóliu — P/L ${Number.isFinite(pct) ? pct.toFixed(2) + ' %' : 'n/a'}">●${pctTxt}</span>`;
+      el.innerHTML = `<span class="hold-tag ${cls}" title="V portfóliu — P/L ${Number.isFinite(pct) ? pct.toFixed(2) + ' %' : 'n/a'}">PORT${pctTxt}</span>`;
     });
   }
   document.querySelectorAll('[data-newssum]').forEach(el => {
@@ -8238,15 +8302,12 @@ let verdictLastData = null;
 let verdictLastTicker = '';
 let verdictLoadSeq = 0;
 
-function initVerdictView() {
+function initVerdictView(preferredTicker = '') {
   const input = document.getElementById('verdictTickerInput');
   if (!input) return;
-  if (!input.value) {
-    input.value = verdictLastTicker ||
-      localStorage.getItem(VERDICT_TICKER_KEY) ||
-      document.getElementById('tickerInput')?.value ||
-      '';
-  }
+  const preferred = String(preferredTicker || '').trim().toUpperCase();
+  if (preferred) input.value = preferred;
+  else if (!input.value) input.value = currentContextTicker();
   const sym = input.value.trim().toUpperCase();
   if (sym && (!verdictLastData || verdictLastTicker !== sym)) loadVerdict();
 }
@@ -8415,6 +8476,7 @@ function renderInvestorVerdict(result) {
     </section>
     <div class="verdict-actions">
       <button class="btn primary" onclick="openVerdictEvidence()">Otvoriť dôkazy v Predikcii</button>
+      ${watchlistButtonHtml(result.ticker, 'verdict-wl-btn')}
       <span>Vyhodnotené ${result.evaluatedAt.toLocaleTimeString('sk-SK', {hour:'2-digit', minute:'2-digit'})} · rozhodovacia pomôcka, nie finančné odporúčanie.</span>
     </div>`;
 }
