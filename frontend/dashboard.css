@@ -2539,8 +2539,37 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font: 800 11px var(--font-mono);
 }
 .inbox-headline small {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--muted2);
   font: 10px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inbox-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.inbox-mode-switch button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--muted);
+  cursor: pointer;
+  font: 800 9px var(--font-mono);
+  padding: 3px 8px;
+}
+.inbox-mode-switch button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.inbox-mode-switch button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .inbox-list {
   display: grid;
@@ -2598,8 +2627,14 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .inbox-detail {
   margin-top: 3px;
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--muted2);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.inbox-summary {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 10.5px;
   line-height: 1.35;
 }
 .inbox-actions {

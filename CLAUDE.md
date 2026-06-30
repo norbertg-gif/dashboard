@@ -142,8 +142,10 @@ Main source sections:
    (`/api/portfolio/holdings`, profit-taking check ≥ +150% P/L), earnings calendar,
    scanner candidates, and chart-health risk flags on held tickers. It is a human
    attention layer only: no new scans, no push infra, no effect on C1–C4, DIP,
-   scanner tier, or portfolio accounting. Rows link to Verdikt / Predikcia and
-   expose `+ WL`.
+   scanner tier, or portfolio accounting. Rows include a human `summary` sentence
+   ("why look at this?") plus technical `detail`. Frontend modes are localStorage
+   based: `defensive` (held/DCA/profit/earnings/risk), `offensive` (new scanner
+   opportunities), `all`. Rows link to Verdikt / Predikcia and expose `+ WL`.
 - **Earnings calendar widget** — `GET /api/earnings/calendar?days=14` returns
    upcoming earnings for the relevant universe only: eToro portfolio, server
    watchlist, and last scanner candidates. It uses `_earnings_next_date()` so the

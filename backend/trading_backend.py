@@ -5696,7 +5696,7 @@ def get_investor_inbox():
     events: list[dict] = []
 
     def add(kind: str, ticker: str, title: str, detail: str, severity: str = "watch",
-            priority: int = 50, **extra):
+            priority: int = 50, summary: str | None = None, **extra):
         ticker = str(ticker or "").upper()
         if not ticker:
             return
@@ -5706,6 +5706,7 @@ def get_investor_inbox():
             "ticker": ticker,
             "title": title,
             "detail": detail,
+            "summary": summary or detail,
             "severity": severity,
             "priority": priority,
             "time": now.isoformat(),
@@ -5724,12 +5725,19 @@ def get_investor_inbox():
                 if flag == "dca":
                     add("dca", sym, "DCA kandidát",
                         f"Účet {account}: pozícia je {row.get('pnl_pct')} %, DIP {row.get('dip_total')} a váha {row.get('weight_pct')} % equity.",
-                        "buy", 10, source="portfolio", account=account)
+                        "buy", 10,
+                        summary=(f"{sym} je v strate {row.get('pnl_pct')} %, DIP ranking ostáva silný "
+                                 f"({row.get('dip_total')}) a váha pozície je {row.get('weight_pct')} % equity. "
+                                 "Stojí za kontrolu DCA."),
+                        source="portfolio", account=account)
                 elif flag in {"value_trap", "no_data"}:
                     label = "Slabý DIP" if flag == "value_trap" else "Mimo DIP dát"
                     add("broken", sym, label,
                         f"Účet {account}: pozícia je {row.get('pnl_pct')} %, ale DIP filter nepotvrdzuje dokup.",
-                        "counter", 35, source="portfolio", account=account)
+                        "counter", 35,
+                        summary=(f"{sym} je síce v strate {row.get('pnl_pct')} %, ale DIP filter zatiaľ "
+                                 "nepotvrdzuje kvalitné dokúpenie. Skôr manuálne overiť než automaticky DCA."),
+                        source="portfolio", account=account)
         except Exception:
             pass
 
@@ -5739,7 +5747,10 @@ def get_investor_inbox():
         if pnl_pct is not None and pnl_pct >= 150:
             add("profit", sym, "Profit-taking kontrola",
                 f"Otvorený zisk je približne {pnl_pct:+.1f} %. Zváž, či nechceš aspoň skontrolovať graf a plán.",
-                "buy", 20, source="portfolio", pnl_pct=pnl_pct)
+                "buy", 20,
+                summary=(f"{sym} má otvorený zisk približne {pnl_pct:+.1f} %. Nie je to predajný signál, "
+                         "ale zaslúži si kontrolu plánu a prípadné uzamknutie časti zisku."),
+                source="portfolio", pnl_pct=pnl_pct)
 
     # Earnings najbližších 14 dní pre relevantné tickery.
     try:
@@ -5749,7 +5760,10 @@ def get_investor_inbox():
             sev = "counter" if item.get("in_portfolio") and days <= 1 else "watch"
             add("earnings", item.get("ticker"), "Earnings v kalendári",
                 f"Earnings {item.get('date')} ({days} dní). Pri držanom titule očakávaj vyššiu volatilitu.",
-                sev, 15 if item.get("in_portfolio") else 45, source="calendar",
+                sev, 15 if item.get("in_portfolio") else 45,
+                summary=(f"{item.get('ticker')} reportuje earnings {item.get('date')} "
+                         f"({days} dní). Pred výsledkami môžu technické signály rýchlo stratiť platnosť."),
+                source="calendar",
                 date=item.get("date"), days=days, in_portfolio=item.get("in_portfolio"))
     except Exception:
         pass
@@ -5767,12 +5781,18 @@ def get_investor_inbox():
             if in_port and ("bad" in {daily_status, weekly_status}):
                 add("broken", sym, "Graf potrebuje kontrolu",
                     "Držaný titul má chart health Bad na daily alebo weekly grafe.",
-                    "counter", 25, source="scanner")
+                    "counter", 25,
+                    summary=(f"{sym} držíš v portfóliu, ale daily alebo weekly graf vyzerá poškodený. "
+                             "Najprv over, či nejde o zmenu trendu alebo value trap."),
+                    source="scanner")
             elif not in_port and sig and (dip_total is not None and dip_total >= DIP_STRONG_THRESHOLD):
                 score = sig.get("score") or row.get("setup_score")
                 add("opportunity", sym, "Nová príležitosť",
                     f"Scanner našiel {score}/4 a DIP {dip_total}. Nie je v portfóliu.",
-                    "watch", 40, source="scanner", score=score, dip_total=dip_total)
+                    "watch", 40,
+                    summary=(f"{sym} nie je v portfóliu, ale scanner našiel technický signál {score}/4 "
+                             f"a silný DIP ranking {dip_total}. Stojí za rýchly Verdikt."),
+                    source="scanner", score=score, dip_total=dip_total)
     except Exception:
         pass
 

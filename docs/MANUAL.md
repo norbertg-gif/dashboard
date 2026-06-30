@@ -451,6 +451,18 @@ Klik na riadok otvorí **Verdikt**, tlačidlo **Predikcia** otvorí detailný gr
 **+ WL** pridá ticker do watchlistu. Karta používa existujúce cache a posledný
 scan; nespúšťa nový veľký výpočet.
 
+Inbox má tri režimy:
+
+- **Defenzívne** — držané tituly, DCA, profit-taking, earnings a riziká. Toto je
+  najlepší default, keď nechceš hľadať nové nákupy a chceš len vedieť, či sa
+  v portfóliu niečo nepýta o pozornosť.
+- **Ofenzívne** — nové príležitosti zo Scannera mimo portfólia.
+- **Všetko** — kompletný pohľad bez filtrovania.
+
+Každý riadok má jednu ľudskú vetu typu „prečo sa na to pozrieť“. Technické
+detaily zostávajú pod ňou, ale prvá veta má byť rozhodovací kontext pre človeka,
+nie ďalší indikátor.
+
 ### Earnings kalendár
 
 Karta **Earnings aktuálny + nasledujúci týždeň** zobrazuje reporty pre relevantné

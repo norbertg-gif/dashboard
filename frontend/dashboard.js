@@ -107,6 +107,10 @@ const EVENT_DISMISS_TTL_DAYS = 60;
 const EVENT_SHOW_DISMISSED_KEY = 'td_event_show_dismissed';
 let _eventDismissed = null;
 let _eventShowDismissed = localStorage.getItem(EVENT_SHOW_DISMISSED_KEY) === '1';
+const INVESTOR_INBOX_MODE_KEY = 'td_investor_inbox_mode';
+let investorInboxMode = ['defensive','offensive','all'].includes(localStorage.getItem(INVESTOR_INBOX_MODE_KEY))
+  ? localStorage.getItem(INVESTOR_INBOX_MODE_KEY)
+  : 'defensive';
 
 function loadEventDismissed() {
   if (_eventDismissed) return _eventDismissed;
@@ -374,6 +378,7 @@ function investorInboxRow(item) {
       <span class="inbox-dot"></span>
       <div class="inbox-text">
         <div class="inbox-title"><b>${ticker}</b><span>${escHtml(item.title || '')}</span><em>${escHtml(inboxSeverityLabel(severity))}</em></div>
+        <div class="inbox-summary">${escHtml(item.summary || item.detail || '')}</div>
         <div class="inbox-detail">${escHtml(item.detail || '')}</div>
       </div>
     </div>
@@ -385,10 +390,30 @@ function investorInboxRow(item) {
   </div>`;
 }
 
+function inboxModeMeta(mode) {
+  return {
+    defensive: { label: 'Defenzívne', kinds: new Set(['dca','profit','earnings','broken']),
+      note: 'držané tituly, riziká, earnings a profit-taking' },
+    offensive: { label: 'Ofenzívne', kinds: new Set(['opportunity']),
+      note: 'nové príležitosti zo scannera' },
+    all: { label: 'Všetko', kinds: null, note: 'všetky výnimky a príležitosti' },
+  }[mode] || null;
+}
+
+function setInvestorInboxMode(mode) {
+  if (!inboxModeMeta(mode)) mode = 'defensive';
+  investorInboxMode = mode;
+  localStorage.setItem(INVESTOR_INBOX_MODE_KEY, mode);
+  if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
+}
+
 function renderInvestorInbox(payload) {
+  window._lastInvestorInboxPayload = payload || null;
   const box = document.getElementById('investorWeekBox');
   if (!box) return;
-  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const mode = inboxModeMeta(investorInboxMode) || inboxModeMeta('defensive');
+  const allItems = Array.isArray(payload?.items) ? payload.items : [];
+  const items = mode.kinds ? allItems.filter(item => mode.kinds.has(item.kind)) : allItems;
   const counts = payload?.counts || {};
   const countText = [
     counts.dca ? `${counts.dca} DCA` : '',
@@ -397,15 +422,24 @@ function renderInvestorInbox(payload) {
     counts.broken ? `${counts.broken} riziko` : '',
     counts.opportunity ? `${counts.opportunity} nové` : '',
   ].filter(Boolean).join(' · ');
+  const modeButtons = ['defensive','offensive','all'].map(modeKey => {
+    const meta = inboxModeMeta(modeKey);
+    return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')">${meta.label}</button>`;
+  }).join('');
   if (!items.length) {
-    box.innerHTML = `<div class="inbox-empty">
-      Tento týždeň nevidím nič urgentné. To je dobrá správa: väčšina portfólia môže pokojne bežať bez ručného pitvania.
+    box.innerHTML = `<div class="inbox-headline">
+      <span>${escHtml(mode.label)} režim</span>
+      <div class="inbox-mode-switch">${modeButtons}</div>
+    </div>
+    <div class="inbox-empty">
+      V režime ${escHtml(mode.label)} tento týždeň nevidím nič urgentné. ${escHtml(mode.note)} sú momentálne bez zásahu.
     </div>`;
     return;
   }
   box.innerHTML = `<div class="inbox-headline">
       <span>${items.length} vecí na kontrolu</span>
-      <small>${escHtml(countText || 'DCA · profit · earnings · nové príležitosti')}</small>
+      <small>${escHtml(mode.note)}${countText ? ` · ${escHtml(countText)}` : ''}</small>
+      <div class="inbox-mode-switch">${modeButtons}</div>
     </div>
     <div class="inbox-list">${items.map(investorInboxRow).join('')}</div>`;
   refreshWatchlistButtons();
