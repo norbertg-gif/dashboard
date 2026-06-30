@@ -145,17 +145,6 @@ vopred sa zobrazia 3-krát).
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
   intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
   net P/L, fees) sa prepočítajú pre zvolený interval.
-- **Korelačná matica** (pod tabuľkou Top pozícií) ukazuje 60-dňovú Pearsonovu
-  koreláciu denných výnosov medzi top 20 pozíciami. Červená pri **+1**
-  (pohybujú sa rovnako), modrá pri **−1** (pohybujú sa opačne), neutrálna pri
-  **0** (nezávislé). Tickery sú zoradené podľa SPDR sektora, aby boli klastre
-  vizuálne pohromade. Karta má aj **slovný verdikt**: ak je priemerná
-  absolútna korelácia ≥ 0.7, portfólio sa hýbe ako jedna skupina (jedna zlá
-  správa zasiahne väčšinu pozícií). Pod verdiktom je tiež zoznam **najsilnejších
-  párov** — pomáha vidieť skrytú koncentráciu, ktorú samotná váha pozície
-  neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
-  v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
-  tab nesťahuje nové API volania.
 - **DCA kandidáti** (karta v Portfóliu) spája agregovaný P/L pozície s DIP
   rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
   pozície v strate **≥ 15 %** a oflaguje ich:
@@ -789,7 +778,6 @@ V low-memory re?ime ost?va zapnut? jadro aplik?cie:
 | `ENABLE_PREDICTIVE_HMM` | `0` | HMM regime diagnostiku. |
 | `ENABLE_SIGNAL_CONTEXT_BACKFILL` | `0` | Automatick? dop??anie regime kontextu star??ch sign?lov pri otvoren? grafu. |
 | `ENABLE_SIGNAL_ANALYTICS` | `1` | 90D+ analytiku sign?lov. |
-| `ENABLE_CORRELATION` | `0` | Korela?n? maticu v Risk tabe. |
 | `ENABLE_MARKET_BREADTH` | `0` | Background v?po?et Nasdaq breadth. |
 | `ENABLE_MASSIVE_SP500` | `0` | S&P 500 ?as? Massive market snapshotu. |
 | `ENABLE_MASSIVE_MARKET` | `1` | Massive EOD kontext ako celok. |

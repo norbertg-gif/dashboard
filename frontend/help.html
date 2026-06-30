@@ -184,15 +184,7 @@
 
   <h3>DCA kandidáti v Portfóliu</h3>
   <ul>
-    <li><strong>Risk briefing</strong> je krátky slovný záver nad tabuľkami: povie, či portfólio pôsobí rozložene alebo koncentrovane, a vypichne najväčší sektor, najväčšiu pozíciu a Top 5 váhu.</li>
-    <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>
-    <li><strong>Risk flags</strong> upozorňujú na nadmerné váhy alebo inú koncentráciu. Sú varovaním na kontrolu, nie automatickým pokynom predať.</li>
-    <li><strong>Podľa typu</strong> rozdeľuje kapitál medzi akcie, ETF, krypto a ďalšie typy.</li>
-    <li><strong>Sektorová expozícia</strong> ukazuje, v ktorých sektoroch je viazaný kapitál. Veľká váha v jednom sektore znamená, že viac titulov môže reagovať na rovnakú správu alebo makro pohyb.</li>
-    <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
-    <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
-    <li><strong>Korelačná matica</strong> (pod Top pozíciami) zobrazuje 60-dňovú Pearsonovu koreláciu denných výnosov medzi top 20 pozíciami. Červená pri +1 = pozície sa pohybujú spolu, modrá pri −1 = pohybujú sa opačne, sivá pri 0 = nezávisle. Tickery sú zoradené podľa SPDR sektora — vizuálne klastre. Slovný verdikt nad maticou hovorí, či sa portfólio hýbe ako jedna skupina (priemerná absolútna korelácia ≥ 0.7 = jedna zlá správa zasiahne väčšinu pozícií). Zoznam najsilnejších párov pomáha vidieť skrytú koncentráciu, ktorú váha pozícií sama neukáže — napríklad NVDA + AMD + MU + AVGO bývajú korelované nad 0.7 aj keď ich Sektorová expozícia rozdeľuje. Dáta tečú z OHLCV cache, nesťahujú sa cez API.</li>
-    <li><strong>DCA kandid?ti</strong> sp?jaj? agregovan? P/L poz?cie s DIP rankingom ? pom?ha rozhodn??, ?i dokupova? stratov? titul. Uk??e len poz?cie v strate ? 15 % a oflaguje ich: ?? <strong>DCA</strong> (DIP ? 90, v?ha &lt; 10 % equity ? kvalitn? dip), ?? <strong>Ve?k? v?ha</strong> (DCA OK, ale poz?cia u? ? 10 % equity ? koncentr?cia), ?? <strong>Pozor</strong> (slab? DIP sk?re, mo?n? value trap), ? <strong>Mimo d?t</strong> (ticker nie je v DIP datasete). Rozhoduje agregovan? P/L celej poz?cie, nie jedna tran?a. Prahy s? zladen? s appkou (?15 % = hlb?ia strata, DIP 90 = p?smo STRONG). Karta ukazuje vek DIP d?t ? pri starom importe ber flag s rezervou. ?isto interpreta?n? pom?cka, nevstupuje do sk?re.</li>
+    <li><strong>DCA kandidáti</strong> spájajú agregovaný P/L pozície s DIP rankingom — pomáhajú rozhodnúť, či dokupovať stratový titul. Karta sa zobrazuje v Portfólio tabe. Ukáže len pozície v strate ≥ 15 % a oflaguje ich: 🟢 <strong>DCA</strong> (DIP ≥ 90, váha &lt; 10 % equity — kvalitný dip), 🟡 <strong>Veľká váha</strong> (DCA OK, ale pozícia už ≥ 10 % equity — koncentrácia), 🔴 <strong>Pozor</strong> (slabé DIP skóre, možný value trap), ⚪ <strong>Mimo dát</strong> (ticker nie je v DIP datasete). Rozhoduje agregovaný P/L celej pozície, nie jedna tranža. Prahy sú zladené s appkou (−15 % = hlbšia strata, DIP 90 = pásmo STRONG). Karta ukazuje vek DIP dát — pri starom importe ber flag s rezervou. Čisto interpretačná pomôcka, nevstupuje do skóre.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -513,7 +505,6 @@
       <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika sign?lov.</td></tr>
-      <tr><td><code>ENABLE_CORRELATION</code></td><td>0</td><td>Korela?n? matica v Risk tabe.</td></tr>
       <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth v?po?et.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 ?as? Massive market snapshotu.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_MARKET</code></td><td>1</td><td>Massive EOD kontext ako celok.</td></tr>
