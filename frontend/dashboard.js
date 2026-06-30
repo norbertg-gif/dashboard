@@ -1060,6 +1060,33 @@ async function renderRiskView(force = false) {
 }
 
 let _dcaCache = { account: null, data: null };
+const PORT_DCA_COLLAPSED_KEY = 'td_portfolio_dca_collapsed';
+
+function isPortfolioDcaCollapsed() {
+  return localStorage.getItem(PORT_DCA_COLLAPSED_KEY) === '1';
+}
+
+function togglePortfolioDca() {
+  localStorage.setItem(PORT_DCA_COLLAPSED_KEY, isPortfolioDcaCollapsed() ? '0' : '1');
+  if (_dcaCache.data) renderDcaCard(_dcaCache.data);
+}
+
+function dcaCardHead(data = null) {
+  const th = data?.thresholds || {};
+  const collapsed = isPortfolioDcaCollapsed();
+  const ageTxt = data?.dip_updated_at ? ` · DIP dáta ${fmtImportTime(data.dip_updated_at)}` : '';
+  const metaTxt = data
+    ? `strata ≥ ${th.loss_pct}% · DIP ≥ ${th.dip_min} · váha &lt; ${th.max_weight}%${ageTxt}`
+    : 'DCA kandidáti pre aktuálny účet';
+  return `<div class="risk-corr-head dca-head">
+    <button class="btn dca-toggle" onclick="togglePortfolioDca()" title="${collapsed ? 'Rozbaliť DCA kandidátov' : 'Zbaliť DCA kandidátov'}">${collapsed ? '+' : '−'}</button>
+    <div class="tool-title" style="margin:0;">DCA kandidáti
+      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${metaTxt}</span>
+    </div>
+    <button class="btn" onclick="loadDcaCandidates(true)" style="font-size:10px;">Refresh</button>
+  </div>`;
+}
+
 async function loadDcaCandidates(force = false) {
   const account = String(portState?.main?.account || activeAccount || '1');
   const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
@@ -1075,7 +1102,7 @@ async function loadDcaCandidates(force = false) {
     _dcaCache = { account, data };
     renderDcaCard(data);
   } catch(e) {
-    wrap.innerHTML = `<div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+    wrap.innerHTML = `${dcaCardHead()}
       <div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(e.message)}</div>`;
   }
 }
@@ -1091,14 +1118,19 @@ function renderDcaCard(data) {
   const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
   if (!wrap) return;
   const th = data.thresholds || {};
-  const ageTxt = data.dip_updated_at ? ` · DIP dáta ${fmtImportTime(data.dip_updated_at)}` : '';
-  const head = `<div class="risk-corr-head">
-    <div class="tool-title" style="margin:0;">DCA kandidáti
-      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">strata ≥ ${th.loss_pct}% · DIP ≥ ${th.dip_min} · váha &lt; ${th.max_weight}%${ageTxt}</span>
-    </div>
-    <button class="btn" onclick="loadDcaCandidates(true)" style="font-size:10px;">Refresh</button>
-  </div>`;
+  const head = dcaCardHead(data);
   const list = data.candidates || [];
+  if (isPortfolioDcaCollapsed()) {
+    const c = data.counts || {};
+    const parts = [
+      c.dca ? `${c.dca} DCA` : '',
+      c.concentrated ? `${c.concentrated} veľká váha` : '',
+      c.value_trap ? `${c.value_trap} pozor` : '',
+      c.no_data ? `${c.no_data} mimo dát` : '',
+    ].filter(Boolean).join(' · ') || 'žiadni kandidáti';
+    wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
+    return;
+  }
   if (!list.length) {
     wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:6px 0;">Žiadna pozícia nie je v strate ≥ ${th.loss_pct}%. Nič na zvažovanie DCA.</div>`;
     return;
@@ -2114,7 +2146,7 @@ function renderPortPanel(pid) {
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
   if (pid === 'main') {
     html += `<div id="portfolio-dca">
-    <div class="tool-title" style="margin:0 0 8px;">DCA kandidáti</div>
+    ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
     setTimeout(() => loadDcaCandidates(), 0);

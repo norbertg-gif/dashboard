@@ -1158,7 +1158,7 @@ body.sidebar-collapsed #sb-resizer {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   background: var(--bg-card);
 }
 .port-toolbar {
@@ -1244,7 +1244,7 @@ body.sidebar-collapsed #sb-resizer {
 
 .port-table-wrap {
   flex: 1;
-  min-height: 220px;
+  min-height: 360px;
   overflow: auto;
 }
 .port-table, .tool-table {
@@ -1661,12 +1661,26 @@ body.sidebar-collapsed #sb-resizer {
 .dca-summary { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 8px; }
 #portfolio-dca {
   flex: 0 0 auto;
-  max-height: 150px;
-  overflow: auto;
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: var(--bg-card);
+}
+.dca-head {
+  margin-bottom: 8px;
+}
+.dca-toggle {
+  min-width: 24px;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+.dca-collapsed-summary {
+  color: var(--muted);
+  font: 700 11px var(--font-mono);
+  padding: 2px 0 4px;
 }
 .dca-pill {
   display: inline-block;
