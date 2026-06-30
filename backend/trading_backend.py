@@ -4120,6 +4120,129 @@ def build_setup_assessment(df_d, weekly_bullish: bool, recent_signal: dict | Non
     }
 
 
+def _last_swing_points(values, kind: str, lookback: int = 90, radius: int = 2) -> list[tuple[int, float]]:
+    vals = [float(x) for x in values if pd.notna(x)]
+    if len(vals) < radius * 2 + 3:
+        return []
+    start = max(radius, len(vals) - lookback)
+    pivots: list[tuple[int, float]] = []
+    for i in range(start, len(vals) - radius):
+        win = vals[i - radius:i + radius + 1]
+        v = vals[i]
+        if kind == "high" and v == max(win) and win.count(v) == 1:
+            pivots.append((i, v))
+        elif kind == "low" and v == min(win) and win.count(v) == 1:
+            pivots.append((i, v))
+    return pivots[-4:]
+
+
+def chart_health(df: pd.DataFrame, timeframe: str = "daily") -> dict:
+    """Vizuálna kvalita grafu: OK/Risk/Bad ako ľudský filter nad signálmi.
+
+    Neovplyvňuje C1-C4 ani DIP skóre. Má len povedať, či graf vyzerá ako
+    zdravý pullback, rizikový bounce alebo poškodený downtrend.
+    """
+    if df is None or len(df) < 30:
+        return {"status": "unknown", "label": "N/A", "score": 0, "reasons": ["málo dát"]}
+
+    close = df["Close"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    vol = df["Volume"].astype(float) if "Volume" in df.columns else pd.Series([0] * len(df), index=df.index)
+    last_close = float(close.iloc[-1])
+
+    ema20 = df["ema20"].astype(float) if "ema20" in df.columns else close.ewm(span=20, adjust=False).mean()
+    ema10 = df["ema10"].astype(float) if "ema10" in df.columns else close.ewm(span=10, adjust=False).mean()
+    ema50 = close.ewm(span=50, adjust=False).mean() if len(close) >= 50 else None
+
+    score = 0
+    reasons: list[str] = []
+    e20 = float(ema20.iloc[-1])
+    e10 = float(ema10.iloc[-1])
+    e50 = float(ema50.iloc[-1]) if ema50 is not None else None
+
+    if e50 is not None:
+        if last_close > e20 > e50:
+            score += 2
+            reasons.append("cena nad EMA20/EMA50")
+        elif last_close < e20 < e50:
+            score -= 3
+            reasons.append("cena pod EMA20/EMA50")
+        elif last_close < e20:
+            score -= 1
+            reasons.append("cena pod EMA20")
+        elif last_close > e20:
+            score += 1
+            reasons.append("cena nad EMA20")
+    else:
+        if e10 > e20 and last_close > e20:
+            score += 1
+            reasons.append("krátky trend nad EMA20")
+        elif e10 < e20 and last_close < e20:
+            score -= 2
+            reasons.append("krátky trend pod EMA20")
+
+    window_high = float(high.tail(min(len(high), 126)).max())
+    drawdown = (last_close / window_high - 1.0) * 100 if window_high > 0 else 0.0
+    bad_dd = -35 if timeframe == "daily" else -30
+    warn_dd = -20 if timeframe == "daily" else -18
+    if drawdown <= bad_dd:
+        score -= 3
+        reasons.append(f"hlboko pod maximom ({drawdown:.0f}%)")
+    elif drawdown <= warn_dd:
+        score -= 1
+        reasons.append(f"ďaleko od maxima ({drawdown:.0f}%)")
+
+    highs = _last_swing_points(high.tail(120).values, "high", lookback=120, radius=2)
+    lows = _last_swing_points(low.tail(120).values, "low", lookback=120, radius=2)
+    if len(highs) >= 2 and len(lows) >= 2:
+        lower_high = highs[-1][1] < highs[-2][1]
+        lower_low = lows[-1][1] < lows[-2][1]
+        higher_low = lows[-1][1] > lows[-2][1]
+        if lower_high and lower_low:
+            score -= 3
+            reasons.append("nižšie high aj low")
+        elif lower_high:
+            score -= 1
+            reasons.append("nižšie swing high")
+        elif higher_low:
+            score += 1
+            reasons.append("vyššie swing low")
+
+    daily_ret = close.pct_change()
+    worst = float(daily_ret.tail(30).min() * 100) if len(daily_ret.dropna()) else 0.0
+    red_vol = 0
+    if len(df) >= 20 and "Volume" in df.columns:
+        recent = df.tail(20).copy()
+        vavg = float(vol.tail(60).mean()) if len(vol) >= 20 and float(vol.tail(60).mean()) else 0.0
+        if vavg > 0:
+            red_vol = int(((recent["Close"] < recent["Open"]) & (recent["Volume"] > vavg * 1.5)).sum())
+    if timeframe == "daily" and worst <= -8:
+        score -= 2
+        reasons.append(f"prudký denný pád {worst:.0f}%")
+    if red_vol >= 2:
+        score -= 1
+        reasons.append("červené volume spiky")
+    if last_close > e20 and daily_ret.tail(5).sum() > 0:
+        score += 1
+        reasons.append("odraz nad EMA20")
+
+    if score >= 2:
+        status, label = "ok", "OK"
+    elif score <= -3:
+        status, label = "bad", "Bad"
+    else:
+        status, label = "risk", "Risk"
+
+    return {
+        "status": status,
+        "label": label,
+        "score": int(score),
+        "drawdown_pct": round(drawdown, 1),
+        "reasons": reasons[:4],
+    }
+
+
 NASDAQ100_TICKERS = [
     "AAPL", "ABNB", "ADBE", "ADI", "ADP", "ADSK", "AEP", "AMAT", "AMD", "AMGN",
     "AMZN", "ANSS", "APP", "ARM", "ASML", "AVGO", "AXON", "AZN", "BIIB", "BKNG",
@@ -5088,14 +5211,17 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         return {"ticker": ticker, "error": "Nedostatok dat"}
 
     df_d = add_indicators(raw_d)
+    daily_health = chart_health(df_d, "daily")
 
     raw_w = _yf_download_cached(ticker, "1y", "1wk", prefer_massive=False)
     weekly_bullish = None
     weekly_status = "insufficient_history"
     weekly_trend = None
+    weekly_health = {"status": "unknown", "label": "N/A", "score": 0, "reasons": ["málo dát"]}
     if len(raw_w) >= 20:
         df_w = add_indicators(raw_w)
         weekly_trend = _weekly_trend(df_w)
+        weekly_health = chart_health(df_w, "weekly")
         weekly_bullish = _weekly_trend_to_bullish(weekly_trend)
         if weekly_trend is not None:
             weekly_status = weekly_trend.get("key") or ("bullish" if weekly_bullish else "not_bullish")
@@ -5160,6 +5286,10 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         "weekly_bullish": weekly_bullish,
         "weekly_status": weekly_status,
         "weekly_trend": weekly_trend,
+        "chart_health": {
+            "daily": daily_health,
+            "weekly": weekly_health,
+        },
         "recent_signal": recent_signal,
         "signal_count": len(all_signals),
         "last_close": last_close,

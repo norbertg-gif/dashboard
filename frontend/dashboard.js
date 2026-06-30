@@ -7512,6 +7512,23 @@ function renderNasdaqScanner(payload) {
     techOnly: ranked.filter(r => (r.dip_label || 'TECH ONLY') === 'TECH ONLY').length,
   };
   const errorDetails = renderScannerErrorDetails(cache);
+
+  function chartHealthBadgeHtml(r) {
+    const h = r.chart_health || {};
+    const w = h.weekly || {};
+    const d = h.daily || {};
+    const cls = (x) => x === 'ok' ? 'ok' : x === 'bad' ? 'bad' : x === 'unknown' ? 'unknown' : 'risk';
+    const label = (x) => x?.label || 'N/A';
+    const reasons = [
+      `Weekly: ${(w.reasons || []).join(', ') || 'bez detailu'}`,
+      `Daily: ${(d.reasons || []).join(', ') || 'bez detailu'}`,
+    ].join('\n');
+    return `<span class="chart-health-cell" title="${escHtml(reasons)}">
+      <span class="chart-health-badge ${cls(w.status)}">W ${escHtml(label(w))}</span>
+      <span class="chart-health-badge ${cls(d.status)}">D ${escHtml(label(d))}</span>
+    </span>`;
+  }
+
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}
@@ -7527,7 +7544,7 @@ ${escHtml(copyText)}</textarea>
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Rozhodnutie</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
+          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -7554,7 +7571,8 @@ ${escHtml(copyText)}</textarea>
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b>${gfLinkHtml(r.ticker)}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
-      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button></td>
+      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Predikcii" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Predikcia</button></td>
+      <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
       <td class="r">${dip.fa ?? '-'}</td>
@@ -7566,7 +7584,7 @@ ${escHtml(copyText)}</textarea>
       <td>${marketHtml}</td>
       <td>${escHtml(reason)}</td>
     </tr>
-    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="12" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
+    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="13" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
   }).join('') + `</tbody></table></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">

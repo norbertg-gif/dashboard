@@ -508,6 +508,7 @@ v Exceli nestačí.
 |---|---|
 | **Ticker** | Symbol (klik otvorí v prediktívnom tabe). |
 | **Rozhodnutie** | Buy / Watch / Counter podľa trendového kontextu. |
+| **Graf** | Vizuálna kvalita weekly/daily grafu: `W OK/Risk/Bad` a `D OK/Risk/Bad`. Je to ľudský filter nad číslami: OK = zdravý pullback, Risk = overiť v Predikcii, Bad = možný bounce v poškodenom downtrende. Neovplyvňuje C1-C4 ani DIP skóre. |
 | **Sila** | Počet splnených podmienok C1–C4 (`x/4`). |
 | **DIP** | Celkové DIP skóre z importu. |
 | **FA** | Fundamentálna časť DIP skóre. |

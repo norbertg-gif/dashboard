@@ -2749,7 +2749,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   background: var(--bg-card);
 }
 .scanner-table {
-  min-width: 1120px;
+  min-width: 1280px;
 }
 .scanner-table tr {
   cursor: pointer;
@@ -2758,6 +2758,43 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   position: sticky;
   top: 0;
   z-index: 1;
+  background: var(--bg-input);
+}
+.chart-health-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 96px;
+}
+.chart-health-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font: 800 9px var(--font-mono);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.chart-health-badge.ok {
+  color: var(--up);
+  border-color: var(--up);
+  background: var(--up-soft);
+}
+.chart-health-badge.risk {
+  color: var(--yellow);
+  border-color: var(--yellow);
+  background: var(--yellow-soft);
+}
+.chart-health-badge.bad {
+  color: var(--down);
+  border-color: var(--down);
+  background: var(--down-soft);
+}
+.chart-health-badge.unknown {
+  color: var(--muted);
+  border-color: var(--border);
   background: var(--bg-input);
 }
 .scanner-export {
