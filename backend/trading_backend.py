@@ -4134,7 +4134,6 @@ NASDAQ100_TICKERS = [
 ]
 
 SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
-SCANNER_TICKER_TIMEOUT = int(os.getenv("SCANNER_TICKER_TIMEOUT", "18"))
 SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "8"))
 SCANNER_DIP_UNIVERSE_MAX = int(os.getenv("SCANNER_DIP_UNIVERSE_MAX", "300"))
 SCANNER_DEFAULT_DAYS = 3
@@ -5193,26 +5192,24 @@ def _run_nasdaq_scanner(days: int):
         max_workers = max(1, min(SCANNER_MAX_WORKERS, len(tickers)))
         pool = ThreadPoolExecutor(max_workers=max_workers)
         futures = {}
-        started_at = {}
+        ticker_iter = iter(tickers)
+
+        def submit_next():
+            try:
+                ticker = next(ticker_iter)
+            except StopIteration:
+                return None
+            fut = pool.submit(_scan_buy_signal_for_ticker, ticker, days, dict(slog_work.get(ticker, {})))
+            futures[fut] = ticker
+            return fut
+
         try:
-            for ticker in tickers:
-                fut = pool.submit(_scan_buy_signal_for_ticker, ticker, days, dict(slog_work.get(ticker, {})))
-                futures[fut] = ticker
-                started_at[fut] = _time_module.time()
+            for _ in range(max_workers):
+                submit_next()
 
             pending = set(futures.keys())
             while pending:
                 done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
-
-                timed_out = [f for f in list(pending) if _time_module.time() - started_at.get(f, 0) > SCANNER_TICKER_TIMEOUT]
-                for fut in timed_out:
-                    ticker = futures[fut]
-                    fut.cancel()
-                    pending.remove(fut)
-                    errors.append({"ticker": ticker, "error": f"Timeout po {SCANNER_TICKER_TIMEOUT}s"})
-                    done_count += 1
-                    with _scanner_lock:
-                        _scanner_state.update({"progress": done_count, "current": ticker})
 
                 for future in done:
                     ticker = futures[future]
@@ -5232,6 +5229,9 @@ def _run_nasdaq_scanner(days: int):
                     done_count += 1
                     with _scanner_lock:
                         _scanner_state.update({"progress": done_count, "current": ticker})
+                    newest = submit_next()
+                    if newest is not None:
+                        pending.add(newest)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 

@@ -7408,7 +7408,7 @@ async function renderScannerView() {
             <div class="scanner-section-kicker">DIP universe</div>
             <div class="scanner-source-title">Širší skener nových príležitostí</div>
           </div>
-          <span class="scanner-source-note">Nasdaq-100 + tickery z importovaného DIP Excelu</span>
+          <span class="scanner-source-note">Importovaný DIP Excel; bez importu Nasdaq-100 fallback</span>
         </div>
         <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
       </div>

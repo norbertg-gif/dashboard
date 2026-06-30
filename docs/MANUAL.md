@@ -431,9 +431,9 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
 do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**
 je rýchly radar titulov, ktoré už sleduješ alebo držíš. Spodný podblok
-**DIP universe** hľadá nové širšie príležitosti cez Nasdaq-100 plus tickery
-z importovaného **DIP rankingu**. Klik na kandidáta otvorí jeho detail
-v Predikcii.
+**DIP universe** hľadá nové širšie príležitosti cez importovaný **DIP ranking**.
+Ak nie je importovaný Excel, použije sa Nasdaq-100 ako fallback. Klik na
+kandidáta otvorí jeho detail v Predikcii.
 
 ### Kontext trhu — lišta TRH
 
@@ -486,10 +486,10 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 - Pod importom sa zobrazí kontrolná tabuľka raw hodnôt a výsledného rankingu.
   Chýbajúce hodnoty sú zvýraznené a ticker je klikateľný.
 - XLSX import aktualizuje DIP cache používanú scannerom a DCA kartou. Tickery
-  z importu zároveň rozširujú skenované univerzum mimo Nasdaq-100 (napr. NYSE).
-- **Spustiť scanner** — spustí paralelný sken Nasdaq-100 + importovaných DIP
-  tickerov (progress bar ukazuje priebeh). Beží na pozadí, výsledky sa priebežne
-  dopĺňajú.
+  z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100
+  (napr. NYSE). Bez importu scanner použije Nasdaq-100 fallback.
+- **Spustiť scanner** — spustí paralelný sken importovaných DIP tickerov
+  (progress bar ukazuje priebeh). Beží na pozadí, výsledky sa priebežne dopĺňajú.
 
 ### Kompaktný status scanu
 
@@ -806,7 +806,7 @@ jazykom.
 | Príznak | Príčina / riešenie |
 |---|---|
 | **Prázdny graf / žiadne dáta** | yfinance rate-limit alebo timeout. Skús znova o chvíľu. |
-| **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Scanner používa kratší timeout, aby jeden ticker nezablokoval celý beh. Dá sa upraviť cez `SCANNER_YF_TIMEOUT` a `SCANNER_TICKER_TIMEOUT`. |
+| **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Scanner púšťa len obmedzený počet tickerov naraz, aby čakajúce tickery nevytimeoutovali ešte pred štartom. Dá sa upraviť cez `SCANNER_YF_TIMEOUT`. |
 | **Regime = n/a** | `hmmlearn` nie je nainštalovaný alebo málo histórie (min. 60 sviečok). |
 | **Portfólio stratené pri výpadku eToro** | Cache padá späť na disk (stale-while-erroring), je to zámerné. |
 | **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty. |
@@ -875,7 +875,6 @@ render.yaml            # web service + 1GB disk na /data
 | `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania v scanneri (default 8 s). |
 | `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback. |
-| `SCANNER_TICKER_TIMEOUT` | Wall-clock limit na ticker (default 18 s). |
 | `RENDER` | Príznak produkcie. |
 
 ### Signal scoring — kde žije
