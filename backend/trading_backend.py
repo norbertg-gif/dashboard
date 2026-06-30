@@ -5637,11 +5637,50 @@ def _watched_symbols_for_calendar() -> list[str]:
     return sorted(symbols)
 
 
+INVESTOR_INBOX_CACHE_TTL = 120       # seconds; portfolio P/L can move, keep this short
+EARNINGS_CALENDAR_VIEW_TTL = 900     # seconds; earnings dates are slow-moving
+_investor_view_cache: dict[str, tuple[float, dict]] = {}
+_investor_view_cache_lock = threading.Lock()
+
+
+def _investor_cache_get(key: str, ttl: int, refresh: int = 0) -> dict | None:
+    if refresh:
+        return None
+    with _investor_view_cache_lock:
+        hit = _investor_view_cache.get(key)
+        if not hit:
+            return None
+        ts, payload = hit
+        if time.time() - ts <= ttl:
+            out = dict(payload)
+            out["cache"] = {"hit": True, "ttl_s": ttl, "age_s": round(time.time() - ts, 1)}
+            return out
+        _investor_view_cache.pop(key, None)
+    return None
+
+
+def _investor_cache_set(key: str, payload: dict) -> dict:
+    with _investor_view_cache_lock:
+        if len(_investor_view_cache) > 12:
+            oldest = sorted(_investor_view_cache.items(), key=lambda kv: kv[1][0])[:4]
+            for k, _ in oldest:
+                _investor_view_cache.pop(k, None)
+        _investor_view_cache[key] = (time.time(), payload)
+    out = dict(payload)
+    out["cache"] = {"hit": False}
+    return out
+
+
 @app.get("/api/earnings/calendar")
-def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31)):
+def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31),
+                               refresh: int = Query(0)):
     """Ľahký earnings kalendár pre relevantné tickery: portfólio + watchlist +
     poslední scanner kandidáti. Neprehľadáva celý trh a používa existujúcu cache
     / per-symbol fallback len pre malý zoznam symbolov."""
+    cache_key = f"earnings_calendar:{days}:{datetime.now(timezone.utc).date().isoformat()}"
+    cached = _investor_cache_get(cache_key, EARNINGS_CALENDAR_VIEW_TTL, refresh)
+    if cached:
+        return cached
     now = datetime.now(timezone.utc).date()
     end = now + timedelta(days=days)
     holdings = {}
@@ -5673,7 +5712,7 @@ def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31)):
                 "amount": h.get("amount"),
             })
     rows.sort(key=lambda r: (r["date"], not r["in_portfolio"], r["ticker"]))
-    return {
+    payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "from": now.isoformat(),
         "to": end.isoformat(),
@@ -5681,12 +5720,17 @@ def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31)):
         "items": rows,
         "count": len(rows),
     }
+    return _investor_cache_set(cache_key, payload)
 
 
 @app.get("/api/investor/inbox")
-def get_investor_inbox():
+def get_investor_inbox(refresh: int = Query(0)):
     """Týždenný prehľad výnimiek pre človeka: čo si dnes/tento týždeň pozrieť.
     Používa už existujúce cache a interpretačné vrstvy; nespúšťa nový scan."""
+    cache_key = f"investor_inbox:{datetime.now(timezone.utc).date().isoformat()}"
+    cached = _investor_cache_get(cache_key, INVESTOR_INBOX_CACHE_TTL, refresh)
+    if cached:
+        return cached
     now = datetime.now(timezone.utc)
     holdings = {}
     try:
@@ -5754,7 +5798,7 @@ def get_investor_inbox():
 
     # Earnings najbližších 14 dní pre relevantné tickery.
     try:
-        cal = get_earnings_calendar_view(days=14)
+        cal = get_earnings_calendar_view(days=14, refresh=refresh)
         for item in cal.get("items", []):
             days = item.get("days")
             sev = "counter" if item.get("in_portfolio") and days <= 1 else "watch"
@@ -5807,7 +5851,8 @@ def get_investor_inbox():
     counts = {}
     for item in ordered:
         counts[item["kind"]] = counts.get(item["kind"], 0) + 1
-    return {"generated_at": now.isoformat(), "counts": counts, "items": ordered}
+    payload = {"generated_at": now.isoformat(), "counts": counts, "items": ordered}
+    return _investor_cache_set(cache_key, payload)
 
 
 @app.get("/api/scanner/notes")

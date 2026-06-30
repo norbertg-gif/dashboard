@@ -145,12 +145,15 @@ Main source sections:
    scanner tier, or portfolio accounting. Rows include a human `summary` sentence
    ("why look at this?") plus technical `detail`. Frontend modes are localStorage
    based: `defensive` (held/DCA/profit/earnings/risk), `offensive` (new scanner
-   opportunities), `all`. Rows link to Verdikt / Predikcia and expose `+ WL`.
+   opportunities), `all`. Backend caches the composed payload for 120 seconds
+   (`INVESTOR_INBOX_CACHE_TTL`) to avoid recalculating DCA + earnings on every
+   Scanner reload; `?refresh=1` bypasses. Rows link to Verdikt / Predikcia and expose `+ WL`.
 - **Earnings calendar widget** — `GET /api/earnings/calendar?days=14` returns
    upcoming earnings for the relevant universe only: eToro portfolio, server
    watchlist, and last scanner candidates. It uses `_earnings_next_date()` so the
    existing bulk cache + per-symbol fallback chain remains the single source.
-   Displayed in Scanner as current + next week grouped by day.
+   Displayed in Scanner as current + next week grouped by day. Composed widget
+   payload is cached 15 minutes (`EARNINGS_CALENDAR_VIEW_TTL`); `?refresh=1` bypasses.
 - **Unified Scanner UI** — one “Kandidáti” workflow. Watchlist/eToro radar is the upper source, Nasdaq+DIP discovery is the lower source. Keep new additions behind progressive disclosure.
 - **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only).
 - **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.

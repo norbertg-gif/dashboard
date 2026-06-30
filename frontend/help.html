@@ -325,10 +325,12 @@
   </ul>
   <p>Klik na riadok otvorí <strong>Verdikt</strong>, tlačidlo <strong>Predikcia</strong> otvorí detailný graf a <strong>+ WL</strong> pridá ticker do watchlistu. Karta používa existujúce cache a posledný scan; nespúšťa nový veľký výpočet.</p>
   <p>Prepínač režimu pomáha znížiť šum: <strong>Defenzívne</strong> ukazuje držané tituly, DCA, profit-taking, earnings a riziká; <strong>Ofenzívne</strong> ukazuje nové príležitosti mimo portfólia; <strong>Všetko</strong> zobrazí kompletný zoznam. Každý riadok má jednu ľudskú vetu „prečo sa na to pozrieť“ a pod ňou technický detail.</p>
+  <p>Inbox je na serveri krátko cachovaný približne <strong>2 minúty</strong>, aby reload Scannera zbytočne neprepočítaval DCA, earnings a výnimky, ale portfóliový kontext nezostal starý celý deň.</p>
 
   <h3>Earnings kalendár</h3>
   <p>Karta <strong>Earnings aktuálny + nasledujúci týždeň</strong> zoskupuje reporty podľa dňa pre relevantné tickery: portfólio, serverový watchlist a posledných kandidátov zo Scannera. Urgentné reporty (dnes/zajtra) sú zvýraznené.</p>
   <p>Ak je kalendár prázdny, znamená to, že zdroj zatiaľ nemá termín alebo žiadny sledovaný ticker nereportuje v najbližších 14 dňoch. Používa sa rovnaký earnings reťazec ako inde v dashboarde: Finnhub bulk kalendár, per-symbol fallback, Yahoo/yfinance fallback a cache.</p>
+  <p>Zložený kalendár v Scanneri je cachovaný približne <strong>15 minút</strong>, pretože earnings dátumy sa nemenia každú minútu.</p>
 
   <h3>Kontext trhu — lišta TRH</h3>
   <p>Úplne hore v Scanneri je riadok chipov <strong>TRH</strong>. Odpovedá na otázku: <em>„Má môj Buy signál podporu širšieho trhu, alebo idem proti prúdu?“</em> Dôležité: lišta <strong>nevstupuje do C1–C4 skóre</strong> — signály počíta rovnako v býčom aj medveďom trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom trhu vyššiu šancu na úspech než v klesajúcom.</p>

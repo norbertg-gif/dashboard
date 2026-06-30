@@ -463,6 +463,10 @@ Každý riadok má jednu ľudskú vetu typu „prečo sa na to pozrieť“. Tech
 detaily zostávajú pod ňou, ale prvá veta má byť rozhodovací kontext pre človeka,
 nie ďalší indikátor.
 
+Inbox je na serveri krátko cachovaný približne **2 minúty**. Je to zámer:
+reload Scannera nemá znovu prepočítavať DCA, earnings a scanner výnimky, ale
+zároveň nechceme držať portfóliový kontext starý celý deň.
+
 ### Earnings kalendár
 
 Karta **Earnings aktuálny + nasledujúci týždeň** zobrazuje reporty pre relevantné
@@ -473,6 +477,9 @@ Ak sa ticker v kalendári nenachádza, zvyčajne to znamená, že zdroj dát zat
 nemá termín, alebo report nespadá do najbližších 14 dní. Dashboard používa
 rovnaký reťazec zdrojov ako ostatné earnings prvky: Finnhub bulk kalendár,
 per-symbol fallback, Yahoo/yfinance fallback a cache.
+
+Zložený kalendár v Scanneri je cachovaný približne **15 minút**, pretože
+earnings dátumy sa nemenia každú minútu.
 
 Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
 do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**
