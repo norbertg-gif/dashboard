@@ -5487,7 +5487,7 @@ def _earnings_alert_events(symbols: list[str], now: datetime) -> list:
         seen.add(ticker)
         try:
             event = _earnings_next_date(ticker)
-            raw_date = event.get("date") if isinstance(event, dict) else None
+            raw_date = event.get("date") if isinstance(event, dict) else event
             if not raw_date:
                 continue
             report_date = datetime.fromisoformat(str(raw_date)[:10]).replace(tzinfo=timezone.utc)
@@ -5502,7 +5502,7 @@ def _earnings_alert_events(symbols: list[str], now: datetime) -> list:
                     "ticker": ticker,
                     "time": now.isoformat(),
                     "title": f"Earnings {raw_date}",
-                    "detail": f"Earnings za {days} dni | zdroj: {event.get('source') or 'calendar'}",
+                    "detail": f"Earnings za {days} dni | zdroj: calendar",
                 })
         except Exception:
             continue
@@ -5601,6 +5601,193 @@ def get_recent_events(hours: int = Query(24, ge=1, le=168)):
         "portfolio": sum(1 for event in events if event.get("category") == "portfolio"),
     }
     return {"hours": hours, "generated_at": now.isoformat(), "counts": counts, "events": events[:100]}
+
+
+def _scanner_candidate_rows(limit: int = 40) -> list[dict]:
+    scanner = enrich_scanner_payload(load_scanner_cache())
+    rows = list(scanner.get("results") or [])
+    rows.sort(key=lambda r: (
+        _num_or_none(r.get("dip_total")) or -1,
+        r.get("setup_score") or 0,
+        (r.get("recent_signal") or {}).get("date", ""),
+    ), reverse=True)
+    return rows[:limit]
+
+
+def _watched_symbols_for_calendar() -> list[str]:
+    symbols: set[str] = set()
+    try:
+        symbols.update(_get_portfolio_holdings().keys())
+    except Exception:
+        pass
+    try:
+        for item in _read_watchlist_file():
+            sym = str(item.get("symbol") or "").upper()
+            if sym:
+                symbols.add(sym)
+    except Exception:
+        pass
+    try:
+        for row in _scanner_candidate_rows(25):
+            sym = str(row.get("ticker") or "").upper()
+            if sym:
+                symbols.add(sym)
+    except Exception:
+        pass
+    return sorted(symbols)
+
+
+@app.get("/api/earnings/calendar")
+def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31)):
+    """Ľahký earnings kalendár pre relevantné tickery: portfólio + watchlist +
+    poslední scanner kandidáti. Neprehľadáva celý trh a používa existujúcu cache
+    / per-symbol fallback len pre malý zoznam symbolov."""
+    now = datetime.now(timezone.utc).date()
+    end = now + timedelta(days=days)
+    holdings = {}
+    try:
+        holdings = _get_portfolio_holdings()
+    except Exception:
+        pass
+    rows = []
+    for sym in _watched_symbols_for_calendar():
+        try:
+            raw_date = _earnings_next_date(sym)
+        except Exception:
+            raw_date = None
+        if not raw_date:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw_date)[:10]).date()
+        except Exception:
+            continue
+        if now <= dt <= end:
+            h = holdings.get(sym) or {}
+            rows.append({
+                "ticker": sym,
+                "date": dt.isoformat(),
+                "days": (dt - now).days,
+                "in_portfolio": sym in holdings,
+                "pnl_pct": h.get("pnl_pct"),
+                "pnl": h.get("pnl"),
+                "amount": h.get("amount"),
+            })
+    rows.sort(key=lambda r: (r["date"], not r["in_portfolio"], r["ticker"]))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "from": now.isoformat(),
+        "to": end.isoformat(),
+        "days": days,
+        "items": rows,
+        "count": len(rows),
+    }
+
+
+@app.get("/api/investor/inbox")
+def get_investor_inbox():
+    """Týždenný prehľad výnimiek pre človeka: čo si dnes/tento týždeň pozrieť.
+    Používa už existujúce cache a interpretačné vrstvy; nespúšťa nový scan."""
+    now = datetime.now(timezone.utc)
+    holdings = {}
+    try:
+        holdings = _get_portfolio_holdings()
+    except Exception:
+        pass
+    events: list[dict] = []
+
+    def add(kind: str, ticker: str, title: str, detail: str, severity: str = "watch",
+            priority: int = 50, **extra):
+        ticker = str(ticker or "").upper()
+        if not ticker:
+            return
+        events.append({
+            "id": f"{kind}:{ticker}:{now.date().isoformat()}",
+            "kind": kind,
+            "ticker": ticker,
+            "title": title,
+            "detail": detail,
+            "severity": severity,
+            "priority": priority,
+            "time": now.isoformat(),
+            **extra,
+        })
+
+    # DCA / thesis risk: stojace stavy nad existujúcim DCA endpointom.
+    for account in ("1", "2"):
+        try:
+            dca = get_dca_candidates(
+                account=account, loss_pct=15.0, dip_min=90.0, max_weight=10.0, refresh=0
+            )
+            for row in dca.get("candidates", [])[:20]:
+                sym = row.get("symbol")
+                flag = row.get("flag")
+                if flag == "dca":
+                    add("dca", sym, "DCA kandidát",
+                        f"Účet {account}: pozícia je {row.get('pnl_pct')} %, DIP {row.get('dip_total')} a váha {row.get('weight_pct')} % equity.",
+                        "buy", 10, source="portfolio", account=account)
+                elif flag in {"value_trap", "no_data"}:
+                    label = "Slabý DIP" if flag == "value_trap" else "Mimo DIP dát"
+                    add("broken", sym, label,
+                        f"Účet {account}: pozícia je {row.get('pnl_pct')} %, ale DIP filter nepotvrdzuje dokup.",
+                        "counter", 35, source="portfolio", account=account)
+        except Exception:
+            pass
+
+    # Profit-taking: veľké otvorené zisky sú opačná výnimka.
+    for sym, h in holdings.items():
+        pnl_pct = _num_or_none(h.get("pnl_pct"))
+        if pnl_pct is not None and pnl_pct >= 150:
+            add("profit", sym, "Profit-taking kontrola",
+                f"Otvorený zisk je približne {pnl_pct:+.1f} %. Zváž, či nechceš aspoň skontrolovať graf a plán.",
+                "buy", 20, source="portfolio", pnl_pct=pnl_pct)
+
+    # Earnings najbližších 14 dní pre relevantné tickery.
+    try:
+        cal = get_earnings_calendar_view(days=14)
+        for item in cal.get("items", []):
+            days = item.get("days")
+            sev = "counter" if item.get("in_portfolio") and days <= 1 else "watch"
+            add("earnings", item.get("ticker"), "Earnings v kalendári",
+                f"Earnings {item.get('date')} ({days} dní). Pri držanom titule očakávaj vyššiu volatilitu.",
+                sev, 15 if item.get("in_portfolio") else 45, source="calendar",
+                date=item.get("date"), days=days, in_portfolio=item.get("in_portfolio"))
+    except Exception:
+        pass
+
+    # Scanner: silné nové príležitosti mimo portfólia + zlé grafy pri držaných tituloch.
+    try:
+        for row in _scanner_candidate_rows(30):
+            sym = str(row.get("ticker") or "").upper()
+            sig = row.get("recent_signal") or {}
+            in_port = sym in holdings
+            dip_total = _num_or_none(row.get("dip_total"))
+            health = row.get("chart_health") or {}
+            daily_status = ((health.get("daily") or {}).get("status") or "").lower()
+            weekly_status = ((health.get("weekly") or {}).get("status") or "").lower()
+            if in_port and ("bad" in {daily_status, weekly_status}):
+                add("broken", sym, "Graf potrebuje kontrolu",
+                    "Držaný titul má chart health Bad na daily alebo weekly grafe.",
+                    "counter", 25, source="scanner")
+            elif not in_port and sig and (dip_total is not None and dip_total >= DIP_STRONG_THRESHOLD):
+                score = sig.get("score") or row.get("setup_score")
+                add("opportunity", sym, "Nová príležitosť",
+                    f"Scanner našiel {score}/4 a DIP {dip_total}. Nie je v portfóliu.",
+                    "watch", 40, source="scanner", score=score, dip_total=dip_total)
+    except Exception:
+        pass
+
+    # Dedup: nechaj najvyššiu prioritu pre ticker+kind.
+    dedup = {}
+    for item in events:
+        key = (item.get("kind"), item.get("ticker"))
+        prev = dedup.get(key)
+        if prev is None or item.get("priority", 99) < prev.get("priority", 99):
+            dedup[key] = item
+    ordered = sorted(dedup.values(), key=lambda x: (x.get("priority", 99), x.get("ticker", "")))[:30]
+    counts = {}
+    for item in ordered:
+        counts[item["kind"]] = counts.get(item["kind"], 0) + 1
+    return {"generated_at": now.isoformat(), "counts": counts, "items": ordered}
 
 
 @app.get("/api/scanner/notes")

@@ -360,6 +360,120 @@ async function loadRecentEvents() {
   }
 }
 
+function inboxSeverityLabel(severity) {
+  return severity === 'buy' ? 'pozitívne'
+    : severity === 'counter' ? 'pozor'
+      : 'sledovať';
+}
+
+function investorInboxRow(item) {
+  const ticker = escHtml(item.ticker || '');
+  const severity = ['buy','watch','counter'].includes(item.severity) ? item.severity : 'watch';
+  return `<div class="inbox-item ${severity}">
+    <div class="inbox-main" onclick="openVerdictTicker('${ticker}', event)" title="Otvoriť ${ticker} vo Verdikte">
+      <span class="inbox-dot"></span>
+      <div class="inbox-text">
+        <div class="inbox-title"><b>${ticker}</b><span>${escHtml(item.title || '')}</span><em>${escHtml(inboxSeverityLabel(severity))}</em></div>
+        <div class="inbox-detail">${escHtml(item.detail || '')}</div>
+      </div>
+    </div>
+    <div class="inbox-actions">
+      <button class="btn mini" onclick="openVerdictTicker('${ticker}', event)">Verdikt</button>
+      <button class="btn mini" onclick="event.stopPropagation();openScannerTicker('${ticker}')">Predikcia</button>
+      ${watchlistButtonHtml(item.ticker, 'inbox-wl-btn')}
+    </div>
+  </div>`;
+}
+
+function renderInvestorInbox(payload) {
+  const box = document.getElementById('investorWeekBox');
+  if (!box) return;
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const counts = payload?.counts || {};
+  const countText = [
+    counts.dca ? `${counts.dca} DCA` : '',
+    counts.profit ? `${counts.profit} profit` : '',
+    counts.earnings ? `${counts.earnings} earnings` : '',
+    counts.broken ? `${counts.broken} riziko` : '',
+    counts.opportunity ? `${counts.opportunity} nové` : '',
+  ].filter(Boolean).join(' · ');
+  if (!items.length) {
+    box.innerHTML = `<div class="inbox-empty">
+      Tento týždeň nevidím nič urgentné. To je dobrá správa: väčšina portfólia môže pokojne bežať bez ručného pitvania.
+    </div>`;
+    return;
+  }
+  box.innerHTML = `<div class="inbox-headline">
+      <span>${items.length} vecí na kontrolu</span>
+      <small>${escHtml(countText || 'DCA · profit · earnings · nové príležitosti')}</small>
+    </div>
+    <div class="inbox-list">${items.map(investorInboxRow).join('')}</div>`;
+  updateWatchlistButtons();
+}
+
+async function loadInvestorInbox() {
+  const box = document.getElementById('investorWeekBox');
+  if (box) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Načítavam týždenný prehľad...</div>';
+  try {
+    const response = await fetch(`${API}/api/investor/inbox`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderInvestorInbox(await response.json());
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="inbox-empty">Týždenný prehľad sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function earningsCalendarGroupLabel(item) {
+  const days = Number(item.days);
+  if (days === 0) return 'Dnes';
+  if (days === 1) return 'Zajtra';
+  const date = new Date(`${item.date}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return item.date || 'Neznámy dátum';
+  return date.toLocaleDateString('sk-SK', { weekday:'short', day:'2-digit', month:'2-digit' });
+}
+
+function renderEarningsCalendar(payload) {
+  const box = document.getElementById('earningsCalendarBox');
+  if (!box) return;
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!items.length) {
+    box.innerHTML = '<div class="earncal-empty">V portfóliu, watchliste ani posledných kandidátoch nie sú earnings v najbližších 14 dňoch.</div>';
+    return;
+  }
+  const groups = new Map();
+  for (const item of items) {
+    const key = earningsCalendarGroupLabel(item);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  box.innerHTML = Array.from(groups.entries()).map(([label, rows]) => `
+    <div class="earncal-day">
+      <div class="earncal-day-label">${escHtml(label)}</div>
+      <div class="earncal-day-list">${rows.map(item => {
+        const urgent = Number(item.days) <= 1;
+        const held = item.in_portfolio ? 'PORT' : 'watch';
+        const pnl = Number.isFinite(Number(item.pnl_pct)) ? `${Number(item.pnl_pct) >= 0 ? '+' : ''}${Number(item.pnl_pct).toFixed(1)}%` : '';
+        return `<button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="openVerdictTicker('${escHtml(item.ticker)}', event)" title="Otvoriť ${escHtml(item.ticker)} vo Verdikte">
+          <b>${escHtml(item.ticker)}</b>
+          <span>${escHtml(held)}</span>
+          ${pnl ? `<em class="${Number(item.pnl_pct) >= 0 ? 'pos' : 'neg'}">${escHtml(pnl)}</em>` : ''}
+        </button>`;
+      }).join('')}</div>
+    </div>`).join('');
+}
+
+async function loadEarningsCalendarWidget() {
+  const box = document.getElementById('earningsCalendarBox');
+  if (box) box.innerHTML = '<div class="earncal-empty"><span class="cl-spinner"></span>Načítavam earnings kalendár...</div>';
+  try {
+    const response = await fetch(`${API}/api/earnings/calendar?days=14`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderEarningsCalendar(await response.json());
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="earncal-empty">Earnings kalendár sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
 function openEventTicker(ticker, eventId) {
   if (eventId) {
     loadEventDismissed()[eventId] = { ts: Date.now() };
@@ -7489,6 +7603,26 @@ async function renderScannerView() {
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
         </div>
+        <section class="investor-week-card">
+          <div class="scanner-source-head">
+            <div>
+              <div class="scanner-section-kicker">Investor inbox</div>
+              <div class="scanner-source-title">Tento týždeň</div>
+            </div>
+            <span class="scanner-source-note">DCA · profit · earnings · riziká · nové príležitosti</span>
+          </div>
+          <div id="investorWeekBox" class="inbox-empty">Načítavam týždenný prehľad...</div>
+        </section>
+        <section class="earnings-calendar-card">
+          <div class="scanner-source-head">
+            <div>
+              <div class="scanner-section-kicker">Kalendár</div>
+              <div class="scanner-source-title">Earnings aktuálny + nasledujúci týždeň</div>
+            </div>
+            <span class="scanner-source-note">portfólio · watchlist · poslední kandidáti</span>
+          </div>
+          <div id="earningsCalendarBox" class="earncal-empty">Načítavam earnings...</div>
+        </section>
         <section class="scanner-candidate-radar scanner-candidate-radar-inline">
           <div class="scanner-source-head">
             <div>
@@ -7518,6 +7652,8 @@ async function renderScannerView() {
   }
   // Posledný scan ide z cache — načítaj okamžite a nezávisle od pomalých sekcií
   await loadNasdaqScannerResults();
+  loadInvestorInbox();
+  loadEarningsCalendarWidget();
   // Opportunities (prepočet) bežia na pozadí, neblokujú scan
   refreshOpportunities(true);
 }

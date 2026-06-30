@@ -314,6 +314,21 @@
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
   <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>DIP universe</strong> hľadá nové širšie príležitosti cez importovaný <strong>DIP ranking</strong>. Ak nie je importovaný Excel, použije sa Nasdaq-100 ako fallback. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
 
+  <h3>Investor Inbox — Tento týždeň</h3>
+  <p>Horná karta <strong>Tento týždeň</strong> je ľudský filter nad portfóliom a scannerom. Nesnaží sa zobraziť všetko; vyberá len výnimky, ktoré si zaslúžia pozornosť.</p>
+  <ul>
+    <li><strong>DCA kandidát</strong> — držaný titul je v hlbšej strate a DIP ranking ho stále podporuje. Je to výzva otvoriť Verdikt a graf, nie automatický nákup.</li>
+    <li><strong>Profit-taking kontrola</strong> — držaný titul má veľmi vysoký otvorený zisk. Dashboard pripomína skontrolovať plán, nie predávať.</li>
+    <li><strong>Earnings</strong> — výsledky v najbližších 14 dňoch. Pri držaných tituloch očakávaj vyššiu volatilitu a opatrnejšie čítaj technické signály.</li>
+    <li><strong>Graf potrebuje kontrolu / slabý DIP</strong> — držaná pozícia má konflikt s technickým alebo DIP kontextom.</li>
+    <li><strong>Nová príležitosť</strong> — scanner našiel silný DIP kandidát mimo portfólia.</li>
+  </ul>
+  <p>Klik na riadok otvorí <strong>Verdikt</strong>, tlačidlo <strong>Predikcia</strong> otvorí detailný graf a <strong>+ WL</strong> pridá ticker do watchlistu. Karta používa existujúce cache a posledný scan; nespúšťa nový veľký výpočet.</p>
+
+  <h3>Earnings kalendár</h3>
+  <p>Karta <strong>Earnings aktuálny + nasledujúci týždeň</strong> zoskupuje reporty podľa dňa pre relevantné tickery: portfólio, serverový watchlist a posledných kandidátov zo Scannera. Urgentné reporty (dnes/zajtra) sú zvýraznené.</p>
+  <p>Ak je kalendár prázdny, znamená to, že zdroj zatiaľ nemá termín alebo žiadny sledovaný ticker nereportuje v najbližších 14 dňoch. Používa sa rovnaký earnings reťazec ako inde v dashboarde: Finnhub bulk kalendár, per-symbol fallback, Yahoo/yfinance fallback a cache.</p>
+
   <h3>Kontext trhu — lišta TRH</h3>
   <p>Úplne hore v Scanneri je riadok chipov <strong>TRH</strong>. Odpovedá na otázku: <em>„Má môj Buy signál podporu širšieho trhu, alebo idem proti prúdu?“</em> Dôležité: lišta <strong>nevstupuje do C1–C4 skóre</strong> — signály počíta rovnako v býčom aj medveďom trhu. Je to čisto interpretačná vrstva: rovnaký 3/4 signál má v podporujúcom trhu vyššiu šancu na úspech než v klesajúcom.</p>
   <table>

@@ -428,6 +428,40 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 
 ## 5. Scanner + DIP stratégia
 
+### Investor Inbox — Tento týždeň
+
+Horná karta **Tento týždeň** je ľudský filter nad portfóliom a scannerom.
+Nesnaží sa zobraziť všetko; naopak vyberá len výnimky, ktoré si zaslúžia
+pozornosť.
+
+- **DCA kandidáti** — držaný titul je v hlbšej strate a DIP ranking stále
+  vyzerá kvalitne. To neznamená automaticky kúpiť, ale stojí za otvorenie
+  Verdiktu a grafu.
+- **Profit-taking kontrola** — držaný titul má veľmi vysoký otvorený zisk
+  (aktuálne približne od +150 %). Je to pripomienka skontrolovať plán, nie
+  signál predávať.
+- **Earnings** — titul má výsledky v najbližších 14 dňoch. Pri držaných tituloch
+  je to volatilná udalosť a čísla zo signálov treba brať opatrnejšie.
+- **Graf potrebuje kontrolu / slabý DIP** — dashboard našiel konflikt medzi
+  držanou pozíciou a technickým alebo DIP kontextom. Toto sú kandidáti na
+  manuálne posúdenie.
+- **Nová príležitosť** — scanner našiel silný DIP kandidát mimo portfólia.
+
+Klik na riadok otvorí **Verdikt**, tlačidlo **Predikcia** otvorí detailný graf a
+**+ WL** pridá ticker do watchlistu. Karta používa existujúce cache a posledný
+scan; nespúšťa nový veľký výpočet.
+
+### Earnings kalendár
+
+Karta **Earnings aktuálny + nasledujúci týždeň** zobrazuje reporty pre relevantné
+tickery: portfólio, serverový watchlist a posledných kandidátov zo Scannera.
+Zoskupuje ich podľa dňa (`Dnes`, `Zajtra`, dátum) a zvýrazní urgentné reporty.
+
+Ak sa ticker v kalendári nenachádza, zvyčajne to znamená, že zdroj dát zatiaľ
+nemá termín, alebo report nespadá do najbližších 14 dní. Dashboard používa
+rovnaký reťazec zdrojov ako ostatné earnings prvky: Finnhub bulk kalendár,
+per-symbol fallback, Yahoo/yfinance fallback a cache.
+
 Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
 do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**
 je rýchly radar titulov, ktoré už sleduješ alebo držíš. Spodný podblok
