@@ -622,6 +622,13 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <li>Volané z <code>_scan_buy_signal_for_ticker</code> aj predictive endpointu — rovnaká logika.</li>
   </ul>
 
+  <h3>Equity krivka</h3>
+  <ul>
+    <li>Malý graf na vrchu Portfólia (nad DCA kartou) ukazuje equity za posledných 12 mesiacov z eToro <code>balances/history</code> — denné EOD snapshoty.</li>
+    <li>Percento v hlavičke porovnáva prvý a posledný bod grafu. Dáta sa cachujú 12 hodín.</li>
+    <li>Čisto zobrazovacia vrstva, nič neráta. Ak história chýba (napr. nový účet), zobrazí sa hláška namiesto grafu.</li>
+  </ul>
+
   <h3>Portfolio attention filter</h3>
   <ul>
     <li><strong>Pozornosť</strong> v Portfóliu je rýchly filter, ktorý ukáže len držané tituly s dôvodom na kontrolu. Nemení summary, P/L ani účtovné hodnoty.</li>

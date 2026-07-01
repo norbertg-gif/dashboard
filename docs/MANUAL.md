@@ -908,6 +908,18 @@ render.yaml            # web service + 1GB disk na /data
 | `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback. |
 | `RENDER` | Príznak produkcie. |
 
+### Equity krivka
+
+- Na vrchu záložky **Portfólio** (nad kartou DCA) je malý graf equity za
+  posledných 12 mesiacov, postavený z eToro `balances/history` (denné EOD
+  snapshoty — presne to, čo eToro interne používa na výpočet).
+- Percento v hlavičke porovnáva prvý a posledný bod v grafe.
+- Dáta sa cachujú na 12 hodín (menia sa len raz denne), takže opakované
+  otvorenie Portfólia netrhá nové API volania.
+- Je to čisto zobrazovacia vrstva — nič nepočíta, len prevezme totály z eToro.
+  Ak eToro históriu nevráti (napr. nový účet bez histórie), zobrazí sa krátka
+  informačná hláška namiesto grafu.
+
 ### Portfolio attention filter
 
 - Prepínač **Pozornosť** v záložke **Portfólio** je rýchly filter „čo si mám

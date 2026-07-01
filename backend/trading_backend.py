@@ -2314,6 +2314,100 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings()}
 
 
+# ── Equity curve (eToro balance history) ──────────────────────────────────────
+EQUITY_HISTORY_CACHE_FILE = DATA_ROOT / "_equity_history.json"
+EQUITY_HISTORY_TTL_H = 12
+_equity_history_lock = threading.Lock()
+_trading_account_id_cache: dict[str, str] = {}  # account ("1"/"2") -> eToro accountId, natrvalo
+
+
+def _resolve_trading_account_id(account: str) -> str | None:
+    """Zistí eToro interné accountId Trading účtu (na rozdiel od nášho account=1/2,
+    ktorý je len pár API kľúčov). Nemení sa, kým sa nezmení broker účet — cache natrvalo."""
+    if account in _trading_account_id_cache:
+        return _trading_account_id_cache[account]
+    try:
+        resp = fetch_with_retry(f"{ETORO_PROXY}/etoro/balances?account={account}", timeout=10)
+        data = resp.json()
+        for b in (data.get("balances") or []):
+            if b.get("accountType") == "Trading" and b.get("accountId"):
+                _trading_account_id_cache[account] = b["accountId"]
+                return b["accountId"]
+    except Exception as e:
+        print(f"[equity] resolve accountId {account}: {_scrub_token(e)}")
+    return None
+
+
+@app.get("/api/etoro/equity-history")
+def get_equity_history(account: str = Query("1"), days: int = Query(365, ge=7, le=365), refresh: int = Query(0)):
+    """Equity krivka za posledných `days` dní z eToro balance history (denné EOD
+    snapshoty, max 365 dní dozadu podľa eToro API). Cache 12h na disku — mení sa
+    len raz denne, žiadny dôvod ťahať znova pri každom otvorení Portfólia.
+    Interpretačná vrstva — nepočíta nič, len prevezme eToro totály."""
+    with _equity_history_lock:
+        cache = {}
+        if EQUITY_HISTORY_CACHE_FILE.exists():
+            try:
+                cache = json.loads(EQUITY_HISTORY_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cache = {}
+        hit = cache.get(account)
+        if hit and not refresh:
+            try:
+                age_h = (datetime.now(timezone.utc)
+                         - datetime.fromisoformat(hit["fetched_at"])).total_seconds() / 3600
+                if age_h < EQUITY_HISTORY_TTL_H:
+                    return hit["payload"]
+            except Exception:
+                pass
+
+    account_id = _resolve_trading_account_id(account)
+    if not account_id:
+        if hit:
+            return {**hit["payload"], "stale": True}
+        return {"account": account, "points": [], "error": "Nepodarilo sa zistiť Trading accountId"}
+
+    to_date = datetime.now(timezone.utc).date()
+    from_date = to_date - timedelta(days=min(days, 365))
+    try:
+        resp = fetch_with_retry(
+            f"{ETORO_PROXY}/etoro/balances/Trading/{account_id}/history"
+            f"?fromDate={from_date.isoformat()}&toDate={to_date.isoformat()}&account={account}",
+            timeout=15,
+        )
+        data = resp.json()
+    except Exception as e:
+        if hit:
+            return {**hit["payload"], "stale": True}
+        return {"account": account, "points": [], "error": str(e)[:150]}
+
+    snapshots = data.get("snapshots") or []
+    points = [{
+        "date": s.get("date"),
+        "equity": s.get("totalBalance"),
+        "cash": s.get("totalCash"),
+        "invested": s.get("totalInvestedAmount"),
+        "pnl": s.get("totalPnl"),
+    } for s in snapshots if s.get("date") and s.get("totalBalance") is not None]
+    points.sort(key=lambda p: p["date"])
+
+    payload = {"account": account, "points": points,
+               "from": from_date.isoformat(), "to": to_date.isoformat()}
+    with _equity_history_lock:
+        cache = {}
+        if EQUITY_HISTORY_CACHE_FILE.exists():
+            try:
+                cache = json.loads(EQUITY_HISTORY_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cache = {}
+        cache[account] = {"fetched_at": datetime.now(timezone.utc).isoformat(), "payload": payload}
+        try:
+            EQUITY_HISTORY_CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        except Exception:
+            pass
+    return payload
+
+
 def _get_portfolio_symbols() -> set:
     """Načíta symboly zo všetkých portfólií (oba účty)."""
     syms = set()
