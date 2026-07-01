@@ -973,7 +973,7 @@ function dcaCardHead(data = null) {
 
 async function loadDcaCandidates(force = false) {
   const account = String(portState?.main?.account || activeAccount || '1');
-  const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
+  const wrap = document.getElementById('portfolio-dca');
   if (!wrap) return;
   if (!force && _dcaCache.account === account && _dcaCache.data) {
     renderDcaCard(_dcaCache.data);
@@ -999,7 +999,7 @@ const DCA_FLAG_META = {
 };
 
 function renderDcaCard(data) {
-  const wrap = document.getElementById('portfolio-dca') || document.getElementById('risk-dca');
+  const wrap = document.getElementById('portfolio-dca');
   if (!wrap) return;
   const th = data.thresholds || {};
   const head = dcaCardHead(data);

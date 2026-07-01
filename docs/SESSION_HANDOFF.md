@@ -100,8 +100,7 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 
 - **#2 Regime-aware signal analytics** - backfill historickych signalov (download OHLCV per ticker, slice pri datume signalu, recompute kontext bez look-ahead). Potrebuje zive data + rozhodnutie o pristupe.
 - **News clustering** (analyticky plan #3) - az ked bude news cache naplnena.
-- **Sektorove ETF RS** - hotove cez Finnhub profile2/SPDR mapu; Risk tab pouziva rovnaky sektorovy kontext pre expoziciu.
-
+- **Sektorove ETF RS** - hotove cez Finnhub profile2/SPDR mapu; aktualne pouzivane len ako trhovy/sektorovy kontext tam, kde ma viditelny UI vystup.\n
 ## Cache verzia
 
 `?v=20260613-massive2` (JS aj CSS)
@@ -138,28 +137,16 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
 - Cache verzia frontendu: `?v=20260622-alert2`.
 
 
-## Doplnen? 2026-06-22 - Risk sektorova expozicia
 
-- `/api/etoro/analytics` vracia nove pole `bySector` agregovane podla SPDR sektora
-  z existujucej Finnhub `profile2` cache.
-- Risk tab zobrazuje kartu **Sektorova expozicia**: vaha sektora v equity,
   sektorovy P/L a pocet titulov. Je to interpretacna vrstva, nemeni portfolio P/L.
-- Sektorova koncentracia nad 35% equity pridava risk flag.
-- Cache verzia frontendu: `?v=20260622-alert3`.
 
 
-## Doplnen? 2026-06-23 - Risk briefing
 
-- Risk tab dostal kratky slovny zaver `renderRiskSummary()` nad existujucimi
-  datami: koncentracia Top 5, najvacsi sektor, najvacsia pozicia a pocet flagov.
-- Je to interpretacna vrstva nad `/api/etoro/analytics`; nemeni P/L ani scoring.
-- Cache verzia frontendu: `?v=20260623-risk-summary`.
 
 
 ## Doplnen? 2026-06-29 - memory trim / 512 MB profil
 
 - Odstr?nen? Virtual Trading Bot z UI aj backendu (`/api/bot/*`). Ak sa vr?ti, rie?i? ako samostatn? projekt/slu?bu.
 - Backend m? nov? predvolen? `DASH_MEMORY_PROFILE=low` pre Render 512 MB.
-- ?a?k? vrstvy s? za env prep?na?mi: `ENABLE_PREDICTIVE_ML`, `ENABLE_PREDICTIVE_HMM`, `ENABLE_SIGNAL_CONTEXT_BACKFILL`, `ENABLE_CORRELATION`, `ENABLE_MARKET_BREADTH`, `ENABLE_MASSIVE_SP500`.
 - Nov? diagnostick? endpoint `/api/admin/memory` vracia RSS/feature flags/cache sizes.
 - Cache verzia frontendu: `?v=20260629-memory-trim`.

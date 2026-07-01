@@ -771,7 +771,6 @@ V low-memory re?ime ost?va zapnut? jadro aplik?cie:
 | `ENABLE_PREDICTIVE_HMM` | `0` | HMM regime diagnostiku. |
 | `ENABLE_SIGNAL_CONTEXT_BACKFILL` | `0` | Automatick? dop??anie regime kontextu star??ch sign?lov pri otvoren? grafu. |
 | `ENABLE_SIGNAL_ANALYTICS` | `1` | 90D+ analytiku sign?lov. |
-| `ENABLE_CORRELATION` | `0` | Korela?n? maticu v Risk tabe. |
 | `ENABLE_MARKET_BREADTH` | `0` | Background v?po?et Nasdaq breadth. |
 | `ENABLE_MASSIVE_SP500` | `0` | S&P 500 ?as? Massive market snapshotu. |
 | `ENABLE_MASSIVE_MARKET` | `1` | Massive EOD kontext ako celok. |
