@@ -1273,10 +1273,14 @@ function portfolioAttentionDailyReason(row) {
   };
 }
 
+// 'opportunity' je len pre tituly mimo portfólia (irelevantné tu); 'profit'
+// (+150% otvorený zisk) si používateľ prioritne rieši manuálne cez časový test.
+const PORT_ATTENTION_IGNORED_KINDS = new Set(['opportunity', 'profit']);
+
 function cleanPortfolioAttentionReasons(item) {
   const reasons = Array.isArray(item?.reasons) ? item.reasons : [];
   return reasons
-    .filter(reason => reason?.kind !== 'opportunity')
+    .filter(reason => !PORT_ATTENTION_IGNORED_KINDS.has(reason?.kind))
     .map(reason => ({
       ...reason,
       label: portfolioAttentionReasonLabel(reason),

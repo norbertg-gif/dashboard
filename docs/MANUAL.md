@@ -912,9 +912,9 @@ render.yaml            # web service + 1GB disk na /data
 
 - Prepínač **Pozornosť** v záložke **Portfólio** je rýchly filter „čo si mám
   dnes pozrieť". Nemení účtovníctvo, summary ani výpočty P/L.
-- Dôvody berie z **Investor Inboxu**: DCA, profit-taking, earnings a graf,
-  ktorý potrebuje kontrolu. Scanner-only príležitosti sa v portfóliu ignorujú,
-  lebo nejde o držané tituly.
+- Dôvody berie z **Investor Inboxu**: DCA, earnings a graf, ktorý potrebuje
+  kontrolu. Scanner-only príležitosti a profit-taking sa v portfóliu ignorujú
+  (mimoriadny zisk si používateľ prioritne rieši manuálne cez časový test).
 - Navyše pridáva lacný lokálny dôvod **Pohyb**, ak má držaný titul výrazný
   denný P/L pohyb.
 - V pohľade **Per ticker** ukáže len tickery s dôvodom na kontrolu. V pohľade
