@@ -1073,60 +1073,6 @@ async function loadGainData(account) {
   }
 }
 
-// ── Equity curve (eToro balance history, denné EOD snapshoty) ────────────────
-let _equityCurveCache = { account: null, data: null };
-let _equityCurveChart = null;
-
-async function renderEquityCurve(containerId, account) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  let payload;
-  if (_equityCurveCache.account === account && _equityCurveCache.data) {
-    payload = _equityCurveCache.data;
-  } else {
-    try {
-      const r = await fetch(`${API}/api/etoro/equity-history?account=${account}`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      payload = await r.json();
-      _equityCurveCache = { account, data: payload };
-    } catch(e) {
-      el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity krivka sa nepodarila načítať (${escHtml(e.message)}).</div>`;
-      return;
-    }
-  }
-  const points = (payload.points || []).filter(p => p.date && Number.isFinite(p.equity));
-  if (points.length < 2) {
-    const reason = payload.error ? escHtml(payload.error) : 'eToro vrátilo prázdnu históriu (0 snapshotov v zvolenom rozsahu).';
-    el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity história zatiaľ nie je dostupná — <span style="color:var(--red);">${reason}</span></div>`;
-    return;
-  }
-  const first = points[0].equity;
-  const last = points[points.length - 1].equity;
-  const changePct = first ? (last - first) / first * 100 : 0;
-  const up = changePct >= 0;
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px 4px;">
-      <div class="tool-title" style="margin:0;">Equity krivka
-        <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${escHtml(payload.from||'')} – ${escHtml(payload.to||'')}</span>
-      </div>
-      <span class="${up?'port-pos':'port-neg'}" style="font-family:var(--font-mono);font-weight:700;font-size:12px;">${up?'+':''}${changePct.toFixed(1)}%</span>
-    </div>
-    <div id="${containerId}-chart" style="height:110px;padding:0 10px 8px;"></div>
-  `;
-  const chartEl = document.getElementById(`${containerId}-chart`);
-  if (!chartEl) return;
-  try { _equityCurveChart?.remove(); } catch(e) {}
-  const chart = makeChart(chartEl, 110, {timeVisible: false});
-  _equityCurveChart = chart;
-  const color = up ? '#26a69a' : '#ef5350';
-  const series = chart.addSeries(LightweightCharts.AreaSeries, {
-    lineColor: color, topColor: color + '33', bottomColor: color + '02',
-    lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
-  });
-  series.setData(points.map(p => ({ time: p.date, value: p.equity })));
-  chart.timeScale().fitContent();
-}
-
 function renderGainPanel(containerId, account) {
   const el = document.getElementById(containerId);
   if (!el) return;
@@ -2033,8 +1979,6 @@ function renderPortPanel(pid) {
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
   if (pid === 'main') {
-    html += `<div id="port-equity-${pid}" style="border-top:1px solid var(--border);"><div style="padding:8px 16px;color:var(--muted);font-size:11px;">Načítavam equity krivku…</div></div>`;
-    setTimeout(() => renderEquityCurve(`port-equity-${pid}`, s.account), 0);
     html += `<div id="portfolio-dca">
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
@@ -2175,7 +2119,6 @@ function portSetAccount(pid, acc) {
   const s = getPortState(pid); s.account = acc; s.data = null;
   if (pid === 'main') {
     _dcaCache = { account: null, data: null };
-    _equityCurveCache = { account: null, data: null };
   }
   // Aplikuj tint na portfolio tab podľa zvoleného účtu
   const portEl = document.getElementById('main-portfolio');
