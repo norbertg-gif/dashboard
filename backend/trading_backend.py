@@ -2338,6 +2338,24 @@ def _resolve_trading_account_id(account: str) -> str | None:
     return None
 
 
+@app.get("/api/diagnostics/equity/{account}")
+def diag_equity(account: str):
+    """Surová /balances odpoveď pre debugovanie equity krivky. Žiadny token v odpovedi —
+    x-api-key/x-user-key idú len v hlavičkách requestu, nikdy v tele JSON."""
+    try:
+        resp = fetch_with_retry(f"{ETORO_PROXY}/etoro/balances?account={account}", timeout=10)
+        return {
+            "account": account,
+            "http_status": resp.status_code,
+            "raw": resp.json(),
+            "resolved_trading_account_id": next(
+                (b.get("accountId") for b in (resp.json().get("balances") or [])
+                 if b.get("accountType") == "Trading"), None),
+        }
+    except Exception as e:
+        return {"account": account, "error": str(e)[:500]}
+
+
 @app.get("/api/etoro/equity-history")
 def get_equity_history(account: str = Query("1"), days: int = Query(365, ge=7, le=365), refresh: int = Query(0)):
     """Equity krivka za posledných `days` dní z eToro balance history (denné EOD
