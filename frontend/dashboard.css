@@ -1060,6 +1060,23 @@ body.sidebar-collapsed #sb-resizer {
   color: var(--text);
   background: var(--bg-input);
 }
+.port-attention-toggle {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.port-attention-toggle.active {
+  border-color: var(--orange);
+  color: var(--orange);
+  background: var(--orange-soft);
+}
 .port-export-btn:hover {
   border-color: var(--up);
   color: var(--up);
@@ -1091,6 +1108,23 @@ body.sidebar-collapsed #sb-resizer {
 .port-sum-val {
   font-weight: 700;
   font-size: 14px;
+}
+.port-attention-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--orange), transparent 94%);
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+.port-attention-note b {
+  color: var(--orange);
+}
+.port-attention-note span {
+  color: var(--muted2);
 }
 
 .port-table-wrap {
@@ -1153,6 +1187,46 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 10px;
   color: var(--muted2);
   font-family: var(--font-ui);
+}
+.port-attention-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+}
+.port-attention-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+.port-attention-badge.buy {
+  border-color: var(--up);
+  color: var(--up);
+  background: var(--up-soft);
+}
+.port-attention-badge.watch {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: var(--yellow-soft);
+}
+.port-attention-badge.counter {
+  border-color: var(--down);
+  color: var(--down);
+  background: var(--down-soft);
+}
+.port-attention-badge.neutral {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .port-type-badge {

@@ -908,6 +908,19 @@ render.yaml            # web service + 1GB disk na /data
 | `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback. |
 | `RENDER` | Príznak produkcie. |
 
+### Portfolio attention filter
+
+- Prepínač **Pozornosť** v záložke **Portfólio** je rýchly filter „čo si mám
+  dnes pozrieť". Nemení účtovníctvo, summary ani výpočty P/L.
+- Dôvody berie z **Investor Inboxu**: DCA, profit-taking, earnings a graf,
+  ktorý potrebuje kontrolu. Scanner-only príležitosti sa v portfóliu ignorujú,
+  lebo nejde o držané tituly.
+- Navyše pridáva lacný lokálny dôvod **Pohyb**, ak má držaný titul výrazný
+  denný P/L pohyb.
+- V pohľade **Per ticker** ukáže len tickery s dôvodom na kontrolu. V pohľade
+  **Per trade** zobrazí všetky tranže takého tickera, aby sa nestratil kontext.
+- Summary hore zostáva celkové za účet. Filter je len pohľad, nie zmena reality.
+
 ### Signal scoring — kde žije
 
 - `score_signal_day(row, zscore)` — jediný zdroj pravdy pre c1–c4 + per-bar trend

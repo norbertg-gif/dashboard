@@ -622,6 +622,14 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <li>Volané z <code>_scan_buy_signal_for_ticker</code> aj predictive endpointu — rovnaká logika.</li>
   </ul>
 
+  <h3>Portfolio attention filter</h3>
+  <ul>
+    <li><strong>Pozornosť</strong> v Portfóliu je rýchly filter, ktorý ukáže len držané tituly s dôvodom na kontrolu. Nemení summary, P/L ani účtovné hodnoty.</li>
+    <li>Dôvody preberá z Investor Inboxu: DCA, profit-taking, earnings a graf na kontrolu. Scanner-only príležitosti sa tu ignorujú.</li>
+    <li>Dopĺňa aj <strong>Pohyb</strong>, ak má ticker v portfóliu výrazný denný P/L pohyb.</li>
+    <li>V <strong>Per ticker</strong> ukáže iba dotknuté tickery; v <strong>Per trade</strong> nechá všetky tranže takého tickera.</li>
+  </ul>
+
   <h3>Dátové toky</h3>
   <ul>
     <li><strong>OHLCV cache inkrementálna</strong> — <code>cache/ohlcv/{SYMBOL}_{INTERVAL}.gz</code>, až 1000 sviečok, doťahuje len tail.</li>

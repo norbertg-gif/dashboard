@@ -1227,6 +1227,128 @@ function normalizePortColumns(saved = {}) {
 // Per-panel portfolio state
 const portState = {};
 const portfolioAccountData = {};
+let portfolioAttentionItems = {};
+let portfolioAttentionLoadedAt = 0;
+let portfolioAttentionLoading = null;
+const PORT_ATTENTION_TTL_MS = 120000;
+const PORT_ATTENTION_DAILY_PCT = 1.5;
+const PORT_ATTENTION_DAILY_USD = 25;
+
+function normalizePortSymbol(symbol) {
+  return String(symbol || '').trim().toUpperCase();
+}
+
+function portfolioAttentionReasonLabel(reason) {
+  const kind = reason?.kind || '';
+  if (kind === 'broken') return 'Graf';
+  if (kind === 'dca') return 'DCA';
+  if (kind === 'profit') return 'Profit';
+  if (kind === 'earnings') return 'Earnings';
+  if (kind === 'move') return 'Pohyb';
+  return reason?.label || kind || 'Info';
+}
+
+function portfolioAttentionReasonClass(reason) {
+  const kind = reason?.kind || '';
+  const sev = reason?.severity || '';
+  if (kind === 'dca' || kind === 'profit' || sev === 'buy') return 'buy';
+  if (kind === 'earnings' || sev === 'watch') return 'watch';
+  if (kind === 'broken' || sev === 'counter') return 'counter';
+  if (kind === 'move') return Number(reason.value || 0) >= 0 ? 'buy' : 'counter';
+  return 'neutral';
+}
+
+function portfolioAttentionDailyReason(row) {
+  const daily = Number(row?._liveDailyPnl ?? row?.dailyPnl ?? 0);
+  const amount = Math.abs(Number(row?.amount || 0));
+  const pct = amount > 0 ? daily / amount * 100 : NaN;
+  const strongPct = Number.isFinite(pct) && Math.abs(pct) >= PORT_ATTENTION_DAILY_PCT;
+  const strongUsd = Math.abs(daily) >= PORT_ATTENTION_DAILY_USD;
+  if (!strongPct && !strongUsd) return null;
+  const pctText = Number.isFinite(pct) ? ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)` : '';
+  return {
+    kind: 'move',
+    label: 'Pohyb',
+    title: daily >= 0 ? 'Výrazný denný rast' : 'Výrazný denný pokles',
+    detail: `${daily >= 0 ? '+' : ''}$${daily.toFixed(2)}${pctText}`,
+    severity: daily >= 0 ? 'buy' : 'counter',
+    value: daily,
+  };
+}
+
+function cleanPortfolioAttentionReasons(item) {
+  const reasons = Array.isArray(item?.reasons) ? item.reasons : [];
+  return reasons
+    .filter(reason => reason?.kind !== 'opportunity')
+    .map(reason => ({
+      ...reason,
+      label: portfolioAttentionReasonLabel(reason),
+    }));
+}
+
+function portfolioAttentionReasonsForRow(row) {
+  const sym = normalizePortSymbol(row?.symbol);
+  const reasons = [];
+  if (sym && portfolioAttentionItems[sym]) {
+    reasons.push(...cleanPortfolioAttentionReasons(portfolioAttentionItems[sym]));
+  }
+  const move = portfolioAttentionDailyReason(row);
+  if (move) reasons.push(move);
+  const seen = new Set();
+  return reasons.filter(reason => {
+    const key = `${reason.kind || ''}:${reason.label || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function renderPortfolioAttentionBadges(reasons = []) {
+  if (!reasons.length) return '';
+  return `<div class="port-attention-badges">${reasons.slice(0, 4).map(reason => {
+    const label = portfolioAttentionReasonLabel(reason);
+    const detail = reason.detail || reason.summary || reason.title || '';
+    return `<span class="port-attention-badge ${portfolioAttentionReasonClass(reason)}" title="${escHtml(detail || label)}">${escHtml(label)}</span>`;
+  }).join('')}</div>`;
+}
+
+async function loadPortfolioAttention(force = false) {
+  if (!force && portfolioAttentionLoadedAt && Date.now() - portfolioAttentionLoadedAt < PORT_ATTENTION_TTL_MS) {
+    return portfolioAttentionItems;
+  }
+  if (portfolioAttentionLoading) return portfolioAttentionLoading;
+  portfolioAttentionLoading = fetch(`${API}/api/investor/inbox`)
+    .then(async response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      portfolioAttentionItems = items.reduce((map, item) => {
+        const sym = normalizePortSymbol(item?.ticker);
+        const relevant = cleanPortfolioAttentionReasons(item);
+        if (sym && relevant.length) map[sym] = item;
+        return map;
+      }, {});
+      portfolioAttentionLoadedAt = Date.now();
+      return portfolioAttentionItems;
+    })
+    .catch(error => {
+      console.warn('[portfolio attention] inbox load failed', error);
+      return portfolioAttentionItems;
+    })
+    .finally(() => { portfolioAttentionLoading = null; });
+  return portfolioAttentionLoading;
+}
+
+function maybeRefreshPortfolioAttention(pid) {
+  const s = getPortState(pid);
+  if (!s.attentionOnly) return;
+  if (portfolioAttentionLoading) return;
+  if (portfolioAttentionLoadedAt && Date.now() - portfolioAttentionLoadedAt < PORT_ATTENTION_TTL_MS) return;
+  loadPortfolioAttention(false).then(() => {
+    const latest = getPortState(pid);
+    if (latest?.attentionOnly) renderPortPanel(pid);
+  });
+}
 
 function getPortState(pid) {
   if (!portState[pid]) {
@@ -1236,6 +1358,7 @@ function getPortState(pid) {
     portState[pid] = {
       account:    saved.account    || '1',
       filter:     saved.filter     || 'all',
+      attentionOnly: saved.attentionOnly === true,
       view:       saved.view       || 'ticker',
       sortCol:    saved.sortCol    || 'pnl',
       sortDir:    saved.sortDir    ?? -1,
@@ -1255,6 +1378,7 @@ function savePortState(pid) {
   const s = portState[pid]; if (!s) return;
   localStorage.setItem(`td_port_${pid}`, JSON.stringify({
     account: s.account, filter: s.filter, view: s.view,
+    attentionOnly: s.attentionOnly === true,
     sortCol: s.sortCol, sortDir: s.sortDir,
     colOrder: s.colOrder, colVisible: s.colVisible, colWidths: s.colWidths,
     _symFilter: s._symFilter || null,
@@ -1288,6 +1412,7 @@ function loadPortStateFromStorage(pid) {
     const s = getPortState(pid);
     if (d.account)    s.account    = d.account;
     if (d.filter)     s.filter     = d.filter;
+    if (typeof d.attentionOnly === 'boolean') s.attentionOnly = d.attentionOnly;
     if (d.view)       s.view       = d.view;
     if (d.sortCol)    s.sortCol    = d.sortCol;
     if (d.sortDir)    s.sortDir    = d.sortDir;
@@ -1618,6 +1743,46 @@ function portColStyle(s, key) {
   return ` style="width:${w}px;min-width:${w}px;max-width:${w}px;"`;
 }
 
+function groupPortRowsByTicker(rows) {
+  const groups = {};
+  for (const r of rows) {
+    const sym = r.symbol || '';
+    if (!groups[sym]) groups[sym] = {
+      ...r,
+      amount:   r.amount   || 0,
+      pnl:      r.pnl      || 0,
+      _livePnl: r._livePnl ?? r.pnl ?? 0,
+      dailyPnl: r.dailyPnl || 0,
+      fees:     r.fees     || 0,
+      _count: 1, _trades: [r]
+    };
+    else {
+      const g = groups[sym];
+      g.amount    += (r.amount   || 0);
+      g.pnl       += (r.pnl      || 0);
+      g._livePnl  += (r._livePnl ?? r.pnl ?? 0);
+      g.dailyPnl  += (r.dailyPnl || 0);
+      g.fees      += (r.fees     || 0);
+      g.units     = (g.units || 0) + (r.units || 0);
+      g._count    += 1;
+      g._trades.push(r);
+      g.pnlPct = g.amount ? g.pnl / g.amount * 100 : 0;
+      if (g._livePnl != null) g._livePnlPct = g.amount ? g._livePnl / g.amount * 100 : 0;
+      const totalUnits = g._trades.reduce((sum, t) => sum + (t.units || 0), 0);
+      g.openRate = totalUnits > 0
+        ? g._trades.reduce((sum, t) => sum + (t.openRate || 0) * (t.units || 0), 0) / totalUnits
+        : g._trades.reduce((sum, t) => sum + (t.openRate || 0), 0) / g._trades.length;
+      const currentRates = g._trades
+        .map(t => Number(t.currentRate))
+        .filter(v => Number.isFinite(v) && v > 0);
+      g.currentRate = currentRates.length
+        ? currentRates.reduce((sum, v) => sum + v, 0) / currentRates.length
+        : g.currentRate;
+    }
+  }
+  return groups;
+}
+
 function getFilteredPositions(s) {
   if (!s.data?.positions) return [];
   let rows = s.data.positions;
@@ -1672,6 +1837,20 @@ function getFilteredPositions(s) {
       }
     }
     rows = Object.values(groups);
+  }
+  const attentionGroups = s.view === 'ticker'
+    ? Object.fromEntries(rows.map(row => [normalizePortSymbol(row.symbol), row]))
+    : groupPortRowsByTicker(rows);
+  const attentionBySymbol = {};
+  for (const group of Object.values(attentionGroups)) {
+    const reasons = portfolioAttentionReasonsForRow(group);
+    if (reasons.length) attentionBySymbol[normalizePortSymbol(group.symbol)] = reasons;
+  }
+  if (s.attentionOnly) {
+    rows = rows.filter(row => attentionBySymbol[normalizePortSymbol(row.symbol)]);
+  }
+  for (const row of rows) {
+    row._attentionReasons = attentionBySymbol[normalizePortSymbol(row.symbol)] || [];
   }
   // Sort
   rows.sort((a, b) => {
@@ -1729,11 +1908,13 @@ function renderPortPanel(pid) {
     return;
   }
 
+  maybeRefreshPortfolioAttention(pid);
+
   const sum = s.data.summary || {};
   const rows = getFilteredPositions(s);
   const cols = getVisibleCols(s);
   const mirrors = s.data.mirrors || [];
-  const showMirrors = (s.filter === 'all' || s.filter === 'mirrors') && mirrors.length;
+  const showMirrors = !s.attentionOnly && (s.filter === 'all' || s.filter === 'mirrors') && mirrors.length;
 
   // Zostav HTML
   let html = `<div class="port-panel">`;
@@ -1757,6 +1938,7 @@ function renderPortPanel(pid) {
   // View
   html += `<button class="port-view-btn${s.view==='ticker'?' active':''}" onclick="portSetView('${pid}','ticker')">Per ticker</button>`;
   html += `<button class="port-view-btn${s.view==='trade'?' active':''}" onclick="portSetView('${pid}','trade')">Per trade</button>`;
+  html += `<button class="port-attention-toggle${s.attentionOnly?' active':''}" onclick="portToggleAttention('${pid}')" title="Zobraz len tituly, ktoré majú dôvod na kontrolu z Investor Inboxu alebo výrazný denný pohyb">Pozornosť</button>`;
   // Akcie
   // Späť tlačidlo pri drilldown
   if (s._symFilter) {
@@ -1785,6 +1967,14 @@ function renderPortPanel(pid) {
   </div>`;
 
   // Výkonnostný panel (gain)
+  if (s.attentionOnly) {
+    const shownTickers = new Set(rows.map(row => normalizePortSymbol(row.symbol)).filter(Boolean)).size;
+    const stale = !portfolioAttentionLoadedAt || Date.now() - portfolioAttentionLoadedAt >= PORT_ATTENTION_TTL_MS;
+    html += `<div class="port-attention-note">
+      <b>Pozornosť:</b> zobrazené ${shownTickers} ${shownTickers === 1 ? 'titul' : 'titulov'} s dôvodom na kontrolu.
+      <span>${stale ? 'Inbox sa aktualizuje...' : 'Zdroj: Investor Inbox + denný pohyb.'}</span>
+    </div>`;
+  }
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
   if (pid === 'main') {
@@ -1825,6 +2015,7 @@ function renderPortPanel(pid) {
             <div style="display:flex;flex-direction:column;gap:1px;flex:1;">
               <span class="port-sym">${sym}${count}${gfLinkHtml(sym)}</span>
               <span class="port-name">${row.name||''}</span>
+              ${renderPortfolioAttentionBadges(row._attentionReasons)}
             </div>
           </div></td>`;
         } else if (col.key === 'trade') {
@@ -1941,6 +2132,15 @@ function portSetFilter(pid, f) {
 function portSetView(pid, v) {
   const s = getPortState(pid); s.view = v;
   savePortState(pid); renderPortPanel(pid);
+}
+function portToggleAttention(pid) {
+  const s = getPortState(pid);
+  s.attentionOnly = !s.attentionOnly;
+  savePortState(pid);
+  if (s.attentionOnly) {
+    loadPortfolioAttention(false).then(() => renderPortPanel(pid));
+  }
+  renderPortPanel(pid);
 }
 function portSort(pid, col) {
   const s = getPortState(pid);
