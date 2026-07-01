@@ -3482,6 +3482,29 @@ function loadLayout() {
   return DEFAULTS;
 }
 
+function isTickerInPortfolio(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  return !!(sym && _holdings && _holdings[sym]);
+}
+
+function applyChartPortfolioFlag(id) {
+  const panel = document.getElementById(id);
+  if (!panel || panel.id.startsWith('port-panel-')) return;
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  const held = isTickerInPortfolio(sym);
+  panel.classList.toggle('portfolio-held', held);
+  panel.title = held ? `${sym} je v portfóliu` : '';
+}
+
+function applyAllChartPortfolioFlags() {
+  document.querySelectorAll('.panel').forEach(panel => applyChartPortfolioFlag(panel.id));
+}
+
+async function ensureHoldingsForChartFlags() {
+  if (_holdings) { applyAllChartPortfolioFlags(); return; }
+  try { await loadHoldings(); } catch(e) {}
+  applyAllChartPortfolioFlags();
+}
 // ── PANEL TICKER SEARCH DROPDOWN ──────────────────────────────────────────────
 let ddTarget = null, ddTimer = null, ddResults = [], ddActive = -1;
 const ddEl = document.getElementById('ticker-dd');
@@ -3808,6 +3831,8 @@ function createPanel(cfg) {
     <div class="p-resize-handle" id="rh-${id}" title="Potiahnite pre zmenu výšky grafu"></div>
   `;
   document.getElementById('grid').appendChild(panel);
+  applyChartPortfolioFlag(id);
+  ensureHoldingsForChartFlags();
 
   const mainCont  = document.getElementById('chart-' + id);
   // Výška grafu = flex-basis; graf rastie a vypĺňa všetok voľný priestor panela
@@ -4711,6 +4736,8 @@ async function loadChart(id, opts = {}) {
   const period   = 'auto';
   const interval = panel.querySelector('.interval-sel').value;
   if (!sym) return;
+  applyChartPortfolioFlag(id);
+  ensureHoldingsForChartFlags();
 
   const r = registry[id];
   if (!r) return;
@@ -4989,6 +5016,58 @@ function clearAllPanels() {
   setStatus('Grafy vymazané', '');
 }
 
+
+function parseTickerClipboardText(text) {
+  const seen = new Set();
+  return String(text || '')
+    .split(/[\s,;]+/)
+    .map(s => s.trim().toUpperCase())
+    .map(s => s.replace(/^[^A-Z0-9]+|[^A-Z0-9.\-]+$/g, ''))
+    .filter(s => /^[A-Z0-9][A-Z0-9.\-]{0,14}$/.test(s))
+    .filter(s => {
+      if (seen.has(s)) return false;
+      seen.add(s);
+      return true;
+    });
+}
+
+function clearChartPanelsForImport() {
+  [...document.querySelectorAll('.panel')]
+    .filter(panel => !panel.id.startsWith('port-panel-') && panel.querySelector('.p-sym'))
+    .forEach(panel => removePanel(panel.id));
+}
+
+async function importChartsFromClipboard() {
+  let text = '';
+  try {
+    if (navigator.clipboard?.readText) text = await navigator.clipboard.readText();
+  } catch(e) {}
+  if (!text) {
+    text = prompt('Vlož tickery, každý na samostatnom riadku. Otvorím ich ako 1d grafy (max 20).') || '';
+  }
+  const parsed = parseTickerClipboardText(text);
+  if (!parsed.length) {
+    setStatus('V schránke som nenašiel žiadne tickery', 'err');
+    return;
+  }
+  const tickers = parsed.slice(0, 20);
+  if (parsed.length > 20) {
+    setStatus(`Načítavam prvých 20 tickerov z ${parsed.length}`, 'warn');
+  } else {
+    setStatus(`Načítavam ${tickers.length} tickerov`, 'ok');
+  }
+  switchMainTab('charts');
+  clearChartPanelsForImport();
+  setActivePanel(null);
+  tickers.forEach(symbol => createPanel({
+    symbol,
+    period: 'auto',
+    interval: '1d',
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+  }));
+  saveLayout();
+  applyAllChartPortfolioFlags();
+}
 // Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
 // z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
 let _moversLoading = false;
@@ -7481,6 +7560,7 @@ async function loadHoldings() {
     if (!r.ok) return;
     const data = await r.json();
     _holdings = data.holdings || {};
+    applyAllChartPortfolioFlags();
   } catch (e) { /* non-critical */ }
 }
 

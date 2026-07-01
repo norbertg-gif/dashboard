@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260701-risk-cleanup2">
+<link rel="stylesheet" href="/dashboard.css?v=20260701-chart-import">
 </head>
 <body>
 
@@ -33,6 +33,7 @@
   <button class="btn primary" onclick="loadAll()">⟳ LOAD ALL</button>
   <button class="btn danger" onclick="clearAllPanels()" title="Vymaž všetky grafy">✕ VYMAŽ</button>
   <button class="btn" id="movers-btn" onclick="loadMovers()" title="Otvor grafy s najväčším denným pohybom (2 riadky podľa nastavenia STĹPCE; stock/ETF z watchlistu + portfólia)">📉 Top pohyby</button>
+  <button class="btn" id="clipboard-charts-btn" onclick="importChartsFromClipboard()" title="Vloží tickery zo schránky (každý na samostatnom riadku), zruší aktuálne grafy a otvorí ich ako 1d grafy. Limit 20.">📋 Tickery</button>
   <label id="movers-up-lbl" title="Prepnúť na najväčšie rasty" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
     <input type="checkbox" id="movers-up" onchange="updateMoversLabel()" style="cursor:pointer;">Rast
   </label>
@@ -403,6 +404,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260701-risk-cleanup2"></script>
+  <script src="/dashboard.js?v=20260701-chart-import"></script>
 </body>
 </html>

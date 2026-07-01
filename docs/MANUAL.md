@@ -46,6 +46,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **LOAD ALL** | Načíta dáta pre všetky panely naraz. |
 | **VYMAŽ** | Vyčistí aktuálne rozloženie panelov. |
 | **📉 Top pohyby** | „Dynamický preset" — zatvorí existujúce grafy a otvorí grafy titulov s najväčším denným pohybom (len akcie/ETF z watchlistu + portfólia, crypto sa ignoruje). Počet grafov = **2 riadky podľa nastavenia STĹPCE** (3 stĺpce → 6 grafov, 4 → 8). Default sú najväčšie **poklesy**; checkbox **Rast** prepne na najväčšie **rasty** (tlačidlo sa zmení na 📈). Pri tituloch z portfólia sa denný % počíta z eToro live ceny oproti predchádzajúcemu close; pri ostatných tituloch fallback na OHLCV cache. Panel potom zobrazuje rovnaký denný pohyb, podľa ktorého bol ticker vybraný, a pri 1d grafe dorovná poslednú sviečku na použitú live cenu. |
+| **📋 Tickery** | Import tickerov zo schránky. Vložíš zoznam tickerov (ideálne každý na samostatnom riadku), dashboard zruší aktuálne grafové panely a otvorí ich ako denné 1d grafy. Limit je 20 tickerov, aby omylom nevznikol príliš ťažký layout. |
+| **Farebná obruba grafu** | Ak je ticker otvoreného grafu v niektorom eToro portfóliu, panel má jemnú zeleno-tyrkysovú obrubu. Nerozlišuje účet, iba fakt, že titul už držíš. |
 | **STĹPCE (1–4)** | Počet stĺpcov v mriežke grafov. |
 | **AUTO ON/OFF** | Automatické obnovovanie dát. |
 | **Ucet 1 / Ucet 2 equity** | Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab. |
