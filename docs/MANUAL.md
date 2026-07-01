@@ -52,38 +52,20 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
 
-### Alerty a samostatn? karty
+### Investor Inbox a samostatné karty
 
-- Tla?idlo **Alerty** pri hlavn?ch z?lo?k?ch zobraz? pull-based upozornenia za
-  posledn?ch **24 alebo 48 hod?n**. Panel neposiela push notifik?cie a nesp???a
-  nov? scan; pri otvoren? iba pre??ta existuj?ce cache/logy.
-- Do Alert centra patria nov? predikt?vne sign?ly, kandid?ti z posledn?ho Nasdaq
-  scanneru, earnings do 3 dn? a v?razn? denn? pohyby v eToro portf?liu.
-- Klik na ticker v alerte otvor? dan? titul v z?lo?ke **Predikt?vny**, kde vid??
-  pln? kontext a d?kazy.
-- Ikona **?** pri Grafy / Portf?lio / Hist?ria / Risk / Predikt?vny / Scanner otvor?
-  dan? sekciu v novej karte. Akt?vna sekcia je ulo?en? v URL parametri `tab`.
-
-**Označovanie prečítaných alertov.** Bez tohto by ti panel ukazoval tie isté
-upozornenia každý deň, kým udalosť skutočne nepríde (napr. earnings 3 dni
-vopred sa zobrazia 3-krát).
-
-- Pri každom riadku je tlačidlo **✓** — označí ho ako prečítaný. Riadok
-  zostane v paneli, ale je preškrtnutý a stlmený. Tlačidlo **↩** ho vráti
-  späť na neprečítaný.
-- **Klik na samotný riadok** (otvorenie Predictive) ho zároveň označí
-  prečítaným — netreba dva kliky.
-- Tlačidlo **✓ Označiť všetko prečítané** v hlavičke panela vyčistí celý
-  zoznam jedným klikom.
-- Tlačidlo **Zobraziť prečítané (N)** prepne na pohľad späť. Keď je
-  zapnuté, vidíš aj archivované alerty (preškrtnuté).
-- Badge **Alerty N** v hornej lište ukazuje len **aktívne** (neprečítané)
-  počty — keď je N malé, máš skutočne len nové veci.
-- Stav je uložený v prehliadači (localStorage), prežije reload aj redeploy.
-  Po 60 dňoch sa staré záznamy automaticky vymažú. Keď príde nová udalosť
-  rovnakého typu (napr. nový signál na NVDA ďalší deň), dostane vlastné ID
-  a zobrazí sa ako neprečítaná, aj keď si predošlú variantu označil za
-  prečítanú.
+- **Investor Inbox** v záložke **Scanner** je hlavný prehľad “čo si dnes/tento
+  týždeň pozrieť”. Nahrádza staré tlačidlo Alerty v hornej lište.
+- Inbox kombinuje DCA kandidátov, veľké otvorené zisky, earnings, chart-health
+  riziká pri držaných tituloch a nové príležitosti zo scannera. Neštartuje nový
+  scan; číta už existujúce cache a krátko cachuje výsledok.
+- Jeden ticker sa zobrazí iba raz. Ak má viac dôvodov naraz (napríklad
+  **DCA** aj **Pozor**), karta ukáže viac štítkov a zhrnutie v štýle
+  “zmiešaný signál — najprv over graf/Verdikt”.
+- Režimy **Defenzívne / Ofenzívne / Všetko** iba filtrujú dôvody: defenzívne
+  držané tituly a riziká, ofenzívne nové príležitosti, všetko komplet.
+- Ikona **?** pri hlavných záložkách otvorí danú sekciu v novej karte. Aktívna
+  sekcia je uložená v URL parametri `tab`.
 
 ---
 
@@ -145,6 +127,17 @@ vopred sa zobrazia 3-krát).
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
   intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
   net P/L, fees) sa prepočítajú pre zvolený interval.
+- **Korelačná matica** (pod tabuľkou Top pozícií) ukazuje 60-dňovú Pearsonovu
+  koreláciu denných výnosov medzi top 20 pozíciami. Červená pri **+1**
+  (pohybujú sa rovnako), modrá pri **−1** (pohybujú sa opačne), neutrálna pri
+  **0** (nezávislé). Tickery sú zoradené podľa SPDR sektora, aby boli klastre
+  vizuálne pohromade. Karta má aj **slovný verdikt**: ak je priemerná
+  absolútna korelácia ≥ 0.7, portfólio sa hýbe ako jedna skupina (jedna zlá
+  správa zasiahne väčšinu pozícií). Pod verdiktom je tiež zoznam **najsilnejších
+  párov** — pomáha vidieť skrytú koncentráciu, ktorú samotná váha pozície
+  neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
+  v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
+  tab nesťahuje nové API volania.
 - **DCA kandidáti** (karta v Portfóliu) spája agregovaný P/L pozície s DIP
   rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
   pozície v strate **≥ 15 %** a oflaguje ich:
@@ -778,6 +771,7 @@ V low-memory re?ime ost?va zapnut? jadro aplik?cie:
 | `ENABLE_PREDICTIVE_HMM` | `0` | HMM regime diagnostiku. |
 | `ENABLE_SIGNAL_CONTEXT_BACKFILL` | `0` | Automatick? dop??anie regime kontextu star??ch sign?lov pri otvoren? grafu. |
 | `ENABLE_SIGNAL_ANALYTICS` | `1` | 90D+ analytiku sign?lov. |
+| `ENABLE_CORRELATION` | `0` | Korela?n? maticu v Risk tabe. |
 | `ENABLE_MARKET_BREADTH` | `0` | Background v?po?et Nasdaq breadth. |
 | `ENABLE_MASSIVE_SP500` | `0` | S&P 500 ?as? Massive market snapshotu. |
 | `ENABLE_MASSIVE_MARKET` | `1` | Massive EOD kontext ako celok. |
@@ -856,7 +850,7 @@ jazykom.
 | **Veľa „chýb" v scanneri** | Bežné na free tieri yfinance (timeouty). Scanner púšťa len obmedzený počet tickerov naraz, aby čakajúce tickery nevytimeoutovali ešte pred štartom. Dá sa upraviť cez `SCANNER_YF_TIMEOUT`. |
 | **Regime = n/a** | `hmmlearn` nie je nainštalovaný alebo málo histórie (min. 60 sviečok). |
 | **Portfólio stratené pri výpadku eToro** | Cache padá späť na disk (stale-while-erroring), je to zámerné. |
-| **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty. |
+| **eToro recommendations** | Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Investor Inbox. |
 | **Staré signály majú zlú farbu** | Log sa neprepisuje; prefarbia sa po novom vyhodnotení tickera. |
 
 ---

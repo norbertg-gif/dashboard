@@ -94,8 +94,8 @@
     <tr><td><strong>🌙</strong></td><td>Prepínač témy (tmavá/svetlá).</td></tr>
     <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania.</td></tr>
   </table>
-  <p><strong>Alerty</strong> zobrazia ulo?en? sign?ly, v?sledky posledn?ho Nasdaq scanu, earnings do 3 dn? a v?razn? denn? portf?lio pohyby za 24 alebo 48 hod?n. Panel je pull-based: pri otvoren? ??ta existuj?ce cache/logy, nesp???a nov? scan a neposiela push notifik?cie. Klik na ticker otvor? Predikt?vny tab. Ikona <strong>?</strong> pri hlavnej z?lo?ke otvor? dan? sekciu v novej karte.</p>
-  <p><strong>Označovanie prečítaných alertov.</strong> Tlačidlo <strong>✓</strong> pri každom riadku ho označí ako prečítaný (preškrtnutý, stlmený); <strong>↩</strong> ho vráti späť. Klik na samotný riadok (otvorenie Predictive) ho zároveň označí prečítaným — netreba dva kliky. Tlačidlo <strong>✓ Označiť všetko prečítané</strong> v hlavičke vyčistí celý zoznam; <strong>Zobraziť prečítané (N)</strong> prepne pohľad späť. Badge <strong>Alerty N</strong> v hornej lište počíta len aktívne (neprečítané). Stav je v prehliadači, prežije reload, po 60 dňoch sa vymaže. Nová udalosť (napr. nový denný signál ďalší deň) má vlastné ID a zobrazí sa znova, aj keď si predošlú variantu odbavil.</p>
+  <p><strong>Investor Inbox</strong> v záložke Scanner je hlavný prehľad “čo si dnes/tento týždeň pozrieť”. Nahrádza staré tlačidlo Alerty v hornej lište a kombinuje DCA kandidátov, profit-taking kontrolu, earnings, rizikové grafy držaných titulov a nové príležitosti zo scannera. Panel neštartuje nový scan; číta existujúce cache a krátko cachuje výsledok.</p>
+  <p>Jeden ticker sa v Inboxe zobrazuje iba raz. Ak má viac dôvodov naraz, napríklad <strong>DCA</strong> aj <strong>Pozor</strong>, karta ukáže viac štítkov a zhrnutie “zmiešaný signál” — najprv over graf alebo Verdikt. Režimy <strong>Defenzívne / Ofenzívne / Všetko</strong> iba filtrujú tieto dôvody. Ikona <strong>?</strong> pri hlavnej záložke otvorí danú sekciu v novej karte.</p>
 
   <h2 id="tabs">3. Záložky</h2>
   <ul>
@@ -184,7 +184,15 @@
 
   <h3>DCA kandidáti v Portfóliu</h3>
   <ul>
-    <li><strong>DCA kandidáti</strong> spájajú agregovaný P/L pozície s DIP rankingom — pomáhajú rozhodnúť, či dokupovať stratový titul. Karta sa zobrazuje v Portfólio tabe. Ukáže len pozície v strate ≥ 15 % a oflaguje ich: 🟢 <strong>DCA</strong> (DIP ≥ 90, váha &lt; 10 % equity — kvalitný dip), 🟡 <strong>Veľká váha</strong> (DCA OK, ale pozícia už ≥ 10 % equity — koncentrácia), 🔴 <strong>Pozor</strong> (slabé DIP skóre, možný value trap), ⚪ <strong>Mimo dát</strong> (ticker nie je v DIP datasete). Rozhoduje agregovaný P/L celej pozície, nie jedna tranža. Prahy sú zladené s appkou (−15 % = hlbšia strata, DIP 90 = pásmo STRONG). Karta ukazuje vek DIP dát — pri starom importe ber flag s rezervou. Čisto interpretačná pomôcka, nevstupuje do skóre.</li>
+    <li><strong>Risk briefing</strong> je krátky slovný záver nad tabuľkami: povie, či portfólio pôsobí rozložene alebo koncentrovane, a vypichne najväčší sektor, najväčšiu pozíciu a Top 5 váhu.</li>
+    <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>
+    <li><strong>Risk flags</strong> upozorňujú na nadmerné váhy alebo inú koncentráciu. Sú varovaním na kontrolu, nie automatickým pokynom predať.</li>
+    <li><strong>Podľa typu</strong> rozdeľuje kapitál medzi akcie, ETF, krypto a ďalšie typy.</li>
+    <li><strong>Sektorová expozícia</strong> ukazuje, v ktorých sektoroch je viazaný kapitál. Veľká váha v jednom sektore znamená, že viac titulov môže reagovať na rovnakú správu alebo makro pohyb.</li>
+    <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
+    <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
+    <li><strong>Korelačná matica</strong> (pod Top pozíciami) zobrazuje 60-dňovú Pearsonovu koreláciu denných výnosov medzi top 20 pozíciami. Červená pri +1 = pozície sa pohybujú spolu, modrá pri −1 = pohybujú sa opačne, sivá pri 0 = nezávisle. Tickery sú zoradené podľa SPDR sektora — vizuálne klastre. Slovný verdikt nad maticou hovorí, či sa portfólio hýbe ako jedna skupina (priemerná absolútna korelácia ≥ 0.7 = jedna zlá správa zasiahne väčšinu pozícií). Zoznam najsilnejších párov pomáha vidieť skrytú koncentráciu, ktorú váha pozícií sama neukáže — napríklad NVDA + AMD + MU + AVGO bývajú korelované nad 0.7 aj keď ich Sektorová expozícia rozdeľuje. Dáta tečú z OHLCV cache, nesťahujú sa cez API.</li>
+    <li><strong>DCA kandid?ti</strong> sp?jaj? agregovan? P/L poz?cie s DIP rankingom ? pom?ha rozhodn??, ?i dokupova? stratov? titul. Uk??e len poz?cie v strate ? 15 % a oflaguje ich: ?? <strong>DCA</strong> (DIP ? 90, v?ha &lt; 10 % equity ? kvalitn? dip), ?? <strong>Ve?k? v?ha</strong> (DCA OK, ale poz?cia u? ? 10 % equity ? koncentr?cia), ?? <strong>Pozor</strong> (slab? DIP sk?re, mo?n? value trap), ? <strong>Mimo d?t</strong> (ticker nie je v DIP datasete). Rozhoduje agregovan? P/L celej poz?cie, nie jedna tran?a. Prahy s? zladen? s appkou (?15 % = hlb?ia strata, DIP 90 = p?smo STRONG). Karta ukazuje vek DIP d?t ? pri starom importe ber flag s rezervou. ?isto interpreta?n? pom?cka, nevstupuje do sk?re.</li>
   </ul>
 
   <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
@@ -505,6 +513,7 @@
       <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika sign?lov.</td></tr>
+      <tr><td><code>ENABLE_CORRELATION</code></td><td>0</td><td>Korela?n? matica v Risk tabe.</td></tr>
       <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth v?po?et.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 ?as? Massive market snapshotu.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_MARKET</code></td><td>1</td><td>Massive EOD kontext ako celok.</td></tr>
@@ -551,7 +560,7 @@
     <tr><td>Veľa „chýb" v scanneri</td><td>Bežné na free tieri yfinance. Scanner púšťa len obmedzený počet tickerov naraz, aby čakajúce tickery nevytimeoutovali ešte pred štartom. Dá sa upraviť cez <code>SCANNER_YF_TIMEOUT</code>.</td></tr>
     <tr><td>Regime = n/a</td><td><code>hmmlearn</code> nie je nainštalovaný alebo málo histórie (min. 60 sviečok).</td></tr>
     <tr><td>Portfólio stratené pri výpadku eToro</td><td>Cache padá späť na disk (stale-while-erroring), zámerné.</td></tr>
-    <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Alerty.</td></tr>
+    <tr><td>eToro recommendations</td><td>Starý nepodporovaný endpoint bol odstránený; kandidáti sú riešení cez Scanner, Watchlist / eToro radar a Investor Inbox.</td></tr>
     <tr><td>Massive / Trh ukazuje n/a</td><td>Skontroluj <code>MASSIVE_API_KEY</code> na Renderi. EOD dáta sú dostupné až po uzavretí trhu; vrstva je interpretačná a výpadok nemení C1–C4.</td></tr>
     <tr><td>P/L sa mierne líši od eToro</td><td>Dashboard medzi snapshotmi robí live odhad z cien. eToro môže započítať konverziu meny, spread, poplatky a interné zaokrúhlenie. Malá odchýlka je očakávaná.</td></tr>
     <tr><td>Po deployi vidím staré UI</td><td>Počkaj na dokončenie Render deployu a obnov stránku. Statické súbory majú cache verziu; pri nezvyčajnom stave pomôže anonymné okno alebo vymazanie dát webu.</td></tr>

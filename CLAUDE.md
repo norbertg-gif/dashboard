@@ -147,7 +147,10 @@ Main source sections:
    based: `defensive` (held/DCA/profit/earnings/risk), `offensive` (new scanner
    opportunities), `all`. Backend caches the composed payload for 120 seconds
    (`INVESTOR_INBOX_CACHE_TTL`) to avoid recalculating DCA + earnings on every
-   Scanner reload; `?refresh=1` bypasses. Rows link to Verdikt / Predikcia and expose `+ WL`.
+   Scanner reload; `?refresh=1` bypasses. Rows are grouped by ticker: if one
+   symbol has multiple reasons (for example DCA + chart-health risk), it is
+   rendered once with `kinds`/`reasons` badges and a merged human summary.
+   Rows link to Verdikt / Predikcia and expose `+ WL`.
 - **Earnings calendar widget** — `GET /api/earnings/calendar?days=14` returns
    upcoming earnings for the relevant universe only: eToro portfolio, server
    watchlist, and last scanner candidates. It uses `_earnings_next_date()` so the
@@ -267,34 +270,22 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 Bot UI and `/api/bot/*` endpoints were removed on 2026-06-29 to reduce memory surface in the single 512 MB Render process. If revived, treat it as a separate project/service, not an always-imported dashboard module. Existing `/data/bot_portfolio.json` may remain on disk but no active code reads or writes it.
 
 
-## Alert center - key architecture
+## Retired Alert center
 
-- Pull-based only: no push infra, no scheduler. UI button **Alerty** calls
-  `GET /api/events?hours=24|48` and reads already available caches/logs.
-- Sources: signal log, DIP scanner cache, earnings lookup, and eToro portfolio
-  cache. Keep every source fail-soft; one broken source must not break the panel.
-- Current rules: new predictive signal, scanner candidate, earnings within 3 days,
-  or portfolio daily P/L move over 10 USD or 1%.
-- Alert center is interpretation/navigation only. It must not change C1-C4,
-  scanner tier, prediction scoring, or portfolio accounting.
-- Clicking an alert opens Predictive through `openEventTicker()`.
-- **Dismiss state** is frontend-only (`localStorage` key `td_event_dismissed`,
-  map of `eventId → {ts}`, auto-prune older than 60 days). Alert IDs from the
-  backend are stable across requests (`signal:TICK:YYYY-MM-DD`,
-  `scanner:TICK:generated_at`, `earnings:TICK:date`,
-  `portfolio:acct:TICK:date`), so a dismiss survives reload and redeploy and
-  comes back only when the event ID changes (next day's signal, fresh scan,
-  next earnings call). Clicking a row dismisses it as a side effect — opening
-  Predictive counts as "I saw it". `td_event_show_dismissed` flag toggles the
-  archive view; `↩` un-dismisses individual rows. The `Alerty N` header badge
-  shows ACTIVE count only.
+The old header **Alerty** button and `/api/events` endpoint were removed after
+Investor Inbox became the single triage surface. Do not reintroduce parallel
+time-window alerts unless there is a new, explicit workflow need. Standing
+states such as DCA, profit-taking, chart-health risk, earnings and scanner
+opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 
 ## Data flow worth knowing
 
 - **`_yf_download_cached` skúša Massive pred yfinance.** yfinance je na free tieri najkrehkejší zdroj (rate-limit → prázdne grafy, scanner "chyby"). `_massive_daily_bars(ticker, period, interval)` ťahá denné/týždenné bary z Massive `/v2/aggs/ticker/.../range/1/{day|week}/...` (Polygon-style), yfinance je fallback. Intraday (1h/4h) ostáva na yfinance (free Massive plán ho nemá). Po prvom `NOT_AUTHORIZED` sa Massive bary vypnú flagom `_massive_bars_disabled` (žiadny opakovaný latency hit). `get_chart` (weekly predictive) má Massive len ako fallback keď yfinance vráti prázdno. **Over cez `/api/diagnostics/massive`, či free plán per-ticker agregáty vôbec dáva** — ak nie, všetko padá späť na yfinance bez zmeny správania.
 - **ML + HMM model cache (`_MODEL_CACHE`).** `train_ml_model` a `detect_market_regime` sa inak fitovali pri každom `/api/chart` requeste. Cache kľúč `ticker:period:1wk:{posledná_sviečka}:{n}` → fit sa robí raz za sviečku. ML ukladá len `(acc, bull_prob)` (model je downstream nepoužitý → šetrí RAM), HMM celý dict. Max 256 záznamov, LRU prune.
 - **OHLCV cache is incremental.** `cache/ohlcv/{SYMBOL}_{INTERVAL}.gz` stores up to 1000 candles. Subsequent fetches request a tail (3–50 candles) and merge by `fromDate` key. Full refetch only on first load.
-- **Risk tab fully removed.** The Risk tab was retired (intentional). Dead code cleaned up: frontend `renderRiskView`/`renderRiskSummary`/`renderRiskSectorExposure`/`renderRiskHeatmap`/`hydrateRiskHeatmapDaily`/`sortRisk`/`compareBySort`/`sortMarker` + correlation matrix (`loadCorrelationMatrix`/`renderCorrelationCard`) + risk CSS removed; backend `/api/etoro/analytics` (risk analytics: bySector/byType/topPositions/riskFlags) and `/api/etoro/correlation` (Pearson matrix) endpoints removed, along with the vestigial `ENABLE_CORRELATION` flag (it gated nothing). Only **DCA candidates** survived — relocated to the Portfolio tab. Sector exposure / risk briefing / heatmap / correlation matrix are gone; reintroduce only with a real home, not as a hidden Risk tab.
+- **Risk tab retired from primary UI.** The old Risk renderer/backend analytics remain in code for now, but the main tab is removed from `trading_dashboard.html` and `switchMainTab()` no longer routes to it. Old `?tab=risk` URLs redirect to Portfolio.
+- **Risk sector exposure.** `/api/etoro/analytics` still returns `bySector` from cached Finnhub `profile2`/SPDR mapping, but the dedicated Risk UI is no longer exposed in the main navigation.
+- **Portfolio correlation matrix.** `/api/etoro/correlation?account=&days=60&limit=20` returns the Pearson correlation matrix of daily log returns for the top-N stock/ETF positions. OHLCV comes from the existing `_yf_download_cached` (Massive → yfinance fallback), no extra API quota burnt. Symbols are sorted by SPDR sector so visual clusters stay together. Interpretive only — surfaces hidden concentration that single-name weight cannot see; NEVER feeds back into C1–C4, portfolio P/L, or scanner scoring.
 - **DCA candidates.** `/api/portfolio/dca?account=&loss_pct=15&dip_min=90&max_weight=10` joins aggregated per-ticker position P/L (eToro) with the DIP ranking (Finviz import). Flags positions at a loss ≥ `loss_pct`: `dca` (DIP ≥ dip_min, weight < max_weight — quality dip), `concentrated` (dca conditions met but weight ≥ max_weight), `value_trap` (trigger met, DIP < dip_min), `no_data` (in loss but ticker outside DIP dataset). Decision metric is **aggregate position P/L** (sum of all tranches), NOT newest trade. Defaults aligned with the app: `loss_pct=15` marks a deeper loss threshold, `dip_min=90` matches `DIP_STRONG_THRESHOLD`. Returns `dip_updated_at` so the UI can show DIP data age (manual import can be stale). Rendered as a card inside the Portfolio tab (`portfolio-dca`, via `loadDcaCandidates`/`renderDcaCard`) because DCA only makes sense for already-held tickers. Interpretation only — NEVER feeds C1–C4, scanner tier, or portfolio accounting. Deliberately NOT an Alert Center source: DCA is a standing state, not a time-windowed event.
 - **Portfolio cache TTL = 120s RAM, falls back to disk on eToro proxy outage.** Stale-while-erroring is intentional.
 - **WebSocket** (`wss://ws.etoro.com/ws`) drives live prices for chart last candle, rates tab, portfolio P/L, and predictive daily/weekly last candle. REST refresh runs every 15s as fallback only.

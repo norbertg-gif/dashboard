@@ -123,15 +123,11 @@ Posledný commit na `main`: pozri `git log` — session končila webhook testom 
   diagnostika ostáva `/api/diagnostics/massive`.
 
 
-## Doplnen? 2026-06-22 - Alert center v1
+## Doplnené 2026-07-01 - Alert center retired
 
-- Horn? tla?idlo **Udalosti** je premenovan? na **Alerty**.
-- `/api/events` ost?va pull-based endpoint, ale okrem sign?lov a Nasdaq scanneru
-  vracia aj earnings do 3 dn? a v?razn? denn? eToro portf?lio pohyby.
-- Alert center je iba naviga?no-interpreta?n? vrstva: nesp???a scan, neposiela
-  push notifik?cie a nemen? predik?n? sk?re ani portf?lio v?po?ty.
-- Portf?lio alert vznikne pri dennom pohybe nad 10 USD alebo 1% z invest?cie.
-- Cache verzia frontendu: `?v=20260622-alert1`.
+- Staré horné tlačidlo **Alerty** a endpoint `/api/events` boli odstránené.
+- Triage je zjednotená do **Investor Inboxu** v Scanneri.
+- Jeden ticker sa v Inboxe zobrazuje raz, aj keď má viac dôvodov naraz.
 
 ## Doplnené 2026-06-22 - cleanup legacy eToro recommendations
 

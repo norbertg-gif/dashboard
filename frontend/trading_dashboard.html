@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="/dashboard.css?v=20260630-risk-cleanup">
+<link rel="stylesheet" href="/dashboard.css?v=20260701-inbox-merge">
 </head>
 <body>
 
@@ -112,26 +112,7 @@
     <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">📈 Prediktívny <button class="tab-popout" onclick="openMainTabWindow(event,'predictive')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner <button class="tab-popout" onclick="openMainTabWindow(event,'scanner')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-verdict" onclick="switchMainTab('verdict')">Verdikt <button class="tab-popout" onclick="openMainTabWindow(event,'verdict')" title="Otvoriť v novej karte">↗</button></div>
-    <button id="event-center-toggle" onclick="toggleEventCenter()" title="Alerty a udalosti za posledných 24/48 hodín">
-      Alerty <span id="event-center-count">0</span>
-    </button>
   </div>
-  <aside id="event-center" aria-label="Alert center">
-    <div class="event-center-head">
-      <strong>Alert center</strong>
-      <div class="event-window-switch">
-        <button class="active" data-hours="24" onclick="setEventWindow(24)">24 h</button>
-        <button data-hours="48" onclick="setEventWindow(48)">48 h</button>
-      </div>
-      <button class="event-close" onclick="toggleEventCenter(false)" title="Zavrieť">×</button>
-    </div>
-    <div class="event-center-actions">
-      <button id="event-dismiss-all" type="button" onclick="dismissAllEvents(event)" title="Označiť všetky aktívne alerty ako prečítané">✓ Označiť všetko prečítané</button>
-      <button id="event-show-dismissed" type="button" onclick="toggleShowDismissed(event)" title="Prepnúť zobrazenie prečítaných alertov">Žiadne prečítané</button>
-    </div>
-    <div class="event-center-meta" id="event-center-meta">Načítavam...</div>
-    <div id="event-center-list"></div>
-  </aside>
   <!-- Grafy -->
   <div id="main-charts" style="flex:1;min-height:0;overflow:auto;">
     <div id="grid" onclick="onGridClick(event)"></div>
@@ -422,6 +403,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260630-risk-cleanup"></script>
+  <script src="/dashboard.js?v=20260701-inbox-merge"></script>
 </body>
 </html>

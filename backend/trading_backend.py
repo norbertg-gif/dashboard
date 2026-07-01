@@ -76,6 +76,7 @@ ENABLE_PREDICTIVE_ML = _env_bool("ENABLE_PREDICTIVE_ML", not _LOW_MEMORY)
 ENABLE_PREDICTIVE_HMM = _env_bool("ENABLE_PREDICTIVE_HMM", not _LOW_MEMORY)
 ENABLE_SIGNAL_CONTEXT_BACKFILL = _env_bool("ENABLE_SIGNAL_CONTEXT_BACKFILL", not _LOW_MEMORY)
 ENABLE_SIGNAL_ANALYTICS = _env_bool("ENABLE_SIGNAL_ANALYTICS", True)
+ENABLE_CORRELATION = _env_bool("ENABLE_CORRELATION", not _LOW_MEMORY)
 ENABLE_MARKET_BREADTH = _env_bool("ENABLE_MARKET_BREADTH", not _LOW_MEMORY)
 ENABLE_MASSIVE_SP500 = _env_bool("ENABLE_MASSIVE_SP500", not _LOW_MEMORY)
 ENABLE_MASSIVE_MARKET = _env_bool("ENABLE_MASSIVE_MARKET", True)
@@ -114,6 +115,7 @@ def admin_memory():
             "predictive_hmm": ENABLE_PREDICTIVE_HMM,
             "signal_context_backfill": ENABLE_SIGNAL_CONTEXT_BACKFILL,
             "signal_analytics": ENABLE_SIGNAL_ANALYTICS,
+            "correlation": ENABLE_CORRELATION,
             "market_breadth": ENABLE_MARKET_BREADTH,
             "massive_sp500": ENABLE_MASSIVE_SP500,
             "massive_market": ENABLE_MASSIVE_MARKET,
@@ -2031,6 +2033,247 @@ def get_trade_history(
             "truncated": truncated,
             "etoroMinDate": etoro_min_date,
             "minDate": minDate, "maxDate": maxDate}
+
+
+@app.get("/api/etoro/analytics")
+def get_portfolio_analytics(account: str = Query("1"), refresh: int = Query(0)):
+    """Risk/portfolio agregacie nad existujucim portfolio endpointom."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    positions = portfolio.get("positions", [])
+    summary = portfolio.get("summary", {})
+    equity = summary.get("equity") or 0
+    invested = sum(p.get("amount") or 0 for p in positions)
+
+    by_type = {}
+    by_symbol = {}
+    by_sector = {}
+    risk_flags = []
+    for p in positions:
+        typ = p.get("type") or "Other"
+        sym = p.get("symbol") or str(p.get("instrumentId"))
+        by_type.setdefault(typ, {"type": typ, "amount": 0, "pnl": 0, "dailyPnl": 0, "count": 0})
+        by_type[typ]["amount"] += p.get("amount") or 0
+        by_type[typ]["pnl"] += p.get("pnl") or 0
+        by_type[typ]["dailyPnl"] += p.get("dailyPnl") or 0
+        by_type[typ]["count"] += 1
+
+        by_symbol.setdefault(sym, {"symbol": sym, "name": p.get("name"), "amount": 0, "pnl": 0, "dailyPnl": 0, "count": 0})
+        by_symbol[sym]["amount"] += p.get("amount") or 0
+        by_symbol[sym]["pnl"] += p.get("pnl") or 0
+        by_symbol[sym]["dailyPnl"] += p.get("dailyPnl") or 0
+        by_symbol[sym]["count"] += 1
+
+        sector_key = "Other"
+        sector_name = "Nezaradené"
+        sector_etf = None
+        if str(typ).lower() in ("stock", "etf"):
+            try:
+                sector_etf, sector_industry = _ticker_sector_etf(sym)
+                if sector_etf:
+                    sector_key = sector_etf
+                    sector_name = _SECTOR_ETFS.get(sector_etf) or sector_industry or sector_etf
+                elif sector_industry:
+                    sector_key = "Other"
+                    sector_name = sector_industry
+            except Exception:
+                pass
+        by_sector.setdefault(sector_key, {
+            "sector": sector_key,
+            "name": sector_name,
+            "amount": 0,
+            "pnl": 0,
+            "dailyPnl": 0,
+            "count": 0,
+            "symbols": set(),
+        })
+        by_sector[sector_key]["amount"] += p.get("amount") or 0
+        by_sector[sector_key]["pnl"] += p.get("pnl") or 0
+        by_sector[sector_key]["dailyPnl"] += p.get("dailyPnl") or 0
+        by_sector[sector_key]["count"] += 1
+        by_sector[sector_key]["symbols"].add(sym)
+
+        amount = p.get("amount") or 0
+        weight = amount / equity * 100 if equity else 0
+        if weight >= 15:
+            risk_flags.append({"level": "warn", "symbol": sym, "message": f"Koncentracia {weight:.1f}% equity"})
+        if (p.get("leverage") or 1) > 1:
+            risk_flags.append({"level": "warn", "symbol": sym, "message": f"Leverage x{p.get('leverage')}"})
+        if not p.get("stopLoss"):
+            risk_flags.append({"level": "info", "symbol": sym, "message": "Bez stop loss"})
+        current = p.get("currentRate")
+        sl = p.get("stopLoss")
+        tp = p.get("takeProfit")
+        if current and sl:
+            dist = abs(current - sl) / current * 100
+            if dist <= 3:
+                risk_flags.append({"level": "danger", "symbol": sym, "message": f"Blizko SL ({dist:.1f}%)"})
+        if current and tp:
+            dist = abs(tp - current) / current * 100
+            if dist <= 3:
+                risk_flags.append({"level": "good", "symbol": sym, "message": f"Blizko TP ({dist:.1f}%)"})
+
+    top_positions = sorted(by_symbol.values(), key=lambda x: x["amount"], reverse=True)
+    sector_rows = list(by_sector.values())
+    for row in sector_rows:
+        row["symbols"] = sorted(row["symbols"])
+        row["symbolCount"] = len(row["symbols"])
+        if equity:
+            sector_weight = row["amount"] / equity * 100
+            if sector_weight >= 35:
+                risk_flags.append({
+                    "level": "warn",
+                    "symbol": row["sector"],
+                    "message": f"Sektorova koncentracia {sector_weight:.1f}% equity",
+                })
+    for row in list(by_type.values()) + top_positions + sector_rows:
+        row["weightPct"] = round(row["amount"] / equity * 100, 2) if equity else 0
+        row["pnlPct"] = round(row["pnl"] / row["amount"] * 100, 2) if row["amount"] else 0
+        row["dailyPct"] = round(row["dailyPnl"] / row["amount"] * 100, 2) if row["amount"] else 0
+
+    concentration_top5 = sum(x["amount"] for x in top_positions[:5])
+    return {
+        "summary": {
+            **summary,
+            "investedFromPositions": round(invested, 2),
+            "top5ConcentrationPct": round(concentration_top5 / equity * 100, 2) if equity else 0,
+            "positions": len(positions),
+            "symbols": len(by_symbol),
+        },
+        "byType": sorted(by_type.values(), key=lambda x: x["amount"], reverse=True),
+        "bySector": sorted(sector_rows, key=lambda x: x["amount"], reverse=True),
+        "topPositions": top_positions,
+        "riskFlags": risk_flags[:100],
+    }
+
+
+@app.get("/api/etoro/correlation")
+def get_portfolio_correlation(
+    account: str = Query("1"),
+    days: int = Query(60, ge=20, le=180),
+    limit: int = Query(20, ge=2, le=40),
+    refresh: int = Query(0),
+):
+    """Pearson korelácia denných log returns medzi top N pozíciami účtu.
+    Interpretačná vrstva — pomáha vidieť, či viac pozícií reaguje na rovnaké
+    pohyby (skrytá koncentrácia, ktorú single-name váha neuvidí). NEOVPLYVŇUJE
+    C1–C4 ani portfolio účtovníctvo. OHLCV z existujúcej cache, žiadne nové
+    API volania nad rámec scanner prefetchu."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    positions = portfolio.get("positions", [])
+    equity = (portfolio.get("summary") or {}).get("equity") or 0
+
+    # Stock/ETF only, agreguj viac vstupov na ten istý symbol, zoraď podľa equity podielu
+    by_sym: dict[str, dict] = {}
+    for pos in positions:
+        typ = str(pos.get("type") or "").lower()
+        if typ not in ("stock", "etf"):
+            continue
+        sym = pos.get("symbol") or str(pos.get("instrumentId"))
+        if not sym:
+            continue
+        entry = by_sym.setdefault(sym, {"symbol": sym, "name": pos.get("name"), "amount": 0.0})
+        entry["amount"] += pos.get("amount") or 0
+    if len(by_sym) < 2:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": None,
+                "warning": "Potrebujeme aspoň 2 stock/ETF pozície."}
+
+    universe = sorted(by_sym.values(), key=lambda x: x["amount"], reverse=True)[:limit]
+
+    # Stiahni Close pre každý symbol z OHLCV cache; potrebujeme aspoň ~30 spoločných sviečok
+    period_label = "1y" if days > 90 else ("6mo" if days > 30 else "3mo")
+    closes: dict[str, pd.Series] = {}
+    skipped: list[dict] = []
+    for entry in universe:
+        sym = entry["symbol"]
+        try:
+            raw = _yf_download_cached(sym, period_label, "1d")
+        except Exception as e:
+            skipped.append({"symbol": sym, "reason": f"fetch: {str(e)[:80]}"})
+            continue
+        if raw is None or len(raw) < 30:
+            skipped.append({"symbol": sym, "reason": "málo dát"})
+            continue
+        s = raw["Close"].astype(float).tail(days + 5).dropna()
+        if len(s) < 30:
+            skipped.append({"symbol": sym, "reason": "málo dát"})
+            continue
+        s.index = pd.to_datetime(s.index)
+        closes[sym] = s
+
+    if len(closes) < 2:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": None,
+                "skipped": skipped,
+                "warning": "Nedostatok historických dát v cache."}
+
+    # Align na spoločný kalendár → log returns → korelačná matica
+    df = pd.DataFrame(closes).sort_index().dropna(how="any")
+    if len(df) < 20:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": len(df),
+                "skipped": skipped,
+                "warning": f"Len {len(df)} spoločných sviečok — málo na koreláciu."}
+    df = df.tail(days)
+    returns = np.log(df / df.shift(1)).dropna()
+    if len(returns) < 15:
+        return {"symbols": [], "matrix": [], "pairs": [],
+                "days": days, "lookback_used": len(returns),
+                "skipped": skipped,
+                "warning": f"Len {len(returns)} returns — málo na koreláciu."}
+
+    corr = returns.corr().round(3)
+    syms = list(corr.columns)
+    # Zoraď podľa sektoru, aby sa klastre v matici držali pohromade (vizuálna pomoc)
+    sector_of: dict[str, str] = {}
+    for sym in syms:
+        try:
+            etf, _ = _ticker_sector_etf(sym)
+            sector_of[sym] = etf or "ZZZ"
+        except Exception:
+            sector_of[sym] = "ZZZ"
+    weight_of = {entry["symbol"]: (entry["amount"] / equity * 100) if equity else 0
+                 for entry in universe}
+    syms_sorted = sorted(syms, key=lambda s: (sector_of.get(s, "ZZZ"), -weight_of.get(s, 0)))
+    corr = corr.loc[syms_sorted, syms_sorted]
+
+    matrix = [[float(corr.iat[i, j]) for j in range(len(syms_sorted))]
+              for i in range(len(syms_sorted))]
+
+    # Top korelované páry (off-diagonal), max 12
+    pairs = []
+    for i in range(len(syms_sorted)):
+        for j in range(i + 1, len(syms_sorted)):
+            pairs.append({
+                "a": syms_sorted[i],
+                "b": syms_sorted[j],
+                "corr": float(corr.iat[i, j]),
+            })
+    pairs.sort(key=lambda p: abs(p["corr"]), reverse=True)
+    top_pairs = pairs[:12]
+
+    # Mean off-diagonal absolútna korelácia — agregátny "skupinový" pohyb
+    off_diag = [abs(p["corr"]) for p in pairs]
+    avg_abs_corr = round(sum(off_diag) / len(off_diag), 3) if off_diag else None
+    high_count = sum(1 for p in pairs if p["corr"] >= 0.7)
+
+    return {
+        "account": account,
+        "days": days,
+        "lookback_used": len(returns),
+        "symbols": [
+            {"symbol": s,
+             "name": next((u["name"] for u in universe if u["symbol"] == s), s),
+             "weightPct": round(weight_of.get(s, 0), 2),
+             "sector": sector_of.get(s, None) if sector_of.get(s) != "ZZZ" else None}
+            for s in syms_sorted
+        ],
+        "matrix": matrix,
+        "pairs": top_pairs,
+        "avgAbsCorr": avg_abs_corr,
+        "highCorrCount": high_count,
+        "skipped": skipped,
+    }
 
 
 @app.get("/api/portfolio/dca")
@@ -5183,183 +5426,6 @@ def get_nasdaq_scanner_results():
     return {"state": state, "cache": enrich_scanner_payload(load_scanner_cache())}
 
 
-ALERT_EARNINGS_DAYS = 3
-ALERT_PORT_DAILY_USD = 10.0
-ALERT_PORT_DAILY_PCT = 1.0
-
-
-def _event_add(events: list, payload: dict):
-    if payload.get("ticker"):
-        payload["ticker"] = str(payload["ticker"]).upper()
-    payload.setdefault("category", payload.get("type") or "info")
-    payload.setdefault("severity", payload.get("tier") or "info")
-    events.append(payload)
-
-
-def _portfolio_alert_events(now: datetime) -> list:
-    events = []
-    for account in ("1", "2"):
-        payload = _positions_cache.get(account)
-        if not payload:
-            payload = cache_read(CACHE_DIR / "portfolio" / f"portfolio_{account}", PORTFOLIO_CACHE_TTL)
-        rows = (payload or {}).get("positions") or []
-        grouped = {}
-        for row in rows:
-            ticker = str(row.get("ticker") or row.get("symbol") or "").upper()
-            if not ticker:
-                continue
-            daily = _num_or_none(row.get("dailyPnl") or row.get("dailyPL") or row.get("daily_pnl")) or 0.0
-            invested = _num_or_none(row.get("amount") or row.get("invested") or row.get("investment")) or 0.0
-            item = grouped.setdefault(ticker, {"daily": 0.0, "invested": 0.0})
-            item["daily"] += daily
-            item["invested"] += invested
-        for ticker, item in grouped.items():
-            daily = item["daily"]
-            invested = item["invested"]
-            daily_pct = (daily / invested * 100.0) if invested else 0.0
-            if abs(daily) < ALERT_PORT_DAILY_USD and abs(daily_pct) < ALERT_PORT_DAILY_PCT:
-                continue
-            severity = "buy" if daily >= 0 else "counter"
-            _event_add(events, {
-                "id": f"portfolio:{account}:{ticker}:{now.date().isoformat()}",
-                "type": "portfolio",
-                "category": "portfolio",
-                "severity": severity,
-                "tier": severity,
-                "ticker": ticker,
-                "time": now.isoformat(),
-                "title": "Denný P/L pohyb",
-                "detail": f"Account {account} | denný P/L {daily:+.2f} USD ({daily_pct:+.2f}%)",
-            })
-    return events
-
-
-def _earnings_alert_events(symbols: list[str], now: datetime) -> list:
-    events = []
-    seen = set()
-    for symbol in symbols:
-        ticker = str(symbol or "").upper()
-        if not ticker or ticker in seen:
-            continue
-        seen.add(ticker)
-        try:
-            event = _earnings_next_date(ticker)
-            raw_date = event.get("date") if isinstance(event, dict) else event
-            if not raw_date:
-                continue
-            report_date = datetime.fromisoformat(str(raw_date)[:10]).replace(tzinfo=timezone.utc)
-            days = (report_date.date() - now.date()).days
-            if 0 <= days <= ALERT_EARNINGS_DAYS:
-                _event_add(events, {
-                    "id": f"earnings:{ticker}:{raw_date}",
-                    "type": "earnings",
-                    "category": "earnings",
-                    "severity": "watch",
-                    "tier": "watch",
-                    "ticker": ticker,
-                    "time": now.isoformat(),
-                    "title": f"Earnings {raw_date}",
-                    "detail": f"Earnings za {days} dni | zdroj: calendar",
-                })
-        except Exception:
-            continue
-    return events
-
-
-@app.get("/api/events")
-def get_recent_events(hours: int = Query(24, ge=1, le=168)):
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=hours)
-    events = []
-
-    for ticker, entries in load_signals_log().items():
-        if not isinstance(entries, dict):
-            continue
-        for date_key, signal in entries.items():
-            if not isinstance(signal, dict):
-                continue
-            try:
-                signal_time = datetime.fromisoformat(f"{date_key}T21:00:00+00:00")
-            except Exception:
-                continue
-            if signal_time < cutoff or signal_time > now + timedelta(hours=12):
-                continue
-            score = int(signal.get("score") or 0)
-            tier = str(signal.get("tier") or signal_tier(score)).lower()
-            _event_add(events, {
-                "id": f"signal:{ticker}:{date_key}",
-                "type": "signal",
-                "category": "signal",
-                "ticker": str(ticker).upper(),
-                "time": signal_time.isoformat(),
-                "tier": tier,
-                "severity": tier,
-                "score": score,
-                "price": _num_or_none(signal.get("close")),
-                "title": f"{tier.title()} signal {score}/4",
-                "detail": f"Prediktívny signál | {score}/4",
-            })
-
-    scanner = enrich_scanner_payload(load_scanner_cache())
-    generated_at = scanner.get("generated_at")
-    try:
-        scan_time = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
-    except Exception:
-        scan_time = None
-    if scan_time and scan_time >= cutoff:
-        for row in (scanner.get("results") or []):
-            recent = row.get("recent_signal") or {}
-            ticker = str(row.get("ticker") or "").upper()
-            if not ticker:
-                continue
-            _event_add(events, {
-                "id": f"scanner:{ticker}:{generated_at}",
-                "type": "scanner",
-                "category": "scanner",
-                "ticker": ticker,
-                "time": scan_time.isoformat(),
-                "tier": str(recent.get("tier") or "").lower(),
-                "severity": str(recent.get("tier") or "watch").lower(),
-                "score": int(row.get("setup_score") or recent.get("score") or 0),
-                "dip_label": row.get("dip_label"),
-                "dip_total": _num_or_none(row.get("dip_total")),
-                "title": "DIP scanner",
-                "detail": "DIP scanner kandidát",
-            })
-
-    events.extend(_portfolio_alert_events(now))
-    earnings_symbols = [event.get("ticker") for event in events if event.get("ticker")]
-    try:
-        earnings_symbols.extend([row.get("ticker") for row in _get_portfolio_holdings() if row.get("ticker")])
-    except Exception:
-        pass
-    try:
-        earnings_symbols.extend([row.get("ticker") for row in (scanner.get("results") or [])[:25] if row.get("ticker")])
-    except Exception:
-        pass
-    events.extend(_earnings_alert_events(earnings_symbols[:40], now))
-
-    priority = {"buy": 0, "watch": 1, "counter": 2, "info": 3}
-    category_priority = {"signal": 0, "scanner": 1, "earnings": 2, "portfolio": 3}
-    events.sort(
-        key=lambda event: (
-            event.get("time") or "",
-            -category_priority.get(event.get("category") or event.get("type"), 9),
-            -priority.get(event.get("severity") or event.get("tier"), 9),
-            event.get("score") or 0,
-        ),
-        reverse=True,
-    )
-    counts = {
-        "total": len(events),
-        "signals": sum(1 for event in events if event.get("category") == "signal"),
-        "scanner": sum(1 for event in events if event.get("category") == "scanner"),
-        "earnings": sum(1 for event in events if event.get("category") == "earnings"),
-        "portfolio": sum(1 for event in events if event.get("category") == "portfolio"),
-    }
-    return {"hours": hours, "generated_at": now.isoformat(), "counts": counts, "events": events[:100]}
-
-
 def _scanner_candidate_rows(limit: int = 40) -> list[dict]:
     scanner = enrich_scanner_payload(load_scanner_cache())
     rows = list(scanner.get("results") or [])
@@ -5597,18 +5663,104 @@ def get_investor_inbox(refresh: int = Query(0)):
     except Exception:
         pass
 
-    # Dedup: nechaj najvyššiu prioritu pre ticker+kind.
-    dedup = {}
+    # Inbox je určený pre človeka: jeden ticker = jeden riadok, aj keď má viac
+    # dôvodov. Detailné dôvody ostávajú ako badges/reasons, aby sa nestratila
+    # informácia typu "DCA áno, ale graf varuje".
+    per_ticker: dict[str, dict[str, dict]] = {}
     for item in events:
-        key = (item.get("kind"), item.get("ticker"))
-        prev = dedup.get(key)
+        ticker = item.get("ticker")
+        kind = item.get("kind")
+        if not ticker or not kind:
+            continue
+        bucket = per_ticker.setdefault(ticker, {})
+        prev = bucket.get(kind)
         if prev is None or item.get("priority", 99) < prev.get("priority", 99):
-            dedup[key] = item
-    ordered = sorted(dedup.values(), key=lambda x: (x.get("priority", 99), x.get("ticker", "")))[:30]
+            bucket[kind] = item
+
+    kind_labels = {
+        "dca": "DCA",
+        "broken": "Pozor",
+        "profit": "Profit",
+        "earnings": "Earnings",
+        "opportunity": "Nové",
+    }
+    positive_kinds = {"dca", "profit", "opportunity"}
+    risk_kinds = {"broken"}
+    watch_kinds = {"earnings"}
+
+    def merge_ticker_items(ticker: str, items: list[dict]) -> dict:
+        items = sorted(items, key=lambda x: (x.get("priority", 99), x.get("kind", "")))
+        kinds = [item.get("kind") for item in items if item.get("kind")]
+        has_positive = any(kind in positive_kinds for kind in kinds)
+        has_risk = any(kind in risk_kinds for kind in kinds)
+        has_watch = any(kind in watch_kinds for kind in kinds)
+        primary = items[0]
+
+        if has_positive and has_risk:
+            severity = "mixed"
+            title = "Zmiešaný signál"
+            summary = (f"{ticker}: pozitívny dôvod aj varovanie naraz. "
+                       "Najprv otvor Verdikt/graf, potom rieš DCA alebo vstup.")
+        elif has_risk:
+            severity = "counter"
+            title = primary.get("title") or "Pozor"
+            summary = primary.get("summary") or primary.get("detail") or ""
+        elif has_positive:
+            severity = "buy"
+            title = primary.get("title") or "Stojí za kontrolu"
+            summary = primary.get("summary") or primary.get("detail") or ""
+        elif has_watch:
+            severity = "watch"
+            title = primary.get("title") or "Sledovať"
+            summary = primary.get("summary") or primary.get("detail") or ""
+        else:
+            severity = primary.get("severity") or "watch"
+            title = primary.get("title") or "Sledovať"
+            summary = primary.get("summary") or primary.get("detail") or ""
+
+        if len(items) > 1 and not (has_positive and has_risk):
+            labels = " + ".join(kind_labels.get(kind, kind or "?") for kind in kinds)
+            title = f"{title} · {labels}"
+            if not summary:
+                summary = f"{ticker} má viac dôvodov na kontrolu: {labels}."
+
+        reasons = [{
+            "kind": item.get("kind"),
+            "label": kind_labels.get(item.get("kind"), item.get("kind")),
+            "title": item.get("title"),
+            "detail": item.get("detail"),
+            "summary": item.get("summary"),
+            "severity": item.get("severity"),
+            "priority": item.get("priority"),
+            "source": item.get("source"),
+        } for item in items]
+        detail = " | ".join(
+            f"{kind_labels.get(item.get('kind'), item.get('kind'))}: {item.get('detail') or item.get('summary') or ''}"
+            for item in items
+        )
+        return {
+            "id": f"inbox:{ticker}:{now.date().isoformat()}:{'+'.join(kinds)}",
+            "kind": primary.get("kind"),
+            "kinds": kinds,
+            "ticker": ticker,
+            "title": title,
+            "detail": detail,
+            "summary": summary,
+            "severity": severity,
+            "priority": min(item.get("priority", 99) for item in items),
+            "time": now.isoformat(),
+            "reasons": reasons,
+        }
+
+    ordered = sorted(
+        (merge_ticker_items(ticker, list(kind_map.values())) for ticker, kind_map in per_ticker.items()),
+        key=lambda x: (x.get("priority", 99), x.get("ticker", "")),
+    )[:30]
     counts = {}
-    for item in ordered:
-        counts[item["kind"]] = counts.get(item["kind"], 0) + 1
-    payload = {"generated_at": now.isoformat(), "counts": counts, "items": ordered}
+    for kind_map in per_ticker.values():
+        for kind in kind_map:
+            counts[kind] = counts.get(kind, 0) + 1
+    payload = {"generated_at": now.isoformat(), "counts": counts, "tickers": len(per_ticker), "items": ordered}
     return _investor_cache_set(cache_key, payload)
 
 
