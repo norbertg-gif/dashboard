@@ -401,6 +401,7 @@
   <ul>
     <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
     <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
+    <li><strong>Klastrovanie duplicít</strong>: viac vydavateľov často prevezme tú istú správu s takmer rovnakým titulkom. Do priemerného sentimentu sa počíta len jeden reprezentant na udalosť; zoznam článkov sa nekráti, duplicity sú len označené ako „duplicita" / „+N zdrojov".</li>
     <li><strong>Cache</strong>: výsledky sa držia 12 h na disku — opakované otvorenie neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
     <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
     <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.</li>

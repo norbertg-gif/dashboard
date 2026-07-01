@@ -5830,6 +5830,78 @@ def _news_scrub_error(msg: str) -> str:
     return text[:200]
 
 
+# ── News clustering ────────────────────────────────────────────────────────
+# Viac vydavateľov často prevezme tú istú správu (wire story) takmer s rovnakým
+# titulkom. Bez klastrovania by taká udalosť vážila v priemernom sentimente
+# N-krát namiesto raz. Lacná heuristika (Jaccard prienik tokenov titulku) —
+# žiadne NLP knižnice, žiadny nový RAM footprint.
+_NEWS_STOPWORDS = {
+    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "is", "are",
+    "as", "at", "by", "its", "it", "with", "after", "before", "amid", "says",
+    "say", "will", "has", "have", "had", "from", "into", "over", "up", "down",
+    "than", "that", "this", "be", "was", "were", "vs",
+}
+
+
+def _news_title_tokens(title: str) -> set:
+    words = re.findall(r"[a-z0-9]+", (title or "").lower())
+    return {w for w in words if len(w) > 2 and w not in _NEWS_STOPWORDS}
+
+
+def _news_cluster_items(items: list[dict], threshold: float = 0.5) -> list[dict]:
+    """Zoskupí články pokrývajúce tú istú udalicu — Jaccard prienik tokenov titulku
+    >= threshold. Union-find, O(n^2) na n<=NEWS_MAX_ITEMS (lacné, žiadny externý
+    volanie). Pridá cluster_id/cluster_size/cluster_primary; poradie a obsah
+    zoznamu inak nemení — čisto anotácia nad už vybranými top-N článkami."""
+    n = len(items)
+    if n <= 1:
+        for it in items:
+            it["cluster_id"] = 0
+            it["cluster_size"] = 1
+            it["cluster_primary"] = True
+        return items
+    token_sets = [_news_title_tokens(it.get("title")) for it in items]
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for i in range(n):
+        if not token_sets[i]:
+            continue
+        for j in range(i + 1, n):
+            if not token_sets[j]:
+                continue
+            inter = token_sets[i] & token_sets[j]
+            uni = token_sets[i] | token_sets[j]
+            if uni and len(inter) / len(uni) >= threshold:
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    # zoradenie klastrov podľa najsilnejšieho člena — len pre stabilné cluster_id,
+    # neovplyvňuje poradie v zozname (to ostáva podľa items ako prišli)
+    ordered = sorted(groups.values(),
+                      key=lambda idxs: max(items[i].get("relevance") or 0 for i in idxs),
+                      reverse=True)
+    for cid, idxs in enumerate(ordered):
+        primary = max(idxs, key=lambda i: items[i].get("relevance") or 0)
+        for i in idxs:
+            items[i]["cluster_id"] = cid
+            items[i]["cluster_size"] = len(idxs)
+            items[i]["cluster_primary"] = (i == primary)
+    return items
+
+
 def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
     """Normalizuje surovú AV NEWS_SENTIMENT odpoveď na zoznam položiek."""
     # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
@@ -5864,7 +5936,8 @@ def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
         })
     # aktuálnosť + relevancia: novšie a relevantnejšie hore
     items.sort(key=lambda a: (a.get("time_published") or "", a.get("relevance") or 0), reverse=True)
-    return items[:NEWS_MAX_ITEMS]
+    items = items[:NEWS_MAX_ITEMS]
+    return _news_cluster_items(items)
 
 
 def _news_fetch_av(ticker: str) -> list[dict]:
@@ -5907,7 +5980,12 @@ def get_news_clientkey():
 @app.get("/api/news/summary")
 def get_news_summary(tickers: str = Query("")):
     """Agregovaný sentiment z disk cache — žiadne AV requesty, len prečíta
-    čo už bolo stiahnuté cez 📰. Relevance-weighted priemer sentiment skóre."""
+    čo už bolo stiahnuté cez 📰. Relevance-weighted priemer sentiment skóre.
+
+    Počíta sa len z cluster_primary článkov (jeden reprezentant na udalosť) —
+    inak by udalosť pokrytá 5 vydavateľmi vážila v priemere 5x viac než udalosť
+    s jediným článkom. Staré cache záznamy bez cluster_primary poľa (pred
+    zavedením clusteringu) sa berú ako primary, kým sa cache neobnoví (12h TTL)."""
     out = {}
     for t in tickers.split(","):
         t = t.strip().upper()
@@ -5915,13 +5993,14 @@ def get_news_summary(tickers: str = Query("")):
             continue
         cached = _news_cache_read(t)
         items = (cached or {}).get("items") or []
+        primary_items = [i for i in items if i.get("cluster_primary", True)]
         scored = [(i.get("sentiment_score"), i.get("relevance") or 0.0)
-                  for i in items if i.get("sentiment_score") is not None]
+                  for i in primary_items if i.get("sentiment_score") is not None]
         if not scored:
             continue
         wsum = sum(r for _, r in scored) or 1.0
         avg = sum(s * r for s, r in scored) / wsum
-        out[t] = {"avg": round(avg, 3), "n": len(items),
+        out[t] = {"avg": round(avg, 3), "n": len(primary_items), "n_articles": len(items),
                   "fetched_at": cached.get("fetched_at")}
     return {"summary": out}
 

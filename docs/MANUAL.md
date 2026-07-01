@@ -568,6 +568,12 @@ NEWS_SENTIMENT).
   ticker, nie celkové vyznenie článku).
 - **Relevancia**: články s relevanciou < 15 % pre ticker sa odfiltrujú;
   zvyšok je zoradený podľa času a relevancie, max. 10 položiek.
+- **Klastrovanie duplicít**: viac vydavateľov často prevezme tú istú správu
+  takmer s rovnakým titulkom. Takéto články sa zoskupia (podľa podobnosti
+  titulku) a do **priemerného sentimentu** sa počíta len jeden reprezentant
+  na udalosť — inak by udalosť pokrytá 5 zdrojmi vážila 5x viac než udalosť
+  s jediným článkom. Zoznam článkov sa nekráti, duplicity ostávajú viditeľné
+  s označením „duplicita" / „+N zdrojov", takže si vieš dohľadať pôvodné zdroje.
 - **Cache**: výsledky sa držia 12 h na disku — opakované otvorenie neminie
   API request. **⟳ Obnoviť** vynúti čerstvé načítanie.
 - **Limity**: free API kľúč má 25 requestov/deň. Server beží na zdieľanej

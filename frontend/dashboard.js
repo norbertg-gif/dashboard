@@ -8032,11 +8032,14 @@ async function loadNewsSummary(tickers) {
 }
 
 function newsSummaryFromItems(items) {
-  const scored = (items || []).filter(i => Number.isFinite(i.sentiment_score));
+  // Len cluster_primary (jeden reprezentant na udalosť) — viac vydavateľov
+  // s tou istou wire story inak násobí váhu jednej udalosti v priemere.
+  const primary = (items || []).filter(i => i.cluster_primary !== false);
+  const scored = primary.filter(i => Number.isFinite(i.sentiment_score));
   if (!scored.length) return null;
   const wsum = scored.reduce((s, i) => s + (i.relevance || 0), 0) || 1;
   const avg = scored.reduce((s, i) => s + i.sentiment_score * (i.relevance || 0), 0) / wsum;
-  return { avg: Math.round(avg * 1000) / 1000, n: (items || []).length };
+  return { avg: Math.round(avg * 1000) / 1000, n: primary.length, nArticles: (items || []).length };
 }
 
 function applyScannerBadges() {
@@ -8057,7 +8060,11 @@ function applyScannerBadges() {
     const s = _newsSummary[el.dataset.newssum];
     if (!s || !s.n) { el.innerHTML = ''; return; }
     const cls = s.avg >= 0.15 ? 'bull' : s.avg <= -0.15 ? 'bear' : 'neutral';
-    el.innerHTML = `<span class="news-badge ${cls}" title="Priemerný sentiment z ${s.n} článkov (vážený relevanciou)">${s.avg >= 0 ? '+' : ''}${s.avg.toFixed(2)}</span>`;
+    const extraArticles = (s.nArticles || s.n) - s.n;
+    const storyWord = s.n === 1 ? 'príbeh' : (s.n >= 2 && s.n <= 4) ? 'príbehy' : 'príbehov';
+    const storyTxt = `${s.n} ${storyWord}`
+      + (extraArticles > 0 ? ` (${s.nArticles} článkov, duplicity zlúčené)` : '');
+    el.innerHTML = `<span class="news-badge ${cls}" title="Priemerný sentiment z ${storyTxt}, vážený relevanciou">${s.avg >= 0 ? '+' : ''}${s.avg.toFixed(2)}</span>`;
   });
   const now = new Date();
   document.querySelectorAll('[data-earn]').forEach(el => {
@@ -8271,10 +8278,17 @@ function renderNewsBlock(data) {
   const rows = items.map(a => {
     const t = a.time_published ? new Date(a.time_published).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
     const rel = Number.isFinite(a.relevance) ? `<span class="news-rel" title="Relevancia článku pre ticker">rel ${(a.relevance*100).toFixed(0)} %</span>` : '';
-    return `<div class="news-item" onclick="event.stopPropagation()">
+    // Duplicitné pokrytie tej istej udalosti (viac vydavateľov, podobný titulok) —
+    // len primárny článok klastra ide do priemerného sentimentu, ostatné sa
+    // označia, nech je jasné prečo počet "príbehov" v badge je nižší než počet riadkov.
+    const clusterSize = a.cluster_size || 1;
+    const clusterTag = (a.cluster_primary !== false && clusterSize > 1)
+      ? `<span class="news-cluster-tag" title="Ďalších ${clusterSize - 1} zdrojov o tej istej udalosti nepočítame zvlášť do priemeru">+${clusterSize - 1} zdrojov</span>`
+      : (a.cluster_primary === false ? `<span class="news-cluster-dup" title="Rovnaká udalosť ako vyššie — nepočíta sa zvlášť do priemerného sentimentu">duplicita</span>` : '');
+    return `<div class="news-item${a.cluster_primary === false ? ' news-item-dup' : ''}" onclick="event.stopPropagation()">
       ${newsSentimentBadge(a.sentiment_label, a.sentiment_score)}
       <a href="${escHtml(a.url || '#')}" target="_blank" rel="noopener" class="news-title">${escHtml(a.title || '(bez titulku)')}</a>
-      <span class="news-meta">${escHtml(a.source || '')} · ${t} ${rel}</span>
+      <span class="news-meta">${escHtml(a.source || '')} · ${t} ${rel} ${clusterTag}</span>
     </div>`;
   }).join('');
   return head + `<div class="news-list">${rows}</div>`;
