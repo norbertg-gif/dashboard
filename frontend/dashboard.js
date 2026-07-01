@@ -3482,6 +3482,8 @@ function loadLayout() {
   return DEFAULTS;
 }
 
+let _chartHoldingsPromise = null;
+
 function isTickerInPortfolio(symbol) {
   const sym = String(symbol || '').trim().toUpperCase();
   return !!(sym && _holdings && _holdings[sym]);
@@ -3502,7 +3504,10 @@ function applyAllChartPortfolioFlags() {
 
 async function ensureHoldingsForChartFlags() {
   if (_holdings) { applyAllChartPortfolioFlags(); return; }
-  try { await loadHoldings(); } catch(e) {}
+  if (!_chartHoldingsPromise) {
+    _chartHoldingsPromise = loadHoldings().finally(() => { _chartHoldingsPromise = null; });
+  }
+  try { await _chartHoldingsPromise; } catch(e) {}
   applyAllChartPortfolioFlags();
 }
 // ── PANEL TICKER SEARCH DROPDOWN ──────────────────────────────────────────────
@@ -5059,7 +5064,7 @@ async function importChartsFromClipboard() {
   switchMainTab('charts');
   clearChartPanelsForImport();
   setActivePanel(null);
-  tickers.forEach(symbol => createPanel({
+  const ids = tickers.map(symbol => createPanel({
     symbol,
     period: 'auto',
     interval: '1d',
@@ -5067,6 +5072,7 @@ async function importChartsFromClipboard() {
   }));
   saveLayout();
   applyAllChartPortfolioFlags();
+  ids.forEach(id => loadChart(id));
 }
 // Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
 // z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
