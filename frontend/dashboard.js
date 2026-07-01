@@ -1090,13 +1090,14 @@ async function renderEquityCurve(containerId, account) {
       payload = await r.json();
       _equityCurveCache = { account, data: payload };
     } catch(e) {
-      el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity krivka sa nepodarila načítať.</div>`;
+      el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity krivka sa nepodarila načítať (${escHtml(e.message)}).</div>`;
       return;
     }
   }
   const points = (payload.points || []).filter(p => p.date && Number.isFinite(p.equity));
   if (points.length < 2) {
-    el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity história zatiaľ nie je dostupná (eToro ju sprístupňuje max 12 mesiacov dozadu).</div>`;
+    const reason = payload.error ? escHtml(payload.error) : 'eToro vrátilo prázdnu históriu (0 snapshotov v zvolenom rozsahu).';
+    el.innerHTML = `<div style="padding:8px 16px;color:var(--muted);font-size:11px;">Equity história zatiaľ nie je dostupná — <span style="color:var(--red);">${reason}</span></div>`;
     return;
   }
   const first = points[0].equity;
