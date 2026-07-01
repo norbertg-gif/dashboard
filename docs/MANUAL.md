@@ -129,17 +129,6 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
   intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
   net P/L, fees) sa prepočítajú pre zvolený interval.
-- **Korelačná matica** (pod tabuľkou Top pozícií) ukazuje 60-dňovú Pearsonovu
-  koreláciu denných výnosov medzi top 20 pozíciami. Červená pri **+1**
-  (pohybujú sa rovnako), modrá pri **−1** (pohybujú sa opačne), neutrálna pri
-  **0** (nezávislé). Tickery sú zoradené podľa SPDR sektora, aby boli klastre
-  vizuálne pohromade. Karta má aj **slovný verdikt**: ak je priemerná
-  absolútna korelácia ≥ 0.7, portfólio sa hýbe ako jedna skupina (jedna zlá
-  správa zasiahne väčšinu pozícií). Pod verdiktom je tiež zoznam **najsilnejších
-  párov** — pomáha vidieť skrytú koncentráciu, ktorú samotná váha pozície
-  neukáže (napr. NVDA + AMD + MU + AVGO zvyčajne korelujú nad 0.7 aj keď sú
-  v rôznych sub-sektoroch). Dáta tečú z existujúcej OHLCV cache, takže Risk
-  tab nesťahuje nové API volania.
 - **DCA kandidáti** (karta v Portfóliu) spája agregovaný P/L pozície s DIP
   rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
   pozície v strate **≥ 15 %** a oflaguje ich:
