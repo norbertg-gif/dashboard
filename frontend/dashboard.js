@@ -1231,8 +1231,7 @@ let portfolioAttentionItems = {};
 let portfolioAttentionLoadedAt = 0;
 let portfolioAttentionLoading = null;
 const PORT_ATTENTION_TTL_MS = 120000;
-const PORT_ATTENTION_DAILY_PCT = 1.5;
-const PORT_ATTENTION_DAILY_USD = 25;
+const PORT_ATTENTION_DAILY_PCT = 2;
 
 function normalizePortSymbol(symbol) {
   return String(symbol || '').trim().toUpperCase();
@@ -1262,10 +1261,8 @@ function portfolioAttentionDailyReason(row) {
   const daily = Number(row?._liveDailyPnl ?? row?.dailyPnl ?? 0);
   const amount = Math.abs(Number(row?.amount || 0));
   const pct = amount > 0 ? daily / amount * 100 : NaN;
-  const strongPct = Number.isFinite(pct) && Math.abs(pct) >= PORT_ATTENTION_DAILY_PCT;
-  const strongUsd = Math.abs(daily) >= PORT_ATTENTION_DAILY_USD;
-  if (!strongPct && !strongUsd) return null;
-  const pctText = Number.isFinite(pct) ? ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)` : '';
+  if (!Number.isFinite(pct) || Math.abs(pct) < PORT_ATTENTION_DAILY_PCT) return null;
+  const pctText = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
   return {
     kind: 'move',
     label: 'Pohyb',
