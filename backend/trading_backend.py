@@ -922,6 +922,12 @@ app.add_middleware(
     allow_credentials=True,
 )
 
+# GZip — dashboard.js má ~400 KB raw, ~106 KB gzip; bez kompresie letí každý
+# reload celý raw payload cez pomalý Render výstup. minimum_size=1000 nechá
+# malé JSON odpovede na pokoji.
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # ── Basic Auth — registruje sa pri štarte, env vars sú dostupné ──────────────
 import base64 as _b64, secrets as _secrets
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7602,25 +7608,32 @@ def massive_diagnostics(
     }
 
 
+# Cache stratégia statiky: HTML nesie ?v= verzie JS/CSS, takže MUSÍ revalidovať
+# (no-cache = smie cachovať, ale vždy over so serverom). JS/CSS sú immutable —
+# každá zmena obsahu bumpne ?v=, stará URL sa už nikdy nezmení, prehliadač ich
+# smie držať navždy bez requestu. `private` lebo obsah je za basic auth.
+_STATIC_IMMUTABLE = {"Cache-Control": "private, max-age=31536000, immutable"}
+_STATIC_REVALIDATE = {"Cache-Control": "private, no-cache"}
+
 @app.get("/")
 def root():
     from fastapi.responses import FileResponse
-    return FileResponse(FRONTEND_DIR / "trading_dashboard.html")
+    return FileResponse(FRONTEND_DIR / "trading_dashboard.html", headers=_STATIC_REVALIDATE)
 
 @app.get("/help")
 def help_page():
     from fastapi.responses import FileResponse
-    return FileResponse(FRONTEND_DIR / "help.html")
+    return FileResponse(FRONTEND_DIR / "help.html", headers=_STATIC_REVALIDATE)
 
 @app.get("/dashboard.css")
 def dashboard_css():
     from fastapi.responses import FileResponse
-    return FileResponse(FRONTEND_DIR / "dashboard.css", media_type="text/css")
+    return FileResponse(FRONTEND_DIR / "dashboard.css", media_type="text/css", headers=_STATIC_IMMUTABLE)
 
 @app.get("/dashboard.js")
 def dashboard_js():
     from fastapi.responses import FileResponse
-    return FileResponse(FRONTEND_DIR / "dashboard.js", media_type="application/javascript")
+    return FileResponse(FRONTEND_DIR / "dashboard.js", media_type="application/javascript", headers=_STATIC_IMMUTABLE)
 
 if __name__ == "__main__":
     # ── eToro proxy ako background thread ─────────────────────────────────────
