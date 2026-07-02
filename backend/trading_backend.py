@@ -922,9 +922,8 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# GZip — dashboard.js má ~400 KB raw, ~106 KB gzip; bez kompresie letí každý
-# reload celý raw payload cez pomalý Render výstup. minimum_size=1000 nechá
-# malé JSON odpovede na pokoji.
+# GZip — frontend moduly a väčšie JSON odpovede sa oplatí komprimovať; malé
+# JSON payloady necháva minimum_size=1000 na pokoji.
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
@@ -7698,7 +7697,7 @@ def dashboard_css():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "dashboard.css", media_type="text/css", headers=_STATIC_IMMUTABLE)
 
-# Frontend moduly (bývalý dashboard.js monolit) — whitelist namiesto path param
+# Frontend moduly — whitelist namiesto path param
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
