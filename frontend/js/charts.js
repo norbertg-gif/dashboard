@@ -239,18 +239,25 @@ let _chartHoldingsPromise = null;
 
 function isTickerInPortfolio(symbol) {
   const sym = String(symbol || '').trim().toUpperCase();
-  return !!(sym && _holdings && _holdings[sym]);
+  if (!sym) return false;
+  if (typeof getPortfolioLiveAggregateForSymbol === 'function' && getPortfolioLiveAggregateForSymbol(sym)) return true;
+  return !!(_holdings && _holdings[sym]);
 }
 
 function applyChartPortfolioFlag(id) {
   const panel = document.getElementById(id);
   if (!panel || panel.id.startsWith('port-panel-')) return;
   const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
-  const held = isTickerInPortfolio(sym);
+  const live = typeof getPortfolioLiveAggregateForSymbol === 'function'
+    ? getPortfolioLiveAggregateForSymbol(sym)
+    : null;
+  const held = !!live || isTickerInPortfolio(sym);
   panel.classList.toggle('portfolio-held', held);
-  const h = held ? _holdings[sym] : null;
-  panel.classList.toggle('profit', !!h && h.pnl >= 0);
-  panel.classList.toggle('loss', !!h && h.pnl < 0);
+  const h = live || (held ? _holdings[sym] : null);
+  const pnl = Number(h?.pnl);
+  const pct = Number(h?.pct ?? h?.pnl_pct);
+  panel.classList.toggle('profit', held && Number.isFinite(pnl) && pnl >= 0);
+  panel.classList.toggle('loss', held && Number.isFinite(pnl) && pnl < 0);
   panel.title = held ? `${sym} je v portfóliu (${h.pnl >= 0 ? '+' : ''}${h.pnl_pct.toFixed(1)} %)` : '';
 }
 
@@ -265,6 +272,71 @@ async function ensureHoldingsForChartFlags() {
   }
   try { await _chartHoldingsPromise; } catch(e) {}
   applyAllChartPortfolioFlags();
+}
+
+function getPanelChangeForSymbol(sym, r, candlePct) {
+  const live = typeof getPortfolioLiveAggregateForSymbol === 'function'
+    ? getPortfolioLiveAggregateForSymbol(sym)
+    : null;
+  const liveDaily = Number(live?.dailyChangePct);
+  if (Number.isFinite(liveDaily)) {
+    return { pct: liveDaily, title: 'Denny pohyb z eToro/live portfolia' };
+  }
+  const mover = Number(r?.moverChangePct);
+  if (Number.isFinite(mover)) {
+    return {
+      pct: mover,
+      title: `Top pohyby: denny pohyb (${r.moverPriceSource === 'etoro_live' ? 'eToro live' : 'OHLCV cache'})`,
+    };
+  }
+  return {
+    pct: Number.isFinite(Number(candlePct)) ? Number(candlePct) : 0,
+    title: 'Fallback: pohyb podla poslednych sviecok grafu',
+  };
+}
+
+function renderChartPositionBadge(sym) {
+  const live = typeof getPortfolioLiveAggregateForSymbol === 'function'
+    ? getPortfolioLiveAggregateForSymbol(sym)
+    : null;
+  if (!live?.count) return '';
+  const pnl = Number(live.pnl || 0);
+  return `<span class="p-pos-badge" style="font-family:var(--font-mono);font-size:11px;padding:2px 7px;border-radius:3px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted);"
+           title="Otvorene pozicie: ${live.count}">
+           ${live.count}x <span class="p-pos-badge-pnl" style="color:${pnl>=0?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
+         </span>`;
+}
+
+function updateChartLiveBadges(id) {
+  const panel = document.getElementById(id);
+  const r = registry[id];
+  if (!panel || !r) return;
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  if (!sym) return;
+
+  const last = r._chartData?.[r._chartData.length - 1];
+  const prev = r._chartData?.length > 1 ? r._chartData[r._chartData.length - 2] : null;
+  const candlePct = last && prev ? (Number(last.close) - Number(prev.close)) / Number(prev.close) * 100 : 0;
+  const change = getPanelChangeForSymbol(sym, r, candlePct);
+  const chgEl = panel.querySelector('.p-chg');
+  if (chgEl) {
+    chgEl.classList.toggle('up', change.pct >= 0);
+    chgEl.classList.toggle('down', change.pct < 0);
+    chgEl.title = change.title;
+    chgEl.textContent = `${change.pct >= 0 ? '▲' : '▼'} ${Math.abs(change.pct).toFixed(2)}%`;
+  }
+
+  const oldBadge = panel.querySelector('.p-pos-badge');
+  const html = renderChartPositionBadge(sym);
+  if (oldBadge && html) {
+    oldBadge.outerHTML = html;
+  } else if (!oldBadge && html) {
+    const cnts = panel.querySelector('.p-cnts');
+    if (cnts) cnts.insertAdjacentHTML('beforebegin', html);
+  } else if (oldBadge && !html) {
+    oldBadge.remove();
+  }
+  applyChartPortfolioFlag(id);
 }
 // ── PANEL TICKER SEARCH DROPDOWN ──────────────────────────────────────────────
 let ddTarget = null, ddTimer = null, ddResults = [], ddActive = -1;
@@ -1454,6 +1526,7 @@ async function loadOlderChartData(id) {
     r.hasMoreHistory = !!payload.hasMore;
     if (!r.indicators.ha) {
       applyEtoroMarkers(id, sym, r, r._rawChartData)
+        .then(() => updateChartLiveBadges(id))
         .catch(e => console.warn('eToro markers after history load failed:', e));
     }
     if (visible) {
@@ -1564,6 +1637,7 @@ async function loadChart(id, opts = {}) {
         r.lastWizardData = r._rawChartData;
         if (!r.indicators.ha && !opts.skipEtoro) {
           applyEtoroMarkers(id, sym, r, r._rawChartData)
+            .then(() => updateChartLiveBadges(id))
             .catch(e => console.warn('eToro markers failed:', e));
         }
       }
@@ -1603,10 +1677,9 @@ async function loadChart(id, opts = {}) {
 
     const last = data[data.length-1], prev = data.length>1?data[data.length-2]:null;
     const pct  = prev ? (last.close-prev.close)/prev.close*100 : 0;
-    const displayPct = Number.isFinite(Number(r.moverChangePct)) ? Number(r.moverChangePct) : pct;
-    const displayPctTitle = Number.isFinite(Number(r.moverChangePct))
-      ? `Top pohyby: denný pohyb (${r.moverPriceSource === 'etoro_live' ? 'eToro live' : 'OHLCV cache'})`
-      : 'Denný pohyb podľa posledných sviečok grafu';
+    const displayChange = getPanelChangeForSymbol(sym, r, pct);
+    const displayPct = displayChange.pct;
+    const displayPctTitle = displayChange.title;
     // eToro P&L badge — vypočítame po applyEtoroMarkers
     const ePct = r.etoroPct;
     const haBadge = r.indicators.ha
@@ -1614,23 +1687,16 @@ async function loadChart(id, opts = {}) {
       : '';
     const etoroUrl = `https://www.etoro.com/markets/${sym.toLowerCase()}`;
     // Zozbieraj pozície pre oba účty pre daný symbol
-    const _symPos = [...(etoroPositionsAll['1']||[]), ...(etoroPositionsAll['2']||[])]
-      .filter(p => p.symbol === sym);
-    const _posCount = _symPos.length;
-    const _totalPnl = _symPos.reduce((s, p) => s + (p.pnl || 0), 0);
-    const _totalAmt  = _symPos.reduce((s, p) => s + (p.amount || 0), 0);
+    const _portfolioLive = typeof getPortfolioLiveAggregateForSymbol === 'function'
+      ? getPortfolioLiveAggregateForSymbol(sym)
+      : null;
 
     const eBadge = ePct != null
       ? `<a href="${etoroUrl}" target="_blank" rel="noopener"
            style="font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;background:${ePct>=0?'#00c99a22':'#ff456022'};color:${ePct>=0?'var(--green)':'var(--red)'};border:1px solid ${ePct>=0?'#00c99a44':'#ff456044'};text-decoration:none;"
            title="Otvoriť na eToro">${ePct>=0?'+':''}${ePct.toFixed(2)}% eToro ↗</a>`
       : '';
-    const ePosBadge = _posCount > 0
-      ? `<span style="font-family:var(--font-mono);font-size:11px;padding:2px 7px;border-radius:3px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted);"
-           title="Otvorené pozície: ${_posCount}">
-           ${_posCount}× <span style="color:${_totalPnl>=0?'var(--green)':'var(--red)'};">${_totalPnl>=0?'+':''}$${_totalPnl.toFixed(2)}</span>
-         </span>`
-      : '';
+    const ePosBadge = _portfolioLive?.count ? renderChartPositionBadge(sym) : '';
     infoEl.innerHTML = `
       ${(name&&name!==sym)?`<span class="p-name">${name}</span>`:''}
       <span class="p-price">${fmtPrice(last.close)}</span>
@@ -1660,7 +1726,9 @@ async function loadChart(id, opts = {}) {
     if (wItem) { wItem.price = last.close; wItem.chg = pct; saveWatchlist(); renderSidebar(); }
 
     if (!r.indicators.ha && !opts.skipEtoro) {
-      applyEtoroMarkers(id, sym, r, data).catch(e => console.warn('eToro markers failed:', e));
+      applyEtoroMarkers(id, sym, r, data)
+        .then(() => updateChartLiveBadges(id))
+        .catch(e => console.warn('eToro markers failed:', e));
     }
     if (data.patterns?.length) applyPatternMarkers(id, r, data.patterns);
     if (opts.refresh !== 1 && !opts.noLiveAfter) {

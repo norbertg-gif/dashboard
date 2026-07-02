@@ -207,7 +207,12 @@ function onLivePriceUpdate(instrumentId) {
   // 2. Ceny tab
   if (activeMainTab === 'rates') updateRatesCells();
 
-  if (sym) updatePositionRowsWithLive(etoroPositions, sym, livePrice);
+  if (sym) {
+    updatePositionRowsWithLive(etoroPositions, sym, livePrice);
+    for (const rows of Object.values(etoroPositionsAll || {})) {
+      updatePositionRowsWithLive(rows, sym, livePrice);
+    }
+  }
 
   // 3. Portfólio tab — aktualizuj currentRate, pnl, pnlPct bunky
   if (sym) {
@@ -251,6 +256,7 @@ function onLivePriceUpdate(instrumentId) {
         } catch(e) {}
       }
     }
+    updateChartLiveBadges(pid);
   }
 }
 
@@ -283,6 +289,7 @@ async function loadPositionsForAccount(accountId) {
     const r = await fetch(`${API}/api/etoro/portfolio?account=${accountId}`);
     if (!r.ok) return [];
     const data = await r.json();
+    if (typeof preparePortfolioSnapshot === 'function') preparePortfolioSnapshot(data);
     etoroPositionsAll[accountId] = (data.positions || []).map(p => ({
       ...p,
       openDate: p.openDateTime ? p.openDateTime.substring(0, 10) : null,

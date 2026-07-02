@@ -1077,6 +1077,79 @@ function updateHeaderEquities() {
   }
 }
 
+function getPortfolioLiveAggregateForSymbol(symbol) {
+  const sym = normalizePortSymbol(symbol);
+  if (!sym) return null;
+
+  const rows = [];
+  const seenData = new Set();
+  for (const [pid, state] of Object.entries(portState || {})) {
+    const data = state?.data;
+    if (!data?.positions || seenData.has(data)) continue;
+    seenData.add(data);
+    rows.push(...data.positions.map(pos => ({ ...pos, _aggAcct: String(state.account || pid || '') })));
+  }
+  for (const [accountId, data] of Object.entries(portfolioAccountData || {})) {
+    if (!data?.positions || seenData.has(data)) continue;
+    seenData.add(data);
+    rows.push(...data.positions.map(pos => ({ ...pos, _aggAcct: String(accountId || '') })));
+  }
+  for (const [accountId, list] of Object.entries(etoroPositionsAll || {})) {
+    if (Array.isArray(list)) rows.push(...list.map(pos => ({ ...pos, _aggAcct: String(accountId || pos._acct || '') })));
+  }
+
+  const positions = rows.filter(pos => normalizePortSymbol(pos?.symbol) === sym);
+  const seenPositions = new Set();
+  const unique = [];
+  for (const pos of positions) {
+    const key = `${pos._aggAcct || pos._acct || pos.accountId || ''}:${pos.positionId || pos.openTimestamp || pos.openRate || ''}:${pos.amount || ''}:${pos.units || ''}`;
+    if (seenPositions.has(key)) continue;
+    seenPositions.add(key);
+    unique.push(pos);
+  }
+
+  if (!unique.length) {
+    const h = _holdings?.[sym];
+    if (!h) return null;
+    const pnl = Number(h.pnl || 0);
+    const amount = Number(h.amount || 0);
+    const pct = Number.isFinite(Number(h.pnl_pct))
+      ? Number(h.pnl_pct)
+      : (amount ? pnl / amount * 100 : 0);
+    return { symbol: sym, count: Number(h.count || 1), pnl, amount, pct, pnl_pct: pct, source: 'holdings' };
+  }
+
+  const amount = unique.reduce((sum, pos) => sum + Number(pos.amount || 0), 0);
+  const pnl = unique.reduce((sum, pos) => sum + Number(pos._livePnl ?? pos.pnl ?? 0), 0);
+  const dailyPnl = unique.reduce((sum, pos) => sum + Number(pos._liveDailyPnl ?? pos.dailyPnl ?? 0), 0);
+  const units = unique.reduce((sum, pos) => sum + Math.abs(Number(pos.units || 0)), 0);
+  const pct = amount ? pnl / amount * 100 : 0;
+  const dailyPnlPct = amount ? dailyPnl / amount * 100 : null;
+  const currentRates = unique.map(pos => Number(pos.currentRate)).filter(v => Number.isFinite(v) && v > 0);
+  const previousCloses = unique.map(pos => Number(pos._previousClose ?? pos.previousClose)).filter(v => Number.isFinite(v) && v > 0);
+  const currentRate = currentRates.length ? currentRates[currentRates.length - 1] : null;
+  const previousClose = previousCloses.length ? previousCloses[previousCloses.length - 1] : null;
+  const dailyChangePct = currentRate && previousClose
+    ? (currentRate - previousClose) / previousClose * 100
+    : null;
+
+  return {
+    symbol: sym,
+    count: unique.length,
+    pnl,
+    amount,
+    pct,
+    pnl_pct: pct,
+    dailyPnl,
+    dailyPnlPct,
+    dailyChangePct,
+    currentRate,
+    previousClose,
+    units,
+    source: 'portfolio',
+  };
+}
+
 async function loadHeaderPortfolioAccounts() {
   const accountIds = (etoroAccounts.length ? etoroAccounts.map(a => String(a.id)) : ['1', '2']).slice(0, 2);
   await Promise.all(accountIds.map(async accountId => {
