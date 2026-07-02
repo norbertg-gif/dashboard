@@ -4752,6 +4752,11 @@ const ACCT_COLORS = {
 
 // Cache pozícií pre oba účty { '1': [...], '2': [...] }
 const etoroPositionsAll = { '1': [], '2': [] };
+const etoroPositionsFetchedAt = { '1': 0, '2': 0 };
+const ETORO_POSITIONS_TTL_MS = 60000;
+function positionsStale(acct) {
+  return !etoroPositionsAll[acct]?.length || (Date.now() - (etoroPositionsFetchedAt[acct] || 0)) > ETORO_POSITIONS_TTL_MS;
+}
 
 function chartTimeToMs(t) {
   if (t == null) return NaN;
@@ -4803,6 +4808,7 @@ async function loadPositionsForAccount(accountId) {
       openDate: p.openDateTime ? p.openDateTime.substring(0, 10) : null,
       openTimestamp: p.openDateTime || null,
     }));
+    etoroPositionsFetchedAt[accountId] = Date.now();
     return etoroPositionsAll[accountId];
   } catch(e) { return []; }
 }
@@ -4843,10 +4849,10 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   r.entryPriceLines = [];
   r._etoroMarkersList = [];
 
-  // Načítaj pozície pre oba účty ak ešte nie sú
+  // Načítaj pozície pre oba účty ak ešte nie sú, alebo ak je cache staršia než ETORO_POSITIONS_TTL_MS
   const accts = ['1', '2'];
   for (const acct of accts) {
-    if (!etoroPositionsAll[acct].length) {
+    if (positionsStale(acct)) {
       await loadPositionsForAccount(acct);
     }
   }
@@ -8728,11 +8734,11 @@ async function loadData(reoptimize = false) {
     wsSubscribeSymbol(ticker);
     renderCharts(data);
     pc_applyOverlays();
-    // Donačítaj eToro pozície ak ešte nie sú, potom re-renderuj markery
+    // Donačítaj eToro pozície ak ešte nie sú alebo je cache stará, potom re-renderuj markery
     (async () => {
       let updated = false;
       for (const acct of ['1', '2']) {
-        if (!etoroPositionsAll[acct]?.length) {
+        if (positionsStale(acct)) {
           await loadPositionsForAccount(acct);
           updated = true;
         }
