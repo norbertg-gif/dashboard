@@ -41,7 +41,7 @@ python backend/trading_backend.py
 # Render redeploy: push to main, Render auto-deploys
 ```
 
-No test suite. Verify changes by hitting endpoints manually or driving the UI.
+No test suite, but there IS a smoke check: `python smoke_test.py` boots the app in-process and hits ~17 core endpoints (200 + response shape). Run it after backend changes — it catches "forgotten decorator" / "changed response shape" regressions in ~15 s. eToro-dependent endpoints are a tolerated tier (they need proxy credentials). For remote: `BASE_URL=https://... SMOKE_AUTH=user:pass python smoke_test.py`. Beyond that, verify by driving the UI.
 
 ## Working conventions
 
