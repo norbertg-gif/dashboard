@@ -102,7 +102,7 @@ These were already in the codebase and need to stay fixed:
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
-6. **Chart Pattern overlay.** V1 hotovo — samostatný modul `frontend/js/chart_patterns.js` s registry + detektormi + LWC primitive rendererom. Checkbox `chk_patterns` (`pc_patterns_enabled` v localStorage) kreslí vizuálne patterny nad Predictive Weekly/Daily grafom: `Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`, `Descending Triangle`. Sidebar karta `#chartPatternCard` vysvetľuje stav (`forming`/`confirmed`/`failed`), kvalitu, trigger a invalidáciu. Je to výlučne vizuálna pomôcka; NESMIE meniť C1–C4, scanner tier, ML predikciu, Verdikt ani portfolio logiku.
+6. **Chart Pattern overlay.** V1 hotovo — samostatný modul `frontend/js/chart_patterns.js` s registry + detektormi + LWC primitive rendererom. Checkbox `chk_patterns` (`pc_patterns_enabled` v localStorage) kreslí vizuálne patterny nad Predictive Weekly/Daily grafom: `Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`, `Descending Triangle`. Filtre `chk_patterns_bullish`, `chk_patterns_bearish`, `chk_patterns_neutral` (`pc_pattern_filters` v localStorage) iba filtrujú render a sidebar kartu podľa biasu, detekčnú logiku nemenia. Sidebar karta `#chartPatternCard` vysvetľuje stav (`forming`/`confirmed`/`failed`), kvalitu, trigger a invalidáciu. Je to výlučne vizuálna pomôcka; NESMIE meniť C1–C4, scanner tier, ML predikciu, Verdikt ani portfolio logiku.
 7. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
    until LWC finishes layout; manual drag uses a double animation frame.
 8. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
@@ -145,7 +145,8 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
   reads already loaded candles only and must remain a visual aid. If adding a
   new pattern later, add registry metadata and a detector; do not wire pattern
   confidence into signal scoring unless the user explicitly asks for a separate
-  research phase.
+  research phase. Bullish/Bearish/Range checkboxes are render filters only and
+  are persisted in `pc_pattern_filters`.
 - **Predictive chart** (bottom, collapsible): `flex:1` vs main chart `flex:2` → 2:1 height ratio. Collapsed via `PC_MODEL_CHART_COLLAPSED_KEY` in localStorage.
 - **Subpanel** (RSI/MACD/ADX/StochRSI): `pc_subChartInst`, synced timescale with main chart.
 - **HMM regime**: `detect_market_regime(df)` called from `/api/chart` — 3-state GaussianHMM (bull/bear/sideways) + high_volatility override. Diagnostic only, does not affect ML prediction.

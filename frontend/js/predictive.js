@@ -402,6 +402,24 @@ function pc_toggleChartPatterns(el) {
   pc_applyChartPatterns();
 }
 
+function pc_syncPatternFilterControls() {
+  if (typeof getChartPatternFilters !== 'function') return;
+  const filters = getChartPatternFilters();
+  const bull = document.getElementById('chk_patterns_bullish');
+  const bear = document.getElementById('chk_patterns_bearish');
+  const neutral = document.getElementById('chk_patterns_neutral');
+  if (bull) bull.checked = filters.bullish !== false;
+  if (bear) bear.checked = filters.bearish !== false;
+  if (neutral) neutral.checked = filters.neutral !== false;
+}
+
+function pc_togglePatternFilter(kind, enabled) {
+  if (typeof setChartPatternFilter !== 'function') return;
+  setChartPatternFilter(kind, enabled);
+  pc_syncPatternFilterControls();
+  pc_applyChartPatterns();
+}
+
 function initCharts() {
   removeKumoCanvas();
   if (typeof clearChartPatternOverlays === 'function') clearChartPatternOverlays();
@@ -433,6 +451,7 @@ function initCharts() {
   if (vpChk) vpChk.checked = pc_vpEnabled;
   const patternChk = document.getElementById('chk_patterns');
   if (patternChk) patternChk.checked = pc_patternsEnabled;
+  pc_syncPatternFilterControls();
 
   // BOTTOM: backtest candles + actual close line + future prediction candle
   pc_predChartInst = pc_makeChart('predChart');

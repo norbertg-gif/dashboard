@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260702-patterns1">
+<link rel="stylesheet" href="/dashboard.css?v=20260702-patterns2">
 </head>
 <body>
 
@@ -306,6 +306,21 @@
           <input type="checkbox" id="chk_patterns" onchange="pc_toggleChartPatterns(this)">
           <label for="chk_patterns">Pattern overlay</label>
         </div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:#22d3ee;"></div>
+          <input type="checkbox" id="chk_patterns_bullish" onchange="pc_togglePatternFilter('bullish', this.checked)">
+          <label for="chk_patterns_bullish">Bullish</label>
+        </div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:#c084fc;"></div>
+          <input type="checkbox" id="chk_patterns_bearish" onchange="pc_togglePatternFilter('bearish', this.checked)">
+          <label for="chk_patterns_bearish">Bearish</label>
+        </div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:#fbbf24;"></div>
+          <input type="checkbox" id="chk_patterns_neutral" onchange="pc_togglePatternFilter('neutral', this.checked)">
+          <label for="chk_patterns_neutral">Range</label>
+        </div>
       </div>
     </div>
 
@@ -450,15 +465,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260702-patterns1"></script>
-  <script src="/js/live.js?v=20260702-patterns1"></script>
-  <script src="/js/portfolio.js?v=20260702-patterns1"></script>
-  <script src="/js/watchlist.js?v=20260702-patterns1"></script>
-  <script src="/js/scanner.js?v=20260702-patterns1"></script>
-  <script src="/js/chart_patterns.js?v=20260702-patterns1"></script>
-  <script src="/js/predictive.js?v=20260702-patterns1"></script>
-  <script src="/js/verdict.js?v=20260702-patterns1"></script>
-  <script src="/js/charts.js?v=20260702-patterns1"></script>
-  <script src="/js/main.js?v=20260702-patterns1"></script>
+  <script src="/js/core.js?v=20260702-patterns2"></script>
+  <script src="/js/live.js?v=20260702-patterns2"></script>
+  <script src="/js/portfolio.js?v=20260702-patterns2"></script>
+  <script src="/js/watchlist.js?v=20260702-patterns2"></script>
+  <script src="/js/scanner.js?v=20260702-patterns2"></script>
+  <script src="/js/chart_patterns.js?v=20260702-patterns2"></script>
+  <script src="/js/predictive.js?v=20260702-patterns2"></script>
+  <script src="/js/verdict.js?v=20260702-patterns2"></script>
+  <script src="/js/charts.js?v=20260702-patterns2"></script>
+  <script src="/js/main.js?v=20260702-patterns2"></script>
 </body>
 </html>

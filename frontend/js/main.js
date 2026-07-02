@@ -230,6 +230,7 @@ document.addEventListener('mousedown', e => {
 window.pc_applyOverlays = pc_applyOverlays;
 window.pc_toggleVolumeProfile = pc_toggleVolumeProfile;
 window.pc_toggleChartPatterns = pc_toggleChartPatterns;
+window.pc_togglePatternFilter = pc_togglePatternFilter;
 window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;

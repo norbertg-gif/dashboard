@@ -261,8 +261,10 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   vysvetlí stav (`forming`, `confirmed`, `failed`), kvalitu, trigger úroveň a
   invalidáciu. Vrstva je iba vizuálna: **nemení C1–C4, scanner, predikciu ani
   Verdikt**. Farby sú zámerne mimo farieb sviečok: bullish patterny sú cyan,
-  bearish patterny fialové, neutral/range zlaté. Pattern sa považuje za
-  potvrdený až po breakoute/breakdowne podľa pravidiel technickej analýzy.
+  bearish patterny fialové, neutral/range zlaté. Prepínače **Bullish**,
+  **Bearish** a **Range** filtrujú, čo sa má kresliť a zobrazovať v karte;
+  ukladajú sa do `localStorage`. Pattern sa považuje za potvrdený až po
+  breakoute/breakdowne podľa pravidiel technickej analýzy.
 
 ### Pravý panel (sidebar)
 

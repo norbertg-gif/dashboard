@@ -69,6 +69,44 @@ const CHART_PATTERN_PALETTE = {
   },
 };
 
+const CHART_PATTERN_FILTER_KEY = 'pc_pattern_filters';
+const CHART_PATTERN_FILTER_DEFAULTS = {
+  bullish: true,
+  bearish: true,
+  neutral: true,
+};
+
+function getChartPatternFilters() {
+  try {
+    const raw = localStorage.getItem(CHART_PATTERN_FILTER_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      ...CHART_PATTERN_FILTER_DEFAULTS,
+      ...(parsed && typeof parsed === 'object' ? parsed : {}),
+    };
+  } catch (e) {
+    return { ...CHART_PATTERN_FILTER_DEFAULTS };
+  }
+}
+
+function setChartPatternFilter(kind, enabled) {
+  const filters = getChartPatternFilters();
+  if (!Object.prototype.hasOwnProperty.call(CHART_PATTERN_FILTER_DEFAULTS, kind)) return filters;
+  filters[kind] = !!enabled;
+  localStorage.setItem(CHART_PATTERN_FILTER_KEY, JSON.stringify(filters));
+  return filters;
+}
+
+function chartPatternBias(pattern) {
+  const reg = pattern?.registry || CHART_PATTERN_REGISTRY[pattern?.id] || {};
+  if (reg.bias === 'bullish' || reg.bias === 'bearish') return reg.bias;
+  return 'neutral';
+}
+
+function chartPatternAllowed(pattern, filters = getChartPatternFilters()) {
+  return filters[chartPatternBias(pattern)] !== false;
+}
+
 function chartPatternPalette(registry) {
   if (registry?.bias === 'bullish') return CHART_PATTERN_PALETTE.bullish;
   if (registry?.bias === 'bearish') return CHART_PATTERN_PALETTE.bearish;
@@ -324,7 +362,7 @@ function cpDetectRangeAndTriangles(candles, pivots) {
   return candidates.filter(c => Number.isFinite(c.confidence));
 }
 
-function detectChartPatterns(candlesInput, timeframe = 'weekly') {
+function detectChartPatterns(candlesInput, timeframe = 'weekly', filters = null) {
   const candles = cpCandleNormalize(candlesInput);
   if (candles.length < 35) return [];
   const span = timeframe === 'daily' ? 4 : 3;
@@ -339,7 +377,8 @@ function detectChartPatterns(candlesInput, timeframe = 'weekly') {
     timeframe,
     registry: CHART_PATTERN_REGISTRY[p.id] || { label: p.id, sk: p.id, bias: 'neutral', family: 'pattern' },
   }));
-  return enriched
+  const visible = filters ? enriched.filter(p => chartPatternAllowed(p, filters)) : enriched;
+  return visible
     .sort((a, b) => (b.state === 'confirmed') - (a.state === 'confirmed') || b.confidence - a.confidence)
     .slice(0, 2);
 }
@@ -454,7 +493,7 @@ function detachPatternPrimitive(series, primitiveRef) {
 
 function chartPatternHtml(patterns, timeframe) {
   if (!patterns || !patterns.length) {
-    return `<div class="pc-pattern-empty">Zatial bez jasneho ${timeframe === 'daily' ? 'daily' : 'weekly'} patternu. Overlay ber ako vizualnu pomocku, nie signal.</div>`;
+    return `<div class="pc-pattern-empty">Zatial bez jasneho ${timeframe === 'daily' ? 'daily' : 'weekly'} patternu pre zapnute filtre. Overlay ber ako vizualnu pomocku, nie signal.</div>`;
   }
   return patterns.map((p, idx) => {
     const reg = p.registry || {};
@@ -501,7 +540,7 @@ function applyChartPatternOverlay({ chart, series, candles, timeframe, enabled, 
     return [];
   }
 
-  const patterns = detectChartPatterns(candles, timeframe);
+  const patterns = detectChartPatterns(candles, timeframe, getChartPatternFilters());
   if (patterns.length && typeof series.attachPrimitive === 'function') {
     const primitive = new ChartPatternPrimitive(chart, series, patterns);
     series.attachPrimitive(primitive);
