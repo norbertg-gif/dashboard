@@ -667,8 +667,14 @@ function portfolioAttentionReasonClass(reason) {
 
 function portfolioAttentionDailyReason(row) {
   const daily = Number(row?._liveDailyPnl ?? row?.dailyPnl ?? 0);
-  const amount = Math.abs(Number(row?.amount || 0));
-  const pct = amount > 0 ? daily / amount * 100 : NaN;
+  const live = typeof getPortfolioLiveAggregateForSymbol === 'function'
+    ? getPortfolioLiveAggregateForSymbol(row?.symbol)
+    : null;
+  const currentRate = Number(live?.currentRate ?? row?.currentRate);
+  const previousClose = Number(live?.previousClose ?? row?._previousClose ?? row?.previousClose);
+  const pct = Number.isFinite(currentRate) && currentRate > 0 && Number.isFinite(previousClose) && previousClose > 0
+    ? (currentRate - previousClose) / previousClose * 100
+    : Number(live?.dailyChangePct);
   if (!Number.isFinite(pct) || Math.abs(pct) < dashSettings.attention_daily_pct) return null;
   const pctText = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
   return {
@@ -676,8 +682,8 @@ function portfolioAttentionDailyReason(row) {
     label: 'Pohyb',
     title: daily >= 0 ? 'Výrazný denný rast' : 'Výrazný denný pokles',
     detail: `${daily >= 0 ? '+' : ''}$${daily.toFixed(2)}${pctText}`,
-    severity: daily >= 0 ? 'buy' : 'counter',
-    value: daily,
+    severity: pct >= 0 ? 'buy' : 'counter',
+    value: pct,
   };
 }
 

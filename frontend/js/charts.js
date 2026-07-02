@@ -1860,12 +1860,13 @@ async function loadMovers() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Hľadám…'; }
   try {
     switchMainTab('charts');
-    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}`);
+    const minChange = Number(dashSettings?.attention_daily_pct || 0);
+    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}&min_change=${encodeURIComponent(minChange)}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const movers = data.movers || [];
     if (!movers.length) {
-      setStatus(`Žiadne dáta pre Top pohyby (z ${data.universe_size||0} titulov sa nevyhodnotil žiadny — cache ešte nezahriata?)`, 'err');
+      setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
       return;
     }
     [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
@@ -1880,7 +1881,7 @@ async function loadMovers() {
     saveLayout();
     loadAll();
     const dirTxt = up ? 'rast' : 'pokles';
-    setStatus(`Top ${movers.length} — ${dirTxt} (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
+    setStatus(`Top ${movers.length} - ${dirTxt} >= ${minChange}% (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
   } catch(e) {
     setStatus(`Top pohyby zlyhali: ${e.message}`, 'err');
   } finally {

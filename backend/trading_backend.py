@@ -2200,6 +2200,7 @@ def get_movers(
     account: str = Query("1"),
     n: int = Query(6, ge=1, le=20),
     direction: str = Query("down"),
+    min_change: float = Query(0.0, ge=0.0, le=50.0),
 ):
     """Top N titulov podľa denného % pohybu naprieč watchlistom + portfóliom.
     Len stock/ETF (crypto vynechané). Denný % z OHLCV cache (žiadne nové API
@@ -2248,6 +2249,8 @@ def get_movers(
             skipped += 1
             continue
         change_pct, last_close = dc
+        if abs(change_pct) < min_change:
+            continue
         rows.append({
             "symbol": sym,
             "change_pct": round(change_pct, 2),
@@ -2263,6 +2266,7 @@ def get_movers(
         "account": account,
         "direction": "down" if down else "up",
         "n": n,
+        "min_change": min_change,
         "movers": top,
         "universe_size": len(universe),
         "evaluated": len(rows),
