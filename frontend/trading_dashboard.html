@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260702-polish">
+<link rel="stylesheet" href="/dashboard.css?v=20260702-settings">
 </head>
 <body>
 
@@ -37,6 +37,7 @@
   <label id="movers-up-lbl" title="Prepnúť na najväčšie rasty" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
     <input type="checkbox" id="movers-up" onchange="updateMoversLabel()" style="cursor:pointer;">Rast
   </label>
+  <button id="settings-btn" onclick="openSettingsModal()" title="Nastavenia prahov (DCA, Pozornosť, earnings)" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">⚙</button>
   <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>
   <a href="/help" target="_blank" title="Manuál k dashboardu" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">?</a>
 
@@ -354,6 +355,29 @@
       <button class="btn primary" onclick="confirmSave()">Ulož</button>
     </div>
   </div>
+</div>
+<div id="settings-modal-bg">
+  <div id="settings-modal">
+    <h2>⚙ Nastavenia prahov</h2>
+    <div class="settings-rows">
+      <label>DCA — strata pozície ≥ <span class="settings-unit">%</span>
+        <input id="set-dca-loss" type="number" min="1" max="90" step="1"></label>
+      <label>DCA — minimálne DIP skóre
+        <input id="set-dca-dip" type="number" min="0" max="200" step="1"></label>
+      <label>DCA — max. váha pozície <span class="settings-unit">% equity</span>
+        <input id="set-dca-weight" type="number" min="1" max="100" step="1"></label>
+      <label>Pozornosť — denný pohyb ≥ <span class="settings-unit">%</span>
+        <input id="set-attention-pct" type="number" min="0.1" max="50" step="0.1"></label>
+      <label>Earnings varovanie ≤ <span class="settings-unit">dní</span>
+        <input id="set-earnings-days" type="number" min="1" max="60" step="1"></label>
+    </div>
+    <div class="settings-note">Prahy platia pre DCA kartu, Investor Inbox aj filter Pozornosť — server ich drží na jednom mieste, zmena nevyžaduje redeploy.</div>
+    <div class="modal-btns">
+      <button class="btn" onclick="resetSettingsModal()" title="Vráti predvolené hodnoty do formulára (uloží až Ulož)">Predvolené</button>
+      <button class="btn" onclick="closeSettingsModal()">Zruš</button>
+      <button class="btn primary" onclick="saveSettingsModal()">Ulož</button>
+    </div>
+  </div>
 </div><div id="ttBox"></div>
 
 
@@ -405,6 +429,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260702-polish"></script>
+  <script src="/dashboard.js?v=20260702-settings"></script>
 </body>
 </html>

@@ -51,6 +51,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **STĹPCE (1–4)** | Počet stĺpcov v mriežke grafov. |
 | **AUTO ON/OFF** | Automatické obnovovanie dát. |
 | **Ucet 1 / Ucet 2 equity** | Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab. |
+| **⚙** | Nastavenia prahov: DCA (strata %, min. DIP, max. váha), Pozornosť (denný pohyb %), earnings varovanie (dni). Uložené na serveri — platia pre DCA kartu, Investor Inbox aj filter Pozornosť naraz, bez redeployu. |
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
 

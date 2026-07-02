@@ -2039,16 +2039,77 @@ def get_trade_history(
             "minDate": minDate, "maxDate": maxDate}
 
 
+# ── Nastavenia prahov (jeden zdroj pre backend aj frontend) ──────────────────
+# DCA prahy konzumuje aj Investor Inbox server-side, preto žijú na disku
+# a nie v localStorage — jedna hodnota pre obe strany, meniteľná bez redeployu.
+DASH_SETTINGS_FILE = DATA_ROOT / "dashboard_settings.json"
+_dash_settings_lock = threading.Lock()
+DASH_SETTINGS_DEFAULTS = {
+    "dca_loss_pct": 15.0,        # strata pozície ≥ x % → DCA úvaha
+    "dca_dip_min": 90.0,         # DIP skóre ≥ x → kvalitný dip
+    "dca_max_weight": 10.0,      # váha pozície < x % equity → bez koncentračného rizika
+    "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
+    "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
+}
+_DASH_SETTINGS_LIMITS = {
+    "dca_loss_pct": (1, 90),
+    "dca_dip_min": (0, 200),
+    "dca_max_weight": (1, 100),
+    "attention_daily_pct": (0.1, 50),
+    "earnings_warn_days": (1, 60),
+}
+
+
+def _dash_settings() -> dict:
+    out = dict(DASH_SETTINGS_DEFAULTS)
+    with _dash_settings_lock:
+        if DASH_SETTINGS_FILE.exists():
+            try:
+                saved = json.loads(DASH_SETTINGS_FILE.read_text(encoding="utf-8"))
+                for k in DASH_SETTINGS_DEFAULTS:
+                    if k in saved and isinstance(saved[k], (int, float)):
+                        out[k] = saved[k]
+            except Exception:
+                pass
+    return out
+
+
+@app.get("/api/settings")
+def get_dash_settings():
+    return {"settings": _dash_settings(), "defaults": DASH_SETTINGS_DEFAULTS}
+
+
+@app.post("/api/settings")
+async def save_dash_settings(request: Request):
+    body = await request.json()
+    current = _dash_settings()
+    for k, (lo, hi) in _DASH_SETTINGS_LIMITS.items():
+        if k in body:
+            try:
+                v = float(body[k])
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{k}: musí byť číslo")
+            if not (lo <= v <= hi):
+                raise HTTPException(400, f"{k}: mimo rozsahu {lo}–{hi}")
+            current[k] = int(v) if k == "earnings_warn_days" else v
+    with _dash_settings_lock:
+        DASH_SETTINGS_FILE.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "settings": current}
+
+
 @app.get("/api/portfolio/dca")
 def get_dca_candidates(
     account: str = Query("1"),
-    loss_pct: float = Query(15.0, ge=1, le=90),
-    dip_min: float = Query(90.0, ge=0, le=200),
-    max_weight: float = Query(10.0, ge=1, le=100),
+    loss_pct: float | None = Query(None, ge=1, le=90),
+    dip_min: float | None = Query(None, ge=0, le=200),
+    max_weight: float | None = Query(None, ge=1, le=100),
     refresh: int = Query(0),
 ):
     """DCA kandidáti — pozície v strate ≥ loss_pct, klasifikované podľa DIP skóre
     a váhy. Spája agregovaný per-ticker P/L (eToro) s DIP rankingom (Finviz import).
+
+    Prahy default z /api/settings (dashboard_settings.json) — meniteľné cez ⚙
+    bez redeployu; explicitné query parametre ich prebijú.
 
     Flagy:
       dca          → strata ≥ loss_pct, DIP ≥ dip_min, váha < max_weight (kvalitný dip)
@@ -2058,6 +2119,10 @@ def get_dca_candidates(
 
     Interpretačná vrstva — NEOVPLYVŇUJE C1–C4, scanner, bota ani portfolio účtovníctvo.
     DCA skóre je z manuálneho importu → vraciame aj vek dát (dip_updated_at)."""
+    _s = _dash_settings()
+    if loss_pct is None: loss_pct = _s["dca_loss_pct"]
+    if dip_min is None: dip_min = _s["dca_dip_min"]
+    if max_weight is None: max_weight = _s["dca_max_weight"]
     portfolio = get_portfolio(account=account, refresh=refresh)
     positions = portfolio.get("positions", [])
     equity = (portfolio.get("summary") or {}).get("equity") or 0
@@ -5344,10 +5409,13 @@ def get_investor_inbox(refresh: int = Query(0)):
         })
 
     # DCA / thesis risk: stojace stavy nad existujúcim DCA endpointom.
+    # Prahy z /api/settings — rovnaké ako DCA karta v Portfóliu (jeden zdroj pravdy).
+    _dca_s = _dash_settings()
     for account in ("1", "2"):
         try:
             dca = get_dca_candidates(
-                account=account, loss_pct=15.0, dip_min=90.0, max_weight=10.0, refresh=0
+                account=account, loss_pct=_dca_s["dca_loss_pct"],
+                dip_min=_dca_s["dca_dip_min"], max_weight=_dca_s["dca_max_weight"], refresh=0
             )
             for row in dca.get("candidates", [])[:20]:
                 sym = row.get("symbol")

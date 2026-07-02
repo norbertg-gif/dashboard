@@ -1231,7 +1231,87 @@ let portfolioAttentionItems = {};
 let portfolioAttentionLoadedAt = 0;
 let portfolioAttentionLoading = null;
 const PORT_ATTENTION_TTL_MS = 120000;
-const PORT_ATTENTION_DAILY_PCT = 2;
+
+// ── Nastavenia prahov (⚙) — server-side v dashboard_settings.json ───────────
+// Defaulty musia sedieť s DASH_SETTINGS_DEFAULTS v backende; server je zdroj
+// pravdy (DCA prahy konzumuje aj Investor Inbox), toto je len štartovací stav
+// kým sa nedotiahne /api/settings.
+let dashSettings = {
+  dca_loss_pct: 15,
+  dca_dip_min: 90,
+  dca_max_weight: 10,
+  attention_daily_pct: 2,
+  earnings_warn_days: 7,
+};
+
+async function loadDashSettings() {
+  try {
+    const r = await fetch(`${API}/api/settings`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.settings) dashSettings = { ...dashSettings, ...d.settings };
+    if (d.defaults) dashSettingsDefaults = { ...dashSettingsDefaults, ...d.defaults };
+  } catch(e) {}
+}
+
+let dashSettingsDefaults = { ...dashSettings };
+const _SETTINGS_INPUTS = [
+  ['set-dca-loss', 'dca_loss_pct'],
+  ['set-dca-dip', 'dca_dip_min'],
+  ['set-dca-weight', 'dca_max_weight'],
+  ['set-attention-pct', 'attention_daily_pct'],
+  ['set-earnings-days', 'earnings_warn_days'],
+];
+
+function openSettingsModal() {
+  for (const [id, key] of _SETTINGS_INPUTS) {
+    const el = document.getElementById(id);
+    if (el) el.value = dashSettings[key];
+  }
+  document.getElementById('settings-modal-bg')?.classList.add('open');
+}
+
+function closeSettingsModal() {
+  document.getElementById('settings-modal-bg')?.classList.remove('open');
+}
+
+function resetSettingsModal() {
+  for (const [id, key] of _SETTINGS_INPUTS) {
+    const el = document.getElementById(id);
+    if (el) el.value = dashSettingsDefaults[key];
+  }
+}
+
+async function saveSettingsModal() {
+  const body = {};
+  for (const [id, key] of _SETTINGS_INPUTS) {
+    const v = parseFloat(document.getElementById(id)?.value);
+    if (Number.isFinite(v)) body[key] = v;
+  }
+  try {
+    const r = await fetch(`${API}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json()).detail || msg; } catch(e) {}
+      throw new Error(msg);
+    }
+    const d = await r.json();
+    dashSettings = { ...dashSettings, ...(d.settings || {}) };
+    closeSettingsModal();
+    // Prahy sa zmenili → invaliduj odvodené cache a prekresli, čo je otvorené
+    _dcaCache = { account: null, data: null };
+    portfolioAttentionLoadedAt = 0;
+    if (portState.main?.data) renderPortPanel('main');
+    applyScannerBadges();
+    setStatus('Nastavenia uložené', 'ok');
+  } catch(e) {
+    setStatus(`Nastavenia sa nepodarilo uložiť: ${e.message}`, 'err');
+  }
+}
 
 function normalizePortSymbol(symbol) {
   return String(symbol || '').trim().toUpperCase();
@@ -1261,7 +1341,7 @@ function portfolioAttentionDailyReason(row) {
   const daily = Number(row?._liveDailyPnl ?? row?.dailyPnl ?? 0);
   const amount = Math.abs(Number(row?.amount || 0));
   const pct = amount > 0 ? daily / amount * 100 : NaN;
-  if (!Number.isFinite(pct) || Math.abs(pct) < PORT_ATTENTION_DAILY_PCT) return null;
+  if (!Number.isFinite(pct) || Math.abs(pct) < dashSettings.attention_daily_pct) return null;
   const pctText = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
   return {
     kind: 'move',
@@ -5576,8 +5656,8 @@ async function loadMemProfileChip() {
   loadLogoMap();
   watchlist = loadWatchlist();
   renderSidebar();
-  // Preset dropdown a watchlist sync sú nezávislé — paralelne namiesto vodopádu
-  await Promise.all([refreshPresetDropdown(''), syncWatchlistFromServer()]);
+  // Preset dropdown, watchlist sync a nastavenia prahov sú nezávislé — paralelne
+  await Promise.all([refreshPresetDropdown(''), syncWatchlistFromServer(), loadDashSettings()]);
 
   // Načítaj layout — spracuj grafy aj portfolio panely
   for (const cfg of loadLayout()) {
@@ -7713,7 +7793,7 @@ let _holdings = null;          // {TICKER: {pnl, pnl_pct, amount}}
 let _apeMentions = {};         // {TICKER: {mentions, rank, rank_24h_ago, mentions_24h_ago}}
 let _scannerMetaLoading = false;
 
-const EARNINGS_WARN_DAYS = 7;
+
 const APE_CACHE_TTL_H = 6;
 
 async function ensureScannerMetaLoaded(tickers) {
@@ -8079,7 +8159,7 @@ function applyScannerBadges() {
     }
     const days = Math.ceil((new Date(d + 'T00:00:00') - now) / 86400000);
     const dt = new Date(d + 'T00:00:00');
-    if (days >= 0 && days <= EARNINGS_WARN_DAYS) {
+    if (days >= 0 && days <= dashSettings.earnings_warn_days) {
       el.innerHTML = `<span class="earn-warn" title="Earnings ${dt.toLocaleDateString('sk-SK')} (o ${days} d.) — zvýšená volatilita, čísla pred reportom nemusia platiť">⚠ E: ${dt.getDate()}.${dt.getMonth() + 1}.</span>`;
       return;
     }
@@ -8401,7 +8481,7 @@ function buildInvestorVerdict(ticker, data, insights, market) {
     .filter(value => Number.isFinite(value) && value >= Date.now())
     .sort((a, b) => a - b);
   const earningsDays = earnings.length ? Math.ceil((earnings[0] - Date.now()) / 86400000) : null;
-  const earningsRisk = earningsDays != null && earningsDays <= EARNINGS_WARN_DAYS;
+  const earningsRisk = earningsDays != null && earningsDays <= dashSettings.earnings_warn_days;
   if (earningsRisk) verdictPush(risks, `Earnings sú o ${earningsDays} dní; technický obraz sa môže rýchlo zmeniť.`);
 
   const ac = insights?.analyst_consensus;
