@@ -123,6 +123,45 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
     document.addEventListener('mouseup', onUp);
   });
 })();
+// ── CHART DOCK RESIZE ────────────────────────────────────────────────────────
+// Dock ostáva pri načítaní vždy zatvorený (žiadny reštart na starý ticker) —
+// obnovuje sa len uložená šírka pre prípad, že ho používateľ znova otvorí.
+(function() {
+  const resizer = document.getElementById('dock-resizer');
+  const dock = document.getElementById('chart-dock');
+  if (!resizer || !dock) return;
+  const MIN_W = 280, MAX_W = 800;
+  let startX, startW;
+
+  const saved = localStorage.getItem('td_dock_width');
+  if (saved) {
+    const w = Math.min(MAX_W, Math.max(MIN_W, parseInt(saved)));
+    document.documentElement.style.setProperty('--dock-width', w + 'px');
+  }
+
+  resizer.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = dock.offsetWidth;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMove(e) {
+      const w = Math.min(MAX_W, Math.max(MIN_W, startW - (e.clientX - startX)));
+      document.documentElement.style.setProperty('--dock-width', w + 'px');
+    }
+    function onUp() {
+      localStorage.setItem('td_dock_width', dock.offsetWidth);
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
 
 // ══ Predictive Chart JS ══
 

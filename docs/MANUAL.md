@@ -125,6 +125,11 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   účtu. P/L a Equity sa medzi eToro snapshotmi prepočítavajú z live cien.
 - Account 1/2, typ aktíva a Per ticker/Per trade menia pohľad, nie samotné
   eToro dáta. Per ticker agreguje viac obchodov; Per trade ich rozbalí.
+- **Klik na logo/ticker** v Portfóliu otvorí graf v bočnom **Chart docku**
+  vpravo — presne v štýle záložky Grafy (indikátory, wizard, news, watchlist
+  tlačidlo), bez opustenia Portfólia. Panel sa dá zavrieť krížikom v hlavičke
+  docku a šírka sa dá ťahať za ľavý okraj. Klik na iný ticker v Portfóliu
+  prepne obsah toho istého panelu, neotvára ďalšie okná.
 - Stĺpce možno zapínať, radiť a nezávisle meniť ich šírku. Nastavenie sa uloží.
   Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým

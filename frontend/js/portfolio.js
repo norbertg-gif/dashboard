@@ -1498,7 +1498,7 @@ function renderPortPanel(pid) {
       for (const col of cols) {
         if (col.key === 'symbol') {
           const count = row._count > 1 ? ` <span style="color:var(--muted);font-size:9px;">(${row._count})</span>` : '';
-          html += `<td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;">
+          html += `<td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;cursor:pointer;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${sym}')">
             ${getLogoWrapper(sym, 26, (row.pnl||0)>=0?'var(--green)':'var(--red)')}
             <div style="display:flex;flex-direction:column;gap:1px;flex:1;">
               <span class="port-sym">${sym}${count}${gfLinkHtml(sym)}</span>
@@ -1670,7 +1670,7 @@ function portRowClick(pid, sym) {
   if (!sym) return;
   // Prepni na grafy tab a otvor ticker
   switchMainTab('charts');
-  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.querySelector('.p-sym'));
+  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.id !== dockPanelId && p.querySelector('.p-sym'));
   if (chartPanel) {
     chartPanel.querySelector('.p-sym').value = sym;
     loadChart(chartPanel.id);

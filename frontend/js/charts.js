@@ -113,7 +113,7 @@ function onSbTickerClick(symbol) {
   // Nájdi aktívny CHART panel (nie portfolio)
   let chartPanelId = activePanelId;
   if (chartPanelId?.startsWith('port-panel-')) {
-    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.querySelector('.p-sym'))?.id || null;
+    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.id !== dockPanelId && p.querySelector('.p-sym'))?.id || null;
   }
   if (chartPanelId && document.getElementById(chartPanelId)) {
     const panel = document.getElementById(chartPanelId);
@@ -172,7 +172,7 @@ async function loadPreset() {
   if (String(name).startsWith('__')) return;
   const presets = await fetchPresets();
   const cfg = presets[name]; if (!cfg?.length) return;
-  [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
   setActivePanel(null);
   cfg.forEach(c => createPanel(c));
   saveLayout(); loadAll();
@@ -209,6 +209,7 @@ async function confirmSave() {
 function getCurrentConfig() {
   try {
     return [...document.querySelectorAll('.panel')].map(p => {
+      if (p.id === dockPanelId) return null;
       if (p.id.startsWith('port-panel-')) return { type: 'portfolio' };
       const symEl = p.querySelector('.p-sym');
       if (!symEl) return null;
@@ -272,6 +273,46 @@ async function ensureHoldingsForChartFlags() {
   }
   try { await _chartHoldingsPromise; } catch(e) {}
   applyAllChartPortfolioFlags();
+}
+
+// ── CHART DOCK (bočný graf z Portfólia) ────────────────────────────────────────
+// Jediný panel mimo #grid, vylúčený zo všetkých bulk operácií Grafy tabu
+// (loadPreset, clearAllPanels, clearChartPanelsForImport, loadMovers,
+// getCurrentConfig/saveLayout, onSbTickerClick) — má vlastný ✕ close.
+// Zámerne ZAHRNUTÝ v loadAll() bulk refreshi a v applyAllChartPortfolioFlags.
+let dockPanelId = null;
+
+function openChartDock(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return;
+  const dock = document.getElementById('chart-dock');
+  dock?.classList.remove('hidden');
+  localStorage.setItem('td_dock_open', '1');
+  const titleEl = document.getElementById('dock-title');
+  if (titleEl) titleEl.textContent = sym;
+
+  if (dockPanelId && document.getElementById(dockPanelId)) {
+    const panel = document.getElementById(dockPanelId);
+    const symEl = panel.querySelector('.p-sym');
+    if (symEl) symEl.value = sym;
+    loadChart(dockPanelId);
+    setActivePanel(dockPanelId);
+    return;
+  }
+  const cfg = {
+    symbol: sym, period: 'auto', interval: '1d',
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+    container: 'dock-grid',
+  };
+  dockPanelId = createPanel(cfg);
+  setActivePanel(dockPanelId);
+  loadChart(dockPanelId);
+}
+
+function closeChartDock() {
+  if (dockPanelId) { removePanel(dockPanelId); dockPanelId = null; }
+  document.getElementById('chart-dock')?.classList.add('hidden');
+  localStorage.setItem('td_dock_open', '0');
 }
 
 function getPanelChangeForSymbol(sym, r, candlePct) {
@@ -657,7 +698,7 @@ function createPanel(cfg) {
     </div>
     <div class="p-resize-handle" id="rh-${id}" title="Potiahnite pre zmenu výšky grafu"></div>
   `;
-  document.getElementById('grid').appendChild(panel);
+  document.getElementById(cfg.container || 'grid').appendChild(panel);
   applyChartPortfolioFlag(id);
   ensureHoldingsForChartFlags();
 
@@ -1780,7 +1821,7 @@ function removePanel(id) {
 
 function clearAllPanels() {
   if (!confirm('Vymazať všetky grafy?')) return;
-  [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
   setActivePanel(null);
   saveLayout();
   setStatus('Grafy vymazané', '');
@@ -1802,7 +1843,7 @@ function parseTickerClipboardText(text) {
 
 function clearChartPanelsForImport() {
   [...document.querySelectorAll('.panel')]
-    .filter(panel => !panel.id.startsWith('port-panel-') && panel.querySelector('.p-sym'))
+    .filter(panel => !panel.id.startsWith('port-panel-') && panel.id !== dockPanelId && panel.querySelector('.p-sym'))
     .forEach(panel => removePanel(panel.id));
 }
 
@@ -1869,7 +1910,7 @@ async function loadMovers() {
       setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
       return;
     }
-    [...document.querySelectorAll('.panel')].forEach(p => removePanel(p.id));
+    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
     setActivePanel(null);
     movers.forEach(m => createPanel({
       symbol: m.symbol,
