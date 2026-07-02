@@ -51,6 +51,30 @@ const CHART_PATTERN_STATE = {
   failed: { label: 'failed', sk: 'zlyhal', cls: 'counter' },
 };
 
+const CHART_PATTERN_PALETTE = {
+  bullish: {
+    line: '#22d3ee',       // cyan, deliberately not candle green
+    point: '#67e8f9',
+    soft: 'rgba(34,211,238,0.10)',
+  },
+  bearish: {
+    line: '#c084fc',       // violet, deliberately not candle red
+    point: '#e879f9',
+    soft: 'rgba(192,132,252,0.11)',
+  },
+  neutral: {
+    line: '#fbbf24',       // amber for range/neutral structures
+    point: '#fde68a',
+    soft: 'rgba(251,191,36,0.10)',
+  },
+};
+
+function chartPatternPalette(registry) {
+  if (registry?.bias === 'bullish') return CHART_PATTERN_PALETTE.bullish;
+  if (registry?.bias === 'bearish') return CHART_PATTERN_PALETTE.bearish;
+  return CHART_PATTERN_PALETTE.neutral;
+}
+
 let pc_patternPrimitive = null;
 let pc_dailyPatternPrimitive = null;
 
@@ -350,10 +374,10 @@ class ChartPatternPrimitive {
       context.lineJoin = 'round';
       for (const p of this.patterns) {
         const reg = p.registry || {};
-        const bullish = reg.bias === 'bullish';
-        const bearish = reg.bias === 'bearish';
-        const color = bullish ? '#26a69a' : bearish ? '#ef5350' : '#f59e0b';
-        const soft = bullish ? 'rgba(38,166,154,0.10)' : bearish ? 'rgba(239,83,80,0.10)' : 'rgba(245,158,11,0.10)';
+        const palette = chartPatternPalette(reg);
+        const color = palette.line;
+        const pointColor = palette.point;
+        const soft = palette.soft;
 
         for (const z of p.zones || []) {
           const x1 = xOf(z.t1), x2 = xOf(z.t2), y1 = yOf(z.high), y2 = yOf(z.low);
@@ -385,7 +409,7 @@ class ChartPatternPrimitive {
         for (const pt of p.points || []) {
           const x = xOf(pt.time), y = yOf(pt.price);
           if (x == null || y == null) continue;
-          context.fillStyle = color;
+          context.fillStyle = pointColor;
           context.strokeStyle = '#071018';
           context.lineWidth = 2 * horizontalPixelRatio;
           context.beginPath();
@@ -412,7 +436,7 @@ class ChartPatternPrimitive {
             context.roundRect(lx, ly, w, h, 5 * horizontalPixelRatio);
             context.fill();
             context.stroke();
-            context.fillStyle = color;
+            context.fillStyle = pointColor;
             context.fillText(text, lx + padX, ly + 14 * verticalPixelRatio);
           }
         }
