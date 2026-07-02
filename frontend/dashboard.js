@@ -2973,11 +2973,18 @@ async function refreshWatchlistPrices() {
       }
     } catch(e) {}
   }
-  for (const item of watchlist) {
-    if (updated.has(item.symbol) && item.chg != null) continue;
-    await fetchWatchlistPrice(item.symbol);
-    await new Promise(r => setTimeout(r, 120));
-  }
+  // Fallback pre tickery bez batch rate / bez % zmeny — /api/ohlcv je po
+  // prefetchi cache-backed, takže 3 paralelné workery sú bezpečné a rádovo
+  // rýchlejšie než pôvodná séria so 120 ms pauzou na ticker.
+  const pending = watchlist.filter(item => !(updated.has(item.symbol) && item.chg != null));
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const item = pending[cursor++];
+      await fetchWatchlistPrice(item.symbol);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
 }
 
 async function refreshWatchlistNames() {
@@ -5444,6 +5451,23 @@ function setSbTab(tab, el) {
 }
 
 // ── XLSX IMPORT ──────────────────────────────────────────────────────────────
+// SheetJS je ~900 KB a potrebuje ho len XLSX import (pár krát do mesiaca) —
+// preto sa neťahá v <head>, ale lazy až pri prvom použití.
+let _xlsxLoading = null;
+function ensureXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  if (!_xlsxLoading) {
+    _xlsxLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      s.onload = resolve;
+      s.onerror = () => { _xlsxLoading = null; reject(new Error('SheetJS sa nepodarilo načítať')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _xlsxLoading;
+}
+
 async function importXlsx(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -5453,6 +5477,7 @@ async function importXlsx(event) {
   const threshold = thresholdEl ? (parseInt(thresholdEl.value) || 0) : 100;
 
   try {
+    await ensureXLSX();
     const buf  = await file.arrayBuffer();
     const wb   = XLSX.read(buf, { type: 'array' });
 
@@ -5519,12 +5544,11 @@ Sheet: ${sheetName}`);
   const cols = localStorage.getItem('td_cols') || '2';
   document.getElementById('grid').style.setProperty('--cols', cols);
   document.getElementById('col-sel').value = cols;
-  await refreshPresetDropdown('');
-
   loadLogoMap();
   watchlist = loadWatchlist();
   renderSidebar();
-  await syncWatchlistFromServer();
+  // Preset dropdown a watchlist sync sú nezávislé — paralelne namiesto vodopádu
+  await Promise.all([refreshPresetDropdown(''), syncWatchlistFromServer()]);
 
   // Načítaj layout — spracuj grafy aj portfolio panely
   for (const cfg of loadLayout()) {
@@ -5543,15 +5567,21 @@ Sheet: ${sheetName}`);
   }
 
   setTimeout(async () => {
-    await loadAll();
-    await refreshWatchlistPrices();
-    await refreshWatchlistNames();
-    // Spusti background prefetch
-    startBackgroundPrefetch();
-    // eToro inicializácia
-    await loadEtoroWatchlistId();
-    await loadEtoroAccounts();
-    await loadHeaderPortfolioAccounts();
+    startBackgroundPrefetch();   // fire-and-forget, nezávislé
+    // Jediná reálna závislosť: header portfóliá potrebujú zoznam účtov.
+    const etoroInit = (async () => {
+      await loadEtoroAccounts();
+      await loadHeaderPortfolioAccounts();
+    })();
+    // Grafy, watchlist ceny, eToro watchlist ID a účty sú navzájom nezávislé —
+    // pôvodný sekvenčný vodopád zdržiaval štart o súčet všetkých latencií.
+    await Promise.all([
+      loadAll(),
+      refreshWatchlistPrices(),
+      loadEtoroWatchlistId(),
+      etoroInit,
+    ]);
+    refreshWatchlistNames();   // len dopĺňa chýbajúce názvy — netreba naň čakať
     // Subscribe existujúce watchlist tickery na WS
     for (const item of watchlist) {
       cacheInstrumentId(item.symbol, item.instrumentId);
