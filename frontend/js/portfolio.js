@@ -1599,6 +1599,9 @@ function renderPortPanel(pid) {
   cont.innerHTML = html;
   if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);
   resolveGfLinks();
+  if (pid === 'main' && typeof syncChartDockPosition === 'function') {
+    syncChartDockPosition();
+  }
 }
 
 // Portfolio akcie

@@ -634,13 +634,17 @@ body.sidebar-collapsed #sb-resizer {
 /* ── CHART DOCK (bočný graf) ── */
 #chart-dock {
   width: var(--dock-width, 420px);
-  flex-shrink: 0;
   background: var(--bg);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  position: relative;
+  position: fixed;
+  top: var(--dock-top, 183px);
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  box-shadow: -18px 0 30px color-mix(in oklch, var(--bg), transparent 35%);
 }
 #chart-dock.hidden { display: none; }
 .dock-header {
@@ -1194,6 +1198,9 @@ body.sidebar-collapsed #sb-resizer {
   flex: 1;
   min-height: 360px;
   overflow: auto;
+}
+body.dock-open #main-portfolio .port-table-wrap {
+  margin-right: var(--dock-width, 420px);
 }
 .port-table, .tool-table {
   border-collapse: separate;

@@ -282,11 +282,52 @@ async function ensureHoldingsForChartFlags() {
 // Zámerne ZAHRNUTÝ v loadAll() bulk refreshi a v applyAllChartPortfolioFlags.
 let dockPanelId = null;
 
+function resizeChartPanelNow(id) {
+  const panel = document.getElementById(id);
+  const r = registry[id];
+  if (!panel || !r) return;
+  const mainCont = panel.querySelector('.chart-main');
+  const w = mainCont?.clientWidth || panel.clientWidth;
+  const h = mainCont?.clientHeight;
+  if (w > 0 && h > 0) {
+    try { r.mainChart?.applyOptions({ width: w, height: h }); } catch(e) {}
+  } else if (w > 0) {
+    try { r.mainChart?.applyOptions({ width: w }); } catch(e) {}
+  }
+  for (const chart of [r.rsiChart, r.adxChart, r.macdChart]) {
+    try { chart?.applyOptions({ width: w }); } catch(e) {}
+  }
+}
+
+function syncChartDockPosition() {
+  const dock = document.getElementById('chart-dock');
+  if (!dock || dock.classList.contains('hidden')) return;
+  let top = null;
+  if (activeMainTab === 'portfolio') {
+    const tableWrap = document.querySelector('#main-portfolio .port-table-wrap');
+    const rect = tableWrap?.getBoundingClientRect();
+    if (rect && Number.isFinite(rect.top) && rect.top > 0) top = rect.top;
+  }
+  if (top == null) {
+    const tabs = document.querySelector('#tabs');
+    const rect = tabs?.getBoundingClientRect();
+    top = rect ? rect.bottom : 183;
+  }
+  document.documentElement.style.setProperty('--dock-top', `${Math.max(120, Math.round(top))}px`);
+  setTimeout(() => {
+    if (dockPanelId && registry[dockPanelId]) {
+      resizeChartPanelNow(dockPanelId);
+    }
+  }, 0);
+}
+
 function openChartDock(symbol) {
   const sym = String(symbol || '').trim().toUpperCase();
   if (!sym) return;
   const dock = document.getElementById('chart-dock');
   dock?.classList.remove('hidden');
+  document.body.classList.add('dock-open');
+  syncChartDockPosition();
   localStorage.setItem('td_dock_open', '1');
   const titleEl = document.getElementById('dock-title');
   if (titleEl) titleEl.textContent = sym;
@@ -312,6 +353,7 @@ function openChartDock(symbol) {
 function closeChartDock() {
   if (dockPanelId) { removePanel(dockPanelId); dockPanelId = null; }
   document.getElementById('chart-dock')?.classList.add('hidden');
+  document.body.classList.remove('dock-open');
   localStorage.setItem('td_dock_open', '0');
 }
 

@@ -122,6 +122,9 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+  window.addEventListener('resize', () => {
+    if (typeof syncChartDockPosition === 'function') syncChartDockPosition();
+  });
 })();
 // ── CHART DOCK RESIZE ────────────────────────────────────────────────────────
 // Dock ostáva pri načítaní vždy zatvorený (žiadny reštart na starý ticker) —
