@@ -2743,6 +2743,9 @@ function setAlert(sym, type, value, timeframe) {
   alertMap[sym] = alertMap[sym].filter(a => !(a.type === type && a.timeframe === timeframe));
   if (value !== null) {
     alertMap[sym].push({ type, value: parseFloat(value), timeframe: timeframe || 'daily', triggered: false });
+    // Povolenie na notifikácie si pýtame až tu — pri reálnom user geste.
+    // Žiadosť pri načítaní stránky prehliadače trestajú automatickým blokom.
+    if (Notification.permission === 'default') Notification.requestPermission();
   }
   saveAlerts(alertMap);
   renderSidebar();
@@ -2758,9 +2761,6 @@ function resetTriggered(sym) {
   if (alertMap[sym]) alertMap[sym].forEach(a => a.triggered = false);
   saveAlerts(alertMap);
 }
-
-// Požiadaj o browser notification permission
-if (Notification.permission === 'default') Notification.requestPermission();
 
 // Editor stav
 let openEditorSym = null;
@@ -5539,6 +5539,35 @@ Sheet: ${sheetName}`);
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
+// Memory profile chip — v low profile sú ML/HMM/breadth potichu vypnuté a
+// Predictive tab len "nemá" niektoré čísla. Chip robí ten stav viditeľným,
+// nech sa nehľadá neexistujúca chyba. Pri plnom profile sa neukáže vôbec.
+async function loadMemProfileChip() {
+  try {
+    const r = await fetch(`${API}/api/admin/memory`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const flags = d.feature_flags || {};
+    const offLabels = {
+      predictive_ml: 'ML predikcia',
+      predictive_hmm: 'HMM regime',
+      signal_context_backfill: 'context backfill',
+      signal_analytics: 'signal analytics',
+      market_breadth: 'breadth',
+      massive_sp500: 'S&P 500 snapshot',
+      massive_market: 'Massive EOD',
+    };
+    const off = Object.entries(flags).filter(([, v]) => !v).map(([k]) => offLabels[k] || k);
+    if (!off.length) return;
+    const chip = document.getElementById('mem-profile-chip');
+    if (!chip) return;
+    chip.textContent = `${d.profile || 'low'}-mem · ${off.length} off`;
+    chip.title = `Pamäťový profil ${d.profile}: vypnuté vrstvy — ${off.join(', ')}. `
+      + `Zapnúť sa dajú env flagmi (ENABLE_*=1), viď /api/admin/memory.`;
+    chip.style.display = 'inline-block';
+  } catch(e) {}
+}
+
 (async function init() {
   setWsStatus('connecting'); // okamžite — WS sa spustí po async inicializácii
   const cols = localStorage.getItem('td_cols') || '2';
@@ -5566,6 +5595,7 @@ Sheet: ${sheetName}`);
     switchMainTab(requestedTab);
   }
 
+  loadMemProfileChip();   // fire-and-forget — viditeľnosť vypnutých vrstiev
   setTimeout(async () => {
     startBackgroundPrefetch();   // fire-and-forget, nezávislé
     // Jediná reálna závislosť: header portfóliá potrebujú zoznam účtov.

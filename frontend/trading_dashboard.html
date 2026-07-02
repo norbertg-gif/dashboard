@@ -7,11 +7,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trading Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260702-init-parallel">
+<link rel="stylesheet" href="/dashboard.css?v=20260702-polish">
 </head>
 <body>
 
@@ -60,6 +59,7 @@
     <div class="header-equity acct2" onclick="switchAccount('2')" style="cursor:pointer;" title="Prepnúť na účet 2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
   </div>
   <div id="ws-status" title="eToro WebSocket — live ceny" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);"><span id="ws-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block;"></span><span id="ws-status-txt">WS</span></div>
+  <span id="mem-profile-chip" style="display:none;font-size:9px;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;cursor:help;"></span>
   <div id="hdr-status">—</div>
 </div>
 
@@ -405,6 +405,6 @@
     </table>
   </div>
 </div>
-  <script src="/dashboard.js?v=20260702-init-parallel"></script>
+  <script src="/dashboard.js?v=20260702-polish"></script>
 </body>
 </html>
