@@ -1,0 +1,7 @@
+# Normalizácia koncov riadkov — mixed CRLF/LF robil z malých zmien
+# 20 000-riadkové diffy (editor na Windows vs cloud sessions).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gz binary
+*.xlsx binary
