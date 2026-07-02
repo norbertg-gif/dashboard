@@ -839,6 +839,17 @@ jazykom.
 
 ---
 
+### Poznámka k denným percentám
+
+Filter **Pozornosť** a preset **Top pohyby** používajú denný cenový pohyb
+`currentRate vs previousClose`. Pri tituloch obchodovaných na eToro 24/5 môže
+mať eToro UI inú hranicu obchodného dňa alebo session, takže percento nemusí
+sedieť presne. Pri štandardne obchodovaných akciách by sa hodnoty mali správať
+konzistentne. Pri ďalších úpravách daily percent na tento rozdiel vždy myslieť
+a pri nejasnostiach ho používateľovi pripomenúť.
+
+---
+
 ## 9. Troubleshooting
 
 | Príznak | Príčina / riešenie |
