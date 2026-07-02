@@ -3785,7 +3785,10 @@ function applyChartPortfolioFlag(id) {
   const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
   const held = isTickerInPortfolio(sym);
   panel.classList.toggle('portfolio-held', held);
-  panel.title = held ? `${sym} je v portfóliu` : '';
+  const h = held ? _holdings[sym] : null;
+  panel.classList.toggle('profit', !!h && h.pnl >= 0);
+  panel.classList.toggle('loss', !!h && h.pnl < 0);
+  panel.title = held ? `${sym} je v portfóliu (${h.pnl >= 0 ? '+' : ''}${h.pnl_pct.toFixed(1)} %)` : '';
 }
 
 function applyAllChartPortfolioFlags() {

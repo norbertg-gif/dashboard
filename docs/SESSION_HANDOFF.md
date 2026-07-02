@@ -1,152 +1,174 @@
-# Session Handoff — 2026-06-11 (večer)
+# Session Handoff — 2026-07-02 (pokračovanie v novom vlákne, token limit)
 
-## Doplnené 2026-06-13 — kompletný používateľský manuál
+## Stav repa
 
-- `frontend/help.html` bol rozšírený na praktickú príručku pre menej skúseného
-  tradera: odporúčaný workflow, bežné grafy, Portfólio/História/Risk, samostatný
-  Investičný Verdikt, MFE/MAE, HMM High Vol a obmedzenia Volume Profile.
-- Doplnené sú aj vysvetlenia analytických cieľov, live odhadov P/L, Massive
-  EOD vrstvy a troubleshooting po deployi.
-- `docs/MANUAL.md` je zosúladený s používateľskou časťou HTML manuálu.
-- Technická príloha už uvádza Python 3.14 a Lightweight Charts 5.2.0.
+`main` je čistý a plne pushnutý, posledný commit `2388b80` (smoke_test.py).
+Žiadne uncommitted zmeny, žiadny rozdiel voči `origin/main` v čase písania.
 
-## Stav po tejto session
+```
+2388b80 test: smoke_test.py — 15-sekundová poistka proti endpoint regresiám
+bd3ddd4 feat: ⚙ Nastavenia prahov — server-side, jeden zdroj pre backend aj frontend
+184fa68 ui: font dedup, notification permission pri geste, memory profile chip
+534910c perf: paralelizácia init sekvencie + SheetJS lazy-load
+ef481bc chore: .gitattributes eol=lf + jednorazová normalizácia koncov riadkov
+4abdf19 perf: GZip middleware + Cache-Control na statiku
+369a220 revert(portfolio): odstrániť equity krivku — eToro balance API je 403
+2c4e61a docs: opraviť doslovný \n v CLAUDE.md
+0a3c883 chore: diagnostický endpoint pre equity krivku
+c1dc084 fix(portfolio): zobraziť skutočnú príčinu zlyhania equity krivky
+3e899e8 feat(news): klastrovanie duplicitných článkov
+c82b844 feat(portfolio): vyhodiť 'profit' z dôvodov Pozornosti
+dfb94b9 feat: add portfolio attention filter
+```
 
-Posledný commit na `main`: pozri `git log` — session končila webhook testom (tento docs commit).
+Verzia cache-bustu: `?v=20260702-settings` (aktuálna v `trading_dashboard.html`,
+treba bumpnúť pri ďalšej JS/CSS zmene).
 
----
+## Rozrobená úloha — HOTOVO (implementované v pokračovaní tejto session)
 
-## Čo bolo dokončené v tejto session
+**Používateľova požiadavka (posledná správa pred limitom):**
+> Uprav orámovanie grafov. Teraz sú orámované zeleno tie ktoré mám v portfóliách,
+> vieš to urobiť aby orámovanie bolo rozličné pre ziskový / stratový titul?
+> (berieme do úvahy celkovú sumu ktorú tam už máme kdesi)
 
-### Lightweight Charts 4.1.3 → 5.2.0 (backlog #4 — done)
-- `addXSeries(opts)` → `addSeries(LightweightCharts.XSeries, opts)` (46 miest)
-- `series.setMarkers()` → `setSeriesMarkers()` helper nad `createSeriesMarkers` (WeakMap, jeden primitive per series)
-- TradingView attribution logo (v5 default) vypnuté: `layout.attributionLogo: false` všade
-- Crosshair `MagnetOHLC` vo všetkých troch zdrojoch options
+### Čo to znamená
+Panely grafov (v Grafy tabe) majú zelený border/glow keď je ticker v portfóliu —
+bez ohľadu na to, či je pozícia v zisku alebo strate. Používateľ chce farbu
+podmieniť **agregovaným P/L** (nie len prítomnosťou v portfóliu).
 
-### Hover tooltipy na markeroch (backlog #3 — done)
-- Zdieľaný `attachMarkerTooltip()` helper; id-based hit-testing (`hoveredInfo.objectId` + `hoveredObjectId` fallback)
-- Dashboard panely: `registry[id]._markerMeta`, Predictive: `pc_markerMeta`
-- Pokrýva eToro pozície, buy signály aj pattern markery; staré time-based tooltipy zmazané
-- Pitfall fix: P/L farba markerov z `pos.pnl`, fallback rozlišuje short pozície
+### Presný aktuálny stav (overené, pripravené na úpravu)
 
-### Volume Profile (backlog #5 — done)
-- Vlastný `VolumeProfilePrimitive` (v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example), bez závislosti
-- 40 binov z viditeľného rozsahu, objem rozdelený medzi biny pretínané high–low, pravý okraj, max 18 % šírky
-- Checkbox `chk_vp` v Indikátory—overlay → `pc_toggleVolumeProfile()`, stav v `localStorage.pc_vp_enabled`
-- SafariTrader plugin zavrhnutý (vlastný DOM/canvas, kolízia s témami)
+**CSS** (`frontend/dashboard.css`, riadky 741–747):
+```css
+.panel.portfolio-held {
+  border-color: color-mix(in srgb, var(--up) 72%, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 34%, transparent), var(--shadow-sm);
+}
+.panel.portfolio-held.focused {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 55%, transparent), var(--shadow-md);
+}
+```
+Vždy `var(--up)` (zelená), bez ohľadu na P/L.
 
-### Earnings — zjednotenie zdrojov
-- **Scanner badge**: vždy viditeľné `E: dátum` / `⚠ E:` (≤7 dní) / `E: n/a` (user)
-- **Predictive karta**: `/api/chart` číta primárne Finnhub/AV kalendár (`get_earnings_calendar(refresh=0)` — pozor, bez explicitného argumentu príde truthy FastAPI Query objekt!), yfinance `.calendar` len fallback (Yahoo blokuje Render IP)
-- Predictive karta vždy viditeľná, placeholder "Zatiaľ nedostupné" (user)
-- **OPEN: overiť na prode** — `fetch('/api/earnings?refresh=1')` → `dates.ADBE` má vrátiť dátum; ak error, pozri Render logs `[earnings] finnhub failed` (možný 403 ak Finnhub presunul calendar do premium)
+**JS** (`frontend/dashboard.js`, riadky ~3777–3793):
+```js
+function isTickerInPortfolio(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  return !!(sym && _holdings && _holdings[sym]);
+}
 
-### Backend opravy
-- **ADX bug**: duplicitná sada `calc_*` definícií (CLAUDE.md pitfall reintrodukovaný) — druhá `calc_adx` (DataFrame) tieňovala prvú (tuple), `add_indicators` rozbaľoval názvy stĺpcov → ADX/DI± features boli NaN. Duplicity zmazané, ADX features znova živé → môže ovplyvniť predikcie (očakávané).
-- **Python 3.14.3 + pandas 3**: `runtime.txt` Render ignoruje → `.python-version` + `PYTHON_VERSION` env var. Výstupy indikátorov overené identické pandas 2.3.3 vs 3.0.3. `pandas<4`, `numpy<3` capy.
+function applyChartPortfolioFlag(id) {
+  const panel = document.getElementById(id);
+  if (!panel || panel.id.startsWith('port-panel-')) return;
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  const held = isTickerInPortfolio(sym);
+  panel.classList.toggle('portfolio-held', held);
+  panel.title = held ? `${sym} je v portfóliu` : '';
+}
 
-## Infra poznámky
+function applyAllChartPortfolioFlags() {
+  document.querySelectorAll('.panel').forEach(panel => applyChartPortfolioFlag(panel.id));
+}
+```
+Volané z `createPanel()` (r. ~4129) a `loadChart()` (r. ~5034), plus po `loadHoldings()`.
 
-- **Render auto-deploy flaká** (GitHub App fronta, v konfigurácii sa nič nemenilo). Riešenie: GitHub webhook → Render **Deploy Hook URL** (Just the push event). Nastavené userom na konci session — tento docs commit je test webhooku.
-- Render služba **nečíta render.yaml** (dashboard-managed) — env vars meniť ručne v UI. `PYTHON_VERSION=3.14.3` nastavená.
-- Claude session vetvy (`claude/*`) na remote: user ich nechce, mazať v GitHub UI (session proxy ich mazať nevie — 403).
+**Dátový zdroj — `_holdings` global**, plnený z `GET /api/portfolio/holdings`
+(`loadHoldings()`, r. ~7906). Backend `_get_portfolio_holdings()` už počíta
+**agregovaný `pnl_pct` naprieč tranžami** (nie per-trade) — presne to, čo
+používateľ myslí frázou "celková suma, ktorú tam už máme kdesi". Tvar dát:
+```json
+{ "AAPL": { "pnl": 123.45, "pnl_pct": 8.2, "amount": 1500.0 }, ... }
+```
+Toto pole **už existuje a je dostupné** — netreba nový endpoint.
 
-## Doplnené po handoffe (pokračovanie session 2026-06-12)
+### Navrhovaný postup implementácie
 
-- **Earnings vyriešené definitívne**: bulk Finnhub vynecháva veľké tituly (1498 tickerov bez ADBE!) → per-symbol reťazec `_earnings_next_date`: bulk → Finnhub `?symbol=` → Yahoo calendarEvents → yf. Predictive karta + browser-direct AV fallback + diagnostika priamo v karte. OVERENÉ na prode (ADBE, AAPL, NVDA).
-- **TRH kontextová lišta v Scanneri**: `GET /api/market/context` (QQQ/SPY trend, Nasdaq-100 breadth na pozadí, VIX, sektorová rotácia), 6h cache, dokumentácia v help.html/MANUAL.md. NEOVPLYVŇUJE C1–C4.
-- **Auto-fill grafov**: `.p-chart` flex 1 1 250px + zlúčený RO (výška+šírka+kumo). Drag handle mení flex-basis. Issue: kumo canvas po resize (backlog 6).
-- **Insider & EPS karta v Predictive**: `GET /api/ticker/insights/{symbol}` — primárne Finnhub (insider-transactions P/S kódy + earnings surprises), Yahoo quoteSummary fallback (z Render IP NEPREJDE — overené). `_scrub_token()` maskuje kľúč v chybách. OVERENÉ na prode (NVDA).
-- **Firma & očakávania rozšírená**: rovnaký insights endpoint teraz fail-soft
-  dopĺňa Finnhub recommendation trend, konsenzuálny price target (mean + low/high)
-  a short interest z basic metrics; Yahoo moduly sú fallback. UI ukazuje
-  Buy/Hold/Sell, cieľ v hodnote + potenciál % + rozpätie a nízky/zvýšený/vysoký
-  short interest. Zatiaľ iba kontext, bez zásahu do C1–C4/ML.
-- **Deploy webhook**: Render GitHub App flakala → GitHub webhook na Render Deploy Hook URL (Just the push event). Funguje spoľahlivo.
-- **Analytické plány poznačené v CLAUDE.md** (user si vyžiada): RS/párový kontext, makro kvadrant, news clustering.
+1. **CSS**: nahradiť jednu triedu `.panel.portfolio-held` dvomi variantmi,
+   napr. `.panel.portfolio-held.profit` (zelená, `var(--up)`) a
+   `.panel.portfolio-held.loss` (červená, `var(--down)`). Zachovať rovnakú
+   štruktúru (`color-mix` s `var(--accent)`, `.focused` variant).
+2. **JS**: v `applyChartPortfolioFlag(id)` po zistení `held`, ak `held`,
+   pozrieť `_holdings[sym].pnl` (alebo `pnl_pct`) a nastaviť triedu
+   `profit`/`loss` namiesto/popri `portfolio-held`. Rozhodnúť hraničný prípad
+   `pnl === 0` (zaradiť ako profit, alebo neutrálna tretia farba — zvoliť
+   rozumný default, prípadne krátko spomenúť v odpovedi).
+3. Zvážiť, či title tooltip má tiež niesť P/L info (`"AAPL je v portfóliu
+   (+8.2 %)"`) — malé zlepšenie UX zadarmo, konzistentné s CLAUDE.md pitfall
+   "Profit/loss colouring uses pos.pnl >= 0, not rate comparison" (rovnaký
+   princíp platí aj tu — použiť `pnl`/`pnl_pct` z `_holdings`, nie rate
+   porovnanie).
+4. Bump `?v=` cache-bust v `trading_dashboard.html` (aktuálne `20260702-settings`
+   → nová hodnota).
+5. Syntax check (`node --check frontend/dashboard.js`), commit, push.
+6. **Dokumentácia**: vyhľadať "portfolio-held" v `CLAUDE.md` (sekcia "Chart UX
+   helpers") a aktualizovať popis na nové profit/loss správanie; skontrolovať
+   aj `docs/MANUAL.md`/`frontend/help.html`.
 
-## Backlog po tejto session
+### Čo NIE je súčasťou tejto úlohy
+- Nemeniť backend `_get_portfolio_holdings()` — dáta už sú v správnom tvare.
+- Nemeniť inú CSS triedu (`.panel.focused`, `.panel.loading-state`, atď.) —
+  len `.portfolio-held` a jej `.focused` variant.
 
-1. Predictive accuracy → 60 %+ (ROC 4-week, 52-week high/low feature) — **ADX features po fixe znova prispievajú**
-2. Regime-aware signal analytics (backfill, min 20–30 signálov per regime)
-3. ~~Hover tooltip~~ done
-4. ~~LWC v5~~ done — voliteľné: native panes pre subpanely, `setSeriesOrder()`, data conflation
-5. ~~Volume Profile~~ done — vizuálne overiť na prode (kreslenie netestované v browseri)
-6. ~~Kumo canvas po resize~~ fixed — redraw počká na dokončenie LWC layoutu.
-7. ~~Legacy eToro recommendations~~ odstranene 2026-06-22
-8. Earnings retry drobnosť: `_earningsDates = {}` po chybe sa drží do reloadu (zvážiť TTL reset)
+### Implementácia (hotovo)
+- CSS: `.panel.portfolio-held` rozdelené na `.profit` (zelená, `var(--up)`)
+  a `.loss` (červená, `var(--down)`), oba s `.focused` variantom —
+  `frontend/dashboard.css`.
+- JS: `applyChartPortfolioFlag()` po zistení `held` prečíta `_holdings[sym].pnl`
+  a prepína triedy `profit`/`loss` (`pnl >= 0` → profit, edge case `pnl === 0`
+  ide do profit vetvy). Title tooltip teraz nesie aj `pnl_pct`
+  (`"AAPL je v portfóliu (+8.2 %)"`) — `frontend/dashboard.js`.
+- Cache-bust bumpnutý na `?v=20260702-pnlborder` v `trading_dashboard.html`.
+- `CLAUDE.md` sekcia "Chart UX helpers" aktualizovaná; `docs/MANUAL.md`/
+  `frontend/help.html` nemali existujúcu zmienku o farbe rámu, netreba meniť.
+- `node --check` OK, `smoke_test.py` PASS 17/17.
 
-## Doplnené 2026-06-12 — Investor Verdikt
+## Kontext projektu (pre orientáciu v novom vlákne)
 
-- Samostatný tab agreguje existujúce technické, trhové, earnings a firemné
-  dáta do odpovede ÁNO / POČKAŤ / NIE.
-- Bez nového black-box skóre: explicitné pravidlá v `buildInvestorVerdict()`.
-- Max. 2 argumenty pre, 2 proti a jedna podmienka zmeny verdiktu.
-- Source chips ukazujú dostupnosť podkladov; chýbajúce dáta znižujú istotu.
-- 10-min browser cache + `verdictLoadSeq` proti race condition pri rýchlom
-  prepínaní tickerov.
-- Odkaz na Verdikt je v Scanneri aj v Decision Bare Prediktívneho tabu.
+Trading dashboard pre eToro monitoring — FastAPI backend (`backend/trading_backend.py`,
+~7650 LOC) + vanilla JS frontend (`frontend/dashboard.js`, ~9000 LOC). Nasadené
+na Render.com, 512 MB RAM limit (`DASH_MEMORY_PROFILE=low` default vypína
+ML/HMM/breadth vrstvy). Plný kontext je v `CLAUDE.md` (koreň repa) — **prečítať
+ako prvé v novom vlákne**, obsahuje kompletné pracovné konvencie, pitfalls
+a architektonické poznámky pre každú funkciu appky.
 
-## Doplnene 2026-06-13 - autonomna davka (backlog + analyticke plany)
+### Posledná väčšia session (dnešná) — zhrnutie
+Prebehla rozsiahla revízia + performance/UX vylepšenia:
+- Equity krivka z eToro balance history bola postavená a **odstránená**
+  (eToro API vracia 403 — chýbajúci OAuth scope na partnerských API kľúčoch,
+  ktoré appka používa, `x-api-key`/`x-user-key`, nie OAuth). Nepokúšať sa
+  o rovnaký prístup znova.
+- News clustering (duplicitné články tej istej udalosti) — hotové, funkčné.
+- Portfolio "Pozornosť" filter (attention filter) — reuse Investor Inboxu,
+  badge DCA/Earnings/Graf/Pohyb pri tickeroch v Portfóliu. **Toto sa
+  používateľovi obzvlášť páči** (jeho slová: "flagy v portfóliu pri tituloch
+  sa mi páčia").
+- Risk tab bol dvakrát odstránený (raz zámerne, raz čiastočne vrátený
+  cudzím mergom a znova vyčistený) — DCA karta prežila presunom do Portfólia.
+- Performance balík: GZip middleware, Cache-Control immutable na JS/CSS,
+  paralelizácia init sekvencie, lazy-load SheetJS, `.gitattributes` (koniec
+  CRLF/LF diff šumu), `smoke_test.py` (17 core endpoint checks, PASS 17/17).
+- Nový `⚙ Nastavenia` panel — DCA/Pozornosť/earnings prahy teraz server-side
+  v `dashboard_settings.json` (gitignored, na `/data`), upraviteľné bez
+  redeployu cez `GET/POST /api/settings`.
 
-- **Predictive features (#1)**: roc_4 (4-period ROC) + pos_52w (pozicia v rolling 52-period high/low rozsahu, 0-1, min_periods=20) pridane do ML_FEATURES (teraz 12). ADX/DI features znova zive po fixe duplicit.
-- **Makro rezim kvadrant** (analyticky plan #2): _mc_regime_quadrant() -> Goldilocks/Prehriatie/Risk-off/Utlm/Neutral z QQQ/SPY trendu + VIX + breadth. Pole market_regime v /api/market/context, chip na cele TRH listy. NEOVPLYVNUJE C1-C4.
-- **Relativna sila** (analyticky plan #1, ciastocne): GET /api/ticker/rs/{symbol} = RS voci QQQ/SPY (1M/3M), karta #rsCard v Predictive (pc_loadRS). Sektorove ETF RS je hotove cez Finnhub profile2/SPDR mapu.
-- **Legacy eToro recommendations (#7)**: neskor odstranene; free eToro API tier endpoint nepodporoval a UI ho uz nepouzivalo.
-- **Manualy**: Volume Profile + Insider & EPS doplnene do help.html/MANUAL.md.
+### Pracovné zvyklosti (potvrdené v tejto session)
+- Vždy `git fetch origin main` + pull na začiatku session — používateľ alebo
+  iné session môžu pushnúť medzi kontaktmi.
+- `-w` (ignore whitespace) pri `git diff`/`git show --stat` na overenie reálnej
+  veľkosti zmeny — CRLF/LF mix v `CLAUDE.md` predtým skresľoval diff staty;
+  `.gitattributes` (commit `ef481bc`) by to malo ukončiť, ale overiť pri
+  prvej väčšej zmene.
+- Bump `?v=` v `trading_dashboard.html` po KAŽDEJ zmene `dashboard.js`/`.css`.
+- Syntax check pred commitom: `node --check frontend/dashboard.js` +
+  `python -c "import ast; ast.parse(open('backend/trading_backend.py').read())"`.
+- Pri neistote overiť endpoint diagnostickým volaním (napr. in-process
+  `uvicorn` test v Bashi) namiesto hádania — viackrát sa to vyplatilo
+  (FMP price target, eToro equity 403).
+- Dokumentácia (`CLAUDE.md`, `docs/MANUAL.md`, `frontend/help.html`) sa
+  aktualizuje pri každej funkčnej zmene, nie len kód.
+- Používateľ komunikuje po slovensky, kód/commit messages môžu byť SK aj EN.
 
-## Zostava otvorene
-
-- **#2 Regime-aware signal analytics** - backfill historickych signalov (download OHLCV per ticker, slice pri datume signalu, recompute kontext bez look-ahead). Potrebuje zive data + rozhodnutie o pristupe.
-- **News clustering** (analyticky plan #3) - az ked bude news cache naplnena.
-- **Sektorove ETF RS** - hotove cez Finnhub profile2/SPDR mapu; aktualne pouzivane len ako trhovy/sektorovy kontext tam, kde ma viditelny UI vystup.\n
-## Cache verzia
-
-`?v=20260613-massive2` (JS aj CSS)
-
-## Doplnené 2026-06-13 — Massive Nasdaq Market Pulse
-
-- `MASSIVE_API_KEY` ostáva iba v Render environment.
-- Grouped EOD endpoint sa volá najviac raz za uzavretý obchodný deň.
-- Na disk sa z celého US snapshotu ukladá iba zjednotený Nasdaq-100 + S&P 500
-  subset do `DATA_ROOT/massive_market/YYYY-MM-DD.json`.
-- S&P 500 universe sa obnovuje z Wikipédie raz za 7 dní; pri chybe ostáva stale
-  cache. Bodkové tickery sa normalizujú na pomlčku.
-- `_massive_universe_context()` počíta samostatný NDX aj SPX Market Pulse:
-  A/D, percento nad denným VWAP a up/down volume ratio.
-- Scanner dostal stĺpec `Trh`: daily change, close vs VWAP a transakčný
-  percentil `Axx` v rámci Nasdaq-100.
-- Massive kontext je interpretačný a nemení C1–C4, DIP, ML ani tier.
-- Endpointy: `/api/market/massive`, rozšírený `/api/market/context`;
-  diagnostika ostáva `/api/diagnostics/massive`.
-
-
-## Doplnené 2026-07-01 - Alert center retired
-
-- Staré horné tlačidlo **Alerty** a endpoint `/api/events` boli odstránené.
-- Triage je zjednotená do **Investor Inboxu** v Scanneri.
-- Jeden ticker sa v Inboxe zobrazuje raz, aj keď má viac dôvodov naraz.
-
-## Doplnené 2026-06-22 - cleanup legacy eToro recommendations
-
-- Odstraneny nepouzivany frontend `toggleRecommendations()` a backend endpoint
-  `/api/etoro/recommendations`.
-- Dovod: free eToro API tier endpoint nepodporuje a v aktualnom HTML uz
-  neexistoval ovladaci prvok, ktory by tuto funkciu volal.
-- Cache verzia frontendu: `?v=20260622-alert2`.
-
-
-
-  sektorovy P/L a pocet titulov. Je to interpretacna vrstva, nemeni portfolio P/L.
-
-
-
-
-
-## Doplnen? 2026-06-29 - memory trim / 512 MB profil
-
-- Odstr?nen? Virtual Trading Bot z UI aj backendu (`/api/bot/*`). Ak sa vr?ti, rie?i? ako samostatn? projekt/slu?bu.
-- Backend m? nov? predvolen? `DASH_MEMORY_PROFILE=low` pre Render 512 MB.
-- Nov? diagnostick? endpoint `/api/admin/memory` vracia RSS/feature flags/cache sizes.
-- Cache verzia frontendu: `?v=20260629-memory-trim`.
+## Ďalšie odložené položky (nespojené s aktuálnou úlohou)
+- Bod C z UI/perf/funkcie analýzy (daňový export ★ pre časový test, backtest
+  alert pravidiel) — používateľ explicitne povedal "zatiaľ nepotrebujem",
+  nezačínať bez vyžiadania.

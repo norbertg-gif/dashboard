@@ -738,12 +738,19 @@ body.sidebar-collapsed #sb-resizer {
   border-color: var(--accent) !important;
   box-shadow: var(--shadow-glow), var(--shadow-lg);
 }
-.panel.portfolio-held {
+.panel.portfolio-held.profit {
   border-color: color-mix(in srgb, var(--up) 72%, var(--accent));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 34%, transparent), var(--shadow-sm);
 }
-.panel.portfolio-held.focused {
+.panel.portfolio-held.profit.focused {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--up) 55%, transparent), var(--shadow-md);
+}
+.panel.portfolio-held.loss {
+  border-color: color-mix(in srgb, var(--down) 72%, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--down) 34%, transparent), var(--shadow-sm);
+}
+.panel.portfolio-held.loss.focused {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--down) 55%, transparent), var(--shadow-md);
 }
 .panel.loading-state { border-color: var(--accent); }
 .panel.error-state   { border-color: var(--down); }
