@@ -1,5 +1,17 @@
 # Session Handoff — 2026-07-02 (pokračovanie v novom vlákne, token limit)
 
+## Najnovšie v tejto session
+
+- Pridaný **Chart Pattern overlay V1** do Prediktívneho tabu:
+  `frontend/js/chart_patterns.js` (registry + detektory + LWC primitive renderer),
+  checkbox `Pattern overlay` v karte *Indikátory — overlay* a vysvetľovacia karta
+  `Chart Pattern`.
+- V1 patterny: `Double Bottom`, `Double Top`, `Rectangle`,
+  `Ascending Triangle`, `Descending Triangle`; kreslí support/resistance,
+  neckline/trendline, dotykové body a stav `forming` / `confirmed` / `failed`.
+- Funkcia je striktne vizuálna pomôcka. Nemení C1–C4, scanner, Verdikt, ML ani
+  portfólio.
+
 ## FRONTEND SPLIT HOTOVÝ (doplnené neskôr v ten istý deň)
 
 `frontend/dashboard.js` (9022 r.) bol rozdelený na 9 modulov v `frontend/js/`

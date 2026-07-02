@@ -229,6 +229,7 @@ document.addEventListener('mousedown', e => {
 // Expose predictive functions globally for HTML onclick
 window.pc_applyOverlays = pc_applyOverlays;
 window.pc_toggleVolumeProfile = pc_toggleVolumeProfile;
+window.pc_toggleChartPatterns = pc_toggleChartPatterns;
 window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;

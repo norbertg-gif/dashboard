@@ -253,6 +253,15 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo
   (LVN). Profil sa prepočítava podľa zoomu — priblíženie = voľba obdobia analýzy.
   Stav prežíva reload (`localStorage`).
+- **Pattern overlay** (checkbox v *Indikátory — overlay*, skupina Chart patterns) —
+  vizuálna pomôcka nad hlavným Weekly/Daily grafom. Rozpozná základné zaužívané
+  formácie (`Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`,
+  `Descending Triangle`) a kreslí trendlines, support/resistance, neckline,
+  dotykové body a krátky label priamo v grafe. Pravý panel **Chart Pattern**
+  vysvetlí stav (`forming`, `confirmed`, `failed`), kvalitu, trigger úroveň a
+  invalidáciu. Vrstva je iba vizuálna: **nemení C1–C4, scanner, predikciu ani
+  Verdikt**. Pattern sa považuje za potvrdený až po breakoute/breakdowne podľa
+  pravidiel technickej analýzy.
 
 ### Pravý panel (sidebar)
 

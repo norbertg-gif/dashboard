@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260702-dockchart4">
+<link rel="stylesheet" href="/dashboard.css?v=20260702-patterns1">
 </head>
 <body>
 
@@ -300,7 +300,18 @@
           <input type="checkbox" id="chk_vp" onchange="pc_toggleVolumeProfile(this)">
           <label for="chk_vp">Volume Profile</label>
         </div>
+        <div class="ind-group-label" style="margin-top:6px;">Chart patterns</div>
+        <div class="ind-check-row">
+          <div class="ind-dot" style="background:#f59e0b;"></div>
+          <input type="checkbox" id="chk_patterns" onchange="pc_toggleChartPatterns(this)">
+          <label for="chk_patterns">Pattern overlay</label>
+        </div>
       </div>
+    </div>
+
+    <div class="card" id="chartPatternCard">
+      <div class="card-title">Chart Pattern <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;">vizuálna pomôcka</span></div>
+      <div id="chartPatternInfo" style="color:var(--muted); font-size:12px;">Zapni Pattern overlay.</div>
     </div>
 
     <div class="card">
@@ -439,14 +450,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260702-dockchart4"></script>
-  <script src="/js/live.js?v=20260702-dockchart4"></script>
-  <script src="/js/portfolio.js?v=20260702-dockchart4"></script>
-  <script src="/js/watchlist.js?v=20260702-dockchart4"></script>
-  <script src="/js/scanner.js?v=20260702-dockchart4"></script>
-  <script src="/js/predictive.js?v=20260702-dockchart4"></script>
-  <script src="/js/verdict.js?v=20260702-dockchart4"></script>
-  <script src="/js/charts.js?v=20260702-dockchart4"></script>
-  <script src="/js/main.js?v=20260702-dockchart4"></script>
+  <script src="/js/core.js?v=20260702-patterns1"></script>
+  <script src="/js/live.js?v=20260702-patterns1"></script>
+  <script src="/js/portfolio.js?v=20260702-patterns1"></script>
+  <script src="/js/watchlist.js?v=20260702-patterns1"></script>
+  <script src="/js/scanner.js?v=20260702-patterns1"></script>
+  <script src="/js/chart_patterns.js?v=20260702-patterns1"></script>
+  <script src="/js/predictive.js?v=20260702-patterns1"></script>
+  <script src="/js/verdict.js?v=20260702-patterns1"></script>
+  <script src="/js/charts.js?v=20260702-patterns1"></script>
+  <script src="/js/main.js?v=20260702-patterns1"></script>
 </body>
 </html>

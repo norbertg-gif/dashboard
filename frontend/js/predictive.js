@@ -291,6 +291,7 @@ function pc_attachMarkerTooltip(chart, containerId) {
 // ── Volume Profile (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) ──
 let pc_vpPrimitive = null;
 let pc_vpEnabled = localStorage.getItem('pc_vp_enabled') === '1';
+let pc_patternsEnabled = localStorage.getItem('pc_patterns_enabled') === '1';
 const PC_VP_BINS = 40;
 
 class VolumeProfilePrimitive {
@@ -372,8 +373,38 @@ function pc_toggleVolumeProfile(el) {
   pc_applyVolumeProfile();
 }
 
+function pc_applyChartPatterns() {
+  if (typeof applyChartPatternOverlay !== 'function' || !pc_lastData) return;
+  if (pc_currentView === 'daily') {
+    applyChartPatternOverlay({
+      chart: pc_dailyMainInst,
+      series: pc_dailyMainSeries,
+      candles: pc_lastData.daily_candles || [],
+      timeframe: 'daily',
+      enabled: pc_patternsEnabled,
+      daily: true,
+    });
+  } else {
+    applyChartPatternOverlay({
+      chart: pc_realChartInst,
+      series: pc_realSeries,
+      candles: pc_lastData.candles || [],
+      timeframe: 'weekly',
+      enabled: pc_patternsEnabled,
+      daily: false,
+    });
+  }
+}
+
+function pc_toggleChartPatterns(el) {
+  pc_patternsEnabled = !!el.checked;
+  localStorage.setItem('pc_patterns_enabled', pc_patternsEnabled ? '1' : '0');
+  pc_applyChartPatterns();
+}
+
 function initCharts() {
   removeKumoCanvas();
+  if (typeof clearChartPatternOverlays === 'function') clearChartPatternOverlays();
   pc__kumoPrimitive = null; // starý chart sa odstraňuje celý, detach netreba
   pc__kumoAreaSeries = [];
   clearSubpanel();
@@ -400,6 +431,8 @@ function initCharts() {
   pc_applyVolumeProfile();
   const vpChk = document.getElementById('chk_vp');
   if (vpChk) vpChk.checked = pc_vpEnabled;
+  const patternChk = document.getElementById('chk_patterns');
+  if (patternChk) patternChk.checked = pc_patternsEnabled;
 
   // BOTTOM: backtest candles + actual close line + future prediction candle
   pc_predChartInst = pc_makeChart('predChart');
@@ -595,6 +628,7 @@ function renderCharts(data) {
     });
   }
   setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
+  if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
   pc_btActualLine.setData(candles.map(c => ({ time: c.time, value: c.close })));
@@ -1624,6 +1658,7 @@ function switchView(view) {
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
   pc_applyOverlays();
+  pc_applyChartPatterns();
 }
 
 let pc_dailyMarkerMode = localStorage.getItem('pc_daily_marker_mode') === 'return' ? 'return' : 'strength';
@@ -1705,6 +1740,7 @@ function renderDailyMain(data) {
   }
 
   pc_dailyMainInst.timeScale().fitContent();
+  if (pc_currentView === 'daily') pc_applyChartPatterns();
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
     pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
@@ -1893,7 +1929,9 @@ async function loadData(reoptimize = false) {
     pc_lastData = data;
     wsSubscribeSymbol(ticker);
     renderCharts(data);
+    if (pc_currentView === 'daily') renderDailyMain(data);
     pc_applyOverlays();
+    pc_applyChartPatterns();
     // Donačítaj eToro pozície ak ešte nie sú alebo je cache stará, potom re-renderuj markery
     (async () => {
       let updated = false;
@@ -1903,7 +1941,11 @@ async function loadData(reoptimize = false) {
           updated = true;
         }
       }
-      if (updated && pc_lastData) renderCharts(pc_lastData);
+      if (updated && pc_lastData) {
+        renderCharts(pc_lastData);
+        if (pc_currentView === 'daily') renderDailyMain(pc_lastData);
+        pc_applyChartPatterns();
+      }
     })();
     pc_renderSidebar(data);
     status.textContent = `✓ ${ticker} · ${data.candles.length} weekly sviečok`;

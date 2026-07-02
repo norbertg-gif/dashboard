@@ -7705,7 +7705,7 @@ def dashboard_css():
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
-    "predictive.js", "verdict.js", "charts.js", "main.js",
+    "chart_patterns.js", "predictive.js", "verdict.js", "charts.js", "main.js",
 }
 
 @app.get("/js/{fname}")

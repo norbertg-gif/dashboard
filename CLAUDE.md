@@ -102,9 +102,10 @@ These were already in the codebase and need to stay fixed:
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
-6. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
+6. **Chart Pattern overlay.** V1 hotovo — samostatný modul `frontend/js/chart_patterns.js` s registry + detektormi + LWC primitive rendererom. Checkbox `chk_patterns` (`pc_patterns_enabled` v localStorage) kreslí vizuálne patterny nad Predictive Weekly/Daily grafom: `Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`, `Descending Triangle`. Sidebar karta `#chartPatternCard` vysvetľuje stav (`forming`/`confirmed`/`failed`), kvalitu, trigger a invalidáciu. Je to výlučne vizuálna pomôcka; NESMIE meniť C1–C4, scanner tier, ML predikciu, Verdikt ani portfolio logiku.
+7. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
    until LWC finishes layout; manual drag uses a double animation frame.
-7. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
+8. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
 
@@ -138,6 +139,13 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
   open-position markers (circles) are injected in `renderCharts()` alongside
   buy signal arrows. Marker IDs resolve through `pc_markerMeta`; standard chart
   panels use the same hover implementation through `registry[id]._markerMeta`.
+- **Chart Pattern overlay**: `frontend/js/chart_patterns.js` is intentionally
+  separate from `predictive.js`. Keep the split: registry = names/descriptions,
+  detectors = visual pattern recognition, renderer = LWC primitive. The overlay
+  reads already loaded candles only and must remain a visual aid. If adding a
+  new pattern later, add registry metadata and a detector; do not wire pattern
+  confidence into signal scoring unless the user explicitly asks for a separate
+  research phase.
 - **Predictive chart** (bottom, collapsible): `flex:1` vs main chart `flex:2` → 2:1 height ratio. Collapsed via `PC_MODEL_CHART_COLLAPSED_KEY` in localStorage.
 - **Subpanel** (RSI/MACD/ADX/StochRSI): `pc_subChartInst`, synced timescale with main chart.
 - **HMM regime**: `detect_market_regime(df)` called from `/api/chart` — 3-state GaussianHMM (bull/bear/sideways) + high_volatility override. Diagnostic only, does not affect ML prediction.

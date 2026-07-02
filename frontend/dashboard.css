@@ -2066,6 +2066,97 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .stat-value.bear { color: var(--down); }
 #predictiveTab .stat-value.pred { color: var(--accent); }
 
+#predictiveTab .pc-pattern-empty {
+  color: var(--muted);
+  line-height: 1.45;
+}
+#predictiveTab .pc-pattern-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+#predictiveTab .pc-pattern-item + .pc-pattern-item {
+  margin-top: 8px;
+}
+#predictiveTab .pc-pattern-item.secondary {
+  opacity: .78;
+}
+#predictiveTab .pc-pattern-top,
+#predictiveTab .pc-pattern-score,
+#predictiveTab .pc-pattern-levels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#predictiveTab .pc-pattern-name {
+  color: var(--text);
+  font-weight: 800;
+  font-size: 12px;
+}
+#predictiveTab .pc-pattern-sk {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 2px;
+}
+#predictiveTab .pc-pattern-state {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+#predictiveTab .pc-pattern-state.buy {
+  color: var(--up);
+  background: var(--up-soft);
+  border-color: color-mix(in srgb, var(--up) 50%, var(--border));
+}
+#predictiveTab .pc-pattern-state.watch {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: color-mix(in srgb, var(--yellow) 50%, var(--border));
+}
+#predictiveTab .pc-pattern-state.counter {
+  color: var(--down);
+  background: var(--down-soft);
+  border-color: color-mix(in srgb, var(--down) 50%, var(--border));
+}
+#predictiveTab .pc-pattern-score,
+#predictiveTab .pc-pattern-levels {
+  font-size: 10px;
+  color: var(--muted);
+}
+#predictiveTab .pc-pattern-score strong {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+#predictiveTab .pc-pattern-summary {
+  color: var(--muted2);
+  font-size: 11px;
+  line-height: 1.35;
+}
+#predictiveTab .pc-pattern-levels {
+  align-items: flex-start;
+  border-top: 1px solid var(--border);
+  padding-top: 7px;
+}
+#predictiveTab .pc-pattern-levels span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#predictiveTab .pc-pattern-levels b {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 #predictiveTab .signal-current-box {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
