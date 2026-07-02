@@ -1,5 +1,17 @@
 # Session Handoff — 2026-07-02 (pokračovanie v novom vlákne, token limit)
 
+## FRONTEND SPLIT HOTOVÝ (doplnené neskôr v ten istý deň)
+
+`frontend/dashboard.js` (9022 r.) bol rozdelený na 9 modulov v `frontend/js/`
+(core, live, portfolio, watchlist, scanner, predictive, verdict, charts, main)
+— klasické script tagy, zdieľaný globálny scope, žiadny build step. Detaily
+a pravidlá (load order, TDZ, `_JS_MODULES` whitelist, spoločný `?v=` token)
+sú v CLAUDE.md (Layout + Critical pitfalls). Každý krok = samostatný commit
+overený AST ekvivalenciou (557 deklarácií, 0 zmenených tiel), TDZ auditom
+a smoke testom. **Nález:** `renderEtoroList` bol v monolite definovaný 2×
+(prvá definícia mŕtva) — presunuté verbatim do core.js, oprava odložená,
+viď pitfall v CLAUDE.md.
+
 ## Stav repa
 
 `main` je čistý a plne pushnutý, posledný commit `2388b80` (smoke_test.py).

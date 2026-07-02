@@ -7698,12 +7698,7 @@ def dashboard_css():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "dashboard.css", media_type="text/css", headers=_STATIC_IMMUTABLE)
 
-@app.get("/dashboard.js")
-def dashboard_js():
-    from fastapi.responses import FileResponse
-    return FileResponse(FRONTEND_DIR / "dashboard.js", media_type="application/javascript", headers=_STATIC_IMMUTABLE)
-
-# Frontend moduly (postupný split dashboard.js) — whitelist namiesto path param
+# Frontend moduly (bývalý dashboard.js monolit) — whitelist namiesto path param
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",

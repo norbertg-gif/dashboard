@@ -884,7 +884,9 @@ backend/
 frontend/
   trading_dashboard.html
   dashboard.css
-  dashboard.js
+  js/                  # frontend JS moduly (core, live, portfolio, watchlist,
+                       #   scanner, predictive, verdict, charts, main — v tomto
+                       #   poradí ich načítava HTML; main.js ide posledný)
   help.html            # tento manuál (HTML), servovaný na /help
 docs/
   MANUAL.md            # tento manuál (Markdown)

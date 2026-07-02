@@ -19,7 +19,16 @@ backend/
 frontend/
   trading_dashboard.html
   dashboard.css
-  dashboard.js         # dashboard + predictive + scanner + investor verdict tab logic
+  js/                  # frontend split — klasické <script> tagy, zdieľaný globálny
+    core.js            #   scope (žiadne ES moduly/bundler). Load order = poradie v HTML:
+    live.js            #   core → live → portfolio → watchlist → scanner → predictive
+    portfolio.js       #   → verdict → charts → main. main.js je JEDINÝ s top-level
+    watchlist.js       #   exec kódom (init IIFE, window.* exposures) a ide posledný;
+    scanner.js         #   ostatné súbory obsahujú len deklarácie, takže na ich
+    predictive.js      #   vzájomnom poradí nezáleží (runtime lookup cez globálny scope).
+    verdict.js         #   Servuje ich GET /js/{fname} s whitelistom _JS_MODULES.
+    charts.js
+    main.js
 docs/
   MANUAL.md            # Markdown user manual
 trading_backend.py     # thin entrypoint shim for Render (imports backend/.)
@@ -56,7 +65,10 @@ No test suite, but there IS a smoke check: `python smoke_test.py` boots the app 
 
 These were already in the codebase and need to stay fixed:
 
-- **Bump `?v=` after every `dashboard.js` change.** `trading_dashboard.html` loads the script with a cache-busting query param (`/dashboard.js?v=...`). Forgetting to bump it means browsers keep the old JS while serving new HTML — features silently missing.
+- **Bump `?v=` after every `frontend/js/*.js` or CSS change.** `trading_dashboard.html` loads every module with a cache-busting query param (one shared token, e.g. `?v=20260702-split8`) and the responses are `Cache-Control: immutable`. Forgetting to bump means browsers keep the old JS while serving new HTML — features silently missing. Bump ALL tags at once (one sed), never just the changed file.
+- **New frontend module = 3 places.** A new file under `frontend/js/` must be added to `_JS_MODULES` whitelist in `trading_backend.py` AND as a `<script>` tag in `trading_dashboard.html` (before `main.js`). The smoke test fetches every script tag from the index, so a missing route fails fast.
+- **`main.js` is the only module with top-level exec code** (init IIFE, `window.*` exposures, document listeners, WS watchdog) and must stay the LAST script tag. All other modules contain only declarations — cross-file calls resolve at runtime through the shared global scope of classic scripts, so their relative order is irrelevant; a top-level statement referencing another module's `let/const` is the only ordering hazard (TDZ).
+- **`renderEtoroList` is defined twice in `core.js`** (pre-existing latent duplicate; the second definition wins, the first is dead code). Kept verbatim during the split on purpose — if you touch that area, delete the FIRST definition (the one without sort controls) and verify the eToro sidebar list still renders.
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise.
 - **Don't duplicate `/api/search`.** There were two routes with the same path returning different shapes (`list` vs `{results: [...]}`). FastAPI keeps the first; the second is dead, and clients expecting the other shape silently break (predictive autocomplete).
 - **Don't redefine `calc_adx` / `calc_rsi` / `calc_macd` / `calc_ichimoku` / `calc_stoch_rsi`.** The file had two sets — the second `calc_adx` returns a DataFrame, the first returns a tuple. Anything unpacking `_adx, _di, _di2 = calc_adx(df)` will silently get column-name strings → NaN columns → ADX disabled. Keep one definition each, near the top, used by both predictive and `/api/ohlcv`.

@@ -1,3 +1,9 @@
+// ── MAIN (INIT) ──────────────────────────────────────────────────────────────
+// Jediný modul s top-level exec kódom: init IIFE, window.* exposures pre HTML
+// onclick, globálne document listenery, WS watchdog, sidebar resize. Načítava sa
+// POSLEDNÝ — všetky deklarácie z ostatných modulov už existujú. Súčasť splitu
+// dashboard.js (pôvodný monolit týmto zaniká).
+
 window.toggleSidebar = toggleSidebar;
 
 // Prepíš loadPortData aby použil port-inner-{pid} aj pre 'main'
