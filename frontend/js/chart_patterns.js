@@ -181,6 +181,29 @@ function cpStateFromBreakout(kind, lastClose, trigger, invalidation) {
   return 'forming';
 }
 
+// Objemove potvrdenie breakoutu: najdi prvu sviecku breakout runu (close za triggerom,
+// predchadzajuca este nie) a porovnaj jej objem s priemerom ~20 sviecok pred nou.
+// Breakout na zvysenom objeme je spolahlivejsi -> bump do confidence. Bez volume dat
+// alebo pri kratkej historii vracia 0 (fail-soft, ziadny flag v UI).
+function cpBreakoutVolumeBoost(candles, kind, trigger) {
+  if (!Number.isFinite(trigger) || !candles?.length) return 0;
+  const buffer = 0.005;
+  const beyond = c => kind === 'bullish' ? c.close > trigger * (1 + buffer) : c.close < trigger * (1 - buffer);
+  let i = candles.length - 1;
+  if (!beyond(candles[i])) return 0;
+  while (i > 0 && beyond(candles[i - 1])) i--;
+  const bo = candles[i];
+  if (!(bo.volume > 0)) return 0;
+  const win = candles.slice(Math.max(0, i - 20), i).map(c => c.volume).filter(v => v > 0);
+  if (win.length < 5) return 0;
+  const avg = win.reduce((s, v) => s + v, 0) / win.length;
+  if (!(avg > 0)) return 0;
+  const ratio = bo.volume / avg;
+  if (ratio >= 1.5) return 8;
+  if (ratio >= 1.2) return 5;
+  return 0;
+}
+
 function cpScoreBase({ tolerancePct = 0, touches = 2, spanBars = 20, recentBars = 20 }) {
   let score = 45;
   score += Math.max(0, 18 - tolerancePct * 4);
@@ -209,7 +232,8 @@ function cpDetectDoubleBottom(candles, pivots) {
       if ((neck.price - avgLow) / avgLow < 0.06) continue;
       const recent = candles.length - 1 - l2.i;
       const state = cpStateFromBreakout('bullish', last.close, neck.price, Math.min(l1.price, l2.price));
-      const confidence = cpScoreBase({ tolerancePct: tol, touches: 2, spanBars: sep, recentBars: recent }) + (state === 'confirmed' ? 7 : 0);
+      const volBoost = state === 'confirmed' ? cpBreakoutVolumeBoost(candles, 'bullish', neck.price) : 0;
+      const confidence = cpScoreBase({ tolerancePct: tol, touches: 2, spanBars: sep, recentBars: recent }) + (state === 'confirmed' ? 7 : 0) + volBoost;
       const candidate = {
         id: 'double_bottom',
         confidence: Math.min(96, confidence),
@@ -224,9 +248,14 @@ function cpDetectDoubleBottom(candles, pivots) {
           { role: 'neckline', time: neck.time, price: neck.price },
           { role: 'low 2', time: l2.time, price: l2.price },
         ],
-        levels: { trigger: neck.price, invalidation: Math.min(l1.price, l2.price) },
+        levels: {
+          trigger: neck.price,
+          invalidation: Math.min(l1.price, l2.price),
+          // measured move: vyska patternu (neckline - dno) premietnuta nad neckline
+          target: neck.price + (neck.price - Math.min(l1.price, l2.price)),
+        },
         summary: state === 'confirmed'
-          ? `Breakout nad neckline ${cpFmtPrice(neck.price)} je potvrdeny.`
+          ? `Breakout nad neckline ${cpFmtPrice(neck.price)} je potvrdeny.${volBoost ? ' Objem breakoutu nad priemerom.' : ''}`
           : `Dve podobne low, potvrdenie az nad neckline ${cpFmtPrice(neck.price)}.`,
       };
       if (!best || candidate.confidence > best.confidence) best = candidate;
@@ -254,7 +283,8 @@ function cpDetectDoubleTop(candles, pivots) {
       if ((avgHigh - support.price) / support.price < 0.06) continue;
       const recent = candles.length - 1 - h2.i;
       const state = cpStateFromBreakout('bearish', last.close, support.price, Math.max(h1.price, h2.price));
-      const confidence = cpScoreBase({ tolerancePct: tol, touches: 2, spanBars: sep, recentBars: recent }) + (state === 'confirmed' ? 7 : 0);
+      const volBoost = state === 'confirmed' ? cpBreakoutVolumeBoost(candles, 'bearish', support.price) : 0;
+      const confidence = cpScoreBase({ tolerancePct: tol, touches: 2, spanBars: sep, recentBars: recent }) + (state === 'confirmed' ? 7 : 0) + volBoost;
       const candidate = {
         id: 'double_top',
         confidence: Math.min(96, confidence),
@@ -269,9 +299,14 @@ function cpDetectDoubleTop(candles, pivots) {
           { role: 'support', time: support.time, price: support.price },
           { role: 'top 2', time: h2.time, price: h2.price },
         ],
-        levels: { trigger: support.price, invalidation: Math.max(h1.price, h2.price) },
+        levels: {
+          trigger: support.price,
+          invalidation: Math.max(h1.price, h2.price),
+          // measured move: vyska patternu (vrchol - support) premietnuta pod support
+          target: support.price - (Math.max(h1.price, h2.price) - support.price),
+        },
         summary: state === 'confirmed'
-          ? `Breakdown pod support ${cpFmtPrice(support.price)} je potvrdeny.`
+          ? `Breakdown pod support ${cpFmtPrice(support.price)} je potvrdeny.${volBoost ? ' Objem breakdownu nad priemerom.' : ''}`
           : `Dva podobne vrcholy, potvrdenie az pod support ${cpFmtPrice(support.price)}.`,
       };
       if (!best || candidate.confidence > best.confidence) best = candidate;
@@ -301,12 +336,15 @@ function cpDetectRangeAndTriangles(candles, pivots) {
   const candidates = [];
   const t1 = slice[0].time, t2 = last.time;
   if (hiTouch.length >= 2 && loTouch.length >= 2) {
-    const state = last.close > resistance * 1.005 ? 'confirmed'
-      : last.close < support * 0.995 ? 'confirmed'
-      : 'forming';
+    const brokeUp = last.close > resistance * 1.005;
+    const brokeDown = last.close < support * 0.995;
+    const state = brokeUp || brokeDown ? 'confirmed' : 'forming';
+    const height = resistance - support;
+    const volBoost = brokeUp ? cpBreakoutVolumeBoost(candles, 'bullish', resistance)
+      : brokeDown ? cpBreakoutVolumeBoost(candles, 'bearish', support) : 0;
     candidates.push({
       id: 'rectangle',
-      confidence: Math.min(88, 42 + hiTouch.length * 7 + loTouch.length * 7 - Math.abs(heightPct - 18) * 0.4),
+      confidence: Math.min(88, 42 + hiTouch.length * 7 + loTouch.length * 7 - Math.abs(heightPct - 18) * 0.4 + volBoost),
       state,
       lines: [
         { role: 'resistance', p1: { time: t1, price: resistance }, p2: { time: t2, price: resistance } },
@@ -315,9 +353,14 @@ function cpDetectRangeAndTriangles(candles, pivots) {
       zones: [{ role: 'range', t1, t2, low: support, high: resistance }],
       points: [...hiTouch.slice(-2).map(h => ({ role: 'resistance touch', time: h.time, price: h.price })),
                ...loTouch.slice(-2).map(l => ({ role: 'support touch', time: l.time, price: l.price }))],
-      levels: { trigger: last.close >= (support + resistance) / 2 ? resistance : support, invalidation: last.close >= (support + resistance) / 2 ? support : resistance },
+      levels: {
+        trigger: last.close >= (support + resistance) / 2 ? resistance : support,
+        invalidation: last.close >= (support + resistance) / 2 ? support : resistance,
+        // measured move ma zmysel az po breakoute — kym je range neutralny, smer nepozname
+        target: brokeUp ? resistance + height : brokeDown ? support - height : null,
+      },
       summary: state === 'confirmed'
-        ? 'Cena opustila obchodne pasmo, smer treba potvrdit zavretim mimo hranice.'
+        ? `Cena opustila obchodne pasmo, smer treba potvrdit zavretim mimo hranice.${volBoost ? ' Breakout na zvysenom objeme.' : ''}`
         : `Range medzi ${cpFmtPrice(support)} a ${cpFmtPrice(resistance)}; direction az po breakoute.`,
     });
   }
@@ -329,33 +372,47 @@ function cpDetectRangeAndTriangles(candles, pivots) {
 
   if (hiTouch.length >= 2 && firstLow && lastLow && lowSlope > 0.04) {
     const trendNow = cpLineValue(firstLow, lastLow, last.i);
+    const state = cpStateFromBreakout('bullish', last.close, resistance, trendNow || support);
+    const volBoost = state === 'confirmed' ? cpBreakoutVolumeBoost(candles, 'bullish', resistance) : 0;
     candidates.push({
       id: 'ascending_triangle',
-      confidence: Math.min(90, 50 + hiTouch.length * 7 + Math.min(20, lowSlope * 180)),
-      state: cpStateFromBreakout('bullish', last.close, resistance, trendNow || support),
+      confidence: Math.min(90, 50 + hiTouch.length * 7 + Math.min(20, lowSlope * 180) + volBoost),
+      state,
       lines: [
         { role: 'resistance', p1: { time: t1, price: resistance }, p2: { time: t2, price: resistance } },
         { role: 'rising support', p1: { time: firstLow.time, price: firstLow.price }, p2: { time: lastLow.time, price: lastLow.price } },
       ],
       points: [{ role: 'higher low', time: firstLow.time, price: firstLow.price }, { role: 'higher low', time: lastLow.time, price: lastLow.price }],
-      levels: { trigger: resistance, invalidation: trendNow || support },
-      summary: `Horizontalna rezistencia ${cpFmtPrice(resistance)} a stupajuce minima; potvrdenie az breakoutom nahor.`,
+      levels: {
+        trigger: resistance,
+        invalidation: trendNow || support,
+        // measured move: vyska pasma premietnuta nad rezistenciu
+        target: resistance + (resistance - support),
+      },
+      summary: `Horizontalna rezistencia ${cpFmtPrice(resistance)} a stupajuce minima; potvrdenie az breakoutom nahor.${volBoost ? ' Breakout na zvysenom objeme.' : ''}`,
     });
   }
 
   if (loTouch.length >= 2 && firstHigh && lastHigh && highSlope < -0.04) {
     const trendNow = cpLineValue(firstHigh, lastHigh, last.i);
+    const state = cpStateFromBreakout('bearish', last.close, support, trendNow || resistance);
+    const volBoost = state === 'confirmed' ? cpBreakoutVolumeBoost(candles, 'bearish', support) : 0;
     candidates.push({
       id: 'descending_triangle',
-      confidence: Math.min(90, 50 + loTouch.length * 7 + Math.min(20, Math.abs(highSlope) * 180)),
-      state: cpStateFromBreakout('bearish', last.close, support, trendNow || resistance),
+      confidence: Math.min(90, 50 + loTouch.length * 7 + Math.min(20, Math.abs(highSlope) * 180) + volBoost),
+      state,
       lines: [
         { role: 'support', p1: { time: t1, price: support }, p2: { time: t2, price: support } },
         { role: 'falling resistance', p1: { time: firstHigh.time, price: firstHigh.price }, p2: { time: lastHigh.time, price: lastHigh.price } },
       ],
       points: [{ role: 'lower high', time: firstHigh.time, price: firstHigh.price }, { role: 'lower high', time: lastHigh.time, price: lastHigh.price }],
-      levels: { trigger: support, invalidation: trendNow || resistance },
-      summary: `Horizontalny support ${cpFmtPrice(support)} a klesajuce maxima; potvrdenie az breakdownom.`,
+      levels: {
+        trigger: support,
+        invalidation: trendNow || resistance,
+        // measured move: vyska pasma premietnuta pod support
+        target: support - (resistance - support),
+      },
+      summary: `Horizontalny support ${cpFmtPrice(support)} a klesajuce maxima; potvrdenie az breakdownom.${volBoost ? ' Breakdown na zvysenom objeme.' : ''}`,
     });
   }
 
@@ -417,10 +474,17 @@ class ChartPatternPrimitive {
         const color = palette.line;
         const pointColor = palette.point;
         const soft = palette.soft;
+        let spanX1 = null, spanX2 = null; // x-rozsah patternu pre measured-move ciaru
+        const trackX = x => {
+          if (x == null) return;
+          if (spanX1 == null || x < spanX1) spanX1 = x;
+          if (spanX2 == null || x > spanX2) spanX2 = x;
+        };
 
         for (const z of p.zones || []) {
           const x1 = xOf(z.t1), x2 = xOf(z.t2), y1 = yOf(z.high), y2 = yOf(z.low);
           if ([x1, x2, y1, y2].some(v => v == null)) continue;
+          trackX(x1); trackX(x2);
           context.fillStyle = soft;
           context.strokeStyle = color;
           context.lineWidth = 1 * horizontalPixelRatio;
@@ -434,6 +498,7 @@ class ChartPatternPrimitive {
           const x1 = xOf(ln.p1.time), y1 = yOf(ln.p1.price);
           const x2 = xOf(ln.p2.time), y2 = yOf(ln.p2.price);
           if ([x1, y1, x2, y2].some(v => v == null)) continue;
+          trackX(x1); trackX(x2);
           context.strokeStyle = color;
           context.lineWidth = (ln.role === 'neckline' || ln.role === 'support' || ln.role === 'resistance') ? 1.5 * horizontalPixelRatio : 1.2 * horizontalPixelRatio;
           context.setLineDash((ln.role || '').includes('support') || (ln.role || '').includes('resistance') || ln.role === 'neckline'
@@ -455,6 +520,39 @@ class ChartPatternPrimitive {
           context.arc(x, y, 4.5 * horizontalPixelRatio, 0, Math.PI * 2);
           context.fill();
           context.stroke();
+        }
+
+        // Measured-move ciel: bodkovana ciara v pravej casti patternu + maly label.
+        // yOf moze vratit suradnicu mimo viewportu (target nad/pod aktualnym range)
+        // — kreslenie mimo canvas je nespkodne, label sa clampne k okraju.
+        const targetPrice = cpNum(p.levels?.target);
+        if (targetPrice != null && spanX2 != null) {
+          const yT = yOf(targetPrice);
+          if (yT != null) {
+            const xStart = spanX1 != null ? spanX1 + (spanX2 - spanX1) * 0.55 : spanX2 - 80 * horizontalPixelRatio;
+            context.strokeStyle = color;
+            context.lineWidth = 1 * horizontalPixelRatio;
+            context.setLineDash([3 * horizontalPixelRatio, 3 * horizontalPixelRatio]);
+            context.beginPath();
+            context.moveTo(xStart, yT);
+            context.lineTo(spanX2, yT);
+            context.stroke();
+            context.setLineDash([]);
+            const txt = `Ciel ${cpFmtPrice(targetPrice)}`;
+            const padX = 4 * horizontalPixelRatio;
+            const w = context.measureText(txt).width + padX * 2;
+            const h = 16 * verticalPixelRatio;
+            const lx = Math.max(4 * horizontalPixelRatio, spanX2 - w);
+            const ly = Math.max(2 * verticalPixelRatio, yT - h - 3 * verticalPixelRatio);
+            context.fillStyle = 'rgba(2,8,15,0.85)';
+            context.strokeStyle = color;
+            context.beginPath();
+            context.roundRect(lx, ly, w, h, 4 * horizontalPixelRatio);
+            context.fill();
+            context.stroke();
+            context.fillStyle = pointColor;
+            context.fillText(txt, lx + padX, ly + 12 * verticalPixelRatio);
+          }
         }
 
         const labelPoint = (p.points || [])[0] || (p.lines || [])[0]?.p1;
@@ -500,6 +598,7 @@ function chartPatternHtml(patterns, timeframe) {
     const st = CHART_PATTERN_STATE[p.state] || CHART_PATTERN_STATE.forming;
     const trigger = p.levels?.trigger;
     const invalidation = p.levels?.invalidation;
+    const target = cpNum(p.levels?.target);
     const secondary = idx > 0 ? ' secondary' : '';
     return `
       <div class="pc-pattern-item${secondary}">
@@ -517,6 +616,7 @@ function chartPatternHtml(patterns, timeframe) {
         <div class="pc-pattern-levels">
           <span>Trigger <b>${cpFmtPrice(trigger)}</b></span>
           <span>Invalidacia <b>${cpFmtPrice(invalidation)}</b></span>
+          ${target != null ? `<span>Ciel <b>${cpFmtPrice(target)}</b></span>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -536,7 +636,9 @@ function applyChartPatternOverlay({ chart, series, candles, timeframe, enabled, 
   else pc_patternPrimitive = null;
 
   if (!enabled) {
-    if (!daily) renderChartPatternInfo([], timeframe);
+    // Info karta je zdielana medzi weekly/daily view — cistit ju treba vzdy,
+    // inak po vypnuti overlay na daily view drzi stare weekly patterny.
+    renderChartPatternInfo([], timeframe);
     return [];
   }
 

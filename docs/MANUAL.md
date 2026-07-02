@@ -264,7 +264,14 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   bearish patterny fialové, neutral/range zlaté. Prepínače **Bullish**,
   **Bearish** a **Range** filtrujú, čo sa má kresliť a zobrazovať v karte;
   ukladajú sa do `localStorage`. Pattern sa považuje za potvrdený až po
-  breakoute/breakdowne podľa pravidiel technickej analýzy.
+  breakoute/breakdowne podľa pravidiel technickej analýzy. Potvrdený breakout
+  na **zvýšenom objeme** (≥ 1.2× priemer ~20 sviečok pred breakoutom) zvýši
+  kvalitu patternu — spoľahlivosť breakoutu na tenkom objeme je nižšia. Overlay
+  kreslí aj **measured-move cieľ** (bodkovaná čiara `Ciel`): projekciu výšky
+  patternu od breakout úrovne — pri Double Bottom `neckline + (neckline − dno)`,
+  pri range/trojuholníkoch výška pásma od prerazenej hranice. Pri neutrálnom
+  Rectangle sa cieľ ukáže až po breakoute (dovtedy smer nepoznáme). Cieľ je
+  orientačná projekcia, nie cenová predpoveď.
 
 ### Pravý panel (sidebar)
 

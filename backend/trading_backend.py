@@ -3722,6 +3722,9 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                         daily_candles.append({
                             "time":  int(pd.Timestamp(ts).timestamp()),
                             "open": o, "high": h, "low": l, "close": c,
+                            # volume: pattern overlay potrebuje objemové potvrdenie breakoutu;
+                            # LWC candlestick series extra pole ignoruje (aditívne, fail-soft)
+                            "volume": safe_float(row.get("Volume")),
                         })
 
                 # Daily indicator series for overlay
