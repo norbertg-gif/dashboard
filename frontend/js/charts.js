@@ -304,7 +304,7 @@ function syncChartDockPosition() {
   if (!dock || dock.classList.contains('hidden')) return;
   let top = null;
   if (activeMainTab === 'portfolio') {
-    const tableWrap = document.querySelector('#main-portfolio .port-table-wrap');
+    const tableWrap = document.querySelector('#main-portfolio .port-main-table-wrap');
     const rect = tableWrap?.getBoundingClientRect();
     if (rect && Number.isFinite(rect.top) && rect.top > 0) top = rect.top;
   }

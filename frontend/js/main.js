@@ -133,12 +133,13 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   const resizer = document.getElementById('dock-resizer');
   const dock = document.getElementById('chart-dock');
   if (!resizer || !dock) return;
-  const MIN_W = 280, MAX_W = 800;
+  const MIN_W = 280;
+  const maxDockWidth = () => Math.max(MIN_W, window.innerWidth - 80);
   let startX, startW;
 
   const saved = localStorage.getItem('td_dock_width');
   if (saved) {
-    const w = Math.min(MAX_W, Math.max(MIN_W, parseInt(saved)));
+    const w = Math.min(maxDockWidth(), Math.max(MIN_W, parseInt(saved)));
     document.documentElement.style.setProperty('--dock-width', w + 'px');
   }
 
@@ -150,7 +151,7 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
     document.body.style.userSelect = 'none';
 
     function onMove(e) {
-      const w = Math.min(MAX_W, Math.max(MIN_W, startW - (e.clientX - startX)));
+      const w = Math.min(maxDockWidth(), Math.max(MIN_W, startW - (e.clientX - startX)));
       document.documentElement.style.setProperty('--dock-width', w + 'px');
     }
     function onUp() {

@@ -367,6 +367,7 @@ function isPortfolioDcaCollapsed() {
 function togglePortfolioDca() {
   localStorage.setItem(PORT_DCA_COLLAPSED_KEY, isPortfolioDcaCollapsed() ? '0' : '1');
   if (_dcaCache.data) renderDcaCard(_dcaCache.data);
+  if (typeof syncChartDockPosition === 'function') setTimeout(syncChartDockPosition, 0);
 }
 
 function dcaCardHead(data = null) {
@@ -1476,7 +1477,7 @@ function renderPortPanel(pid) {
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
     const tableWidth = cols.reduce((sum, col) => sum + portColWidth(s, col.key), 0);
-    html += `<div class="port-table-wrap"><table class="port-table" style="table-layout:fixed;width:${tableWidth}px;min-width:${tableWidth}px;max-width:${tableWidth}px;"><colgroup>`;
+    html += `<div class="port-table-wrap port-main-table-wrap"><table class="port-table" style="table-layout:fixed;width:${tableWidth}px;min-width:${tableWidth}px;max-width:${tableWidth}px;"><colgroup>`;
     for (const col of cols) html += `<col data-col="${col.key}"${portColStyle(s, col.key)}>`;
     html += `</colgroup><thead><tr>`;
     for (const col of cols) {

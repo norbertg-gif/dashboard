@@ -1199,7 +1199,7 @@ body.sidebar-collapsed #sb-resizer {
   min-height: 360px;
   overflow: auto;
 }
-body.dock-open #main-portfolio .port-table-wrap {
+body.dock-open #main-portfolio .port-main-table-wrap {
   margin-right: var(--dock-width, 420px);
 }
 .port-table, .tool-table {
