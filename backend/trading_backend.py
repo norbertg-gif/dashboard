@@ -7703,6 +7703,20 @@ def dashboard_js():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "dashboard.js", media_type="application/javascript", headers=_STATIC_IMMUTABLE)
 
+# Frontend moduly (postupný split dashboard.js) — whitelist namiesto path param
+# validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
+_JS_MODULES = {
+    "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
+    "predictive.js", "verdict.js", "charts.js", "main.js",
+}
+
+@app.get("/js/{fname}")
+def dashboard_js_module(fname: str):
+    from fastapi.responses import FileResponse
+    if fname not in _JS_MODULES:
+        raise HTTPException(status_code=404, detail="Neznámy modul")
+    return FileResponse(FRONTEND_DIR / "js" / fname, media_type="application/javascript", headers=_STATIC_IMMUTABLE)
+
 if __name__ == "__main__":
     # ── eToro proxy ako background thread ─────────────────────────────────────
     try:

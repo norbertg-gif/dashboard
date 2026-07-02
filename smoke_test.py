@@ -42,10 +42,25 @@ def _json(body: bytes):
     return json.loads(body)
 
 
+def _check_all_scripts(body: bytes):
+    """Vytiahne všetky lokálne <script src> z indexu a overí, že každý modul
+    server reálne servuje (chytí zabudnutú /js/ route alebo chýbajúci súbor)."""
+    import re
+    srcs = re.findall(r'<script src="(/[^"?]+)(?:\?[^"]*)?"', body.decode("utf-8", "replace"))
+    assert srcs, "index nemá žiadny lokálny <script src>"
+    total = 0
+    for s in srcs:
+        st, b = _req(s)
+        assert st == 200, f"{s}: HTTP {st}"
+        assert len(b) > 200, f"{s}: podozrivo malý ({len(b)} B)"
+        total += len(b)
+    assert total > 100_000, f"súčet JS modulov podozrivo malý ({total} B)"
+
+
 # (path, popis, check(body) -> None alebo raise)
 CORE = [
-    ("/", "index HTML", lambda b: b"dashboard.js?v=" in b or (_ for _ in ()).throw(AssertionError("chýba dashboard.js?v="))),
-    ("/dashboard.js", "JS bundle", lambda b: len(b) > 100_000 or (_ for _ in ()).throw(AssertionError(f"podozrivo malý JS ({len(b)} B)"))),
+    ("/", "index HTML", lambda b: b'?v=' in b or (_ for _ in ()).throw(AssertionError("chýba ?v= cache-bust"))),
+    ("/", "JS moduly z indexu", _check_all_scripts),
     ("/dashboard.css", "CSS", lambda b: len(b) > 10_000 or (_ for _ in ()).throw(AssertionError("podozrivo malé CSS"))),
     ("/help", "manuál", lambda b: b"<h1" in b or (_ for _ in ()).throw(AssertionError("chýba h1"))),
     ("/api/health", "health", lambda b: _json(b) is not None),
