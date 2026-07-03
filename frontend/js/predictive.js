@@ -299,6 +299,7 @@ class VolumeProfilePrimitive {
     this._chart = chart;
     this._series = series;
     this._getCandles = getCandles;
+    this._requestUpdate = null;
     const self = this;
     this._paneView = {
       update() {},
@@ -306,8 +307,17 @@ class VolumeProfilePrimitive {
       renderer() { return { draw: target => self._draw(target) }; },
     };
   }
+  attached(param) {
+    this._requestUpdate = param?.requestUpdate || null;
+  }
+  detached() {
+    this._requestUpdate = null;
+  }
   paneViews() { return [this._paneView]; }
   updateAllViews() {}
+  requestUpdate() {
+    try { this._requestUpdate && this._requestUpdate(); } catch (e) {}
+  }
 
   _draw(target) {
     const candles = this._getCandles();
@@ -361,10 +371,18 @@ function pc_applyVolumeProfile() {
     pc_vpPrimitive = new VolumeProfilePrimitive(pc_realChartInst, pc_realSeries,
       () => (pc_lastData && pc_lastData.candles) || []);
     pc_realSeries.attachPrimitive(pc_vpPrimitive);
+  } else if (pc_vpEnabled && pc_vpPrimitive) {
+    pc_vpPrimitive.requestUpdate();
   } else if (!pc_vpEnabled && pc_vpPrimitive) {
     try { pc_realSeries.detachPrimitive(pc_vpPrimitive); } catch (e) {}
     pc_vpPrimitive = null;
   }
+}
+
+function pc_refreshVolumeProfile() {
+  if (!pc_vpEnabled) return;
+  if (!pc_vpPrimitive) pc_applyVolumeProfile();
+  if (pc_vpPrimitive) pc_vpPrimitive.requestUpdate();
 }
 
 function pc_toggleVolumeProfile(el) {
@@ -487,12 +505,14 @@ function initCharts() {
     pc_syncing = true;
     pc_predChartInst.timeScale().setVisibleLogicalRange(range);
     pc_syncing = false;
+    pc_refreshVolumeProfile();
   });
   pc_predChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (pc_syncing || !range) return;
     pc_syncing = true;
     pc_realChartInst.timeScale().setVisibleLogicalRange(range);
     pc_syncing = false;
+    pc_refreshVolumeProfile();
   });
 
   // Sync crosshair bidirectionally using logical index via time
@@ -772,9 +792,11 @@ function renderCharts(data) {
 
   // Fit real chart, copy its logical range to pred chart after render
   pc_realChartInst.timeScale().fitContent();
+  pc_refreshVolumeProfile();
   requestAnimationFrame(() => {
     const range = pc_realChartInst.timeScale().getVisibleLogicalRange();
     if (range) pc_predChartInst.timeScale().setVisibleLogicalRange(range);
+    pc_refreshVolumeProfile();
   });
 }
 
