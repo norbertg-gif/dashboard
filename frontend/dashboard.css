@@ -61,10 +61,30 @@
   --shadow-lg:     0 12px 32px rgba(0,0,0,0.4);
   --shadow-glow:   none;
 
-  --font-ui:       'Manrope', system-ui, sans-serif;
+  --font-ui:       'Inter', 'Manrope', system-ui, sans-serif;
   --font-mono:     'JetBrains Mono', monospace;
   --sb-width:      210px;
   --transition:    all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Aliasy — tieto mená sa historicky používajú v inline štýloch (JS + HTML),
+     ale nikdy neboli definované (latentne rendrovali ako inherit/currentColor).
+     Definované ako aliasy sémantických tokenov, platia pre všetky varianty. */
+  --green:    var(--up);
+  --red:      var(--down);
+  --bear:     var(--down);
+  --blue:     var(--accent);
+  --blue-dim: var(--accent-soft);
+  --bg3:      var(--bg-input);
+  --border2:  var(--border);
+
+  /* Glass vrstva — safe defaulty pre varianty, ktoré sklo nepoužívajú
+     (plochá výplň, žiadny sheen). Glass Terminal ich prepíše. */
+  --glass-fill:  linear-gradient(180deg, var(--bg-card), var(--bg-card));
+  --glass-sheen: none;
+  --accent-grad: linear-gradient(180deg, var(--accent), var(--accent));
+  --accent-grad-ink: var(--accent-ink);
+  --hover-overlay: oklch(100% 0 0 / 0.035);
+  --page-glow: none;
 }
 
 /* ── Odvážna (Cyberpunk Neon Glow) ── */
@@ -106,6 +126,54 @@ html[data-variant="odvazna"] {
   --shadow-glow:   0 0 12px 2px var(--accent-soft);
 }
 
+/* ── Glass Terminal (dark redesign podľa design handoffu, 2026-07) ── */
+html[data-variant="glass"] {
+  --bg:          oklch(13% 0.006 260);
+  --bg-card:     oklch(18% 0.009 260);
+  --bg-input:    oklch(22% 0.011 260);
+  --bg2:         oklch(21% 0.01 260);
+  --border:      oklch(100% 0 0 / 0.07);
+  --border-focus:oklch(68% 0.18 260);
+  --text:        oklch(92% 0.005 260);
+  --muted:       oklch(62% 0.01 260);
+  --muted2:      oklch(55% 0.01 260);
+  --muted3:      oklch(36% 0.012 260);
+
+  --up:          oklch(72% 0.19 145);      /* klasická zelená (handoff) */
+  --up-soft:     oklch(72% 0.19 145 / 0.15);
+  --down:        oklch(65% 0.22 25);       /* klasická červená (handoff) */
+  --down-soft:   oklch(65% 0.22 25 / 0.15);
+  --accent:      oklch(64% 0.185 260);     /* stred modrého CTA gradientu */
+  --accent-soft: oklch(64% 0.185 260 / 0.15);
+  --accent-ink:  #ffffff;
+
+  --yellow:      oklch(80% 0.15 90);       /* warning/DCA amber (handoff) */
+  --yellow-soft: oklch(80% 0.15 90 / 0.14);
+  --purple:      oklch(72% 0.16 295);
+  --purple-soft: oklch(72% 0.16 295 / 0.14);
+  --teal:        oklch(78% 0.14 195);
+  --teal-soft:   oklch(78% 0.14 195 / 0.14);
+  --orange:      oklch(72% 0.16 45);
+  --orange-soft: oklch(72% 0.16 45 / 0.14);
+
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   14px;
+
+  --shadow-sm:   0 1px 2px oklch(0% 0 0 / 0.25);
+  --shadow:      inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 8px 24px oklch(0% 0 0 / 0.35);
+  --shadow-lg:   inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 14px 36px oklch(0% 0 0 / 0.45);
+  --shadow-glow: 0 2px 10px oklch(60% 0.2 260 / 0.45);
+
+  /* Glossy glass — presné hodnoty z handoff README */
+  --glass-fill:  linear-gradient(180deg, oklch(21% 0.01 260 / 0.9), oklch(17% 0.008 260 / 0.9));
+  --glass-sheen: linear-gradient(120deg, oklch(100% 0 0 / 0.05), transparent 40%);
+  --accent-grad: linear-gradient(180deg, oklch(68% 0.18 260), oklch(58% 0.19 260));
+  --accent-grad-ink: #ffffff;
+  --hover-overlay: oklch(100% 0 0 / 0.035);
+  --page-glow: radial-gradient(1200px 600px at 15% -10%, oklch(28% 0.03 260 / 0.35), transparent);
+}
+
 /* ── Jemný Light Mode ── */
 body.light-mode {
   --bg:          #f1f5f9;
@@ -138,13 +206,22 @@ body.light-mode {
   --shadow-sm:     0 1px 2px rgba(0,0,0,0.05);
   --shadow:        0 4px 12px rgba(15,23,42,0.05);
   --shadow-lg:     0 12px 32px rgba(15,23,42,0.08);
+
+  /* Light mode nemá tmavé sklo — plochá biela výplň, tmavý hover overlay */
+  --glass-fill:  linear-gradient(180deg, #ffffff, #f8fafc);
+  --glass-sheen: none;
+  --accent-grad: linear-gradient(180deg, oklch(62% 0.16 255), oklch(54% 0.17 255));
+  --accent-grad-ink: #ffffff;
+  --hover-overlay: oklch(0% 0 0 / 0.04);
+  --page-glow: none;
 }
 
 /* ── ZÁKLADNÉ RESET / NASTAVENIA ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 body {
-  background: var(--bg);
+  background: var(--page-glow, none), var(--bg);
+  background-color: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;

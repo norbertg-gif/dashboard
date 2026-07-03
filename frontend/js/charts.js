@@ -548,9 +548,11 @@ function getChartTheme() {
     bg:'#f8fafc', text:'#334155', grid:'#e2e8f0',
     border:'#cbd5e1', crosshair:'#64748b55', crosshairLbl:'#f1f5f9',
   };
+  // Glass Terminal dark — chart canvas o stupeň tmavší než glass karta,
+  // nech sviečky "sedia v skle" (handoff: chart area ~ base bg 13% / 260)
   return {
-    bg:'#070a0f', text:'#445566', grid:'#0f1520',
-    border:'#1c2535', crosshair:'#4a9eff55', crosshairLbl:'#0f1520',
+    bg:'#0b0e15', text:'#4d5a70', grid:'#151a26',
+    border:'#232b3d', crosshair:'#4a9eff55', crosshairLbl:'#151a26',
   };
 }
 
