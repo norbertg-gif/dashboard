@@ -282,6 +282,15 @@ async function ensureHoldingsForChartFlags() {
 // Zámerne ZAHRNUTÝ v loadAll() bulk refreshi a v applyAllChartPortfolioFlags.
 let dockPanelId = null;
 
+function syncChartDockVisibilityForTab() {
+  const dock = document.getElementById('chart-dock');
+  if (!dock || dock.classList.contains('hidden')) return;
+  const inPortfolio = activeMainTab === 'portfolio';
+  dock.classList.toggle('tab-hidden', !inPortfolio);
+  document.body.classList.toggle('dock-open', inPortfolio);
+  if (inPortfolio) syncChartDockPosition();
+}
+
 function resizeChartPanelNow(id) {
   const panel = document.getElementById(id);
   const r = registry[id];
@@ -301,7 +310,7 @@ function resizeChartPanelNow(id) {
 
 function syncChartDockPosition() {
   const dock = document.getElementById('chart-dock');
-  if (!dock || dock.classList.contains('hidden')) return;
+  if (!dock || dock.classList.contains('hidden') || dock.classList.contains('tab-hidden')) return;
   let top = null;
   if (activeMainTab === 'portfolio') {
     const tableWrap = document.querySelector('#main-portfolio .port-main-table-wrap');
@@ -326,6 +335,7 @@ function openChartDock(symbol) {
   if (!sym) return;
   const dock = document.getElementById('chart-dock');
   dock?.classList.remove('hidden');
+  dock?.classList.remove('tab-hidden');
   document.body.classList.add('dock-open');
   syncChartDockPosition();
   localStorage.setItem('td_dock_open', '1');

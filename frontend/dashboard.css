@@ -763,7 +763,8 @@ body.sidebar-collapsed #sb-resizer {
   z-index: 60;
   box-shadow: -18px 0 30px color-mix(in oklch, var(--bg), transparent 35%);
 }
-#chart-dock.hidden { display: none; }
+#chart-dock.hidden,
+#chart-dock.tab-hidden { display: none; }
 .dock-header {
   flex-shrink: 0;
   display: flex;
@@ -792,6 +793,9 @@ body.sidebar-collapsed #sb-resizer {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
+}
+#dock-grid .p-btn-rm {
+  display: none;
 }
 #dock-resizer {
   position: absolute;

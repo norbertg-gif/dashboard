@@ -125,6 +125,7 @@ function switchMainTab(tab) {
   } else if (tab === 'verdict') {
     initVerdictView(previousContextTicker);
   }
+  if (typeof syncChartDockVisibilityForTab === 'function') syncChartDockVisibilityForTab();
   const url = new URL(window.location.href);
   url.searchParams.set('tab', tab);
   history.replaceState(null, '', url);
