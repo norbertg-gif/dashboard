@@ -984,7 +984,7 @@ function fmtPortVal(val, fmt) {
     case 'num4':  return n.toFixed(4);
     case 'price': return n.toFixed(4);
     case 'pnl':   return `<span class="${n>=0?'port-pos':'port-neg'}">${n>=0?'+':''}$${n.toFixed(2)}</span>`;
-    case 'pct':   return `<span class="${n>=0?'port-pos':'port-neg'}">${n>=0?'+':''}${n.toFixed(2)}%</span>`;
+    case 'pct':   return `<span class="port-pct ${n>=0?'port-pos':'port-neg'}">${n>=0?'+':''}${n.toFixed(2)}%</span>`;
     case 'lev':   return `x${n}`;
     case 'id':    return `<span style="color:var(--muted);font-size:9px;">${val}</span>`;
     default:      return String(val);
