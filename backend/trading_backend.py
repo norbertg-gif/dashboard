@@ -7709,6 +7709,11 @@ def favicon_svg():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "favicon.svg", media_type="image/svg+xml", headers=_STATIC_IMMUTABLE)
 
+@app.get("/lizard-icon.png")
+def lizard_icon_png():
+    from fastapi.responses import FileResponse
+    return FileResponse(FRONTEND_DIR / "lizard-icon.png", media_type="image/png", headers=_STATIC_IMMUTABLE)
+
 # Frontend moduly — whitelist namiesto path param
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
