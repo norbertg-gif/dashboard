@@ -7704,6 +7704,11 @@ def dashboard_css():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "dashboard.css", media_type="text/css", headers=_STATIC_IMMUTABLE)
 
+@app.get("/favicon.svg")
+def favicon_svg():
+    from fastapi.responses import FileResponse
+    return FileResponse(FRONTEND_DIR / "favicon.svg", media_type="image/svg+xml", headers=_STATIC_IMMUTABLE)
+
 # Frontend moduly — whitelist namiesto path param
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
