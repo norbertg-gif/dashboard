@@ -8,6 +8,12 @@ let investorInboxMode = ['defensive','offensive','all'].includes(localStorage.ge
   ? localStorage.getItem(INVESTOR_INBOX_MODE_KEY)
   : 'defensive';
 
+const INVESTOR_INBOX_COLLAPSED_KEY = 'td_investor_inbox_collapsed';
+function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX_COLLAPSED_KEY) === '1'; }
+
+const WEEKLY_PLAN_COLLAPSED_KEY = 'td_weekly_plan_collapsed';
+function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) === '1'; }
+
 function inboxSeverityLabel(severity) {
   return severity === 'buy' ? 'pozitívne'
     : severity === 'counter' ? 'pozor'
@@ -60,6 +66,12 @@ function setInvestorInboxMode(mode) {
   if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
 }
 
+function toggleInvestorInboxCollapsed() {
+  localStorage.setItem(INVESTOR_INBOX_COLLAPSED_KEY, isInvestorInboxCollapsed() ? '0' : '1');
+  if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
+  else loadInvestorInbox();
+}
+
 function renderInvestorInbox(payload) {
   window._lastInvestorInboxPayload = payload || null;
   const box = document.getElementById('investorWeekBox');
@@ -82,6 +94,10 @@ function renderInvestorInbox(payload) {
     const meta = inboxModeMeta(modeKey);
     return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')">${meta.label}</button>`;
   }).join('');
+  if (isInvestorInboxCollapsed()) {
+    box.innerHTML = `<div class="inbox-collapsed-summary">${allItems.length ? `${allItems.length} vecí na kontrolu${countText ? ` · ${escHtml(countText)}` : ''}` : 'Tento týždeň nič urgentné'}</div>`;
+    return;
+  }
   if (!items.length) {
     box.innerHTML = `<div class="inbox-headline">
       <span>${escHtml(mode.label)} režim</span>
@@ -118,6 +134,12 @@ async function loadWeeklyPlan(force = false) {
   }
 }
 
+function toggleWeeklyPlanCollapsed() {
+  localStorage.setItem(WEEKLY_PLAN_COLLAPSED_KEY, isWeeklyPlanCollapsed() ? '0' : '1');
+  if (window._lastWeeklyPlanPayload) renderWeeklyPlan(window._lastWeeklyPlanPayload);
+  else loadWeeklyPlan();
+}
+
 function weeklyPlanRow(row, cls) {
   const t = escHtml(row.ticker || '');
   return `<div class="plan-row">
@@ -128,10 +150,17 @@ function weeklyPlanRow(row, cls) {
 }
 
 function renderWeeklyPlan(plan) {
+  window._lastWeeklyPlanPayload = plan || null;
   const box = document.getElementById('weeklyPlanBox');
   const head = document.getElementById('weeklyPlanHeadline');
-  if (!box) return;
+  if (!box || !plan) return;
   if (head) head.textContent = plan.headline || 'Týždenný plán';
+
+  if (isWeeklyPlanCollapsed()) {
+    const n = (plan.focus?.length || 0) + (plan.buy_candidates?.length || 0) + (plan.dca?.length || 0) + (plan.risks?.length || 0);
+    box.innerHTML = `<div class="inbox-collapsed-summary">${n ? `${n} položiek v pláne` : 'Pokojný týždeň'}</div>`;
+    return;
+  }
 
   const sections = [];
   const block = (title, rows, cls, emptyNote) => {
@@ -511,6 +540,7 @@ async function renderScannerView() {
         </div>
         <section class="investor-week-card weekly-plan-card">
           <div class="scanner-source-head">
+            <button class="btn dca-toggle" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
             <div>
               <div class="scanner-section-kicker">Týždenný plán</div>
               <div class="scanner-source-title" id="weeklyPlanHeadline">Načítavam plán...</div>
@@ -521,6 +551,7 @@ async function renderScannerView() {
         </section>
         <section class="investor-week-card">
           <div class="scanner-source-head">
+            <button class="btn dca-toggle" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
             <div>
               <div class="scanner-section-kicker">Investor inbox</div>
               <div class="scanner-source-title">Tento týždeň</div>

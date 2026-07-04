@@ -168,7 +168,12 @@ Main source sections:
    (dca kind without broken), Riziko (broken/earnings), Drž bez akcie (held
    tickers absent from inbox). Headline "Tento týždeň rieš hlavne X, Y, Z."
    5-min cache via `_investor_cache_*`, `?refresh=1` bypass. Its goal is LESS
-   mental noise, not more data — do not add new analytics into it.
+   mental noise, not more data — do not add new analytics into it. Both this
+   card and Investor Inbox are independently collapsible (`td_weekly_plan_collapsed`
+   / `td_investor_inbox_collapsed`, default expanded) via the same `.dca-toggle`
+   +/− button pattern as the Portfolio DCA card; collapsed state shows a
+   one-line count summary (`renderWeeklyPlan`/`renderInvestorInbox` still fetch
+   normally, only the DOM output changes) and persists across reloads.
 - **Investor Inbox / Tento týždeň** — `GET /api/investor/inbox` is a pull-based
    weekly triage panel at the top of Scanner. It merges existing cached sources:
    DCA candidates (`/api/portfolio/dca` for both accounts), large portfolio wins

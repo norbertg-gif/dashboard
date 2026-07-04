@@ -2693,6 +2693,11 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 11px;
   padding: 8px 0;
 }
+.inbox-collapsed-summary {
+  color: var(--muted);
+  font: 700 11px var(--font-mono);
+  padding: 2px 0 4px;
+}
 .earncal-day {
   display: grid;
   grid-template-columns: 86px minmax(0, 1fr);

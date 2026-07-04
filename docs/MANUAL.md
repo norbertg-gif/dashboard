@@ -456,6 +456,10 @@ Headline zhrnie týždeň jednou vetou („Tento týždeň rieš hlavne X, Y, Z.
 Klik na ticker otvorí Predikciu, tlačidlo Verdikt priamy verdikt. Žiadny LLM —
 čisto deterministické šablónové vety nad existujúcimi dátami.
 
+Tlačidlo **+/−** vľavo od nadpisu kartu zbalí na jeden riadok („5 položiek
+v pláne") — rovnaký princíp ako pri DCA karte v Portfóliu. Stav sa pamätá
+medzi návštevami. To isté zbaľovanie má aj **Investor Inbox** nižšie.
+
 ### Investor Inbox — Tento týždeň
 
 Horná karta **Tento týždeň** je ľudský filter nad portfóliom a scannerom.
