@@ -101,6 +101,59 @@ function renderInvestorInbox(payload) {
   refreshWatchlistButtons();
 }
 
+// ── TÝŽDENNÝ PLÁN ────────────────────────────────────────────────────────────
+// Ľudská syntéza nad Inboxom: 5 sekcií, šablónové vety, menej mentálneho hluku.
+async function loadWeeklyPlan(force = false) {
+  const box = document.getElementById('weeklyPlanBox');
+  const head = document.getElementById('weeklyPlanHeadline');
+  if (!box) return;
+  if (force) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Prepočítavam plán...</div>';
+  try {
+    const r = await fetch(`${API}/api/investor/plan${force ? '?refresh=1' : ''}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    renderWeeklyPlan(await r.json());
+  } catch (e) {
+    if (head) head.textContent = 'Týždenný plán';
+    box.innerHTML = `<div class="inbox-empty">Plán sa nepodarilo zložiť: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function weeklyPlanRow(row, cls) {
+  const t = escHtml(row.ticker || '');
+  return `<div class="plan-row">
+    <span class="plan-ticker ${cls}" onclick="openScannerTicker('${t}')" title="Otvoriť v Predikcii">${t}</span>
+    <span class="plan-text">${escHtml(row.summary || '')}</span>
+    <button class="scanner-verdict-btn" onclick="openVerdictTicker('${t}', event)">Verdikt</button>
+  </div>`;
+}
+
+function renderWeeklyPlan(plan) {
+  const box = document.getElementById('weeklyPlanBox');
+  const head = document.getElementById('weeklyPlanHeadline');
+  if (!box) return;
+  if (head) head.textContent = plan.headline || 'Týždenný plán';
+
+  const sections = [];
+  const block = (title, rows, cls, emptyNote) => {
+    if (!rows?.length) return emptyNote ? `<div class="plan-section"><h4>${title}</h4><div class="plan-quiet">${emptyNote}</div></div>` : '';
+    return `<div class="plan-section"><h4>${title}</h4>${rows.map(r => weeklyPlanRow(r, cls)).join('')}</div>`;
+  };
+  sections.push(block('Pozri dnes', plan.focus, 'sev-mixed'));
+  sections.push(block('Možný nákup', plan.buy_candidates, 'sev-buy'));
+  sections.push(block('Možné DCA', plan.dca, 'sev-buy'));
+  sections.push(block('Riziko / pozor', plan.risks, 'sev-counter'));
+
+  const q = plan.quiet || {};
+  const quietTxt = q.count
+    ? `Zvyšok portfólia (${q.count} ${q.count === 1 ? 'titul' : q.count < 5 ? 'tituly' : 'titulov'}) nevyžaduje akciu${q.tickers?.length ? ': ' + q.tickers.slice(0, 14).map(escHtml).join(', ') + (q.tickers.length > 14 ? '…' : '') : '.'}`
+    : 'Žiadne držané tituly bez udalosti.';
+  sections.push(`<div class="plan-section"><h4>Drž bez akcie</h4><div class="plan-quiet">${quietTxt}</div></div>`);
+
+  const html = sections.filter(Boolean).join('');
+  box.className = '';
+  box.innerHTML = html || '<div class="inbox-empty">Pokojný týždeň — žiadne položky.</div>';
+}
+
 async function loadInvestorInbox() {
   const box = document.getElementById('investorWeekBox');
   if (box) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Načítavam týždenný prehľad...</div>';
@@ -456,6 +509,16 @@ async function renderScannerView() {
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
         </div>
+        <section class="investor-week-card weekly-plan-card">
+          <div class="scanner-source-head">
+            <div>
+              <div class="scanner-section-kicker">Týždenný plán</div>
+              <div class="scanner-source-title" id="weeklyPlanHeadline">Načítavam plán...</div>
+            </div>
+            <button class="btn" style="font-size:10px;padding:3px 9px;" onclick="loadWeeklyPlan(true)" title="Prepočítať plán">↻</button>
+          </div>
+          <div id="weeklyPlanBox" class="inbox-empty">Skladám syntézu z Inboxu, DCA a scanneru...</div>
+        </section>
         <section class="investor-week-card">
           <div class="scanner-source-head">
             <div>
@@ -505,6 +568,7 @@ async function renderScannerView() {
   }
   // Posledný scan ide z cache — načítaj okamžite a nezávisle od pomalých sekcií
   await loadNasdaqScannerResults();
+  loadWeeklyPlan();
   loadInvestorInbox();
   loadEarningsCalendarWidget();
   // Opportunities (prepočet) bežia na pozadí, neblokujú scan

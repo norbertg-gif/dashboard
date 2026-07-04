@@ -81,6 +81,7 @@ CORE = [
     ("/api/movers?n=3", "movers", lambda b: isinstance(_json(b)["movers"], list)),
     ("/api/ticker/exchanges?tickers=AAPL&limit=0", "exchanges", lambda b: isinstance(_json(b)["exchanges"], dict)),
     ("/api/investor/inbox", "investor inbox", lambda b: isinstance(_json(b)["items"], list)),
+    ("/api/investor/plan", "týždenný plán", lambda b: isinstance(_json(b)["headline"], str)),
     ("/api/prefetch/status", "prefetch status", lambda b: isinstance(_json(b), dict)),
 ]
 

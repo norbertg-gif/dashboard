@@ -5684,6 +5684,115 @@ def get_investor_inbox(refresh: int = Query(0)):
     return _investor_cache_set(cache_key, payload)
 
 
+WEEKLY_PLAN_CACHE_TTL = 300
+
+
+@app.get("/api/investor/plan")
+def get_investor_plan(refresh: int = Query(0)):
+    """Týždenný plán: ľudská syntéza NAD Investor Inboxom — nie nový analytický
+    engine, len prioritizácia do 5 sekcií so šablónovými vetami (žiadny LLM):
+    Pozri dnes / Možný nákup / Možné DCA / Riziko / Drž bez akcie.
+    Cieľ je menej mentálneho hluku, nie viac dát. Nespúšťa nový scan."""
+    cache_key = f"investor_plan:{datetime.now(timezone.utc).date().isoformat()}"
+    cached = _investor_cache_get(cache_key, WEEKLY_PLAN_CACHE_TTL, refresh)
+    if cached:
+        return cached
+
+    inbox = get_investor_inbox(refresh=refresh)
+    items = inbox.get("items") or []
+    holdings: dict = {}
+    try:
+        holdings = _get_portfolio_holdings()
+    except Exception:
+        pass
+
+    # Pozri dnes: top 3-7 podľa počtu dôvodov + závažnosti. Vety sa REUSUJÚ
+    # z inbox merge (vrátane "zmiešaný signál") — jeden zdroj formulácií.
+    sev_weight = {"mixed": 3.0, "counter": 2.5, "buy": 2.0, "watch": 1.0}
+
+    def item_score(it: dict) -> float:
+        return len(it.get("reasons") or []) * 2 + sev_weight.get(it.get("severity"), 1.0)
+
+    ranked = sorted(items, key=item_score, reverse=True)
+    focus = ranked[:7]
+    if len(focus) > 3:
+        top = item_score(focus[0])
+        focus = [it for i, it in enumerate(focus) if i < 3 or item_score(it) >= top * 0.5]
+    focus_rows = [{
+        "ticker": it.get("ticker"),
+        "summary": it.get("summary") or it.get("detail") or "",
+        "kinds": it.get("kinds") or [],
+        "severity": it.get("severity"),
+    } for it in focus]
+
+    inbox_tickers = {it.get("ticker") for it in items}
+
+    # Možné DCA: kvalitný dip bez zlomeného grafu (tie ostávajú v Pozri dnes
+    # so zmiešaným summary). Riziká: earnings/zlomený graf na držaných tituloch.
+    dca_rows: list = []
+    risk_rows: list = []
+    for it in items:
+        kinds = set(it.get("kinds") or [])
+        t = it.get("ticker")
+        if "dca" in kinds and "broken" not in kinds:
+            dca_rows.append({"ticker": t,
+                             "summary": f"{t} je DCA kandidát so zdravým grafom — strata v pásme, DIP drží."})
+        if kinds & {"broken", "earnings"}:
+            reason = next((r for r in (it.get("reasons") or []) if r.get("kind") in ("broken", "earnings")), None)
+            risk_rows.append({"ticker": t,
+                              "summary": (reason or {}).get("summary") or (reason or {}).get("detail")
+                                         or it.get("summary") or ""})
+
+    # Možný nákup: PRIENIK buy signál + DIP kvalita + zdravý graf (nie len jedno
+    # kritérium), len nedržané tituly. Z posledného scanner behu (cache).
+    buy_rows: list = []
+    try:
+        dip_min = float(_dash_settings().get("dca_dip_min") or 90)
+        scan = enrich_scanner_payload(load_scanner_cache()) or {}
+        for row in (scan.get("results") or []):
+            t = str(row.get("ticker") or "").upper()
+            if not t or t in holdings:
+                continue
+            sig = row.get("recent_signal") or {}
+            if sig.get("tier") != "buy":
+                continue
+            dip = row.get("dip_total")
+            if dip is None or float(dip) < dip_min:
+                continue
+            ch = row.get("chart_health") or {}
+            dstat = str((ch.get("daily") or {}).get("status") or "").lower()
+            wstat = str((ch.get("weekly") or {}).get("status") or "").lower()
+            if "bad" in (dstat, wstat):
+                continue
+            buy_rows.append({
+                "ticker": t,
+                "summary": f"{t} má buy signál {sig.get('score', '?')}/4 aj DIP kvalitu ({int(float(dip))}) — stojí za detail.",
+            })
+    except Exception:
+        pass
+    buy_rows = buy_rows[:6]
+
+    quiet = sorted(t for t in holdings.keys() if t not in inbox_tickers)
+
+    focus_syms = [r["ticker"] for r in focus_rows if r.get("ticker")]
+    if focus_syms:
+        extra = f" (+{len(focus_syms) - 3} ďalšie)" if len(focus_syms) > 3 else ""
+        headline = "Tento týždeň rieš hlavne " + ", ".join(focus_syms[:3]) + extra + "."
+    else:
+        headline = "Pokojný týždeň — nič nevyžaduje tvoju akciu."
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "headline": headline,
+        "focus": focus_rows,
+        "buy_candidates": buy_rows,
+        "dca": dca_rows,
+        "risks": risk_rows,
+        "quiet": {"count": len(quiet), "tickers": quiet},
+    }
+    return _investor_cache_set(cache_key, payload)
+
+
 @app.get("/api/scanner/notes")
 def get_scanner_notes():
     if SCANNER_NOTES_FILE.exists():
