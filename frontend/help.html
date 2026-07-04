@@ -97,6 +97,7 @@
   </table>
   <p><strong>📋 Tickery</strong> v hornej lište importuje zoznam tickerov zo schránky/promptu, zruší aktuálne grafové panely a otvorí ich ako denné 1d grafy. Limit je 20 tickerov. Graf titulu držaného v niektorom eToro portfóliu má jemnú zeleno-tyrkysovú obrubu.</p>
   <p><strong>Poznámka k denným percentám:</strong> Pozornosť a Top pohyby používajú denný cenový pohyb <code>currentRate vs previousClose</code>. Pri tituloch obchodovaných na eToro 24/5 môže eToro UI používať inú hranicu obchodného dňa alebo session, takže percento sa môže líšiť. Pri štandardne obchodovaných akciách by sa hodnoty mali správať konzistentne.</p>
+  <p><strong>Týždenný plán</strong> (panel nad Investor Inboxom) je prioritizačná vrstva: jednou vetou povie, čo tento týždeň naozaj rieš („Tento týždeň rieš hlavne X, Y, Z."), a rozdelí obsah do sekcií <em>Pozri dnes</em> (3–7 titulov podľa počtu dôvodov), <em>Možný nákup</em> (len prienik buy signálu + DIP kvality + zdravého grafu, nedržané tituly), <em>Možné DCA</em> (kvalitný dip bez zlomeného grafu), <em>Riziko</em> a <em>Drž bez akcie</em>. Deterministické šablónové vety, žiadny LLM.</p>
   <p><strong>Investor Inbox</strong> v záložke Scanner je hlavný prehľad “čo si dnes/tento týždeň pozrieť”. Nahrádza staré tlačidlo Alerty v hornej lište a kombinuje DCA kandidátov, profit-taking kontrolu, earnings, rizikové grafy držaných titulov a nové príležitosti zo scannera. Panel neštartuje nový scan; číta existujúce cache a krátko cachuje výsledok.</p>
   <p>Jeden ticker sa v Inboxe zobrazuje iba raz. Ak má viac dôvodov naraz, napríklad <strong>DCA</strong> aj <strong>Pozor</strong>, karta ukáže viac štítkov a zhrnutie “zmiešaný signál” — najprv over graf alebo Verdikt. Režimy <strong>Defenzívne / Ofenzívne / Všetko</strong> iba filtrujú tieto dôvody. Ikona <strong>?</strong> pri hlavnej záložke otvorí danú sekciu v novej karte.</p>
 
@@ -187,6 +188,7 @@
   <p>Zobrazuje uzavreté obchody z eToro, filtrovateľné <strong>dátumovým intervalom od–do</strong> (podľa dátumu uzatvorenia). KPI nad tabuľkou (počet, win rate, net P/L, fees) sa prepočítajú pre zvolený interval; ak je „od" väčšie ako „do", interval sa automaticky prehodí. Stĺpce možno radiť; P/L je realizovaný výsledok, nie aktuálny odhad. Dátum otvorenia a zatvorenia pomáha spätne porovnať obchod so signálmi a stavom trhu.</p>
 
   <h3>DCA kandidáti v Portfóliu</h3>
+  <p><strong>Korelačná mapa</strong> (zbaliteľná karta pod DCA) ukazuje, ktoré držané tituly sa hýbu spolu — korelácia denných výnosov za ~90 dní z lokálnej cache. Červená bunka = tituly padajú/rastú spolu (skrytá koncentrácia), zelená = záporná korelácia (diverzifikácia). „Silné prekryvy ≥ 0.80" vypichnú páry správajúce sa takmer identicky. Interpretačná pomôcka, nevstupuje do žiadneho skóre.</p>
   <ul>
     <li><strong>Risk briefing</strong> je krátky slovný záver nad tabuľkami: povie, či portfólio pôsobí rozložene alebo koncentrovane, a vypichne najväčší sektor, najväčšiu pozíciu a Top 5 váhu.</li>
     <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>
@@ -489,6 +491,7 @@
 
   <h2 id="verdict">Investičný Verdikt</h2>
   <p>Záložka <strong>Verdikt</strong> je záverečná zjednodušená vrstva pre človeka, ktorý nechce naraz interpretovať desiatky indikátorov. Odpovedá na otázku: <em>„Dáva tento titul pri dostupných údajoch zmysel pre horizont približne 30–90 dní?“</em></p>
+  <p><strong>Prečo to NEkúpiť</strong> — samostatná sekcia vo výsledku verdiktu s úplným checklistom bŕzd (nie výberom): downtrend grafu, blízke earnings, cena nad priemerným analytickým cieľom, slabý weekly trend, historicky nefunkčné signály na titule a existujúca veľká váha v portfóliu. Keď nič neplatí, ukáže explicitné „žiadne zásadné brzdy".</p>
 
   <h3>Tri možné odpovede</h3>
   <table>

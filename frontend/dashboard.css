@@ -4063,6 +4063,25 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .plan-text { flex: 1; line-height: 1.45; }
 .plan-quiet { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
 
+
+/* ── Verdikt: "Prečo NEkúpiť" ── */
+.verdict-brakes {
+  padding: 14px 17px;
+  border: 1px solid color-mix(in srgb, var(--down) 30%, var(--border2));
+  border-left: 4px solid var(--down);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--down) 5%, var(--bg2));
+}
+.verdict-brakes h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--down);
+}
+.verdict-brakes ul { margin: 0; padding-left: 18px; line-height: 1.55; }
+.verdict-brakes li + li { margin-top: 6px; }
+.verdict-brakes-clear { color: var(--up); font-size: 12.5px; }
+
 /* ═══════════════════════════════════════════════════════════════════════════
    GLASS TERMINAL — component overrides (design handoff 2026-07)
    Všetko scoped pod :where(html[data-variant="glass"] body:not(.light-mode)) — staré varianty a light mode

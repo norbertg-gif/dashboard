@@ -155,7 +155,64 @@ function buildInvestorVerdict(ticker, data, insights, market) {
   };
   return { ticker, verdict, label: labels[verdict][0], summary: labels[verdict][1],
     confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition,
+    brakes: buildVerdictBrakes(ticker, data, insights, market),
     sources, evaluatedAt: new Date() };
+}
+
+// ── "Prečo NEkúpiť" — systematický checklist bŕzd ────────────────────────────
+// Každý nástroj rád hľadá dôvody kúpiť; tento blok robí opak. Deterministické
+// pravidlá nad UŽ načítanými dátami — žiadny nový fetch, žiadny skrytý scoring.
+// Dopĺňa "Proti" (max 2 riziká): brzdy sú úplný zoznam, nie výber.
+function buildVerdictBrakes(ticker, data, insights, market) {
+  const brakes = [];
+  const trendKey = data?.weekly_trend?.key || data?.weekly_bias?.trend || null;
+  const weeklyBullish = !!data?.weekly_bias?.bullish;
+  const close = Number(data?.daily_candles?.at(-1)?.close || data?.candles?.at(-1)?.close);
+
+  if (trendKey === 'down' || trendKey === 'strong_down') {
+    brakes.push('Graf je v downtrende — nákup ide proti smeru titulu.');
+  } else if (!weeklyBullish) {
+    brakes.push('Weekly trend je slabý/bočný — dlhodobý smer nákup nepotvrdzuje.');
+  }
+
+  const upcoming = (data?.earnings_dates || [])
+    .map(v => Number(v) * 1000)
+    .filter(v => Number.isFinite(v) && v >= Date.now())
+    .sort((a, b) => a - b);
+  if (upcoming.length) {
+    const days = Math.ceil((upcoming[0] - Date.now()) / 86400000);
+    if (days <= dashSettings.earnings_warn_days) {
+      brakes.push(`Earnings o ${days} ${days === 1 ? 'deň' : days < 5 ? 'dni' : 'dní'} — výsledky môžu celý technický setup zmeniť.`);
+    }
+  }
+
+  const target = Number(insights?.price_target?.mean);
+  if (Number.isFinite(target) && target > 0 && Number.isFinite(close) && close > target) {
+    const overPct = (close / target - 1) * 100;
+    brakes.push(`Cena je ${overPct.toFixed(1)} % nad priemerným cieľom analytikov (${fmtPrice(target)}) — priestor hore je podľa konsenzu vyčerpaný.`);
+  }
+
+  const row90 = (data?.signal_outcome_summary || {})['90'] || {};
+  const completed = Number(row90.completed) || 0;
+  const winRate = Number(row90.win_rate);
+  if (completed >= 5 && Number.isFinite(winRate) && winRate < 40) {
+    brakes.push(`Signály na tomto titule historicky nefungujú — 90D úspešnosť len ${winRate.toFixed(0)} % z ${completed} vyhodnotených.`);
+  }
+
+  try {
+    const sym = String(ticker || '').toUpperCase();
+    const h = (typeof _holdings === 'object' && _holdings) ? _holdings[sym] : null;
+    if (h) {
+      const totalAmount = Object.values(_holdings).reduce((s, x) => s + (Number(x?.amount) || 0), 0);
+      const weightPct = totalAmount > 0 ? (Number(h.amount) || 0) / totalAmount * 100 : null;
+      const maxW = Number(dashSettings?.dca_max_weight) || 10;
+      if (weightPct != null && weightPct >= maxW) {
+        brakes.push(`Titul už držíš s váhou ${weightPct.toFixed(1)} % portfólia (prah ${maxW} %) — ďalší nákup zvyšuje koncentráciu.`);
+      }
+    }
+  } catch (e) {}
+
+  return brakes;
 }
 
 function renderInvestorVerdict(result) {
@@ -178,6 +235,12 @@ function renderInvestorVerdict(result) {
       <section><h3>Pre</h3><ul>${bullets(result.positives, 'Žiadne silné potvrdenie navyše.')}</ul></section>
       <section><h3>Proti</h3><ul>${bullets(result.risks, 'Nebolo zistené významné varovanie.')}</ul></section>
     </div>
+    <section class="verdict-brakes">
+      <h3>Prečo to NEkúpiť</h3>
+      ${result.brakes?.length
+        ? `<ul>${result.brakes.map(text => `<li>${escHtml(text)}</li>`).join('')}</ul>`
+        : '<div class="verdict-brakes-clear">✓ Žiadne zásadné brzdy — platí štandardný risk manažment (veľkosť pozície, stop).</div>'}
+    </section>
     <section class="verdict-condition">
       <span>Čo zmení verdikt</span>
       <strong>${escHtml(result.condition)}</strong>

@@ -156,6 +156,17 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 - Malé rozdiely oproti eToro sú možné kvôli spreadu, konverzii meny, poplatkom
   a zaokrúhleniu.
 
+### Korelačná mapa (Portfólio)
+
+Zbaliteľná karta **Korelačná mapa** pod DCA kandidátmi ukazuje, ktoré držané
+tituly sa hýbu spolu (Pearsonova korelácia denných výnosov za ~90 dní, čisto
+z lokálnej cache). **Červená bunka = tituly padajú/rastú spolu** — skrytá
+koncentrácia, diverzifikácia je menšia než vyzerá; zelená = záporná korelácia
+(skutočná diverzifikácia). Riadok „Silné prekryvy ≥ 0.80" vypichne páry, ktoré
+sa správajú takmer identicky. Tituly bez dostatočných dát v cache sa preskočia
+(pomôže otvorenie grafov / prefetch). Čisto interpretačná pomôcka — nevstupuje
+do žiadneho skóre ani DCA logiky.
+
 ### Ovládanie grafov a markerov
 
 - V záložke **Grafy** aj **Prediktívny** používa crosshair režim
@@ -425,6 +436,25 @@ Farba ti povie *či* dip kupovať, číslo *ako silný* je.
 ---
 
 ## 5. Scanner + DIP stratégia
+
+### Týždenný plán
+
+Panel **Týždenný plán** (nad Investor Inboxom) je prioritizačná vrstva — nie
+ďalší indikátor, ale menej mentálneho hluku. Raz za deň/týždeň povie ľudskou
+vetou, čo naozaj rieš:
+
+- **Pozri dnes** — 3–7 titulov, ktoré niečo chcú (zoradené podľa počtu dôvodov
+  a závažnosti; vety preberá z Inboxu vrátane „zmiešaného signálu").
+- **Možný nákup** — len kandidáti s **prienikom** buy signálu + DIP kvality +
+  zdravého grafu (nie jedno kritérium), a len tituly, ktoré ešte nedržíš.
+- **Možné DCA** — existujúce pozície, kde strata dáva zmysel (kvalitný dip bez
+  zlomeného grafu; tie so zlomeným grafom ostávajú v Pozri dnes s „počkať").
+- **Riziko / pozor** — earnings a zlomené grafy na držaných tituloch.
+- **Drž bez akcie** — zvyšok portfólia, kde sa nič podstatné nedeje.
+
+Headline zhrnie týždeň jednou vetou („Tento týždeň rieš hlavne X, Y, Z.").
+Klik na ticker otvorí Predikciu, tlačidlo Verdikt priamy verdikt. Žiadny LLM —
+čisto deterministické šablónové vety nad existujúcimi dátami.
 
 ### Investor Inbox — Tento týždeň
 
@@ -709,6 +739,11 @@ stĺpca a rovnaký ticker sa sťahuje iba raz.
 - **POČKAŤ** znamená, že setup potrebuje potvrdenie alebo odstránenie rizika.
 - **NIE** znamená nevstupovať teraz; nie hodnotenie dlhodobej kvality firmy.
 - Verdikt ukáže najviac dva argumenty pre, dva proti a jednu podmienku zmeny.
+- Sekcia **„Prečo to NEkúpiť"** je opak bežných nástrojov: úplný checklist
+  bŕzd, nie výber. Kontroluje downtrend grafu, blízke earnings, cenu nad
+  priemerným cieľom analytikov, slabý weekly trend, historicky nefunkčné
+  signály na titule (90D úspešnosť < 40 %) a či titul už nedržíš s veľkou
+  váhou. Keď nič neplatí, povie to explicitne — „žiadne zásadné brzdy".
 - Technika / Trh / Firma / Earnings sú indikátory dostupnosti zdrojov.
   Chýbajúci zdroj znižuje istotu, ale automaticky nevytvára negatívny verdikt.
 - Verdikt je transparentný preklad existujúcich dát, nie ďalší black-box model.

@@ -159,6 +159,16 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
 **Role:** Candidate discovery — "čo si mám pozrieť?"
 
 Main source sections:
+- **Týždenný plán** — `GET /api/investor/plan` is a prioritization layer ON TOP
+   of Investor Inbox (rendered above it in Scanner): 5 sections with template
+   sentences, NO LLM — Pozri dnes (top 3-7 inbox items by reason count +
+   severity, sentences reused from inbox merge incl. "zmiešaný signál"),
+   Možný nákup (scanner candidates passing the TRIPLE overlap buy tier + DIP ≥
+   `dca_dip_min` + chart health not Bad, held tickers excluded), Možné DCA
+   (dca kind without broken), Riziko (broken/earnings), Drž bez akcie (held
+   tickers absent from inbox). Headline "Tento týždeň rieš hlavne X, Y, Z."
+   5-min cache via `_investor_cache_*`, `?refresh=1` bypass. Its goal is LESS
+   mental noise, not more data — do not add new analytics into it.
 - **Investor Inbox / Tento týždeň** — `GET /api/investor/inbox` is a pull-based
    weekly triage panel at the top of Scanner. It merges existing cached sources:
    DCA candidates (`/api/portfolio/dca` for both accounts), large portfolio wins
@@ -221,6 +231,13 @@ Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()
 - Output is deliberately limited to two positive arguments, two risks and one
   condition that would change the verdict. Detailed evidence remains in the
   Predictive tab via `openVerdictEvidence()`.
+- **"Prečo NEkúpiť" brakes** (`buildVerdictBrakes()`): a separate FULL checklist
+  of deterministic brakes rendered between evidence and condition — downtrend,
+  earnings ≤ `earnings_warn_days`, price above mean analyst target, weak weekly
+  trend, 90D signal win rate < 40% (≥ 5 completed), existing position weight ≥
+  `dca_max_weight`. Unlike risks (max 2, curated), brakes list everything that
+  applies; empty list renders an explicit "no brakes" line. Uses only already
+  fetched data + `_holdings` global — no extra fetch, no scoring impact.
 - Source availability chips expose Technika / Trh / Firma / Earnings. Missing
   optional insights are fail-soft and lower confidence; they must not turn an
   otherwise valid technical setup into an automatic negative verdict.
@@ -307,6 +324,7 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - **ML + HMM model cache (`_MODEL_CACHE`).** `train_ml_model` a `detect_market_regime` sa inak fitovali pri každom `/api/chart` requeste. Cache kľúč `ticker:period:1wk:{posledná_sviečka}:{n}` → fit sa robí raz za sviečku. ML ukladá len `(acc, bull_prob)` (model je downstream nepoužitý → šetrí RAM), HMM celý dict. Max 256 záznamov, LRU prune.
 - **OHLCV cache is incremental.** `cache/ohlcv/{SYMBOL}_{INTERVAL}.gz` stores up to 1000 candles. Subsequent fetches request a tail (3–50 candles) and merge by `fromDate` key. Full refetch only on first load.
 - **Legacy portfolio analytics cleanup.** The old standalone analytics view and its orphaned routes/renderers were removed; DCA candidates remain in the Portfolio tab as the only survivor from that area. Reintroduce any broad portfolio analytics only with a visible UI home and explicit purpose.
+- **Portfolio correlation map.** `GET /api/portfolio/correlation?days=90` computes Pearson correlation of daily returns for held tickers (both accounts, top 30 by amount) purely from OHLCV disk cache — no new API calls, 15-min RAM cache (`_CORR_CACHE`), fail-soft skip for tickers without enough cached candles (`skipped[]`, min overlap 30 days). Rendered as a collapsible heatmap card in Portfolio below DCA (`portfolio-corr`, `loadCorrelationCard`/`renderCorrCard`, default collapsed via `td_portfolio_corr_collapsed`). Cell colors are RISK semantics on purpose: red = moves together (hidden concentration), green = negative correlation (diversification). `pairs_high` lists pairs ≥ 0.80. Interpretation only — never feeds C1–C4, DCA, or accounting.
 - **DCA candidates.** `/api/portfolio/dca?account=&loss_pct=15&dip_min=90&max_weight=10` joins aggregated per-ticker position P/L (eToro) with the DIP ranking (Finviz import). Flags positions at a loss ≥ `loss_pct`: `dca` (DIP ≥ dip_min, weight < max_weight — quality dip), `concentrated` (dca conditions met but weight ≥ max_weight), `value_trap` (trigger met, DIP < dip_min), `no_data` (in loss but ticker outside DIP dataset). Decision metric is **aggregate position P/L** (sum of all tranches), NOT newest trade. Defaults aligned with the app: `loss_pct=15` marks a deeper loss threshold, `dip_min=90` matches `DIP_STRONG_THRESHOLD`. Returns `dip_updated_at` so the UI can show DIP data age (manual import can be stale). Rendered as a card inside the Portfolio tab (`portfolio-dca`, via `loadDcaCandidates`/`renderDcaCard`) because DCA only makes sense for already-held tickers. Interpretation only — NEVER feeds C1–C4, scanner tier, or portfolio accounting. Deliberately NOT an Alert Center source: DCA is a standing state, not a time-windowed event.
 - **Portfolio attention filter.** The `Pozornosť` toggle in the Portfolio tab is a view-only focus layer. It calls `GET /api/investor/inbox`, uses grouped `items[]` by ticker as the single source of truth for DCA/earnings/chart-health reasons, and adds only a cheap local daily-price-move reason from `currentRate` vs `previousClose` (`attention_daily_pct`, percent-only — no USD threshold, deliberately simple). This same threshold is also passed to `/api/movers` as `min_change`, so Top pohyby opens only charts above the configured daily-move threshold. Caveat: for eToro 24/5 instruments, eToro UI can use a different session/day boundary than our previous closed daily candle, so daily % values may differ; always mention this when changing daily-percent logic. `PORT_ATTENTION_IGNORED_KINDS` drops `opportunity` (scanner-only, not a held ticker) and `profit` (+150% P/L check — user handles outsized gains manually via the year-test star, not through this filter) from the inbox reasons before they reach Portfolio. It does not change summary totals, accounting, scanner scoring, or DCA thresholds. In `Per ticker` it shows only attention tickers; in `Per trade` it keeps all tranches for any ticker that needs attention. State is persisted as `attentionOnly` in `td_port_${pid}` and is ANDed with the existing asset-type filter.
 - **Threshold settings (⚙).** `GET/POST /api/settings` persists user-tunable thresholds in `DATA_ROOT/dashboard_settings.json` (gitignored): `dca_loss_pct` (15), `dca_dip_min` (90), `dca_max_weight` (10), `attention_daily_pct` (2), `earnings_warn_days` (7). Server is the single source of truth because DCA thresholds are consumed server-side by Investor Inbox — do NOT move these to localStorage. `/api/portfolio/dca` query params default to `None` and fall back to settings; explicit params still override. Frontend mirrors defaults in `dashSettings` (loaded in init `Promise.all`) and the ⚙ header button opens the settings modal; saving invalidates `_dcaCache` + attention cache and re-renders. POST validates ranges (`_DASH_SETTINGS_LIMITS`) and rejects out-of-range with 400.
