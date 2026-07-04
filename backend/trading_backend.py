@@ -2388,6 +2388,89 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings()}
 
 
+# ── Korelačná mapa portfólia ──────────────────────────────────────────────────
+# Interpretačná vrstva: odhalí skrytú koncentráciu (tituly čo sa hýbu spolu).
+# Čisto z OHLCV disk cache — žiadne nové API volania, žiadny vplyv na účtovanie.
+_CORR_CACHE = {"key": None, "data": None, "ts": 0.0}
+CORR_CACHE_TTL = 900          # 15 min RAM cache
+CORR_MAX_SYMBOLS = 30         # najväčšie pozície podľa amount (30x30 matica stačí)
+CORR_MIN_OVERLAP = 30         # min. spoločných dní pre validnú koreláciu
+
+
+@app.get("/api/portfolio/correlation")
+def get_portfolio_correlation(days: int = Query(90, ge=30, le=365)):
+    """Pearsonova korelácia denných výnosov držaných titulov (oba účty).
+    Tituly bez dostatočnej OHLCV cache sa preskočia (fail-soft, `skipped`)."""
+    holdings = _get_portfolio_holdings()
+    symbols = sorted(holdings.keys(), key=lambda s: -abs(float(holdings[s].get("amount") or 0)))
+    symbols = symbols[:CORR_MAX_SYMBOLS]
+    cache_key = (tuple(sorted(symbols)), days)
+    now = _time_module.time()
+    if _CORR_CACHE["key"] == cache_key and now - _CORR_CACHE["ts"] < CORR_CACHE_TTL:
+        return _CORR_CACHE["data"]
+
+    series: dict = {}
+    skipped: list = []
+    for sym in symbols:
+        closes: dict = {}
+        try:
+            raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneDay")
+            candles = _flatten_ohlcv(raw) if raw else []
+        except Exception:
+            candles = []
+        for c in candles[-(days + 5):]:
+            d = str(c.get("fromDate", ""))[:10]
+            try:
+                px = float(c.get("close") or 0)
+            except (TypeError, ValueError):
+                px = 0.0
+            if d and px > 0:
+                closes[d] = px
+        if len(closes) > CORR_MIN_OVERLAP:
+            series[sym] = closes
+        else:
+            skipped.append(sym)
+
+    syms = sorted(series.keys())
+    if len(syms) < 2:
+        return {"symbols": syms, "matrix": [], "skipped": skipped, "days": days,
+                "pairs_high": [], "note": "V OHLCV cache nie je dosť dát (pomôže prefetch/otvorenie grafov)."}
+
+    df = pd.DataFrame(series).sort_index()
+    rets = df.pct_change()
+    corr = rets.corr(min_periods=CORR_MIN_OVERLAP)
+
+    matrix = []
+    for a in syms:
+        row = []
+        for b in syms:
+            try:
+                v = corr.at[a, b]
+                row.append(round(float(v), 3) if pd.notna(v) else None)
+            except Exception:
+                row.append(None)
+        matrix.append(row)
+
+    pairs_high = []
+    for i in range(len(syms)):
+        for j in range(i + 1, len(syms)):
+            v = matrix[i][j]
+            if v is not None and v >= 0.8:
+                pairs_high.append({"a": syms[i], "b": syms[j], "corr": v})
+    pairs_high.sort(key=lambda p: -p["corr"])
+
+    data = {
+        "symbols": syms,
+        "matrix": matrix,
+        "skipped": skipped,
+        "days": days,
+        "pairs_high": pairs_high[:12],
+        "computed_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    _CORR_CACHE.update(key=cache_key, data=data, ts=now)
+    return data
+
+
 def _get_portfolio_symbols() -> set:
     """Načíta symboly zo všetkých portfólií (oba účty)."""
     syms = set()

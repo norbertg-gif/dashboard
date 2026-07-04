@@ -3997,6 +3997,36 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 /* Portfólio per-trade: časový test (akcie/ETF držané > 1 rok) */
 .port-year-test { color: #f5c542; font-size: 11px; cursor: help; }
 
+
+/* ── Korelačná mapa portfólia ── */
+#portfolio-corr {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.corr-wrap { overflow-x: auto; max-width: 100%; padding: 4px 0; }
+.corr-table { border-collapse: collapse; font-family: var(--font-mono); }
+.corr-table th { font-size: 9px; color: var(--muted); font-weight: 600; padding: 2px 3px; }
+.corr-col-label { height: 56px; vertical-align: bottom; }
+.corr-col-label span { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; }
+.corr-row-label { text-align: right; padding-right: 6px !important; white-space: nowrap; }
+.corr-cell {
+  width: 26px; height: 20px; min-width: 26px;
+  font-size: 8.5px; text-align: center; color: var(--text);
+  border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+  cursor: help;
+}
+.corr-diag { background: var(--bg-input); }
+.corr-pairs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 10.5px; }
+.corr-pair {
+  padding: 2px 8px; border-radius: 8px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  background: var(--down-soft); color: var(--down);
+  border: 1px solid color-mix(in srgb, var(--down) 35%, transparent);
+}
+.corr-pair:hover { filter: brightness(1.15); }
+
 /* ═══════════════════════════════════════════════════════════════════════════
    GLASS TERMINAL — component overrides (design handoff 2026-07)
    Všetko scoped pod :where(html[data-variant="glass"] body:not(.light-mode)) — staré varianty a light mode

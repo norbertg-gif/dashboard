@@ -461,6 +461,105 @@ function renderDcaCard(data) {
     <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu.</div>`;
 }
 
+// ── KORELAČNÁ MAPA PORTFÓLIA ─────────────────────────────────────────────────
+// Heatmapa korelácií denných výnosov držaných titulov (oba účty) z OHLCV cache.
+// Odhalí skrytú koncentráciu — tituly, ktoré sa hýbu spolu aj naprieč sektormi.
+// Interpretačná vrstva; nevstupuje do C1–C4, DCA ani účtovania.
+let _corrCache = { data: null, ts: 0 };
+const CORR_CARD_TTL_MS = 15 * 60 * 1000;
+const PORT_CORR_COLLAPSED_KEY = 'td_portfolio_corr_collapsed';
+
+function isPortfolioCorrCollapsed() {
+  const v = localStorage.getItem(PORT_CORR_COLLAPSED_KEY);
+  return v == null ? true : v === '1';   // default zbalená — nech nepridáva hluk
+}
+
+function togglePortfolioCorr() {
+  localStorage.setItem(PORT_CORR_COLLAPSED_KEY, isPortfolioCorrCollapsed() ? '0' : '1');
+  renderCorrCard(_corrCache.data);
+  if (!isPortfolioCorrCollapsed() && !_corrCache.data) loadCorrelationCard();
+}
+
+function corrCardHead(data = null) {
+  const collapsed = isPortfolioCorrCollapsed();
+  const sub = data?.symbols?.length
+    ? `${data.symbols.length} titulov · denné výnosy ${data.days}d · ${(data.pairs_high || []).length} silných prekryvov`
+    : 'ktoré tituly sa hýbu spolu (skrytá koncentrácia)';
+  const refresh = collapsed ? '' :
+    `<button class="btn" style="margin-left:auto;font-size:10px;padding:3px 9px;" onclick="loadCorrelationCard(true)">Refresh</button>`;
+  return `<div class="dca-head" style="display:flex;align-items:center;gap:8px;">
+    <button class="btn dca-toggle" onclick="togglePortfolioCorr()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <b style="font-size:12px;">Korelačná mapa</b>
+    <span style="color:var(--muted);font-size:10.5px;">${sub}</span>
+    ${refresh}
+  </div>`;
+}
+
+async function loadCorrelationCard(force = false) {
+  const wrap = document.getElementById('portfolio-corr');
+  if (!wrap || isPortfolioCorrCollapsed()) return;
+  if (!force && _corrCache.data && Date.now() - _corrCache.ts < CORR_CARD_TTL_MS) {
+    renderCorrCard(_corrCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/correlation`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _corrCache = { data: await r.json(), ts: Date.now() };
+    renderCorrCard(_corrCache.data);
+  } catch (e) {
+    wrap.innerHTML = `${corrCardHead()}<div class="signal-outcome-note">Korelácie sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// Farba bunky: vysoká kladná korelácia = riziko koncentrácie (červená),
+// záporná = diverzifikácia (zelená). Zámerne P/L konvencia — červená tu
+// znamená "pozor", nie stratu.
+function corrCellStyle(v) {
+  if (v == null) return 'background:transparent;color:var(--muted3);';
+  const pct = Math.round(Math.min(1, Math.abs(v)) * 72);
+  const col = v >= 0 ? 'var(--down)' : 'var(--up)';
+  return `background:color-mix(in oklch, ${col} ${pct}%, transparent);`;
+}
+
+function renderCorrCard(data) {
+  const wrap = document.getElementById('portfolio-corr');
+  if (!wrap) return;
+  const head = corrCardHead(data);
+  if (isPortfolioCorrCollapsed()) { wrap.innerHTML = head; return; }
+  if (!data) { wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>`; return; }
+  const syms = data.symbols || [];
+  if (syms.length < 2) {
+    wrap.innerHTML = `${head}<div class="signal-outcome-note">${escHtml(data.note || 'Málo titulov s dátami v cache.')}</div>`;
+    return;
+  }
+  let table = `<div class="corr-wrap"><table class="corr-table"><thead><tr><th></th>`;
+  for (const s of syms) table += `<th class="corr-col-label"><span>${escHtml(s)}</span></th>`;
+  table += `</tr></thead><tbody>`;
+  data.matrix.forEach((row, i) => {
+    table += `<tr><th class="corr-row-label">${escHtml(syms[i])}</th>`;
+    row.forEach((v, j) => {
+      if (i === j) { table += `<td class="corr-cell corr-diag"></td>`; return; }
+      const txt = v == null ? '·' : v.toFixed(2).replace('0.', '.');
+      table += `<td class="corr-cell" style="${corrCellStyle(v)}" title="${escHtml(syms[i])} × ${escHtml(syms[j])}: ${v == null ? 'málo spoločných dní' : v.toFixed(2)}">${txt}</td>`;
+    });
+    table += `</tr>`;
+  });
+  table += `</tbody></table></div>`;
+
+  const pairs = (data.pairs_high || []).map(p =>
+    `<span class="corr-pair" onclick="onSbTickerClick('${escHtml(p.a)}')" title="Korelácia ${p.corr.toFixed(2)} — hýbu sa takmer identicky">${escHtml(p.a)}×${escHtml(p.b)} ${p.corr.toFixed(2)}</span>`
+  ).join('');
+  const pairsBlock = pairs
+    ? `<div class="corr-pairs"><b>Silné prekryvy (≥ 0.80):</b> ${pairs}</div>`
+    : `<div class="corr-pairs" style="color:var(--muted);">Žiadny pár nad 0.80 — portfólio sa nehýbe ako jeden blok.</div>`;
+  const skipped = (data.skipped || []).length
+    ? `<div class="signal-outcome-note">Bez dát v cache (preskočené): ${data.skipped.map(escHtml).join(', ')}</div>`
+    : '';
+  wrap.innerHTML = `${head}${table}${pairsBlock}${skipped}
+    <div class="signal-outcome-note" style="margin-top:4px;">Pearsonova korelácia denných výnosov za ${data.days} dní. Vysoká hodnota = tituly padajú/rastú spolu → diverzifikácia je menšia, než vyzerá. Nevstupuje do žiadneho scoringu.</div>`;
+}
+
 // ── ETORO GAIN CACHE ─────────────────────────────────────────────────────────
 const _gainCache = {};      // { '1': { monthly, yearly, daily, loaded, ts } }
 const _GAIN_TTL = 3600000;  // 1 hodina
@@ -1471,7 +1570,9 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
+    html += `<div id="portfolio-corr">${corrCardHead(_corrCache.data)}</div>`;
     setTimeout(() => loadDcaCandidates(), 0);
+    setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
   }
 
   // Tabuľka pozícií
