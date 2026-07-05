@@ -3099,6 +3099,28 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--up);
   background: var(--up-soft);
 }
+.pc-accuracy-badge {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--muted);
+  font-weight: 800;
+}
+.pc-accuracy-badge.bull {
+  border-color: var(--up);
+  color: var(--up);
+  background: var(--up-soft);
+}
+.pc-accuracy-badge.warn {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: var(--yellow-soft);
+}
+.pc-accuracy-badge.bear {
+  border-color: var(--down);
+  color: var(--down);
+  background: var(--down-soft);
+}
 .sb-holding-dot {
   flex-shrink: 0;
   color: var(--up);

@@ -1274,6 +1274,16 @@ function pc_renderSidebar(data) {
   const accTest = bt.test_accuracy;
   const accColor     = acc     >= 55 ? 'bull' : acc     >= 50 ? 'pred' : 'bear';
   const accTestColor = accTest >= 55 ? 'bull' : accTest >= 50 ? 'pred' : 'bear';
+  const accBadge = document.getElementById('pcAccuracyBadge');
+  if (accBadge) {
+    const accNum = Number(acc);
+    const testNum = Number(accTest);
+    accBadge.classList.remove('bull', 'warn', 'bear');
+    accBadge.classList.add(Number.isFinite(accNum) && accNum >= 55 ? 'bull' : Number.isFinite(accNum) && accNum >= 50 ? 'warn' : 'bear');
+    accBadge.textContent = Number.isFinite(accNum)
+      ? `Úspešnosť ${accNum.toFixed(1)}%${Number.isFinite(testNum) ? ` · test ${testNum.toFixed(1)}%` : ''}`
+      : 'Úspešnosť —';
+  }
   const accDef  = data.accuracy_def;
   const accOpt  = data.accuracy_opt;
   const accDiff = accOpt && accDef ? (accOpt - accDef).toFixed(1) : null;
@@ -2076,6 +2086,11 @@ async function loadData(reoptimize = false) {
   if (status) status.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px"><span class="spinner"></span> Načítavam…</span>';
   const decisionBar = document.getElementById('pcDecisionBar');
   if (decisionBar) decisionBar.innerHTML = '<div class="pc-decision-empty">Načítavam rozhodnutie, kontext a analytiku signálu…</div>';
+  const accBadge = document.getElementById('pcAccuracyBadge');
+  if (accBadge) {
+    accBadge.classList.remove('bull', 'warn', 'bear');
+    accBadge.textContent = 'Úspešnosť —';
+  }
 
   // initCharts() called once on tab init, not on every load
   document.getElementById('predInfo').innerHTML = '<div class="loading"><div class="spinner"></div>Počítam prognózu…</div>';
@@ -2119,6 +2134,11 @@ async function loadData(reoptimize = false) {
     document.getElementById('predInfo').innerHTML = `<div class="error-msg">${e.message}</div>`;
     document.getElementById('btInfo').innerHTML   = '—';
     document.getElementById('indInfo').innerHTML  = '—';
+    const accBadge = document.getElementById('pcAccuracyBadge');
+    if (accBadge) {
+      accBadge.classList.remove('bull', 'warn', 'bear');
+      accBadge.textContent = 'Úspešnosť —';
+    }
   } finally {
     if (btn) btn.disabled = false;
   }
