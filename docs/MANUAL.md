@@ -257,6 +257,12 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
   hlavný graf.
+  Predikčná sviečka je vždy binárna — buď očakáva pohyb hore, alebo dole.
+  Ak je dostupná dostatočná história, používa analog model: nájde minulé setupy
+  podobné aktuálnemu grafu a pozrie, kam išla nasledujúca sviečka. Ak história
+  nestačí, použije pôvodný vážený technický kompozit. Po update algoritmu sa
+  môžu zmeniť historické predikčné sviečky a bodky úspešnosti; reálne sviečky
+  a ceny sa nemenia.
 - **Volume Profile** (checkbox v *Indikátory — overlay*, skupina Objem) —
   horizontálny histogram pri pravom okraji ukazuje, **pri akých cenách** sa
   zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = **POC**

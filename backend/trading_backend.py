@@ -460,6 +460,148 @@ def detect_market_regime(df, cache_key=None) -> dict:
 
 # ── Prediction engine ─────────────────────────────────────────────────────────
 
+ANALOG_FEATURE_COLUMNS = [
+    "ema_gap",
+    "ema20_dist",
+    "kijun_dist",
+    "kumo_pos",
+    "rsi",
+    "macd_hist_pct",
+    "vol_ratio",
+    "stoch_k",
+    "adx",
+    "atr_pct",
+    "roc_4",
+    "pos_52w",
+]
+
+
+def _analog_feature_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Compact numeric fingerprint of each candle setup for nearest-neighbor matching."""
+    close = pd.to_numeric(df["Close"], errors="coerce").astype(float)
+    high = pd.to_numeric(df["High"], errors="coerce").astype(float)
+    low = pd.to_numeric(df["Low"], errors="coerce").astype(float)
+    frame = pd.DataFrame(index=df.index)
+
+    ema10 = pd.to_numeric(df.get("ema10"), errors="coerce")
+    ema20 = pd.to_numeric(df.get("ema20"), errors="coerce")
+    kijun = pd.to_numeric(df.get("ichi_kijun"), errors="coerce")
+    ichi_sa = pd.to_numeric(df.get("ichi_sa"), errors="coerce")
+    ichi_sb = pd.to_numeric(df.get("ichi_sb"), errors="coerce")
+    atr = pd.to_numeric(df.get("atr"), errors="coerce")
+
+    frame["ema_gap"] = (ema10 - ema20) / close
+    frame["ema20_dist"] = pd.to_numeric(df.get("ema20_dist"), errors="coerce")
+    frame["kijun_dist"] = (close - kijun) / close
+
+    kumo_top = pd.concat([ichi_sa, ichi_sb], axis=1).max(axis=1)
+    kumo_bottom = pd.concat([ichi_sa, ichi_sb], axis=1).min(axis=1)
+    kumo_width = (kumo_top - kumo_bottom).replace(0, np.nan)
+    frame["kumo_pos"] = np.where(
+        close > kumo_top,
+        (close - kumo_top) / close,
+        np.where(close < kumo_bottom, (close - kumo_bottom) / close, (close - (kumo_top + kumo_bottom) / 2) / kumo_width),
+    )
+
+    frame["rsi"] = pd.to_numeric(df.get("rsi"), errors="coerce")
+    frame["macd_hist_pct"] = pd.to_numeric(df.get("macd_hist"), errors="coerce") / close
+    frame["vol_ratio"] = pd.to_numeric(df.get("vol_ratio"), errors="coerce").clip(lower=0, upper=4)
+    frame["stoch_k"] = pd.to_numeric(df.get("stoch_k"), errors="coerce")
+    frame["adx"] = pd.to_numeric(df.get("adx"), errors="coerce")
+    frame["atr_pct"] = atr / close
+    frame["roc_4"] = pd.to_numeric(df.get("roc_4"), errors="coerce")
+    if "pos_52w" in df.columns:
+        frame["pos_52w"] = pd.to_numeric(df.get("pos_52w"), errors="coerce")
+    else:
+        roll_max = high.rolling(52, min_periods=20).max()
+        roll_min = low.rolling(52, min_periods=20).min()
+        frame["pos_52w"] = (close - roll_min) / (roll_max - roll_min).replace(0, np.nan)
+
+    return frame.replace([np.inf, -np.inf], np.nan)
+
+
+def _analog_prediction(df: pd.DataFrame, min_history: int = 60, neighbors: int = 21) -> dict | None:
+    """Predict next direction from historically similar setups.
+
+    The candidate set only uses candles whose following candle is already inside
+    the provided df. During backtest df is a past-only slice, so this remains
+    walk-forward and does not peek into the future.
+    """
+    if df is None or len(df) < min_history:
+        return None
+    try:
+        features = _analog_feature_frame(df)
+        current = features.iloc[-1]
+        candidate_features = features.iloc[:-1].copy()
+        closes = pd.to_numeric(df["Close"], errors="coerce").astype(float).reset_index(drop=True)
+        next_returns = (closes.shift(-1) - closes) / closes
+        outcomes = np.where(next_returns >= 0, 1.0, -1.0)
+
+        work = candidate_features.copy()
+        work["_ret"] = next_returns.iloc[:-1].to_numpy(dtype=float)
+        work["_outcome"] = outcomes[:-1]
+        needed = ANALOG_FEATURE_COLUMNS + ["_ret", "_outcome"]
+        work = work[needed].dropna()
+        current = current[ANALOG_FEATURE_COLUMNS]
+        if current.isna().any() or len(work) < max(25, neighbors):
+            return None
+
+        x = work[ANALOG_FEATURE_COLUMNS].astype(float)
+        mean = x.mean(axis=0)
+        std = x.std(axis=0).replace(0, 1.0).fillna(1.0)
+        xz = (x - mean) / std
+        cz = ((current.astype(float) - mean) / std).to_numpy(dtype=float)
+        distances = np.sqrt(((xz.to_numpy(dtype=float) - cz) ** 2).sum(axis=1))
+        if not np.isfinite(distances).all():
+            return None
+
+        k = min(neighbors, len(work))
+        idx = np.argsort(distances)[:k]
+        selected = work.iloc[idx].copy()
+        selected_dist = distances[idx]
+        similarity = 1.0 / (1.0 + selected_dist)
+
+        # Slight recency tilt: similar recent setups matter a bit more, but old
+        # analogs still vote. Index positions remain from the original df.
+        pos = np.array([candidate_features.index.get_loc(i) for i in selected.index], dtype=float)
+        recency = 0.65 + 0.35 * ((pos + 1.0) / max(1.0, len(candidate_features)))
+        vote_weights = similarity * recency
+        weight_sum = float(vote_weights.sum())
+        if weight_sum <= 0:
+            return None
+
+        outcomes_sel = selected["_outcome"].to_numpy(dtype=float)
+        returns_sel = selected["_ret"].to_numpy(dtype=float)
+        vote = float(np.sum(outcomes_sel * vote_weights) / weight_sum)
+        direction = 1 if vote >= 0 else -1
+
+        weighted_move = float(np.sum(returns_sel * vote_weights) / weight_sum)
+        if weighted_move == 0 or (weighted_move > 0) != (direction > 0):
+            avg_abs_move = float(np.sum(np.abs(returns_sel) * vote_weights) / weight_sum)
+            weighted_move = direction * avg_abs_move * max(0.35, abs(vote))
+        weighted_move = float(np.clip(weighted_move, -0.15, 0.15))
+        if abs(weighted_move) < 0.001:
+            weighted_move = direction * 0.001
+
+        up_count = int((outcomes_sel > 0).sum())
+        down_count = int((outcomes_sel < 0).sum())
+        confidence = float(np.clip(0.50 + abs(vote) * 0.50, 0.50, 0.99))
+        composite = float(np.clip(weighted_move / 0.10, -1.0, 1.0))
+        return {
+            "direction": direction,
+            "vote": vote,
+            "confidence": confidence,
+            "neighbors": int(k),
+            "up": up_count,
+            "down": down_count,
+            "move_pct": weighted_move,
+            "composite": composite,
+            "avg_abs_move_pct": float(np.sum(np.abs(returns_sel) * vote_weights) / weight_sum),
+        }
+    except Exception:
+        return None
+
+
 def predict_next_candle(df, weights: dict = None, **kwargs):
     row        = df.iloc[-1]
     last_close = float(row["Close"])
@@ -535,7 +677,7 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
 
     # Weights — use provided or defaults
     w = weights if weights else DEFAULT_WEIGHTS
-    composite = (
+    tech_composite = (
         ema_signal    * w.get("ema",   0.20) +
         rsi_signal    * w.get("rsi",   0.10) +
         macd_signal   * w.get("macd",  0.20) +
@@ -543,10 +685,11 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
         ichi_combined * w.get("ichi",  0.25) +
         stoch_signal  * w.get("stoch", 0.10)
     ) * (1.0 + adx_factor * 0.3)  # ADX scales overall confidence +/-30%
-    composite = float(np.clip(composite, -1.0, 1.0))
+    tech_composite = float(np.clip(tech_composite, -1.0, 1.0))
 
     # ML confidence modulation — blend with ML bull probability if provided
     ml_bull_prob = kwargs.get("ml_bull_prob") if kwargs else None
+    composite = tech_composite
     if ml_bull_prob is not None:
         # Convert prob to signal: 0.5 = neutral, 1.0 = +1, 0.0 = -1
         ml_signal = float(np.clip((ml_bull_prob - 0.5) * 2, -1.0, 1.0))
@@ -555,7 +698,14 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
 
     atr        = float(row["atr"])
     pred_open  = last_close
-    pred_close = last_close * (1 + composite * 0.6) + composite * atr * 0.4
+    analog = _analog_prediction(df)
+    prediction_method = "technical_composite"
+    if analog:
+        prediction_method = "analog_similarity"
+        composite = float(analog["composite"])
+        pred_close = last_close * (1 + float(analog["move_pct"]))
+    else:
+        pred_close = last_close * (1 + composite * 0.6) + composite * atr * 0.4
     mid        = (pred_open + pred_close) / 2
     pred_high  = mid + atr * 0.75
     pred_low   = mid - atr * 0.75
@@ -594,6 +744,17 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
         "low":   round(pred_low,   4),
         "close": round(pred_close, 4),
         "composite": round(composite, 4),
+        "method": prediction_method,
+        "tech_composite": round(tech_composite, 4),
+        "analog": {
+            "vote": round(float(analog["vote"]), 4),
+            "confidence": round(float(analog["confidence"]) * 100, 1),
+            "neighbors": int(analog["neighbors"]),
+            "up": int(analog["up"]),
+            "down": int(analog["down"]),
+            "move_pct": round(float(analog["move_pct"]) * 100, 2),
+            "avg_abs_move_pct": round(float(analog["avg_abs_move_pct"]) * 100, 2),
+        } if analog else None,
         "entry_zone": {
             "low":  entry_low,
             "mid":  entry_mid,
@@ -609,6 +770,11 @@ def predict_next_candle(df, weights: dict = None, **kwargs):
             "ichi":  {"value": round(ichi_combined, 3),          "signal": round(ichi_combined, 3), "weight": w.get("ichi",  0.25)},
             "stoch": {"value": round(stoch_k, 2),                "signal": round(stoch_signal, 3),  "weight": w.get("stoch", 0.10)},
             "adx":   {"value": round(adx_val, 2),                "signal": round(adx_factor, 3),    "weight": 0.0},
+            "analog": {
+                "value": round(float(analog["vote"]), 3) if analog else None,
+                "signal": round(float(analog["confidence"]) * (1 if analog and analog["direction"] >= 0 else -1), 3) if analog else 0.0,
+                "weight": 0.0,
+            },
         }
     }
 
@@ -850,6 +1016,8 @@ def run_backtest(df, weights: dict = None):
             "actual_change_pct": round((actual_close - prev_close) / prev_close * 100, 3) if prev_close else None,
             "error_pct":    round(abs(pred_close - actual_close) / actual_close * 100, 3),
             "composite":    round(pred["composite"], 4),
+            "method":       pred.get("method", "technical_composite"),
+            "analog":       pred.get("analog"),
             "contrib":      contrib,
             "is_test":      i >= train_end,
         })
