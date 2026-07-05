@@ -236,6 +236,8 @@ let pc_predCandleSeries = null, pc_futureCandleSeries = null;
 let pc_btPredLine = null, pc_btActualLine = null;
 let btMarkers = [];
 let pc_showBacktest = true;
+const PC_HIDE_MISSES_KEY = 'pc_hide_backtest_misses';
+let pc_hideBacktestMisses = localStorage.getItem(PC_HIDE_MISSES_KEY) === '1';
 let pc_lastData = null;
 const PC_LAST_TICKER_KEY = 'td_predictive_ticker';
 
@@ -592,10 +594,25 @@ function toggleBacktest() {
   if (pc_lastData) renderCharts(pc_lastData);
 }
 
+function syncBacktestMissToggle() {
+  const btn = document.getElementById('btMissToggle');
+  if (!btn) return;
+  btn.classList.toggle('active', pc_hideBacktestMisses);
+  btn.textContent = pc_hideBacktestMisses ? 'Skryť omyly ✓' : 'Skryť omyly';
+}
+
+function toggleBacktestMisses() {
+  pc_hideBacktestMisses = !pc_hideBacktestMisses;
+  localStorage.setItem(PC_HIDE_MISSES_KEY, pc_hideBacktestMisses ? '1' : '0');
+  syncBacktestMissToggle();
+  if (pc_lastData) renderCharts(pc_lastData);
+}
+
 function renderCharts(data) {
   const candles = data.candles;
   const pred    = data.pred_candle;
   const bt      = data.backtest;
+  syncBacktestMissToggle();
 
   // TOP: historical candles — mark last as incomplete if current week
   pc_realSeries.setData(candles);
@@ -693,14 +710,16 @@ function renderCharts(data) {
   // Pad pc_predCandleSeries with invisible points at start so logical indices align with real chart
   // Use NaN-valued candles — lightweight-charts skips them visually but keeps the index
   const firstCandle = candles[0];
-  const overlayStart = bt.overlay.length ? bt.overlay[0].time : firstCandle.time;
+  const overlay = Array.isArray(bt.overlay) ? bt.overlay : [];
+  const visibleOverlay = pc_hideBacktestMisses ? overlay.filter(r => r.correct !== false) : overlay;
+  const overlayStart = overlay.length ? overlay[0].time : firstCandle.time;
   const padCandles = candles
     .filter(c => c.time < overlayStart)
     .map(c => ({ time: c.time, open: c.close, high: c.close, low: c.close, close: c.close }));
 
-  if (pc_showBacktest && bt.overlay && bt.overlay.length) {
+  if (pc_showBacktest && overlay.length) {
     // Use real predicted OHLC from backend
-    const predCandles = bt.overlay.map(r => ({
+    const predCandles = visibleOverlay.map(r => ({
       time:  r.time,
       open:  r.pred_open,
       high:  r.pred_high,
@@ -710,7 +729,7 @@ function renderCharts(data) {
     pc_predCandleSeries.setData([...padCandles, ...predCandles]);
 
     // hit/miss markers on pred candles
-    const markers = bt.overlay.map(r => ({
+    const markers = visibleOverlay.map(r => ({
       time:     r.time,
       position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
       color:    r.correct === null ? '#94a3b8' : r.correct ? '#26a69a' : '#ef5350',
@@ -729,8 +748,8 @@ function renderCharts(data) {
   // Current open week: add prediction candle at current week's timestamp
   if (data.current_week_open && data.pred_current_candle) {
     // Append to pc_predCandleSeries after backtest candles
-    const existing = pc_showBacktest && bt.overlay && bt.overlay.length
-      ? [...padCandles, ...bt.overlay.map(r => ({
+    const existing = pc_showBacktest && overlay.length
+      ? [...padCandles, ...visibleOverlay.map(r => ({
           time: r.time, open: r.pred_open, high: r.pred_high,
           low: r.pred_low, close: r.pred_close,
         }))]
