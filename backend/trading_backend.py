@@ -822,23 +822,32 @@ def run_backtest(df, weights: dict = None):
             continue
 
         actual       = df_r.iloc[i]
+        prev_close   = float(df_r.iloc[i-1]["Close"])
         actual_open  = float(actual["Open"])
         actual_close = float(actual["Close"])
         pred_close   = pred["close"]
 
-        pred_direction   = 1 if pred_close >= float(df_r.iloc[i-1]["Close"]) else -1
-        actual_direction = 1 if actual_close >= actual_open else -1
+        # The model predicts the next close relative to the previous closed
+        # candle. Evaluate against the same baseline. Using close >= open would
+        # score candle color, not price direction, and gaps can flip the result.
+        pred_direction   = 1 if pred_close >= prev_close else -1
+        actual_direction = 1 if actual_close >= prev_close else -1
         contrib = {k: v["signal"] * v["weight"] for k, v in pred["signals"].items()}
 
         results.append({
             "date":         str(dates[i])[:10],
+            "prev_close":   round(prev_close, 4),
             "pred_open":    round(pred["open"], 4),
             "pred_high":    round(pred["high"], 4),
             "pred_low":     round(pred["low"], 4),
             "pred_close":   round(pred_close, 4),
+            "actual_open":  round(actual_open, 4),
             "actual_close": round(actual_close, 4),
             "correct":      pred_direction == actual_direction,
+            "pred_dir":      pred_direction,
             "actual_dir":   actual_direction,
+            "pred_change_pct":   round((pred_close - prev_close) / prev_close * 100, 3) if prev_close else None,
+            "actual_change_pct": round((actual_close - prev_close) / prev_close * 100, 3) if prev_close else None,
             "error_pct":    round(abs(pred_close - actual_close) / actual_close * 100, 3),
             "composite":    round(pred["composite"], 4),
             "contrib":      contrib,
@@ -3591,6 +3600,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     "pred_close":   r["pred_close"],
                     "actual_close": r["actual_close"],
                     "correct":      r["correct"],
+                    "pred_change_pct":   r.get("pred_change_pct"),
+                    "actual_change_pct": r.get("actual_change_pct"),
                 })
             except Exception:
                 pass

@@ -1292,7 +1292,7 @@ function pc_renderSidebar(data) {
 
   document.getElementById('btInfo').innerHTML =
     '<div class="stat-grid">' +
-      '<div class="stat"><div class="stat-label tt" data-tip="Percentuálna správnosť predikcie smeru (bull/bear) na všetkých historických dátach.">Celková správnosť <span class="tt-icon">ⓘ</span></div>' +
+      '<div class="stat"><div class="stat-label tt" data-tip="Percentuálna správnosť predikcie smeru close voči predchádzajúcemu close. Nehodnotí farbu sviečky close vs open, aby gapy neskresľovali výsledok.">Celková správnosť <span class="tt-icon">ⓘ</span></div>' +
         '<div class="stat-value ' + accColor + '">' + acc + '%</div></div>' +
       '<div class="stat"><div class="stat-label tt" data-tip="Priemerná percentuálna odchýlka predikovanej close ceny od reálnej. Čím nižšie, tým presnejší model.">Priem. chyba <span class="tt-icon">ⓘ</span></div>' +
         '<div class="stat-value">' + bt.avg_error_pct + '%</div></div>' +
