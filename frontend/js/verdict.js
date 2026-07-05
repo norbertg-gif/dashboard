@@ -156,7 +156,80 @@ function buildInvestorVerdict(ticker, data, insights, market) {
   return { ticker, verdict, label: labels[verdict][0], summary: labels[verdict][1],
     confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition,
     brakes: buildVerdictBrakes(ticker, data, insights, market),
+    sizing: buildPositionSizing(ticker, data),
     sources, evaluatedAt: new Date() };
+}
+
+// ── ATR pozičný kalkulátor "Koľko kúpiť" ─────────────────────────────────────
+// Deterministický risk-based sizing: risk_per_trade_pct × equity / (atr_stop_mult × ATR14)
+// = počet akcií a kapitál. Cap na dca_max_weight (koncentrácia). Žiadne nové dáta —
+// ATR14 z daily_candles v client-side, equity z portfolioAccountData/etoroSummary.
+function computeAtr14(candles) {
+  const n = candles?.length || 0;
+  if (n < 15) return null;
+  const trs = [];
+  for (let i = n - 14; i < n; i++) {
+    const cur = candles[i], prev = candles[i - 1];
+    if (!cur || !prev) return null;
+    const h = Number(cur.high), l = Number(cur.low), pc = Number(prev.close);
+    if (![h, l, pc].every(Number.isFinite)) return null;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  return trs.reduce((s, v) => s + v, 0) / trs.length;
+}
+
+function totalPortfolioEquity() {
+  try {
+    let total = 0;
+    for (const acc of Object.values(portfolioAccountData || {})) {
+      const eq = Number(acc?.summary?._liveEquity ?? acc?.summary?.equity);
+      if (Number.isFinite(eq) && eq > 0) total += eq;
+    }
+    if (total > 0) return total;
+    for (const s of Object.values(etoroSummary || {})) {
+      const eq = Number(s?.equity);
+      if (Number.isFinite(eq) && eq > 0) total += eq;
+    }
+    return total > 0 ? total : null;
+  } catch (e) { return null; }
+}
+
+function buildPositionSizing(ticker, data) {
+  const candles = data?.daily_candles?.length ? data.daily_candles : data?.candles;
+  const last = candles?.at?.(-1);
+  const close = Number(last?.close);
+  const atr = computeAtr14(candles);
+  const equity = totalPortfolioEquity();
+  const riskPct = Number(dashSettings?.risk_per_trade_pct) || 1;
+  const stopMult = Number(dashSettings?.atr_stop_mult) || 1.5;
+  const maxWeight = Number(dashSettings?.dca_max_weight) || 10;
+  if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(atr) || atr <= 0 || !Number.isFinite(equity) || equity <= 0) {
+    return { available: false, reason: !Number.isFinite(equity) || equity <= 0
+      ? 'Chýba portfólio equity — otvor Portfólio tab.'
+      : 'Málo denných sviečok pre ATR14.' };
+  }
+  const stopDist = stopMult * atr;
+  const stopPrice = close - stopDist;
+  const riskDollars = equity * (riskPct / 100);
+  let shares = Math.floor(riskDollars / stopDist);
+  let positionUSD = shares * close;
+  const maxPositionUSD = equity * (maxWeight / 100);
+  let capped = false;
+  if (positionUSD > maxPositionUSD) {
+    shares = Math.floor(maxPositionUSD / close);
+    positionUSD = shares * close;
+    capped = true;
+  }
+  if (shares < 1) {
+    return { available: false, reason: `Riziko ${riskPct}% equity ($${riskDollars.toFixed(0)}) je menšie ako stop-distancia ($${stopDist.toFixed(2)}) na jednu akciu.` };
+  }
+  return {
+    available: true,
+    equity, riskPct, riskDollars,
+    close, atr, stopMult, stopDist, stopPrice,
+    shares, positionUSD, positionPctEquity: positionUSD / equity * 100,
+    maxWeight, capped,
+  };
 }
 
 // ── "Prečo NEkúpiť" — systematický checklist bŕzd ────────────────────────────
@@ -215,6 +288,29 @@ function buildVerdictBrakes(ticker, data, insights, market) {
   return brakes;
 }
 
+function renderPositionSizing(s) {
+  if (!s) return '';
+  if (!s.available) {
+    return `<section class="verdict-sizing verdict-sizing-empty">
+      <h3>Koľko kúpiť</h3>
+      <div class="verdict-sizing-note">${escHtml(s.reason || 'Kalkulátor nedostupný.')}</div>
+    </section>`;
+  }
+  const capNote = s.capped
+    ? ` <span class="verdict-sizing-cap" title="Pozícia by prekročila max. váhu ${s.maxWeight}% equity; orezané na maximum">cap ${s.maxWeight}% equity</span>`
+    : '';
+  return `<section class="verdict-sizing">
+    <h3>Koľko kúpiť <span class="verdict-sizing-sub">deterministický risk kalkulátor</span></h3>
+    <div class="verdict-sizing-grid">
+      <div><span>Akcií</span><strong>${s.shares}</strong></div>
+      <div><span>Pozícia</span><strong>$${s.positionUSD.toFixed(0)}</strong><em>${s.positionPctEquity.toFixed(2)}% equity${capNote}</em></div>
+      <div><span>Stop</span><strong>$${s.stopPrice.toFixed(2)}</strong><em>−${s.stopDist.toFixed(2)} = ${s.stopMult}× ATR14</em></div>
+      <div><span>Riziko</span><strong>$${s.riskDollars.toFixed(0)}</strong><em>${s.riskPct}% z equity $${Math.round(s.equity).toLocaleString('sk-SK')}</em></div>
+    </div>
+    <div class="verdict-sizing-note">Prahy meň v ⚙ Nastavenia (Riziko na obchod, Stop × ATR14). Kalkulátor je pomôcka — konečnú veľkosť rozhoduješ ty.</div>
+  </section>`;
+}
+
 function renderInvestorVerdict(result) {
   const el = document.getElementById('verdictContent');
   if (!el) return;
@@ -241,6 +337,7 @@ function renderInvestorVerdict(result) {
         ? `<ul>${result.brakes.map(text => `<li>${escHtml(text)}</li>`).join('')}</ul>`
         : '<div class="verdict-brakes-clear">✓ Žiadne zásadné brzdy — platí štandardný risk manažment (veľkosť pozície, stop).</div>'}
     </section>
+    ${renderPositionSizing(result.sizing)}
     <section class="verdict-condition">
       <span>Čo zmení verdikt</span>
       <strong>${escHtml(result.condition)}</strong>

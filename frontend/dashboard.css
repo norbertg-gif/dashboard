@@ -4087,6 +4087,57 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .verdict-brakes li + li { margin-top: 6px; }
 .verdict-brakes-clear { color: var(--up); font-size: 12.5px; }
 
+/* ── Verdikt: kalkulátor "Koľko kúpiť" ── */
+.verdict-sizing {
+  padding: 14px 17px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border2));
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg2));
+}
+.verdict-sizing h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.verdict-sizing-sub {
+  color: var(--muted); font-weight: 400; text-transform: none;
+  font-size: 10.5px; margin-left: 6px; letter-spacing: 0;
+}
+.verdict-sizing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 8px 0 6px;
+}
+.verdict-sizing-grid > div {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.verdict-sizing-grid span {
+  font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted2); font-weight: 700;
+}
+.verdict-sizing-grid strong {
+  font-family: var(--font-mono); font-size: 17px; font-weight: 700;
+  color: var(--text); line-height: 1.15;
+}
+.verdict-sizing-grid em {
+  font-style: normal; font-size: 10.5px; color: var(--muted);
+}
+.verdict-sizing-cap {
+  color: var(--yellow); font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+}
+.verdict-sizing-note {
+  margin-top: 4px; color: var(--muted); font-size: 10.5px; line-height: 1.4;
+}
+.verdict-sizing-empty { background: var(--bg2); border-left-color: var(--muted3); }
+.verdict-sizing-empty h3 { color: var(--muted); }
+
 /* ═══════════════════════════════════════════════════════════════════════════
    GLASS TERMINAL — component overrides (design handoff 2026-07)
    Všetko scoped pod :where(html[data-variant="glass"] body:not(.light-mode)) — staré varianty a light mode

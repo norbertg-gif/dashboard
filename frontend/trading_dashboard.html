@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260705-analytics1">
+<link rel="stylesheet" href="/dashboard.css?v=20260706-sizing1">
 </head>
 <body>
 
@@ -407,6 +407,10 @@
         <input id="set-attention-pct" type="number" min="0.1" max="50" step="0.1"></label>
       <label>Earnings varovanie ≤ <span class="settings-unit">dní</span>
         <input id="set-earnings-days" type="number" min="1" max="60" step="1"></label>
+      <label>Riziko na obchod <span class="settings-unit">% equity</span>
+        <input id="set-risk-per-trade" type="number" min="0.1" max="10" step="0.1"></label>
+      <label>Stop = <span class="settings-unit">× ATR14</span>
+        <input id="set-atr-stop-mult" type="number" min="0.5" max="5" step="0.1"></label>
     </div>
     <div class="settings-note">Prahy platia pre DCA kartu, Investor Inbox aj filter Pozornosť — server ich drží na jednom mieste, zmena nevyžaduje redeploy.</div>
     <div class="modal-btns">
@@ -466,15 +470,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260705-analytics1"></script>
-  <script src="/js/live.js?v=20260705-analytics1"></script>
-  <script src="/js/portfolio.js?v=20260705-analytics1"></script>
-  <script src="/js/watchlist.js?v=20260705-analytics1"></script>
-  <script src="/js/scanner.js?v=20260705-analytics1"></script>
-  <script src="/js/chart_patterns.js?v=20260705-analytics1"></script>
-  <script src="/js/predictive.js?v=20260705-analytics1"></script>
-  <script src="/js/verdict.js?v=20260705-analytics1"></script>
-  <script src="/js/charts.js?v=20260705-analytics1"></script>
-  <script src="/js/main.js?v=20260705-analytics1"></script>
+  <script src="/js/core.js?v=20260706-sizing1"></script>
+  <script src="/js/live.js?v=20260706-sizing1"></script>
+  <script src="/js/portfolio.js?v=20260706-sizing1"></script>
+  <script src="/js/watchlist.js?v=20260706-sizing1"></script>
+  <script src="/js/scanner.js?v=20260706-sizing1"></script>
+  <script src="/js/chart_patterns.js?v=20260706-sizing1"></script>
+  <script src="/js/predictive.js?v=20260706-sizing1"></script>
+  <script src="/js/verdict.js?v=20260706-sizing1"></script>
+  <script src="/js/charts.js?v=20260706-sizing1"></script>
+  <script src="/js/main.js?v=20260706-sizing1"></script>
 </body>
 </html>

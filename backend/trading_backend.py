@@ -2049,6 +2049,8 @@ DASH_SETTINGS_DEFAULTS = {
     "dca_max_weight": 10.0,      # váha pozície < x % equity → bez koncentračného rizika
     "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
+    "risk_per_trade_pct": 1.0,   # riziko na obchod ako % equity — Verdikt kalkulátor
+    "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
 }
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
@@ -2056,6 +2058,8 @@ _DASH_SETTINGS_LIMITS = {
     "dca_max_weight": (1, 100),
     "attention_daily_pct": (0.1, 50),
     "earnings_warn_days": (1, 60),
+    "risk_per_trade_pct": (0.1, 10),
+    "atr_stop_mult": (0.5, 5),
 }
 
 

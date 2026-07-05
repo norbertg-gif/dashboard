@@ -193,6 +193,8 @@ let dashSettings = {
   dca_max_weight: 10,
   attention_daily_pct: 2,
   earnings_warn_days: 7,
+  risk_per_trade_pct: 1,
+  atr_stop_mult: 1.5,
 };
 
 async function loadDashSettings() {
@@ -212,6 +214,8 @@ const _SETTINGS_INPUTS = [
   ['set-dca-weight', 'dca_max_weight'],
   ['set-attention-pct', 'attention_daily_pct'],
   ['set-earnings-days', 'earnings_warn_days'],
+  ['set-risk-per-trade', 'risk_per_trade_pct'],
+  ['set-atr-stop-mult', 'atr_stop_mult'],
 ];
 
 function openSettingsModal() {
