@@ -130,13 +130,13 @@ New signal log entries carry `rules_version` — don't mix v1/v2 populations whe
 
 Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 < EMA20 AND close < EMA20) → **counter** (red), `side` → **watch** (orange). Score = strength, tier = context.
 
-## Predictive tab — key architecture
+## Analytika tab (`predictive`) — key architecture
 
-**Role:** Detail one ticker — "prečo áno/nie?"
+**Role:** Detail one ticker — "prečo áno/nie?" User-facing label is **Analytika**; keep internal route/id/function names as `predictive` / `pc_*` unless doing a dedicated migration.
 
 - **Decision Bar** (top): `predictiveDecisionFromData()` → Buy/Watch/Counter/No signal badge + sila x/4 + weekly trend label + regime + vek signálu. Rendered above charts via `#pcDecisionBar`.
 - **Weekly trend label** (`_weekly_trend(df_w)`): 5-stupňový label cez Donchian 20w pozíciu + SMA50w + EMA10/20 — nahradil pôvodný prísny `composite > 0.05 AND nad Kumo AND EMA10>EMA20`, ktorý dával "bear" aj pri AAPL/AMD v zjavnom uptrende. Stupne: `strong_up` (Donch ≥ 0.80 + SMA50), `up` (≥ 0.55 + SMA50), `range` (default), `down` (< 0.30, pod SMA50), `strong_down` (< 0.15, pod SMA50, EMA bear). Backend vracia `weekly_trend: {key, label, icon, score, donchian_pos, above_sma50, ema_bull, ...}` v scanner aj predict payload. Stará `weekly_bullish: bool` ostáva ako derivát `score >= 1` pre ML kontext, signal log, backfill — žiadny downstream consumer sa nelámal. `_weekly_bullish_asof()` (backfill regime kontextu) tiež prepnutý na novú logiku → historické signály budú konzistentné s novými pri budúcom backfille.
-- **Left column (Dôkazy):** C1–C4 aktuálny setup, história signálov, **90D+ validácia ako hlavný horizont**, Signal Analytics, Timeframe alignment. 30D/60D dáta ostávajú v analytickej vrstve, ale UI ich netlačí dopredu, pretože používateľ obchoduje skôr 90+ deň horizont.
+- **Left column (Dôkazy):** C1–C4 aktuálny setup, história signálov, **90D+ validácia ako hlavný horizont**, Signal Analytics (default collapsed), Timeframe alignment. 30D/60D dáta ostávajú v analytickej vrstve, ale UI ich netlačí dopredu, pretože používateľ obchoduje skôr 90+ deň horizont.
 - **Main chart** (weekly/daily): `pc_realChartInst` / `pc_realSeries`. eToro
   open-position markers (circles) are injected in `renderCharts()` alongside
   buy signal arrows. Marker IDs resolve through `pc_markerMeta`; standard chart
@@ -194,7 +194,7 @@ Main source sections:
    bypasses. Rows are grouped by ticker: if one
    symbol has multiple reasons (for example DCA + chart-health risk), it is
    rendered once with `kinds`/`reasons` badges and a merged human summary.
-   Rows link to Verdikt / Predikcia and expose `+ WL`.
+   Rows link to Verdikt / Analytika and expose `+ WL`.
 - **Earnings calendar widget** — `GET /api/earnings/calendar?days=14` returns
    upcoming earnings for the relevant universe only: eToro portfolio, server
    watchlist, and last scanner candidates. It uses `_earnings_next_date()` so the

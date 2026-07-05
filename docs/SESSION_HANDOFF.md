@@ -2,7 +2,7 @@
 
 ## Najnovšie v tejto session
 
-- Pridaný **Chart Pattern overlay V1** do Prediktívneho tabu:
+- Pridaný **Chart Pattern overlay V1** do Analytiky:
   `frontend/js/chart_patterns.js` (registry + detektory + LWC primitive renderer),
   checkbox `Pattern overlay` v karte *Indikátory — overlay* a vysvetľovacia karta
   `Chart Pattern`.

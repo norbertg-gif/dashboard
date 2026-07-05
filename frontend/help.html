@@ -68,7 +68,7 @@
       <li><a href="#workflow">Odporúčaný pracovný postup</a></li>
       <li><a href="#charts">Grafy</a></li>
       <li><a href="#portfolio">Portfólio a História</a></li>
-      <li><a href="#predictive">Prediktívny tab — ako čítať signály</a></li>
+      <li><a href="#predictive">Analytika — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
       <li><a href="#verdict">Investičný verdikt</a></li>
       <li><a href="#memory">Prev?dzka a pam??ov? profil</a></li>
@@ -88,7 +88,7 @@
   </p>
   <div class="quick-note">
     Najkratšia filozofia dashboardu: <strong>Scanner</strong> hovorí, čo si
-    pozrieť, <strong>Prediktívny/analytický graf</strong> vysvetľuje prečo,
+    pozrieť, <strong>Analytika</strong> vysvetľuje prečo,
     <strong>Portfólio</strong> ukazuje čo z držaných titulov vyžaduje pozornosť
     a <strong>Verdikt</strong> prekladá technické vrstvy do ľudskej reči.
   </div>
@@ -107,8 +107,8 @@
       <figcaption><strong>Scanner</strong> je denný zoznam kandidátov. Týždenný plán a Investor Inbox zlučujú DCA, earnings, riziká grafu a nové príležitosti tak, aby sa jeden ticker neopakoval na viacerých miestach.</figcaption>
     </figure>
     <figure class="screen-card">
-      <img src="/assets/help/screenshots/predictive-overview.svg" alt="Ukážka záložky Prediktívny">
-      <figcaption><strong>Prediktívny</strong> je v praxi analytický detail: weekly/daily graf, dôkazy signálu, pattern overlay, volume profile, backtesting a fundamentálne kontexty.</figcaption>
+      <img src="/assets/help/screenshots/predictive-overview.svg" alt="Ukážka záložky Analytika">
+      <figcaption><strong>Analytika</strong> je detail jedného titulu: weekly/daily graf, dôkazy signálu, pattern overlay, volume profile, backtesting a fundamentálne kontexty.</figcaption>
     </figure>
     <figure class="screen-card">
       <img src="/assets/help/screenshots/verdict-overview.svg" alt="Ukážka záložky Verdikt">
@@ -149,16 +149,16 @@
     <li><strong>📈 Grafy</strong> — mriežka panelov s grafmi tickerov z watchlistu. Klik aktivuje panel.</li>
     <li><strong>📊 Portfólio</strong> — eToro pozície, summary (Cash / Invested / P&amp;L / <strong>Dnes P/L</strong> / Equity).</li>
     <li><strong>História</strong> — uzavreté obchody s filtrom dátumového intervalu od–do.</li>
-    <li><strong>📈 Prediktívny</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a predikcia ďalšej sviečky.</li>
+    <li><strong>📈 Analytika</strong> — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy, história, validácia a modelová prognóza ďalšej sviečky.</li>
     <li><strong>Scanner</strong> — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie watchlistu a DIP universe scanner s crossover stratégiou.</li>
     <li><strong>Verdikt</strong> — zjednodušená odpoveď ÁNO / POČKAŤ / NIE pre horizont 30–90 dní. Ukáže najviac dva argumenty pre, dva proti a jednu podmienku, ktorá môže rozhodnutie zmeniť. Indikátory Technika / Trh / Firma / Earnings ukazujú dostupnosť podkladov; chýbajúci zdroj znižuje deklarovanú istotu. Výsledok sa 10 minút cachuje. Nepridáva nové skóre ani nemení C1–C4 alebo ML.</li>
   </ul>
 
   <h3>Ovládanie grafov a markerov</h3>
   <ul>
-    <li>Grafy aj Prediktívny používajú <strong>MagnetOHLC</strong>: crosshair sa prichytáva k najbližšej hodnote Open / High / Low / Close. Nemení dáta, indikátory ani výpočet signálov.</li>
+    <li>Grafy aj Analytika používajú <strong>MagnetOHLC</strong>: crosshair sa prichytáva k najbližšej hodnote Open / High / Low / Close. Nemení dáta, indikátory ani výpočet signálov.</li>
     <li>Tooltip sa otvorí iba pri skutočnom hoveri konkrétneho markera, nie pri ľubovoľnom prejdení cez rovnaký dátum.</li>
-    <li>Bežné grafy podporujú tooltip pre <strong>eToro vstupy</strong> a <strong>pattern markery</strong>. Prediktívny graf podporuje eToro vstupy a <strong>buy signál šípky</strong>.</li>
+    <li>Bežné grafy podporujú tooltip pre <strong>eToro vstupy</strong> a <strong>pattern markery</strong>. Analytický graf podporuje eToro vstupy a <strong>buy signál šípky</strong>.</li>
     <li>eToro detail obsahuje účet, BUY/SELL, páku, vstupnú cenu, dátum a P/L. Signál ukazuje tier, silu, počet signálov v týždni a dátum.</li>
   </ul>
 
@@ -166,7 +166,7 @@
   <ol>
     <li><strong>Scanner:</strong> pozri najprv lištu TRH. Porovnaj NDX a SPX Pulse, Breadth a VIX. Tým zistíš, či trh kandidátom pomáha alebo ideš proti prúdu.</li>
     <li><strong>Kandidáti:</strong> vyber Buy/Watch titul s rozumnou silou a DIP kvalitou. Stĺpec Trh ti povie, či titul v posledný deň rástol, kde zatvoril voči VWAP a aká bola jeho relatívna obchodná aktivita.</li>
-    <li><strong>Prediktívny:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 90D+ validáciu, earnings a firemný kontext.</li>
+    <li><strong>Analytika:</strong> skontroluj Decision Bar, C1–C4, weekly trend, históriu signálov, 90D+ validáciu, earnings a firemný kontext.</li>
     <li><strong>Verdikt:</strong> použi ho ako záverečné zhrnutie, nie ako náhradu vlastného rozhodnutia. Rozklikni dôkazy, ak záver nie je jasný.</li>
     <li><strong>Portfólio:</strong> pred vstupom over veľkosť existujúcej pozície, P/L a prípadných DCA kandidátov.</li>
   </ol>
@@ -243,7 +243,7 @@
     <li><strong>DCA kandid?ti</strong> sp?jaj? agregovan? P/L poz?cie s DIP rankingom ? pom?ha rozhodn??, ?i dokupova? stratov? titul. Uk??e len poz?cie v strate ? 15 % a oflaguje ich: ?? <strong>DCA</strong> (DIP ? 90, v?ha &lt; 10 % equity ? kvalitn? dip), ?? <strong>Ve?k? v?ha</strong> (DCA OK, ale poz?cia u? ? 10 % equity ? koncentr?cia), ?? <strong>Pozor</strong> (slab? DIP sk?re, mo?n? value trap), ? <strong>Mimo d?t</strong> (ticker nie je v DIP datasete). Rozhoduje agregovan? P/L celej poz?cie, nie jedna tran?a. Prahy s? zladen? s appkou (?15 % = hlb?ia strata, DIP 90 = p?smo STRONG). Karta ukazuje vek DIP d?t ? pri starom importe ber flag s rezervou. ?isto interpreta?n? pom?cka, nevstupuje do sk?re.</li>
   </ul>
 
-  <h2 id="predictive">4. Prediktívny tab — ako čítať signály</h2>
+  <h2 id="predictive">4. Analytika — ako čítať signály</h2>
 
   <h3>Glosár a vizuálna priorita</h3>
   <table>
@@ -280,7 +280,7 @@
     <li><strong>Buy signál markery</strong> (šípky pod sviečkami) — farba podľa tieru (viď nižšie).</li>
     <li><strong>eToro kolieska</strong> — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa malé krúžky pod sviečkou, kde bola pozícia otvorená (zelená = v zisku, červená = v strate, odlíšené podľa účtu). Hover nad eToro kolieskom alebo buy šípkou zobrazí presný detail cez natívny LWC hit-testing.</li>
     <li>Crosshair používa režim <strong>MagnetOHLC</strong> a prichytáva sa k najbližšej OHLC hodnote sviečky.</li>
-    <li>Spodný <strong>Prediktívny chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1), ukazuje predikciu ďalšej sviečky a dá sa zbaliť, keď chceš viac priestoru pre hlavný graf.</li>
+    <li>Spodný <strong>modelový chart</strong> má <strong>1/2 výšky</strong> hlavného grafu (pomer 2:1), ukazuje prognózu ďalšej sviečky a dá sa zbaliť, keď chceš viac priestoru pre hlavný graf.</li>
     <li><strong>Volume Profile</strong> (checkbox v <em>Indikátory — overlay</em>, skupina Objem) — horizontálny histogram pri pravom okraji ukazuje, <strong>pri akých cenách</strong> sa zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = <strong>POC</strong> (cena najväčšej zhody, magnet); zhluky dlhých pruhov = supportné/rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo (LVN). Profil sa prepočítava podľa zoomu, takže priblíženie = voľba obdobia analýzy. Stav checkboxu prežíva reload. Z denných OHLCV dát sa nedá spoľahlivo určiť, ktorá časť pruhu bola skutočne Buy a ktorá Sell — na to by boli potrebné jednotlivé obchody s bid/ask klasifikáciou.</li>
     <li><strong>Pattern overlay</strong> (checkbox v <em>Indikátory — overlay</em>, skupina Chart patterns) — vizuálna vrstva nad Weekly/Daily grafom. V1 rozpoznáva <em>Double Bottom</em>, <em>Double Top</em>, <em>Rectangle</em>, <em>Ascending Triangle</em> a <em>Descending Triangle</em>. Kreslí support/resistance, neckline, trendline a dotykové body; karta <strong>Chart Pattern</strong> vysvetlí stav (forming/confirmed/failed), trigger a invalidáciu. Farby sú oddelené od sviečok: bullish = cyan, bearish = fialová, range/neutral = zlatá. Prepínače <strong>Bullish</strong>, <strong>Bearish</strong> a <strong>Range</strong> filtrujú, ktoré typy patternov sa majú kresliť; nastavenie prežíva reload. Potvrdený breakout na zvýšenom objeme (≥ 1.2× priemer) zvýši kvalitu patternu a overlay kreslí aj <strong>measured-move cieľ</strong> (bodkovaná čiara <em>Ciel</em> = projekcia výšky patternu od breakout úrovne; pri neutrálnom Rectangle až po breakoute). Cieľ je orientačná projekcia, nie predpoveď. Je to pomôcka pre oko, nie vstup do C1–C4, scanneru ani Verdiktu.</li>
   </ul>
@@ -361,7 +361,7 @@
   <blockquote><p>Historické signály sa neprepisujú — staré záznamy bez tieru sa dočasne zobrazia ako watch a prefarbia sa po novom vyhodnotení tickera.</p></blockquote>
 
   <h2 id="scanner">5. Scanner + DIP stratégia</h2>
-  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>DIP universe</strong> hľadá nové širšie príležitosti cez importovaný <strong>DIP ranking</strong>. Ak nie je importovaný Excel, použije sa Nasdaq-100 ako fallback. Klik na kandidáta otvorí jeho detail v Predikcii.</p>
+  <p>Záložka <strong>Scanner</strong> odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené do jedného toku <strong>Kandidáti</strong>: horný podblok <strong>Watchlist / eToro</strong> ukazuje tituly, ktoré už sleduješ alebo držíš, spodný podblok <strong>DIP universe</strong> hľadá nové širšie príležitosti cez importovaný <strong>DIP ranking</strong>. Ak nie je importovaný Excel, použije sa Nasdaq-100 ako fallback. Klik na kandidáta otvorí jeho detail v Analytike.</p>
 
   <h3>Investor Inbox — Tento týždeň</h3>
   <p>Horná karta <strong>Tento týždeň</strong> je ľudský filter nad portfóliom a scannerom. Nesnaží sa zobraziť všetko; vyberá len výnimky, ktoré si zaslúžia pozornosť.</p>
@@ -372,7 +372,7 @@
     <li><strong>Graf potrebuje kontrolu / slabý DIP</strong> — držaná pozícia má konflikt s technickým alebo DIP kontextom.</li>
     <li><strong>Nová príležitosť</strong> — scanner našiel silný DIP kandidát mimo portfólia.</li>
   </ul>
-  <p>Klik na riadok otvorí <strong>Verdikt</strong>, tlačidlo <strong>Predikcia</strong> otvorí detailný graf a <strong>+ WL</strong> pridá ticker do watchlistu. Karta používa existujúce cache a posledný scan; nespúšťa nový veľký výpočet.</p>
+  <p>Klik na riadok otvorí <strong>Verdikt</strong>, tlačidlo <strong>Analytika</strong> otvorí detailný graf a <strong>+ WL</strong> pridá ticker do watchlistu. Karta používa existujúce cache a posledný scan; nespúšťa nový veľký výpočet.</p>
   <p>Prepínač režimu pomáha znížiť šum: <strong>Defenzívne</strong> ukazuje držané tituly, DCA, profit-taking, earnings a riziká; <strong>Ofenzívne</strong> ukazuje nové príležitosti mimo portfólia; <strong>Všetko</strong> zobrazí kompletný zoznam. Každý riadok má jednu ľudskú vetu „prečo sa na to pozrieť“ a pod ňou technický detail.</p>
   <p>Inbox patrí do denného snapshotu Scannera a drží sa približne <strong>24 hodín</strong>. Manuálny import DIP, spustenie scanneru alebo refresh týždenného plánu cache obíde alebo vyčistí.</p>
 
@@ -430,7 +430,7 @@
     <tr><th>Stĺpec</th><th>Význam</th></tr>
     <tr><td><strong>Ticker</strong></td><td>Symbol (klik otvorí v prediktívnom tabe).</td></tr>
     <tr><td><strong>Rozhodnutie</strong></td><td>Buy / Watch / Counter podľa trendového kontextu.</td></tr>
-    <tr><td><strong>Graf</strong></td><td>Vizuálna kvalita weekly/daily grafu: <code>W OK/Risk/Bad</code> a <code>D OK/Risk/Bad</code>. Je to ľudský filter nad číslami: OK = zdravý pullback, Risk = overiť v Predikcii, Bad = možný bounce v poškodenom downtrende. Neovplyvňuje C1-C4 ani DIP skóre.</td></tr>
+    <tr><td><strong>Graf</strong></td><td>Vizuálna kvalita weekly/daily grafu: <code>W OK/Risk/Bad</code> a <code>D OK/Risk/Bad</code>. Je to ľudský filter nad číslami: OK = zdravý pullback, Risk = overiť v Analytike, Bad = možný bounce v poškodenom downtrende. Neovplyvňuje C1-C4 ani DIP skóre.</td></tr>
     <tr><td><strong>Sila</strong></td><td>Počet splnených podmienok C1–C4 (<code>x/4</code>).</td></tr>
     <tr><td><strong>DIP</strong></td><td>Celkové DIP skóre z importu.</td></tr>
     <tr><td><strong>FA / TA</strong></td><td>Fundamentálna / technická časť DIP skóre.</td></tr>
@@ -443,7 +443,7 @@
     <tr><td><strong>Reason</strong></td><td>Najkonkrétnejší dôvod (napr. „štatistický dip z-score -1.8").</td></tr>
   </table>
   <p>Massive údaje sú interpretačné a zatiaľ nemenia C1–C4, DIP skóre, ML ani Buy/Watch/Counter.</p>
-  <p>Pri tickeroch sa zobrazujú aj workflow značky: <strong>PORT ±%</strong> znamená, že titul už je v niektorom eToro portfóliu; <strong>+ WL</strong> pridá ticker do serverového watchlistu. Verdikt si pri otvorení z Grafov, Scannera alebo Predikcie preberá aktuálny ticker.</p>
+  <p>Pri tickeroch sa zobrazujú aj workflow značky: <strong>PORT ±%</strong> znamená, že titul už je v niektorom eToro portfóliu; <strong>+ WL</strong> pridá ticker do serverového watchlistu. Verdikt si pri otvorení z Grafov, Scannera alebo Analytiky preberá aktuálny ticker.</p>
 
   <h3>Správy a sentiment (📰)</h3>
   <p>Každý riadok DIP universe scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
@@ -484,10 +484,10 @@
     <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub s fallbackom Alpha Vantage EARNINGS_CALENDAR; cache 24 h. Čísla pred reportom nemusia platiť.</li>
     <li><strong>Sentiment badge</strong> (zelený/červený/sivý, napr. <code>+0.21</code>) — relevanciou vážený priemer sentimentu článkov z news cache. Zobrazuje sa len pre tickery, ktoré už majú stiahnuté správy (cez 📰) — žiadne API requesty navyše; cache sa časom zaplní sama.</li>
   </ul>
-  <p>Karta <strong>Najbližší Earnings</strong> v Prediktívnom tabe zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
+  <p>Karta <strong>Najbližší Earnings</strong> v Analytike zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
 
   <h3>Firma a očakávania</h3>
-  <p>Karta <strong>Firma &amp; očakávania</strong> v Prediktívnom tabe zobrazuje iba kompaktný kontext:</p>
+  <p>Karta <strong>Firma &amp; očakávania</strong> v Analytike zobrazuje iba kompaktný kontext:</p>
   <ul>
     <li><strong>Analytici</strong> — Buy / Hold / Sell konsenzus; priemerná cieľová cena je uvedená priamo za ním v zátvorke.</li>
     <li><strong>Short interest</strong> — podiel floatu predaný nakrátko: pod 5 % nízky, 5–10 % zvýšený, 10 %+ vysoký.</li>
@@ -551,7 +551,7 @@
     <li><strong>Firma</strong> — analytický konsenzus, cieľová cena, short interest, insider transakcie a EPS história, ak sú dostupné.</li>
     <li><strong>Earnings</strong> — blízkosť najbližšieho reportu, ktorý môže technický setup okamžite zmeniť.</li>
   </ul>
-  <p>Výstup je zámerne krátky: najviac dva dôvody <strong>pre</strong>, dva dôvody <strong>proti</strong> a jedna podmienka, ktorá môže záver zmeniť. Tlačidlo na dôkazy otvorí detail v Prediktívnom tabe.</p>
+  <p>Výstup je zámerne krátky: najviac dva dôvody <strong>pre</strong>, dva dôvody <strong>proti</strong> a jedna podmienka, ktorá môže záver zmeniť. Tlačidlo na dôkazy otvorí detail v Analytike.</p>
   <blockquote><p>Verdikt nevytvára nový model ani tajné skóre. Len prekladá už existujúce dáta do ľudskej reči. Ak niektorý zdroj chýba, zobrazí sa jeho nedostupnosť a istota záveru sa zníži.</p></blockquote>
 
   <h2 id="memory">6. Prev?dzka a pam??ov? profil</h2>
@@ -560,7 +560,7 @@
   <table>
     <thead><tr><th>Prep?na?</th><th>Default</th><th>V?znam</th></tr></thead>
     <tbody>
-      <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnos? v Predikcii.</td></tr>
+      <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnos? v Analytike.</td></tr>
       <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
       <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika sign?lov.</td></tr>
@@ -592,7 +592,7 @@
   </ul>
 
   <h3>Jednotný scoring (single source of truth)</h3>
-  <p>Scanner aj prediktívny graf používajú <strong>tú istú</strong> funkciu skórovania — pre ten istý ticker ukazujú rovnaké hodnoty.</p>
+  <p>Scanner aj Analytika používajú <strong>tú istú</strong> funkciu skórovania — pre ten istý ticker ukazujú rovnaké hodnoty.</p>
   <blockquote><p>Nie je to „falling-knife" lovenie dna — systém zámerne odlišuje dipy v uptrende (kupovať) od dipov v páde (vyhnúť sa).</p></blockquote>
 
   <h2 id="presets">8. Presety, watchlist, eToro</h2>

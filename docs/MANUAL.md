@@ -17,7 +17,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
    - [Odporúčaný pracovný postup](#odporúčaný-pracovný-postup)
    - [Bežné grafy](#bežné-grafy)
    - [Portfólio a História](#portfólio-a-história)
-4. [Prediktívny tab — ako čítať signály](#4-prediktívny-tab--ako-čítať-signály)
+4. [Analytika — ako čítať signály](#4-analytika--ako-čítať-signály)
 5. [Scanner + DIP stratégia](#5-scanner--dip-stratégia)
 6. [Prev?dzka a pam??ov? profil](#6-prev?dzka-a-pam??ov?-profil)
 7. [Filozofia signálov](#7-filozofia-signálov)
@@ -78,9 +78,9 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
   ho aktivuje, dvojklik otvára detail.
 - **📊 Portfólio** — aktuálne eToro pozície, summary (Cash / Invested / P&L / **Dnes P/L** / Equity).
 - **História** — uzavreté obchody s filtrom dátumového intervalu od–do.
-- **📈 Prediktívny** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
-  história, validácia a predikcia ďalšej sviečky
-  (viď [sekcia 4](#4-prediktívny-tab--ako-čítať-signály)).
+- **📈 Analytika** — detail a vysvetlenie jedného titulu: rozhodnutie, dôkazy,
+  história, validácia a modelová prognóza ďalšej sviečky
+  (viď [sekcia 4](#4-analytika--ako-čítať-signály)).
 - **Scanner** — pracovný zoznam kandidátov: Watchlist / eToro radar, skenovanie
   watchlistu a DIP universe scanner s crossover stratégiou
   (viď [sekcia 5](#5-scanner--dip-stratégia)).
@@ -97,7 +97,7 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 ### Odporúčaný pracovný postup
 
 1. V **Scanneri** skontroluj stav trhu a nájdi Buy/Watch kandidátov.
-2. V **Predikcii** otvor konkrétny ticker a pozri C1–C4, trend, týždenný trend,
+2. V **Analytike** otvor konkrétny ticker a pozri C1–C4, trend, týždenný trend,
    earnings, správy a firemné očakávania.
 3. Vo **Verdikte** si nechaj dôkazy zhrnúť do ÁNO / POČKAŤ / NIE.
 4. Ak titul už vlastníš, v **Portfóliu** skontroluj P/L, denný pohyb,
@@ -169,21 +169,21 @@ do žiadneho skóre ani DCA logiky.
 
 ### Ovládanie grafov a markerov
 
-- V záložke **Grafy** aj **Prediktívny** používa crosshair režim
+- V záložke **Grafy** aj **Analytika** používa crosshair režim
   **MagnetOHLC**. Pri pohybe po sviečke sa cena prichytí k jej najbližšej
   hodnote Open / High / Low / Close. Ide iba o pomôcku pri čítaní grafu;
   nemení dáta, indikátory ani výpočet signálov.
 - Hover tooltip sa otvorí iba pri skutočnom zásahu konkrétneho markera, nie pri
   ľubovoľnom prejdení cez rovnaký dátum.
 - Na bežných grafoch tooltip podporuje **eToro vstupy** a **pattern markery**.
-  V Predikcii podporuje **eToro vstupy** a **buy signál šípky**.
+  V Analytike podporuje **eToro vstupy** a **buy signál šípky**.
 - eToro tooltip ukazuje účet, BUY/SELL, páku, vstupnú cenu, dátum a P/L.
   Buy signál tooltip ukazuje tier, silu signálu, počet signálov v týždni
   a dátum. Pattern tooltip ukazuje názov a bullish/bearish smer.
 
 ---
 
-## 4. Prediktívny tab — ako čítať signály
+## 4. Analytika — ako čítať signály
 
 ### Glosár a vizuálna priorita
 
@@ -253,7 +253,7 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   iba preto, že kurzor prešiel cez sviečku s rovnakým dátumom.
 - Crosshair používa režim **MagnetOHLC** a pri pohybe sa prichytáva
   k najbližšej OHLC hodnote sviečky.
-- Spodný **Prediktívny chart** ukazuje predikciu ďalšej sviečky (+1 prognóza) a
+- Spodný **modelový chart** ukazuje prognózu ďalšej sviečky (+1 prognóza) a
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
   hlavný graf.
@@ -409,7 +409,7 @@ ticker nereaguje silno na C1–C4 podmienky.
 Táto tabuľka sa zobrazí len vtedy, keď signály majú vyplnený HMM kontext (segmenty
 Bull / Sideways / Bear / Vysoká volatilita). Nové signály dostávajú kontext
 automaticky; staré signály sa dopĺňajú priebežne pri každom zobrazení tickera
-v Prediktívnom tabe alebo jednorazovým backfillom (sekcia Technická príloha).
+v Analytike alebo jednorazovým backfillom (sekcia Technická príloha).
 
 Toto je v praxi najhodnotnejšia tabuľka: rovnaký Buy 3/4 setup v Bull režime môže
 mať win rate 70 % a medián +8 %, kým v Bear režime len 30 % a medián −5 %. Keď
@@ -484,7 +484,7 @@ pozornosť.
   manuálne posúdenie.
 - **Nová príležitosť** — scanner našiel silný DIP kandidát mimo portfólia.
 
-Klik na riadok otvorí **Verdikt**, tlačidlo **Predikcia** otvorí detailný graf a
+Klik na riadok otvorí **Verdikt**, tlačidlo **Analytika** otvorí detailný graf a
 **+ WL** pridá ticker do watchlistu. Karta používa existujúce cache a posledný
 scan; nespúšťa nový veľký výpočet.
 
@@ -525,7 +525,7 @@ do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro*
 je rýchly radar titulov, ktoré už sleduješ alebo držíš. Spodný podblok
 **DIP universe** hľadá nové širšie príležitosti cez importovaný **DIP ranking**.
 Ak nie je importovaný Excel, použije sa Nasdaq-100 ako fallback. Klik na
-kandidáta otvorí jeho detail v Predikcii.
+kandidáta otvorí jeho detail v Analytike.
 
 ### Kontext trhu — lišta TRH
 
@@ -570,7 +570,7 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
   z watchlistu a eToro pozícií; zobrazuje rozhodnutie, silu, weekly kontext
   a stručné dôvody.
 - **Skenuj watchlist** — kontrola tickerov z watchlistu za zvolený počet dní.
-  Výsledok je samostatná fullscreen tabuľka; klik otvorí detail v Predikcii.
+  Výsledok je samostatná fullscreen tabuľka; klik otvorí detail v Analytike.
 - **Vybrať súbor → Import DIP Excel** — nahrá DIP ranking (FA/TA skóre) z XLSX,
   ideálne zo záložky `Ranking` v tvojom pracovnom súbore. Import je zámerne
   manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom
@@ -598,9 +598,9 @@ v Exceli nestačí.
 
 | Stĺpec | Význam |
 |---|---|
-| **Ticker** | Symbol (klik otvorí v prediktívnom tabe). |
+| **Ticker** | Symbol (klik otvorí v Analytike). |
 | **Rozhodnutie** | Buy / Watch / Counter podľa trendového kontextu. |
-| **Graf** | Vizuálna kvalita weekly/daily grafu: `W OK/Risk/Bad` a `D OK/Risk/Bad`. Je to ľudský filter nad číslami: OK = zdravý pullback, Risk = overiť v Predikcii, Bad = možný bounce v poškodenom downtrende. Neovplyvňuje C1-C4 ani DIP skóre. |
+| **Graf** | Vizuálna kvalita weekly/daily grafu: `W OK/Risk/Bad` a `D OK/Risk/Bad`. Je to ľudský filter nad číslami: OK = zdravý pullback, Risk = overiť v Analytike, Bad = možný bounce v poškodenom downtrende. Neovplyvňuje C1-C4 ani DIP skóre. |
 | **Sila** | Počet splnených podmienok C1–C4 (`x/4`). |
 | **DIP** | Celkové DIP skóre z importu. |
 | **FA** | Fundamentálna časť DIP skóre. |
@@ -619,7 +619,7 @@ aby bolo možné neskôr overiť ich prínos na 90D+ výsledkoch.
 
 Pri tickeroch sa zobrazujú aj workflow značky: **PORT ±%** znamená, že titul už
 je v niektorom eToro portfóliu; **+ WL** pridá ticker do serverového watchlistu.
-Verdikt si pri otvorení z Grafov, Scannera alebo Predikcie preberá aktuálny
+Verdikt si pri otvorení z Grafov, Scannera alebo Analytiky preberá aktuálny
 ticker, aby nebolo nutné ho znova opisovať.
 
 ### Správy a sentiment (📰)
@@ -709,7 +709,7 @@ Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:
   tickery, ktoré už majú stiahnuté správy** (cez 📰) — žiadne API requesty
   navyše; cache sa časom zaplní sama.
 
-Karta **Najbližší Earnings** v Prediktívnom tabe je vždy viditeľná. Ak
+Karta **Najbližší Earnings** v Analytike je vždy viditeľná. Ak
 poskytovateľ pre ticker zatiaľ termín nezverejnil, ukáže „Zatiaľ nedostupné“
 namiesto prázdneho alebo skrytého panelu.
 
@@ -719,7 +719,7 @@ V Portfóliu sa šírka každého stĺpca nastavuje samostatne potiahnutím úch
 hlavičke. Tabuľka má šírku podľa súčtu stĺpcov, takže voľné miesto zostáva
 napravo a pri širšej tabuľke sa použije horizontálny posuvník.
 
-Karta **Firma & očakávania** v Prediktívnom tabe dopĺňa technický signál o
+Karta **Firma & očakávania** v Analytike dopĺňa technický signál o
 stručný externý kontext:
 
 - **Analytici** — súčet odporúčaní Buy / Hold / Sell z najnovšieho obdobia;
@@ -802,8 +802,8 @@ tickerov — jeden zdieľaný blok textu pre celý scanner).
   (vertikálne).
 - Pod šírkou ~1100 px sa panel zarovná pod tabuľku.
 - Tlačidlo **Verdikt** v riadku kandidáta otvorí zjednodušené investičné
-  vyhodnotenie. Klik na zvyšok riadku naďalej otvorí plný detail v Predikcii.
-- Rovnaké tlačidlo je aj v hornej rozhodovacej lište Prediktívneho tabu.
+  vyhodnotenie. Klik na zvyšok riadku naďalej otvorí plný detail v Analytike.
+- Rovnaké tlačidlo je aj v hornej rozhodovacej lište Analytiky.
 
 ### Export / kopírovanie
 
@@ -814,7 +814,7 @@ formát pripravený na vloženie do Excelu / Google Sheets.
 
 - Signál sa zaznamenáva od **2/4** podmienok.
 - Či je **buy** (zelený) alebo **watch/counter** rozhoduje trendový kontext (viď
-  farby v [sekcii 4](#4-prediktívny-tab--ako-čítať-signály)), nie len počet
+  farby v [sekcii 4](#4-analytika--ako-čítať-signály)), nie len počet
   podmienok.
 
 ---
@@ -835,7 +835,7 @@ V low-memory re?ime ost?va zapnut? jadro aplik?cie:
 
 | Premenn? | Default v low re?ime | ?o ovplyv?uje |
 |---|---:|---|
-| `ENABLE_PREDICTIVE_ML` | `0` | RandomForest/ML pravdepodobnos? v Predikcii. |
+| `ENABLE_PREDICTIVE_ML` | `0` | RandomForest/ML pravdepodobnos? v Analytike. |
 | `ENABLE_PREDICTIVE_HMM` | `0` | HMM regime diagnostiku. |
 | `ENABLE_SIGNAL_CONTEXT_BACKFILL` | `0` | Automatick? dop??anie regime kontextu star??ch sign?lov pri otvoren? grafu. |
 | `ENABLE_SIGNAL_ANALYTICS` | `1` | 90D+ analytiku sign?lov. |
@@ -881,7 +881,7 @@ trend**:
 
 ### Jednotný scoring (single source of truth)
 
-Scanner aj prediktívny graf používajú **tú istú** funkciu skórovania, takže pre
+Scanner aj Analytika používajú **tú istú** funkciu skórovania, takže pre
 ten istý ticker ukazujú rovnaké hodnoty. Žiadne dve miesta nehovoria iným
 jazykom.
 

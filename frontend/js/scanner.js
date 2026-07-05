@@ -68,7 +68,7 @@ function investorInboxRow(item) {
     </div>
     <div class="inbox-actions">
       <button class="btn mini" onclick="openVerdictTicker('${ticker}', event)">Verdikt</button>
-      <button class="btn mini" onclick="event.stopPropagation();openScannerTicker('${ticker}')">Predikcia</button>
+      <button class="btn mini" onclick="event.stopPropagation();openScannerTicker('${ticker}')">Analytika</button>
       ${watchlistButtonHtml(item.ticker, 'inbox-wl-btn')}
     </div>
   </div>`;
@@ -177,7 +177,7 @@ function toggleWeeklyPlanCollapsed() {
 function weeklyPlanRow(row, cls) {
   const t = escHtml(row.ticker || '');
   return `<div class="plan-row">
-    <span class="plan-ticker ${cls}" onclick="openScannerTicker('${t}')" title="Otvoriť v Predikcii">${t}</span>
+    <span class="plan-ticker ${cls}" onclick="openScannerTicker('${t}')" title="Otvoriť v Analytike">${t}</span>
     <span class="plan-text">${escHtml(row.summary || '')}</span>
     <button class="scanner-verdict-btn" onclick="openVerdictTicker('${t}', event)">Verdikt</button>
   </div>`;
@@ -623,7 +623,7 @@ async function renderScannerView() {
               <div class="scanner-section-kicker">Watchlist / eToro</div>
               <div class="scanner-source-title">Rýchly radar držaných a sledovaných titulov</div>
             </div>
-            <span class="scanner-source-note">Klik otvorí detail v Predikcii</span>
+            <span class="scanner-source-note">Klik otvorí detail v Analytike</span>
           </div>
           <div id="opportunitiesInfo" class="opp-empty">Načítavam watchlist/eToro kandidátov...</div>
         </section>
@@ -766,7 +766,7 @@ ${escHtml(copyText)}</textarea>
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
       <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
-      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Predikcii" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Predikcia</button></td>
+      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Analytike" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Analytika</button></td>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>

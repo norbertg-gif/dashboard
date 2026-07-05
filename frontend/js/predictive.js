@@ -73,15 +73,32 @@ function weeklyTrendShortText(trend, fallbackBullish) {
   return txt[trend.key] || trend.label || 'n/a';
 }
 
+const PC_SETUP_CHECKS = [
+  {
+    key: 'ema_kijun_touch',
+    label: 'C1 EMA/Kijun touch',
+    tip: 'Cena je pri EMA20 alebo Kijun supporte. Hľadáme pullback k technickej podpore, nie náhodne padajúcu cenu.',
+  },
+  {
+    key: 'rsi_pullback',
+    label: 'C2 RSI pullback',
+    tip: 'RSI je v pullback zóne. Signalizuje ochladenie po pohybe, ale samo o sebe ešte neznamená vstup.',
+  },
+  {
+    key: 'bull_volume',
+    label: 'C3 bull volume',
+    tip: 'Aktuálna sviečka má bullish charakter a objem nad priemerom. Potvrdzuje, že sa do poklesu vracia dopyt.',
+  },
+  {
+    key: 'zscore_dip',
+    label: 'C4 z-score dip',
+    tip: 'Cena je štatisticky nižšie voči vlastnému krátkodobému priemeru. Pomáha odlíšiť bežný šum od reálneho dipu.',
+  },
+];
+
 function predictiveMissingSetup(details) {
   if (!details) return [];
-  const labels = [
-    ['ema_kijun_touch', 'C1 EMA/Kijun touch'],
-    ['rsi_pullback', 'C2 RSI pullback'],
-    ['bull_volume', 'C3 bull volume'],
-    ['zscore_dip', 'C4 z-score dip'],
-  ];
-  return labels.filter(([key]) => !details[key]).map(([, label]) => label);
+  return PC_SETUP_CHECKS.filter(item => !details[item.key]).map(item => item.label);
 }
 
 function predictiveSignalReturn(data, signal) {
@@ -1011,14 +1028,9 @@ function pc_renderDailyExtra(data) {
       </div>
     </div>`;
   }).join('');
-  const setupChecks = [
-    { key: 'ema_kijun_touch', label: 'C1 EMA/Kijun touch' },
-    { key: 'rsi_pullback', label: 'C2 RSI pullback' },
-    { key: 'bull_volume', label: 'C3 bull volume' },
-    { key: 'zscore_dip', label: 'C4 z-score dip' },
-  ].map(item => {
+  const setupChecks = PC_SETUP_CHECKS.map(item => {
     const active = !!details[item.key];
-    return `<div class="signal-check ${active ? 'active' : 'inactive'}">
+    return `<div class="signal-check ${active ? 'active' : 'inactive'}" title="${escHtml(item.tip)}">
       <span class="signal-check-label">${item.label}</span>
       <span class="signal-check-value">${active ? 'splnené' : 'chýba'}</span>
     </div>`;
@@ -1083,7 +1095,7 @@ function pc_renderDailyExtra(data) {
         <div class="signal-outcome-note">Primárny horizont pre tvoje rozhodovanie. Kratšie 30D/60D ostávajú v dátach, ale UI ich netlačí dopredu.</div>
       </div>
 
-      <details class="signal-segments" open>
+      <details class="signal-segments">
         <summary>
           <span>ANALYTIKA SIGNÁLOV</span>
           <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>

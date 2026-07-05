@@ -246,7 +246,7 @@ function renderInvestorVerdict(result) {
       <strong>${escHtml(result.condition)}</strong>
     </section>
     <div class="verdict-actions">
-      <button class="btn primary" onclick="openVerdictEvidence()">Otvoriť dôkazy v Predikcii</button>
+      <button class="btn primary" onclick="openVerdictEvidence()">Otvoriť dôkazy v Analytike</button>
       ${watchlistButtonHtml(result.ticker, 'verdict-wl-btn')}
       <span>Vyhodnotené ${result.evaluatedAt.toLocaleTimeString('sk-SK', {hour:'2-digit', minute:'2-digit'})} · rozhodovacia pomôcka, nie finančné odporúčanie.</span>
     </div>`;
