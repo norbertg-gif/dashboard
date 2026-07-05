@@ -15,11 +15,11 @@ const WEEKLY_PLAN_COLLAPSED_KEY = 'td_weekly_plan_collapsed';
 function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) === '1'; }
 
 const SCANNER_CLIENT_CACHE_MS = {
-  weeklyPlan: 2 * 60 * 1000,
-  investorInbox: 2 * 60 * 1000,
-  earningsWidget: 15 * 60 * 1000,
-  dipStatus: 10 * 60 * 1000,
-  scannerResults: 30 * 1000,
+  weeklyPlan: 24 * 60 * 60 * 1000,
+  investorInbox: 24 * 60 * 60 * 1000,
+  earningsWidget: 24 * 60 * 60 * 1000,
+  dipStatus: 24 * 60 * 60 * 1000,
+  scannerResults: 24 * 60 * 60 * 1000,
 };
 const scannerClientCache = {};
 
@@ -148,7 +148,12 @@ async function loadWeeklyPlan(force = false) {
   const box = document.getElementById('weeklyPlanBox');
   const head = document.getElementById('weeklyPlanHeadline');
   if (!box) return;
-  if (force) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Prepočítavam plán...</div>';
+  if (force) {
+    clearScannerClientCache('weeklyPlan');
+    clearScannerClientCache('investorInbox');
+    clearScannerClientCache('earningsWidget');
+    box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Prepočítavam plán...</div>';
+  }
   try {
     const data = await scannerCachedJson(
       'weeklyPlan',
@@ -549,6 +554,7 @@ async function importDipExcel() {
     clearScannerClientCache('scannerResults');
     clearScannerClientCache('weeklyPlan');
     clearScannerClientCache('investorInbox');
+    clearScannerClientCache('earningsWidget');
     await loadNasdaqScannerResults();
   } catch(e) {
     if (status) status.textContent = 'DIP import chyba: ' + e.message;
@@ -1263,6 +1269,7 @@ async function runNasdaqScanner() {
     clearScannerClientCache('scannerResults');
     clearScannerClientCache('weeklyPlan');
     clearScannerClientCache('investorInbox');
+    clearScannerClientCache('earningsWidget');
     const res = await fetch('/api/scanner/nasdaq/run?days=3', { method: 'POST' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();

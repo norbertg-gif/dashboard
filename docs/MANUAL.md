@@ -500,11 +500,10 @@ Každý riadok má jednu ľudskú vetu typu „prečo sa na to pozrieť“. Tech
 detaily zostávajú pod ňou, ale prvá veta má byť rozhodovací kontext pre človeka,
 nie ďalší indikátor.
 
-Inbox je na serveri krátko cachovaný približne **2 minúty** a frontend ho drží
-rovnaký čas aj v pamäti otvorenej karty. Je to zámer: reload Scannera nemá
-znovu prepočítavať DCA, earnings a scanner výnimky, ale zároveň nechceme držať
-portfóliový kontext starý celý deň. Týždenný plán používa rovnaký princíp,
-earnings widget je pomalšie sa meniaci a drží sa približne 15 minút.
+Scanner je zámerne chápaný ako **denný snapshot**. Týždenný plán, Investor
+Inbox, earnings widget, DIP status aj posledné výsledky scanneru sa držia
+približne **24 hodín** na serveri alebo vo frontende. Ak chceš čerstvé dáta,
+použi manuálne prepočítanie plánu, spustenie scanneru alebo nový import DIP.
 
 ### Earnings kalendár
 
@@ -517,8 +516,9 @@ nemá termín, alebo report nespadá do najbližších 14 dní. Dashboard použ�
 rovnaký reťazec zdrojov ako ostatné earnings prvky: Finnhub bulk kalendár,
 per-symbol fallback, Yahoo/yfinance fallback a cache.
 
-Zložený kalendár v Scanneri je cachovaný približne **15 minút**, pretože
-earnings dátumy sa nemenia každú minútu.
+Zložený kalendár v Scanneri patrí do denného snapshotu a drží sa približne
+**24 hodín**. Ak chceš čerstvé termíny po importe alebo pred rozhodnutím, použi
+manuálny refresh/scanner.
 
 Záložka **Scanner** odpovedá na otázku „čo sa oplatí pozrieť“. UI je zjednotené
 do jedného pracovného toku **Kandidáti**. Horný podblok **Watchlist / eToro**

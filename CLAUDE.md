@@ -169,8 +169,9 @@ Main source sections:
    tickers absent from inbox). Headline "Tento týždeň rieš hlavne X, Y, Z."
    A ticker appears only once in the first/highest-priority section (`focus`
    wins over buy/dca/risk; dca wins over risk), while full reasons remain in
-   Inbox/Verdikt. 5-min server cache via `_investor_cache_*`, `?refresh=1`
-   bypass; frontend also keeps a short tab-memory cache for repeated tab opens.
+   Inbox/Verdikt. Scanner is treated as a daily snapshot: 24h server cache via
+   `_investor_cache_*`, `?refresh=1` bypass; frontend also keeps a 24h
+   tab-memory cache for repeated tab opens.
    Its goal is LESS mental noise, not more data — do not add new analytics into it. Both this
    card and Investor Inbox are independently collapsible (`td_weekly_plan_collapsed`
    / `td_investor_inbox_collapsed`, default expanded) via the same `.dca-toggle`
@@ -186,9 +187,10 @@ Main source sections:
    scanner tier, or portfolio accounting. Rows include a human `summary` sentence
    ("why look at this?") plus technical `detail`. Frontend modes are localStorage
    based: `defensive` (held/DCA/profit/earnings/risk), `offensive` (new scanner
-   opportunities), `all`. Backend caches the composed payload for 120 seconds
-   (`INVESTOR_INBOX_CACHE_TTL`) to avoid recalculating DCA + earnings on every
-   Scanner reload; frontend also keeps a 2-min in-memory cache; `?refresh=1`
+   opportunities), `all`. Backend caches the composed payload for 24h
+   (`INVESTOR_INBOX_CACHE_TTL`) because Scanner is a daily snapshot and to avoid
+   recalculating DCA + earnings on every Scanner reload;
+   frontend also keeps a 24h in-memory cache; `?refresh=1`
    bypasses. Rows are grouped by ticker: if one
    symbol has multiple reasons (for example DCA + chart-health risk), it is
    rendered once with `kinds`/`reasons` badges and a merged human summary.
@@ -198,7 +200,8 @@ Main source sections:
    watchlist, and last scanner candidates. It uses `_earnings_next_date()` so the
    existing bulk cache + per-symbol fallback chain remains the single source.
    Displayed in Scanner as current + next week grouped by day. Composed widget
-   payload is cached 15 minutes (`EARNINGS_CALENDAR_VIEW_TTL`); `?refresh=1` bypasses.
+   payload is treated as part of the Scanner daily snapshot and cached 24h
+   (`EARNINGS_CALENDAR_VIEW_TTL`); `?refresh=1` bypasses.
 - **Unified Scanner UI** — one “Kandidáti” workflow. Watchlist/eToro radar is the upper source, Nasdaq+DIP discovery is the lower source. Keep new additions behind progressive disclosure.
 - **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only).
 - **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.

@@ -5377,8 +5377,8 @@ def _watched_symbols_for_calendar() -> list[str]:
     return sorted(symbols)
 
 
-INVESTOR_INBOX_CACHE_TTL = 120       # seconds; portfolio P/L can move, keep this short
-EARNINGS_CALENDAR_VIEW_TTL = 900     # seconds; earnings dates are slow-moving
+INVESTOR_INBOX_CACHE_TTL = 86400     # seconds; Scanner is a daily snapshot, manual refresh/scan bypasses cache
+EARNINGS_CALENDAR_VIEW_TTL = 86400   # seconds; earnings dates are day-level, not live data
 _investor_view_cache: dict[str, tuple[float, dict]] = {}
 _investor_view_cache_lock = threading.Lock()
 
@@ -5684,7 +5684,7 @@ def get_investor_inbox(refresh: int = Query(0)):
     return _investor_cache_set(cache_key, payload)
 
 
-WEEKLY_PLAN_CACHE_TTL = 300
+WEEKLY_PLAN_CACHE_TTL = 86400
 
 
 @app.get("/api/investor/plan")
