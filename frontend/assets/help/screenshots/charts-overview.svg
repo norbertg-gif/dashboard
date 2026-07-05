@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#071018"/>
+  <rect width="1280" height="54" fill="#0b1320"/><rect y="54" width="220" height="666" fill="#0b1220"/><rect y="54" x="220" width="1060" height="44" fill="#060a10"/>
+  <rect x="16" y="11" width="32" height="32" rx="8" fill="#22d66b"/><text x="58" y="33" fill="#fff" font-family="Segoe UI" font-size="17" font-weight="700">Trading Dashboard</text>
+  <text x="250" y="84" fill="#fff" font-family="Segoe UI" font-size="15" font-weight="700">Grafy</text><line x1="244" y1="96" x2="304" y2="96" stroke="#00d4ff" stroke-width="3"/>
+  <rect x="12" y="64" width="190" height="30" rx="7" fill="#121d2d"/><text x="22" y="84" fill="#8293aa" font-family="Segoe UI" font-size="12">hľadaj ticker...</text>
+  <g font-family="Segoe UI" font-size="13" fill="#e8eef8" font-weight="700">
+    <text x="26" y="126">AAPL</text><text x="26" y="166">AMD</text><text x="26" y="206">NVDA</text><text x="26" y="246">MSFT</text><text x="26" y="286">META</text>
+  </g>
+  <g transform="translate(238,124)">
+    <g><rect width="490" height="230" rx="10" fill="#101827" stroke="#1ba5ff"/><text x="18" y="30" fill="#fff" font-family="Segoe UI" font-size="16" font-weight="700">AAPL · 1d</text><rect x="92" y="16" width="76" height="24" rx="6" fill="#003d22" stroke="#11cc72"/><text x="107" y="33" fill="#00ea76" font-family="Segoe UI" font-size="12">v portfóliu</text></g>
+    <g transform="translate(530,0)"><rect width="490" height="230" rx="10" fill="#101827" stroke="#26364e"/><text x="18" y="30" fill="#fff" font-family="Segoe UI" font-size="16" font-weight="700">MSFT · 1d</text></g>
+    <g transform="translate(0,260)"><rect width="490" height="230" rx="10" fill="#101827" stroke="#26364e"/><text x="18" y="30" fill="#fff" font-family="Segoe UI" font-size="16" font-weight="700">NVDA · 1d</text><rect x="100" y="16" width="78" height="24" rx="6" fill="#3d2d00" stroke="#ffc21a"/><text x="113" y="33" fill="#ffc21a" font-family="Segoe UI" font-size="12">Top pohyb</text></g>
+    <g transform="translate(530,260)"><rect width="490" height="230" rx="10" fill="#101827" stroke="#26364e"/><text x="18" y="30" fill="#fff" font-family="Segoe UI" font-size="16" font-weight="700">AMD · 1d</text></g>
+  </g>
+  <g stroke="#1c2b3f" opacity=".75"><path d="M260 210H700M260 270H700M260 330H700M790 210h410M790 270h410M790 330h410M260 470h440M790 470h410" /></g>
+  <g fill="#00d1a5"><rect x="280" y="260" width="8" height="55"/><rect x="304" y="235" width="8" height="82"/><rect x="330" y="250" width="8" height="44"/><rect x="380" y="218" width="8" height="86"/><rect x="816" y="244" width="8" height="68"/><rect x="862" y="220" width="8" height="92"/><rect x="990" y="230" width="8" height="78"/><rect x="320" y="515" width="8" height="66"/><rect x="870" y="518" width="8" height="62"/></g>
+  <g fill="#ff4d6d"><rect x="292" y="280" width="8" height="48"/><rect x="354" y="272" width="8" height="72"/><rect x="842" y="275" width="8" height="58"/><rect x="1018" y="260" width="8" height="88"/><rect x="350" y="550" width="8" height="52"/><rect x="900" y="546" width="8" height="72"/></g>
+  <text x="238" y="642" fill="#8ba4c0" font-family="Segoe UI" font-size="14">Pracovná plocha grafov: viac panelov naraz, timeframe, indikátory, watchlist a označenie titulov držaných v portfóliu.</text>
+</svg>

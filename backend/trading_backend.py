@@ -7913,6 +7913,24 @@ def lizard_icon_png():
     from fastapi.responses import FileResponse
     return FileResponse(FRONTEND_DIR / "lizard-icon.png", media_type="image/png", headers=_STATIC_IMMUTABLE)
 
+@app.get("/assets/help/screenshots/{fname}")
+def help_screenshot(fname: str):
+    from fastapi.responses import FileResponse
+    allowed = {
+        "charts-overview.svg",
+        "portfolio-overview.svg",
+        "scanner-overview.svg",
+        "predictive-overview.svg",
+        "verdict-overview.svg",
+    }
+    if fname not in allowed:
+        raise HTTPException(status_code=404, detail="Neznamy help asset")
+    return FileResponse(
+        FRONTEND_DIR / "assets" / "help" / "screenshots" / fname,
+        media_type="image/svg+xml",
+        headers=_STATIC_IMMUTABLE,
+    )
+
 # Frontend moduly — whitelist namiesto path param
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
