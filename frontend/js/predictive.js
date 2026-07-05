@@ -1212,8 +1212,28 @@ function pc_renderSidebar(data) {
     regimeHtml = `<div class="pred-row"><span class="key">Regime</span><span class="val" style="color:var(--muted);font-size:10px" title="${regime.error}">n/a</span></div>`;
   }
 
+  // Analog explainability — ako sa model dostal k smeru (drift prior vs. override)
+  const an = p.analog;
+  let analogHtml = '';
+  if (p.method === 'analog_similarity' && an) {
+    const overrode = an.decision === 'analog_override';
+    const voteCol = an.vote >= 0 ? '#26a69a' : '#ef5350';
+    const decTxt = overrode
+      ? `silná zhoda susedov (${an.up}:${an.down}) prebila drift`
+      : `hlas slabý (${an.up}:${an.down}) — smer drží historický drift titulu (${an.up_rate}% týždňov hore)`;
+    const decTip = 'Analógový model: nájde ' + an.neighbors + ' historicky najpodobnejších setupov (12 technických čŕt) a pozrie sa, kam trh šiel týždeň po nich. '
+      + 'Smer preberá ich hlasovanie len pri zhode ≥ 80/20 — inak platí dlhodobý drift titulu, ktorý je štatisticky spoľahlivejší. '
+      + 'Veľkosť pohybu (close) je vážený priemer výnosov susedov.';
+    analogHtml = `<div class="pred-row"><span class="tt key" data-tip="${decTip}">Ako model rozhodol <span class="tt-icon">ⓘ</span></span>`
+      + `<span class="val" style="font-size:10px;color:var(--muted);text-align:right">`
+      + `<span style="color:${voteCol};font-weight:600">hlas ${(an.vote*100).toFixed(0)}%</span> · ${decTxt}</span></div>`;
+  } else if (p.method === 'technical_composite') {
+    analogHtml = `<div class="pred-row"><span class="key">Metóda</span><span class="val" style="color:var(--muted);font-size:10px">technický composite (málo histórie pre analóg)</span></div>`;
+  }
+
   document.getElementById('predInfo').innerHTML = `
-    <div class="pred-row"><span class="tt key" data-tip="Predikovaný smer nasledujúcej weekly sviečky na základe kombinácie technických indikátorov a ML modelu.">Smer <span class="tt-icon">ⓘ</span></span><span class="val">${dirHtml}</span></div>
+    <div class="pred-row"><span class="tt key" data-tip="Predikovaný smer nasledujúcej weekly sviečky. Bázou je dlhodobý drift titulu; analógový model (podobné historické setupy) ho prebije len pri silnej zhode susedov.">Smer <span class="tt-icon">ⓘ</span></span><span class="val">${dirHtml}</span></div>
+    ${analogHtml}
     ${regimeHtml}
     <div class="pred-row"><span class="key">Open</span><span class="val">${pc.open.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Predikované maximum sviečky. Počítané ako stred (open+close)/2 + ATR×0.75">High <span class="tt-icon">ⓘ</span></span><span class="val">${pc.high.toFixed(2)}</span></div>

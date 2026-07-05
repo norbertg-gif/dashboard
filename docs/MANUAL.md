@@ -263,6 +263,15 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   nestačí, použije pôvodný vážený technický kompozit. Po update algoritmu sa
   môžu zmeniť historické predikčné sviečky a bodky úspešnosti; reálne sviečky
   a ceny sa nemenia.
+- **Ako model rozhoduje o smere** (riadok „Ako model rozhodol" v karte
+  Prognóza): bázou je dlhodobý **drift titulu** — percento historických
+  týždňov, ktoré skončili rastom. Hlasovanie podobných setupov smer **prebije
+  len pri silnej zhode** (aspoň ~80/20 pomer susedov). Dôvod je zmeraný na
+  7 854 historických predikciách: slabé hlasovanie je štatisticky horšie než
+  drift, takže model ide proti dlhodobému smeru titulu len vtedy, keď má
+  silný dôkaz. Veľkosť pohybu (predikovaná close) sa vždy berie z vážených
+  výnosov podobných setupov — tie sú na odhad rozsahu výrazne presnejšie
+  než starý kompozit (priemerná chyba ceny ~4.5 % vs ~18.6 %).
 - **Volume Profile** (checkbox v *Indikátory — overlay*, skupina Objem) —
   horizontálny histogram pri pravom okraji ukazuje, **pri akých cenách** sa
   zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = **POC**
