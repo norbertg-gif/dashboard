@@ -618,6 +618,8 @@ function attachMarkerTooltip(chart, container, getMarkerMeta) {
   });
 }
 
+const CHART_RIGHT_SCALE_WIDTH = 64;
+
 function makeChart(container, height, opts={}) {
   const t = getChartTheme();
   return LightweightCharts.createChart(container, {
@@ -625,7 +627,7 @@ function makeChart(container, height, opts={}) {
     layout:{ background:{type:'solid',color:t.bg}, textColor:t.text, attributionLogo:false },
     grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
     crosshair:{ mode:LightweightCharts.CrosshairMode.MagnetOHLC, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
-    rightPriceScale:{ borderColor:t.border },
+    rightPriceScale:{ borderColor:t.border, minimumWidth: CHART_RIGHT_SCALE_WIDTH },
     timeScale:{ borderColor:t.border, timeVisible:true, secondsVisible:false, visible:opts.timeVisible!==false },
     handleScroll:true, handleScale:true,
   });
@@ -637,7 +639,7 @@ function applyChartTheme(chart) {
     layout:{ background:{type:'solid',color:t.bg}, textColor:t.text },
     grid:{ vertLines:{color:t.grid}, horzLines:{color:t.grid} },
     crosshair:{ mode:LightweightCharts.CrosshairMode.MagnetOHLC, vertLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl}, horzLine:{color:t.crosshair,labelBackgroundColor:t.crosshairLbl} },
-    rightPriceScale:{ borderColor:t.border },
+    rightPriceScale:{ borderColor:t.border, minimumWidth: CHART_RIGHT_SCALE_WIDTH },
     timeScale:{ borderColor:t.border },
   });
 }

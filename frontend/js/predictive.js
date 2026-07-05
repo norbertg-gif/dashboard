@@ -277,11 +277,12 @@ function getPcChartOpts() {
     bg:'#0f1117', text:'#64748b', grid:'#1e2535', border:'#2a3145',
     crosshair:'#64748b55', crosshairLbl:'#0f1117',
   };
+  const rightScaleWidth = (typeof CHART_RIGHT_SCALE_WIDTH !== 'undefined') ? CHART_RIGHT_SCALE_WIDTH : 64;
   return {
     layout: { background: { color: t.bg }, textColor: t.text, attributionLogo: false },
     grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
     crosshair: { mode: LightweightCharts.CrosshairMode.MagnetOHLC },
-    rightPriceScale: { borderColor: t.border },
+    rightPriceScale: { borderColor: t.border, minimumWidth: rightScaleWidth },
     timeScale: { borderColor: t.border, timeVisible: false },
   };
 }
@@ -1612,7 +1613,7 @@ function buildSubpanel(type, ind, candles) {
   const opts = {
     ...getPcChartOpts(),
     width: el.offsetWidth, height: el.offsetHeight,
-    rightPriceScale: { borderColor: _t.border, scaleMargins: { top: 0.1, bottom: 0.1 } },
+    rightPriceScale: { borderColor: _t.border, minimumWidth: (typeof CHART_RIGHT_SCALE_WIDTH !== 'undefined' ? CHART_RIGHT_SCALE_WIDTH : 64), scaleMargins: { top: 0.1, bottom: 0.1 } },
     timeScale: { borderColor: _t.border, timeVisible: false },
   };
   pc_subChartInst = LightweightCharts.createChart(el, opts);
