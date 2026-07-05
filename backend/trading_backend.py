@@ -5731,17 +5731,23 @@ def get_investor_plan(refresh: int = Query(0)):
     # so zmiešaným summary). Riziká: earnings/zlomený graf na držaných tituloch.
     dca_rows: list = []
     risk_rows: list = []
+    used_tickers = {str(row.get("ticker") or "").upper() for row in focus_rows if row.get("ticker")}
     for it in items:
         kinds = set(it.get("kinds") or [])
-        t = it.get("ticker")
+        t = str(it.get("ticker") or "").upper()
+        if not t or t in used_tickers:
+            continue
         if "dca" in kinds and "broken" not in kinds:
             dca_rows.append({"ticker": t,
                              "summary": f"{t} je DCA kandidát so zdravým grafom — strata v pásme, DIP drží."})
+            used_tickers.add(t)
+            continue
         if kinds & {"broken", "earnings"}:
             reason = next((r for r in (it.get("reasons") or []) if r.get("kind") in ("broken", "earnings")), None)
             risk_rows.append({"ticker": t,
                               "summary": (reason or {}).get("summary") or (reason or {}).get("detail")
                                          or it.get("summary") or ""})
+            used_tickers.add(t)
 
     # Možný nákup: PRIENIK buy signál + DIP kvalita + zdravý graf (nie len jedno
     # kritérium), len nedržané tituly. Z posledného scanner behu (cache).
@@ -5751,7 +5757,7 @@ def get_investor_plan(refresh: int = Query(0)):
         scan = enrich_scanner_payload(load_scanner_cache()) or {}
         for row in (scan.get("results") or []):
             t = str(row.get("ticker") or "").upper()
-            if not t or t in holdings:
+            if not t or t in holdings or t in used_tickers:
                 continue
             sig = row.get("recent_signal") or {}
             if sig.get("tier") != "buy":
@@ -5768,6 +5774,7 @@ def get_investor_plan(refresh: int = Query(0)):
                 "ticker": t,
                 "summary": f"{t} má buy signál {sig.get('score', '?')}/4 aj DIP kvalitu ({int(float(dip))}) — stojí za detail.",
             })
+            used_tickers.add(t)
     except Exception:
         pass
     buy_rows = buy_rows[:6]

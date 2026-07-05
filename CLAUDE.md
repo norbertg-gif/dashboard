@@ -167,8 +167,11 @@ Main source sections:
    `dca_dip_min` + chart health not Bad, held tickers excluded), Možné DCA
    (dca kind without broken), Riziko (broken/earnings), Drž bez akcie (held
    tickers absent from inbox). Headline "Tento týždeň rieš hlavne X, Y, Z."
-   5-min cache via `_investor_cache_*`, `?refresh=1` bypass. Its goal is LESS
-   mental noise, not more data — do not add new analytics into it. Both this
+   A ticker appears only once in the first/highest-priority section (`focus`
+   wins over buy/dca/risk; dca wins over risk), while full reasons remain in
+   Inbox/Verdikt. 5-min server cache via `_investor_cache_*`, `?refresh=1`
+   bypass; frontend also keeps a short tab-memory cache for repeated tab opens.
+   Its goal is LESS mental noise, not more data — do not add new analytics into it. Both this
    card and Investor Inbox are independently collapsible (`td_weekly_plan_collapsed`
    / `td_investor_inbox_collapsed`, default expanded) via the same `.dca-toggle`
    +/− button pattern as the Portfolio DCA card; collapsed state shows a
@@ -185,7 +188,8 @@ Main source sections:
    based: `defensive` (held/DCA/profit/earnings/risk), `offensive` (new scanner
    opportunities), `all`. Backend caches the composed payload for 120 seconds
    (`INVESTOR_INBOX_CACHE_TTL`) to avoid recalculating DCA + earnings on every
-   Scanner reload; `?refresh=1` bypasses. Rows are grouped by ticker: if one
+   Scanner reload; frontend also keeps a 2-min in-memory cache; `?refresh=1`
+   bypasses. Rows are grouped by ticker: if one
    symbol has multiple reasons (for example DCA + chart-health risk), it is
    rendered once with `kinds`/`reasons` badges and a merged human summary.
    Rows link to Verdikt / Predikcia and expose `+ WL`.

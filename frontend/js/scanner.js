@@ -14,6 +14,31 @@ function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX
 const WEEKLY_PLAN_COLLAPSED_KEY = 'td_weekly_plan_collapsed';
 function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) === '1'; }
 
+const SCANNER_CLIENT_CACHE_MS = {
+  weeklyPlan: 2 * 60 * 1000,
+  investorInbox: 2 * 60 * 1000,
+  earningsWidget: 15 * 60 * 1000,
+  dipStatus: 10 * 60 * 1000,
+  scannerResults: 30 * 1000,
+};
+const scannerClientCache = {};
+
+async function scannerCachedJson(key, url, ttlMs, force = false) {
+  const hit = scannerClientCache[key];
+  if (!force && hit && Date.now() - hit.ts < ttlMs) return hit.data;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  scannerClientCache[key] = { ts: Date.now(), data };
+  return data;
+}
+
+function clearScannerClientCache(prefix = '') {
+  Object.keys(scannerClientCache).forEach(key => {
+    if (!prefix || key.startsWith(prefix)) delete scannerClientCache[key];
+  });
+}
+
 function inboxSeverityLabel(severity) {
   return severity === 'buy' ? 'pozitívne'
     : severity === 'counter' ? 'pozor'
@@ -125,9 +150,13 @@ async function loadWeeklyPlan(force = false) {
   if (!box) return;
   if (force) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Prepočítavam plán...</div>';
   try {
-    const r = await fetch(`${API}/api/investor/plan${force ? '?refresh=1' : ''}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    renderWeeklyPlan(await r.json());
+    const data = await scannerCachedJson(
+      'weeklyPlan',
+      `${API}/api/investor/plan${force ? '?refresh=1' : ''}`,
+      SCANNER_CLIENT_CACHE_MS.weeklyPlan,
+      force,
+    );
+    renderWeeklyPlan(data);
   } catch (e) {
     if (head) head.textContent = 'Týždenný plán';
     box.innerHTML = `<div class="inbox-empty">Plán sa nepodarilo zložiť: ${escHtml(e.message)}</div>`;
@@ -187,9 +216,12 @@ async function loadInvestorInbox() {
   const box = document.getElementById('investorWeekBox');
   if (box) box.innerHTML = '<div class="inbox-empty"><span class="cl-spinner"></span>Načítavam týždenný prehľad...</div>';
   try {
-    const response = await fetch(`${API}/api/investor/inbox`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderInvestorInbox(await response.json());
+    const data = await scannerCachedJson(
+      'investorInbox',
+      `${API}/api/investor/inbox`,
+      SCANNER_CLIENT_CACHE_MS.investorInbox,
+    );
+    renderInvestorInbox(data);
   } catch (e) {
     if (box) box.innerHTML = `<div class="inbox-empty">Týždenný prehľad sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
   }
@@ -238,9 +270,12 @@ async function loadEarningsCalendarWidget() {
   const box = document.getElementById('earningsCalendarBox');
   if (box) box.innerHTML = '<div class="earncal-empty"><span class="cl-spinner"></span>Načítavam earnings kalendár...</div>';
   try {
-    const response = await fetch(`${API}/api/earnings/calendar?days=14`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderEarningsCalendar(await response.json());
+    const data = await scannerCachedJson(
+      'earningsWidget:14',
+      `${API}/api/earnings/calendar?days=14`,
+      SCANNER_CLIENT_CACHE_MS.earningsWidget,
+    );
+    renderEarningsCalendar(data);
   } catch (e) {
     if (box) box.innerHTML = `<div class="earncal-empty">Earnings kalendár sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
   }
@@ -476,9 +511,11 @@ function fmtImportTime(iso) {
 
 async function loadDipStatus() {
   try {
-    const res = await fetch('/api/scanner/dip/status');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
+    return await scannerCachedJson(
+      'dipStatus',
+      '/api/scanner/dip/status',
+      SCANNER_CLIENT_CACHE_MS.dipStatus,
+    );
   } catch(e) {
     return { error: e.message };
   }
@@ -508,6 +545,10 @@ async function importDipExcel() {
     const data = await res.json();
     const fileLabel = data.filename ? ` · ${data.filename}` : '';
     if (status) status.textContent = `DIP import OK: ${data.count || 0} titulov (${data.sheet || 'Ranking'}${fileLabel})`;
+    clearScannerClientCache('dipStatus');
+    clearScannerClientCache('scannerResults');
+    clearScannerClientCache('weeklyPlan');
+    clearScannerClientCache('investorInbox');
     await loadNasdaqScannerResults();
   } catch(e) {
     if (status) status.textContent = 'DIP import chyba: ' + e.message;
@@ -1077,9 +1118,15 @@ async function loadNasdaqScannerResults() {
   if (!el) return;
   try {
     if (!_scannerNotesLoaded) loadScannerNotes();
-    const res = await fetch('/api/scanner/nasdaq/results');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    let data = await scannerCachedJson(
+      'scannerResults',
+      '/api/scanner/nasdaq/results',
+      SCANNER_CLIENT_CACHE_MS.scannerResults,
+    );
+    if (data?.state?.running) {
+      clearScannerClientCache('scannerResults');
+      data = await scannerCachedJson('scannerResults:running', '/api/scanner/nasdaq/results', 0, true);
+    }
     renderNasdaqScanner(data);
     if (data?.state?.running) scheduleNasdaqScannerPoll();
   } catch(e) {
@@ -1213,6 +1260,9 @@ async function runNasdaqScanner() {
   el.className = 'opp-empty';
   el.innerHTML = '<span class="cl-spinner"></span>Spúšťam DIP universe scanner...';
   try {
+    clearScannerClientCache('scannerResults');
+    clearScannerClientCache('weeklyPlan');
+    clearScannerClientCache('investorInbox');
     const res = await fetch('/api/scanner/nasdaq/run?days=3', { method: 'POST' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
