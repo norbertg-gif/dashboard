@@ -1620,6 +1620,14 @@ function buildSubpanel(type, ind, candles) {
   new ResizeObserver(() => {
     if (pc_subChartInst) pc_subChartInst.applyOptions({ width: el.offsetWidth, height: el.offsetHeight });
   }).observe(el);
+  const anchor = pc_subChartInst.addSeries(LightweightCharts.LineSeries, {
+    color: 'rgba(0,0,0,0)',
+    lineWidth: 0,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+  anchor.setData((candles || []).map(d => ({ time: d.time })));
 
   if (type === 'rsi') {
     label.textContent = 'RSI 14';
@@ -1694,7 +1702,6 @@ function buildSubpanel(type, ind, candles) {
     if (firstSeries) pc_subChartInst.setCrosshairPosition(0, param.time, firstSeries);
   });
 
-  pc_subChartInst.timeScale().fitContent();
   requestAnimationFrame(() => {
     const range = pc_realChartInst.timeScale().getVisibleLogicalRange();
     if (range && pc_subChartInst) pc_subChartInst.timeScale().setVisibleLogicalRange(range);

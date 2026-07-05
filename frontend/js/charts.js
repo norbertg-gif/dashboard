@@ -947,6 +947,30 @@ function toLineData(dataArr, field) {
   return dataArr.filter(d => d[field] != null).map(d => ({ time:d.time, value:d[field] }));
 }
 
+function ensureSubChartTimeAnchor(r, chart, key, dataArr) {
+  if (!chart || !Array.isArray(dataArr)) return;
+  if (!r[key]) {
+    r[key] = chart.addSeries(LightweightCharts.LineSeries, {
+      color: 'rgba(0,0,0,0)',
+      lineWidth: 0,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+  }
+  // Whitespace points force the subchart to share the same logical time index
+  // as the main candle chart even when the indicator starts after its warmup.
+  r[key].setData(dataArr.map(d => ({ time: d.time })));
+}
+
+function alignSubChartToMain(r, chart) {
+  if (!r?.mainChart || !chart) return;
+  const range = r.mainChart.timeScale().getVisibleLogicalRange();
+  if (range) {
+    try { chart.timeScale().setVisibleLogicalRange(range); } catch(e) {}
+  }
+}
+
 function applyOverlays(id, data, r) {
   const mc = r.mainChart;
 
@@ -1001,6 +1025,7 @@ function applyOverlays(id, data, r) {
     // RSI
   if (r.indicators.rsi) {
     ensureRsiChart(id, r);
+    ensureSubChartTimeAnchor(r, r.rsiChart, 'rsiAnchor', data);
     const rsiData = toLineData(data, 'rsi');
     r.rsiLine.setData(rsiData);
     if (rsiData.length) {
@@ -1008,18 +1033,19 @@ function applyOverlays(id, data, r) {
       r.rsiOB.setData(times.map(t=>({time:t,value:70})));
       r.rsiOS.setData(times.map(t=>({time:t,value:30})));
     }
-    r.rsiChart.timeScale().fitContent();
+    alignSubChartToMain(r, r.rsiChart);
   }
 
   // ADX
   if (r.indicators.adx) {
     ensureAdxChart(id, r);
+    ensureSubChartTimeAnchor(r, r.adxChart, 'adxAnchor', data);
     const adxData = toLineData(data, 'adx');
     r.adxLine.setData(adxData);
     r.diPLine.setData(toLineData(data,'di_plus'));
     r.diMLine.setData(toLineData(data,'di_minus'));
     if (adxData.length) r.adxThr.setData(adxData.map(d=>({time:d.time,value:25})));
-    r.adxChart.timeScale().fitContent();
+    alignSubChartToMain(r, r.adxChart);
   }
 
   // MACD
@@ -1038,10 +1064,11 @@ function applyOverlays(id, data, r) {
       time: d.time, value: d.macd_hist,
       color: d.macd_hist >= 0 ? '#00c99a66' : '#ff456066',
     }));
+    ensureSubChartTimeAnchor(r, r.macdChart, 'macdAnchor', data);
     r.macdLine.setData(macdData);
     r.macdSignal.setData(signalData);
     r.macdHist.setData(histData);
-    r.macdChart.timeScale().fitContent();
+    alignSubChartToMain(r, r.macdChart);
   }
 }
 
