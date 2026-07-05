@@ -178,17 +178,17 @@ function computeAtr14(candles) {
   return trs.reduce((s, v) => s + v, 0) / trs.length;
 }
 
-function totalPortfolioEquity() {
+function totalPortfolioCash() {
   try {
     let total = 0;
     for (const acc of Object.values(portfolioAccountData || {})) {
-      const eq = Number(acc?.summary?._liveEquity ?? acc?.summary?.equity);
-      if (Number.isFinite(eq) && eq > 0) total += eq;
+      const c = Number(acc?.summary?.cash);
+      if (Number.isFinite(c) && c > 0) total += c;
     }
     if (total > 0) return total;
     for (const s of Object.values(etoroSummary || {})) {
-      const eq = Number(s?.equity);
-      if (Number.isFinite(eq) && eq > 0) total += eq;
+      const c = Number(s?.cash);
+      if (Number.isFinite(c) && c > 0) total += c;
     }
     return total > 0 ? total : null;
   } catch (e) { return null; }
@@ -199,21 +199,21 @@ function buildPositionSizing(ticker, data) {
   const last = candles?.at?.(-1);
   const close = Number(last?.close);
   const atr = computeAtr14(candles);
-  const equity = totalPortfolioEquity();
+  const cash = totalPortfolioCash();
   const riskPct = Number(dashSettings?.risk_per_trade_pct) || 1;
   const stopMult = Number(dashSettings?.atr_stop_mult) || 1.5;
   const maxWeight = Number(dashSettings?.dca_max_weight) || 10;
-  if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(atr) || atr <= 0 || !Number.isFinite(equity) || equity <= 0) {
-    return { available: false, reason: !Number.isFinite(equity) || equity <= 0
-      ? 'Chýba portfólio equity — otvor Portfólio tab.'
+  if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(atr) || atr <= 0 || !Number.isFinite(cash) || cash <= 0) {
+    return { available: false, reason: !Number.isFinite(cash) || cash <= 0
+      ? 'Chýba voľný cash — otvor Portfólio tab (alebo je účet plne investovaný).'
       : 'Málo denných sviečok pre ATR14.' };
   }
   const stopDist = stopMult * atr;
   const stopPrice = close - stopDist;
-  const riskDollars = equity * (riskPct / 100);
+  const riskDollars = cash * (riskPct / 100);
   let shares = Math.floor(riskDollars / stopDist);
   let positionUSD = shares * close;
-  const maxPositionUSD = equity * (maxWeight / 100);
+  const maxPositionUSD = cash * (maxWeight / 100);
   let capped = false;
   if (positionUSD > maxPositionUSD) {
     shares = Math.floor(maxPositionUSD / close);
@@ -221,13 +221,13 @@ function buildPositionSizing(ticker, data) {
     capped = true;
   }
   if (shares < 1) {
-    return { available: false, reason: `Riziko ${riskPct}% equity ($${riskDollars.toFixed(0)}) je menšie ako stop-distancia ($${stopDist.toFixed(2)}) na jednu akciu.` };
+    return { available: false, reason: `Riziko ${riskPct}% cash ($${riskDollars.toFixed(0)}) je menšie ako stop-distancia ($${stopDist.toFixed(2)}) na jednu akciu.` };
   }
   return {
     available: true,
-    equity, riskPct, riskDollars,
+    cash, riskPct, riskDollars,
     close, atr, stopMult, stopDist, stopPrice,
-    shares, positionUSD, positionPctEquity: positionUSD / equity * 100,
+    shares, positionUSD, positionPctCash: positionUSD / cash * 100,
     maxWeight, capped,
   };
 }
@@ -297,17 +297,17 @@ function renderPositionSizing(s) {
     </section>`;
   }
   const capNote = s.capped
-    ? ` <span class="verdict-sizing-cap" title="Pozícia by prekročila max. váhu ${s.maxWeight}% equity; orezané na maximum">cap ${s.maxWeight}% equity</span>`
+    ? ` <span class="verdict-sizing-cap" title="Pozícia by prekročila max. váhu ${s.maxWeight}% voľného cash; orezané na maximum">cap ${s.maxWeight}% cash</span>`
     : '';
   return `<section class="verdict-sizing">
     <h3>Koľko kúpiť <span class="verdict-sizing-sub">deterministický risk kalkulátor</span></h3>
     <div class="verdict-sizing-grid">
       <div><span>Akcií</span><strong>${s.shares}</strong></div>
-      <div><span>Pozícia</span><strong>$${s.positionUSD.toFixed(0)}</strong><em>${s.positionPctEquity.toFixed(2)}% equity${capNote}</em></div>
+      <div><span>Pozícia</span><strong>$${s.positionUSD.toFixed(0)}</strong><em>${s.positionPctCash.toFixed(2)}% cash${capNote}</em></div>
       <div><span>Stop</span><strong>$${s.stopPrice.toFixed(2)}</strong><em>−${s.stopDist.toFixed(2)} = ${s.stopMult}× ATR14</em></div>
-      <div><span>Riziko</span><strong>$${s.riskDollars.toFixed(0)}</strong><em>${s.riskPct}% z equity $${Math.round(s.equity).toLocaleString('sk-SK')}</em></div>
+      <div><span>Riziko</span><strong>$${s.riskDollars.toFixed(0)}</strong><em>${s.riskPct}% z voľného cash $${Math.round(s.cash).toLocaleString('sk-SK')}</em></div>
     </div>
-    <div class="verdict-sizing-note">Prahy meň v ⚙ Nastavenia (Riziko na obchod, Stop × ATR14). Kalkulátor je pomôcka — konečnú veľkosť rozhoduješ ty.</div>
+    <div class="verdict-sizing-note">Percentá sú z voľného cash (nie celej equity) — koľko reálne vieš minúť. Prahy meň v ⚙ Nastavenia (Riziko na obchod, Stop × ATR14). Kalkulátor je pomôcka — konečnú veľkosť rozhoduješ ty.</div>
   </section>`;
 }
 
