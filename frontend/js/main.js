@@ -66,6 +66,7 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
     // pôvodný sekvenčný vodopád zdržiaval štart o súčet všetkých latencií.
     await Promise.all([
       loadAll(),
+      loadHoldings(),
       refreshWatchlistPrices(),
       loadEtoroWatchlistId(),
       etoroInit,

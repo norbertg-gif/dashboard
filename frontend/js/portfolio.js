@@ -2000,5 +2000,6 @@ async function loadHoldings() {
     const data = await r.json();
     _holdings = data.holdings || {};
     applyAllChartPortfolioFlags();
+    if (typeof renderSidebar === 'function') renderSidebar();
   } catch (e) { /* non-critical */ }
 }

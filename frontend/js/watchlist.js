@@ -499,6 +499,9 @@ function renderSidebar() {
     const symAlerts = getAlertsForSym(sym);
     const hasAlert = symAlerts.length > 0;
     const hasTriggered = symAlerts.some(a => a.triggered);
+    const holdingIcon = _holdings?.[sym]
+      ? '<span class="sb-holding-dot" title="Titul je kupeny v portfoliu">&#9679;</span>'
+      : '';
     const bellIcon = hasAlert ? `<span class="sb-bell" style="color:${hasTriggered?'var(--yellow)':'var(--muted2)'};" onclick="event.stopPropagation();toggleAlertEditor('${sym}',event)" title="Alertné podmienky">${hasTriggered?'🔔':'🔕'}</span>` : `<span class="sb-bell" style="color:var(--muted);opacity:.4;" onclick="event.stopPropagation();toggleAlertEditor('${sym}',event)" title="Nastaviť alert">🔕</span>`;
 
     // Alert editor
@@ -541,6 +544,7 @@ function renderSidebar() {
       <div style="display:flex;align-items:center;gap:4px;">
         ${getLogoWrapper(sym, 22, chgCls==='up'?'var(--green)':chgCls==='down'?'var(--red)':'var(--muted)')}
         <span class="sb-sym" style="flex:1;min-width:0;">${sym}</span>
+        ${holdingIcon}
         <div data-spark="${sym}" style="flex-shrink:0;">${drawSparkSvg(sparkCache[sym], chgCls !== 'down', 38, 15)}</div>
         <span class="sb-price" style="flex-shrink:0;min-width:42px;text-align:right;">${fmtSbPrice(item.price)}</span>
         <span class="sb-chg ${chgCls}" style="flex-shrink:0;min-width:38px;text-align:right;">${chgStr}</span>
