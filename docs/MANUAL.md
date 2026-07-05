@@ -756,13 +756,14 @@ stĺpca a rovnaký ticker sa sťahuje iba raz.
   signály na titule (90D úspešnosť < 40 %) a či titul už nedržíš s veľkou
   váhou. Keď nič neplatí, povie to explicitne — „žiadne zásadné brzdy".
 - Sekcia **„Koľko kúpiť"** je deterministický pozičný kalkulátor: `risk_per_trade_pct
-  × voľný cash / (atr_stop_mult × ATR14)` = počet akcií, capnuté na `dca_max_weight`
-  **% z voľného cash** (nie z celej equity — equity zahŕňa aj kapitál uviazaný
-  v existujúcich pozíciách, ktorý reálne nemáš k dispozícii na nový nákup). Ukáže
+  × voľný cash Účtu 1 / (atr_stop_mult × ATR14)` = počet akcií, capnuté na
+  `dca_max_weight` **% z voľného cash** (nie z celej equity a nie zo súčtu oboch
+  účtov — počíta zámerne len s Účtom 1). Equity zahŕňa aj kapitál uviazaný
+  v existujúcich pozíciách, ktorý reálne nemáš k dispozícii na nový nákup. Ukáže
   návrh počtu akcií, výšku pozície v $ (+ % cash), stop cenu (ATR-based, presne
   pod aktuálnou cenou) a dolárové riziko. Prahy meň v ⚙ Nastavenia (Riziko na
-  obchod, Stop × ATR14). Bez voľného cash (napr. plne investovaný účet) alebo
-  s krátkou históriou sviečok kalkulátor uvedie prečo je nedostupný. Je to
+  obchod, Stop × ATR14). Bez voľného cash na Účte 1 (napr. plne investovaný účet)
+  alebo s krátkou históriou sviečok kalkulátor uvedie prečo je nedostupný. Je to
   pomôcka — konečnú veľkosť rozhoduješ ty.
 - Technika / Trh / Firma / Earnings sú indikátory dostupnosti zdrojov.
   Chýbajúci zdroj znižuje istotu, ale automaticky nevytvára negatívny verdikt.

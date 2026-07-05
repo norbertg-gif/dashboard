@@ -179,18 +179,12 @@ function computeAtr14(candles) {
 }
 
 function totalPortfolioCash() {
+  // Zámerne len Account 1 (nie súčet oboch účtov) — user rozhodnutie.
   try {
-    let total = 0;
-    for (const acc of Object.values(portfolioAccountData || {})) {
-      const c = Number(acc?.summary?.cash);
-      if (Number.isFinite(c) && c > 0) total += c;
-    }
-    if (total > 0) return total;
-    for (const s of Object.values(etoroSummary || {})) {
-      const c = Number(s?.cash);
-      if (Number.isFinite(c) && c > 0) total += c;
-    }
-    return total > 0 ? total : null;
+    const c1 = Number(portfolioAccountData?.['1']?.summary?.cash);
+    if (Number.isFinite(c1) && c1 > 0) return c1;
+    const s1 = Number(etoroSummary?.['1']?.cash);
+    return Number.isFinite(s1) && s1 > 0 ? s1 : null;
   } catch (e) { return null; }
 }
 
@@ -305,9 +299,9 @@ function renderPositionSizing(s) {
       <div><span>Akcií</span><strong>${s.shares}</strong></div>
       <div><span>Pozícia</span><strong>$${s.positionUSD.toFixed(0)}</strong><em>${s.positionPctCash.toFixed(2)}% cash${capNote}</em></div>
       <div><span>Stop</span><strong>$${s.stopPrice.toFixed(2)}</strong><em>−${s.stopDist.toFixed(2)} = ${s.stopMult}× ATR14</em></div>
-      <div><span>Riziko</span><strong>$${s.riskDollars.toFixed(0)}</strong><em>${s.riskPct}% z voľného cash $${Math.round(s.cash).toLocaleString('sk-SK')}</em></div>
+      <div><span>Riziko</span><strong>$${s.riskDollars.toFixed(0)}</strong><em>${s.riskPct}% z cash Účtu 1 ($${Math.round(s.cash).toLocaleString('sk-SK')})</em></div>
     </div>
-    <div class="verdict-sizing-note">Percentá sú z voľného cash (nie celej equity) — koľko reálne vieš minúť. Prahy meň v ⚙ Nastavenia (Riziko na obchod, Stop × ATR14). Kalkulátor je pomôcka — konečnú veľkosť rozhoduješ ty.</div>
+    <div class="verdict-sizing-note">Percentá sú z voľného cash <strong>Účtu 1</strong> (nie celej equity ani Účtu 2) — koľko reálne vieš minúť. Prahy meň v ⚙ Nastavenia (Riziko na obchod, Stop × ATR14). Kalkulátor je pomôcka — konečnú veľkosť rozhoduješ ty.</div>
   </section>`;
 }
 
