@@ -295,7 +295,7 @@ function resizeChartPanelNow(id) {
   const panel = document.getElementById(id);
   const r = registry[id];
   if (!panel || !r) return;
-  const mainCont = panel.querySelector('.chart-main');
+  const mainCont = panel.querySelector('.p-chart');
   const w = mainCont?.clientWidth || panel.clientWidth;
   const h = mainCont?.clientHeight;
   if (w > 0 && h > 0) {
@@ -304,7 +304,7 @@ function resizeChartPanelNow(id) {
     try { r.mainChart?.applyOptions({ width: w }); } catch(e) {}
   }
   for (const chart of [r.rsiChart, r.adxChart, r.macdChart]) {
-    try { chart?.applyOptions({ width: w }); } catch(e) {}
+    try { chart?.applyOptions({ width: w, height: 80 }); } catch(e) {}
   }
 }
 
@@ -528,6 +528,10 @@ function updateSubVisibility(pid) {
   document.getElementById(`sub-adx-${pid}`)?.classList.toggle('hidden', !showAdx);
   document.getElementById(`sub-macd-${pid}`)?.classList.toggle('hidden', !showMacd);
   document.getElementById(`chart-${pid}`)?.classList.toggle('with-sub', showRsi || showAdx || showMacd);
+  requestAnimationFrame(() => {
+    resizeChartPanelNow(pid);
+    requestAnimationFrame(() => resizeChartPanelNow(pid));
+  });
   setTimeout(() => {
     const panel = document.getElementById(pid); if (!panel) return;
     const w = panel.clientWidth;
@@ -576,10 +580,7 @@ function fixupChartSizes() {
     const w = panel.clientWidth;
     if (w <= 0) continue;
     try {
-      r.mainChart?.applyOptions({ width: w });
-      r.rsiChart?.applyOptions({ width: w });
-      r.adxChart?.applyOptions({ width: w });
-      r.macdChart?.applyOptions({ width: w });
+      resizeChartPanelNow(id);
     } catch (e) {}
   }
 }
