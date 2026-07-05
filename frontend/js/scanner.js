@@ -1,6 +1,6 @@
 // ── SCANNER ──────────────────────────────────────────────────────────────────
 // Candidate discovery: Investor Inbox, earnings kalendár, watchlist/eToro radar,
-// DIP universe scanner, checklist, notes panel, news sentiment (AV lazy+cache),
+// DIP universe scanner, checklist, notes panel,
 // market context bar (TRH) a scanner badges. Súčasť splitu dashboard.js.
 
 const INVESTOR_INBOX_MODE_KEY = 'td_investor_inbox_mode';
@@ -765,7 +765,7 @@ ${escHtml(copyText)}</textarea>
         </span>`
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}<button class="news-btn" title="Správy + sentiment" onclick="toggleTickerNews('${escHtml(r.ticker)}', event)">📰</button><span class="news-sum" data-newssum="${escHtml(r.ticker)}"></span><span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}<span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Analytike" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Analytika</button></td>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
@@ -778,8 +778,7 @@ ${escHtml(copyText)}</textarea>
       <td class="r">${price}</td>
       <td>${marketHtml}</td>
       <td>${escHtml(reason)}</td>
-    </tr>
-    <tr class="news-row" id="news-row-${escHtml(r.ticker)}" style="display:none;"><td colspan="13" class="news-cell" id="news-cell-${escHtml(r.ticker)}"></td></tr>`;
+    </tr>`;
   }).join('') + `</tbody></table></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">
@@ -828,8 +827,6 @@ function renderScannerErrorDetails(cache) {
 }
 
 let _earningsDates = null;     // {TICKER: 'YYYY-MM-DD'}
-let _newsSummary = {};         // {TICKER: {avg, n}}
-
 let _apeMentions = {};         // {TICKER: {mentions, rank, rank_24h_ago, mentions_24h_ago}}
 let _scannerMetaLoading = false;
 
@@ -840,7 +837,7 @@ async function ensureScannerMetaLoaded(tickers) {
   if (_scannerMetaLoading) return;
   _scannerMetaLoading = true;
   try {
-    await Promise.all([loadEarningsCalendar(), loadNewsSummary(tickers), loadHoldings(), loadRedditMentions(tickers)]);
+    await Promise.all([loadEarningsCalendar(), loadHoldings(), loadRedditMentions(tickers)]);
     applyScannerBadges();
   } finally {
     _scannerMetaLoading = false;
@@ -982,16 +979,6 @@ async function fetchEarningsDirect() {
   }
 }
 
-async function loadNewsSummary(tickers) {
-  if (!tickers || !tickers.length) return;
-  try {
-    const r = await fetch(`/api/news/summary?tickers=${encodeURIComponent(tickers.join(','))}`);
-    if (!r.ok) return;
-    const data = await r.json();
-    Object.assign(_newsSummary, data.summary || {});
-  } catch (e) { /* non-critical */ }
-}
-
 function newsSummaryFromItems(items) {
   // Len cluster_primary (jeden reprezentant na udalosť) — viac vydavateľov
   // s tou istou wire story inak násobí váhu jednej udalosti v priemere.
@@ -1017,16 +1004,6 @@ function applyScannerBadges() {
       el.innerHTML = `<span class="hold-tag ${cls}" title="V portfóliu — P/L ${Number.isFinite(pct) ? pct.toFixed(2) + ' %' : 'n/a'}">PORT${pctTxt}</span>`;
     });
   }
-  document.querySelectorAll('[data-newssum]').forEach(el => {
-    const s = _newsSummary[el.dataset.newssum];
-    if (!s || !s.n) { el.innerHTML = ''; return; }
-    const cls = s.avg >= 0.15 ? 'bull' : s.avg <= -0.15 ? 'bear' : 'neutral';
-    const extraArticles = (s.nArticles || s.n) - s.n;
-    const storyWord = s.n === 1 ? 'príbeh' : (s.n >= 2 && s.n <= 4) ? 'príbehy' : 'príbehov';
-    const storyTxt = `${s.n} ${storyWord}`
-      + (extraArticles > 0 ? ` (${s.nArticles} článkov, duplicity zlúčené)` : '');
-    el.innerHTML = `<span class="news-badge ${cls}" title="Priemerný sentiment z ${storyTxt}, vážený relevanciou">${s.avg >= 0 ? '+' : ''}${s.avg.toFixed(2)}</span>`;
-  });
   const now = new Date();
   document.querySelectorAll('[data-earn]').forEach(el => {
     const d = _earningsDates?.[el.dataset.earn];
@@ -1145,47 +1122,6 @@ function scheduleNasdaqScannerPoll() {
   pc_scannerPollTimer = setTimeout(loadNasdaqScannerResults, 2500);
 }
 
-const _newsCache = {};   // ticker → payload (session-level, server má 12h disk cache)
-
-async function toggleTickerNews(ticker, ev) {
-  if (ev) ev.stopPropagation();
-  const row  = document.getElementById(`news-row-${ticker}`);
-  const cell = document.getElementById(`news-cell-${ticker}`);
-  if (!row || !cell) return;
-  if (row.style.display !== 'none') {
-    row.style.display = 'none';
-    return;
-  }
-  row.style.display = '';
-  if (_newsCache[ticker]) {
-    cell.innerHTML = renderNewsBlock(_newsCache[ticker]);
-    return;
-  }
-  cell.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Načítavam správy…</div>';
-  await fetchTickerNews(ticker, false);
-}
-
-async function fetchTickerNews(ticker, refresh) {
-  const cell = document.getElementById(`news-cell-${ticker}`);
-  try {
-    const r = await fetch(`/api/news/${encodeURIComponent(ticker)}${refresh ? '?refresh=1' : ''}`);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    let data = await r.json();
-    // Backend (Render zdieľaná IP) rate-limitnutý → skús AV priamo z prehliadača
-    // (limit je per-IP, klientova IP je iná) a výsledok pošli backendu do cache.
-    if (data.error && !(data.items || []).length) {
-      const direct = await fetchTickerNewsDirect(ticker);
-      if (direct) data = direct;
-    }
-    _newsCache[ticker] = data;
-    if (cell) cell.innerHTML = renderNewsBlock(data);
-    const sum = newsSummaryFromItems(data.items);
-    if (sum) { _newsSummary[ticker] = sum; applyScannerBadges(); }
-  } catch (e) {
-    if (cell) cell.innerHTML = `<div class="news-empty">Chyba načítania správ: ${escHtml(e.message)}</div>`;
-  }
-}
-
 async function fetchTickerNewsDirect(ticker) {
   try {
     const kr = await fetch('/api/news/clientkey');
@@ -1211,14 +1147,6 @@ async function fetchTickerNewsDirect(ticker) {
   }
 }
 
-function refreshTickerNews(ticker, ev) {
-  if (ev) ev.stopPropagation();
-  const cell = document.getElementById(`news-cell-${ticker}`);
-  if (cell) cell.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Obnovujem…</div>';
-  delete _newsCache[ticker];
-  fetchTickerNews(ticker, true);
-}
-
 function newsSentimentBadge(label, score) {
   const l = String(label || '').toLowerCase();
   let cls = 'neutral', txt = 'Neutral';
@@ -1226,37 +1154,6 @@ function newsSentimentBadge(label, score) {
   else if (l.includes('bearish')) { cls = 'bear'; txt = l.includes('somewhat') ? 'Somewhat bearish' : 'Bearish'; }
   const scoreTxt = Number.isFinite(score) ? ` ${score >= 0 ? '+' : ''}${score.toFixed(2)}` : '';
   return `<span class="news-badge ${cls}">${txt}${scoreTxt}</span>`;
-}
-
-function renderNewsBlock(data) {
-  const items = data.items || [];
-  const fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '-';
-  const staleNote = data.stale ? ' <span class="news-stale">(staršia cache — refresh zlyhal)</span>' : '';
-  const head = `<div class="news-head">
-    <span>Správy + sentiment (Alpha Vantage) — načítané ${fetched}${staleNote}</span>
-    <button class="btn" style="padding:1px 8px;font-size:11px;" onclick="refreshTickerNews('${escHtml(data.ticker)}', event)">⟳ Obnoviť</button>
-  </div>`;
-  if (!items.length) {
-    const err = data.error ? ` (${escHtml(data.error)})` : '';
-    return head + `<div class="news-empty">Žiadne relevantné správy${err}.</div>`;
-  }
-  const rows = items.map(a => {
-    const t = a.time_published ? new Date(a.time_published).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
-    const rel = Number.isFinite(a.relevance) ? `<span class="news-rel" title="Relevancia článku pre ticker">rel ${(a.relevance*100).toFixed(0)} %</span>` : '';
-    // Duplicitné pokrytie tej istej udalosti (viac vydavateľov, podobný titulok) —
-    // len primárny článok klastra ide do priemerného sentimentu, ostatné sa
-    // označia, nech je jasné prečo počet "príbehov" v badge je nižší než počet riadkov.
-    const clusterSize = a.cluster_size || 1;
-    const clusterTag = (a.cluster_primary !== false && clusterSize > 1)
-      ? `<span class="news-cluster-tag" title="Ďalších ${clusterSize - 1} zdrojov o tej istej udalosti nepočítame zvlášť do priemeru">+${clusterSize - 1} zdrojov</span>`
-      : (a.cluster_primary === false ? `<span class="news-cluster-dup" title="Rovnaká udalosť ako vyššie — nepočíta sa zvlášť do priemerného sentimentu">duplicita</span>` : '');
-    return `<div class="news-item${a.cluster_primary === false ? ' news-item-dup' : ''}" onclick="event.stopPropagation()">
-      ${newsSentimentBadge(a.sentiment_label, a.sentiment_score)}
-      <a href="${escHtml(a.url || '#')}" target="_blank" rel="noopener" class="news-title">${escHtml(a.title || '(bez titulku)')}</a>
-      <span class="news-meta">${escHtml(a.source || '')} · ${t} ${rel} ${clusterTag}</span>
-    </div>`;
-  }).join('');
-  return head + `<div class="news-list">${rows}</div>`;
 }
 
 async function runNasdaqScanner() {

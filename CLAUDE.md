@@ -257,7 +257,7 @@ Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
 - **Portfolio holding (●)**: `GET /api/portfolio/holdings` → `_get_portfolio_holdings()` aggregates both accounts' positions from portfolio disk cache into `{symbol: {pnl, pnl_pct, amount}}`. Green/red dot + P/L% → DCA vs fresh entry decision. No extra eToro calls.
-- **Aggregated sentiment + earnings warning** — see News sentiment section.
+- **Earnings warning + other lightweight badges** — Scanner intentionally does **not** fetch Alpha Vantage news sentiment; see News sentiment section.
 
 - **`/api/scanner/notes`** — GET/POST global notes panel content → `/data/scanner_notes.json`. Single HTML blob, not per-ticker.
 - **Export/kopírovanie** block is above KPI tiles (collapsed by default).
@@ -266,15 +266,17 @@ Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureSc
 
 ## News sentiment — key architecture
 
-**Role:** Reality check k číslam — articles + ticker-specific sentiment v DIP universe scanneri (📰 button per row, lazy load).
+**Role:** Reality check k číslam pre jeden konkrétny ticker počas detailnej analýzy. News sentiment sa otvára ručne v Analytike cez tlačidlo `📰 Správy`; Scanner už nezobrazuje news buttony a neťahá sentiment pre riadky, aby sa šetril Alpha Vantage free limit.
 
 - **Source:** Alpha Vantage `NEWS_SENTIMENT`. `ALPHA_VANTAGE_API_KEY` from env only (free tier 25 req/day).
 - **Backend:** `_news_parse_feed(ticker, data)` — shared parsing (relevance filter ≥ 0.15, ticker-specific sentiment not overall, sort by time+relevance, max 10). Called by both `_news_fetch_av` (server fetch) and `POST /api/news/{ticker}/ingest` (browser-fetched raw JSON).
 - **Cache:** `/data/news_cache/{TICKER}.json`, 12h TTL for data, **1h negative cache** for errors (rate-limit) — repeated clicks must not burn requests. Stale fallback: on fetch error return old cache with `stale: true`; never overwrite a cache that has items with an error payload.
 - **API key scrubbing:** AV injects the API key literally into rate-limit error messages. `_news_scrub_error()` masks it before anything reaches UI or disk cache. Don't remove.
+- **Frontend:** `pc_openNewsModal()` / `pc_renderNewsModalBlock()` in `frontend/js/predictive.js`; popup HTML lives in `frontend/trading_dashboard.html`. The popup is closable and lazy-loads only the active Analytika ticker.
 - **Browser-direct fallback (Render shared-IP workaround):** AV rate limit is per-IP; Render free tier shares outbound IP across apps, so the server-side limit is often exhausted by strangers. When `/api/news/{ticker}` returns an error with no items, frontend gets the key via `GET /api/news/clientkey` (basic-auth protected), fetches AV directly from the client IP (AV supports CORS), and POSTs the raw JSON to `/api/news/{ticker}/ingest`, which parses + caches it. The key is intentionally exposed to the (single, authenticated) user's browser — accepted trade-off.
 - **Route order matters:** `/api/news/clientkey` and `/api/news/summary` are defined before `/api/news/{ticker}`, otherwise FastAPI matches them as tickers.
-- **Aggregated sentiment badge** (`GET /api/news/summary?tickers=...`): relevance-weighted avg of `sentiment_score` computed purely from disk cache — never triggers AV requests. Rendered in scanner rows via `applyScannerBadges()`; updated client-side after each 📰 fetch (`newsSummaryFromItems`).
+- **Shared JS helpers:** `newsSummaryFromItems`, `fetchTickerNewsDirect`, and `newsSentimentBadge` currently live in `frontend/js/scanner.js` only because classic scripts share globals and `scanner.js` loads before `predictive.js`. If touched again, move them to `core.js`.
+- **Scanner rule:** Do not re-add per-row news buttons or `GET /api/news/summary` prefetch unless the user explicitly accepts the quota cost.
 - **Earnings calendar** (`GET /api/earnings`): primary source is Finnhub `/calendar/earnings` (`FINNHUB_API_KEY` env, 60 req/min free tier, 90-day window, JSON); fallback chain: AV `EARNINGS_CALENDAR` CSV → browser-direct CSV ingest via `POST /api/earnings/ingest`. 24h cache in `_earnings_calendar.json`, 1h negative cache. Earnings UI is fail-soft and always visible: Scanner shows grey `E: date`, orange `⚠ E: date` when earnings ≤ 7 days (`EARNINGS_WARN_DAYS`), or `E: n/a`; Predictive shows a persistent card with “Zatiaľ nedostupné” if no date exists. `loadEarningsCalendar()` must set `_earningsDates = {}` on empty/error responses so placeholders render. AV returns JSON instead of CSV on errors — `_earnings_parse_csv` detects leading `{`.
 - **ApeWisdom Reddit mentions** (`GET /api/reddit/mentions`): server-side fetch (httpx + browser User-Agent — apewisdom.io has no CORS headers, browser-direct fails), top 5 pages, 6h cache in `_apewisdom.json`, async lock prevents concurrent refetch. Badge `r/{mentions}↑↓` colored by 24h rank move — **yellow up / blue down on purpose**: it measures attention, not bull/bear, must not look like P/L colors.
 

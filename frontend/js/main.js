@@ -186,9 +186,7 @@ document.addEventListener('mousedown', e => {
 
 // ── View switcher ────────────────────────────────────────────────────────────
 
-// ── Earnings warning + agregovaný sentiment v scanner riadkoch ──────────────
-
-// ── News sentiment (Alpha Vantage, lazy + cache-first) ──────────────────────
+// ── Earnings warnings + Analytika news sentiment popup ──────────────────────
 
 // enter key handled in onTickerKeydown
 

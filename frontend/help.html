@@ -445,15 +445,15 @@
   <p>Massive údaje sú interpretačné a zatiaľ nemenia C1–C4, DIP skóre, ML ani Buy/Watch/Counter.</p>
   <p>Pri tickeroch sa zobrazujú aj workflow značky: <strong>PORT ±%</strong> znamená, že titul už je v niektorom eToro portfóliu; <strong>+ WL</strong> pridá ticker do serverového watchlistu. Verdikt si pri otvorení z Grafov, Scannera alebo Analytiky preberá aktuálny ticker.</p>
 
-  <h3>Správy a sentiment (📰)</h3>
-  <p>Každý riadok DIP universe scannera má tlačidlo <strong>📰</strong> — rozbalí pod riadkom zoznam aktuálnych článkov k tickeru so sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
+  <h3>Správy a sentiment (📰 v Analytike)</h3>
+  <p>Správy sa neťahajú priamo v Scanneri, aby sa šetril limit free API. V záložke <strong>Analytika</strong> je tlačidlo <strong>📰 Správy</strong> pri horných ovládačoch. Po kliknutí sa pre aktuálny ticker otvorí zavriteľné popup okno so zoznamom článkov a sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
   <ul>
     <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
     <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
     <li><strong>Klastrovanie duplicít</strong>: viac vydavateľov často prevezme tú istú správu s takmer rovnakým titulkom. Do priemerného sentimentu sa počíta len jeden reprezentant na udalosť; zoznam článkov sa nekráti, duplicity sú len označené ako „duplicita" / „+N zdrojov".</li>
-    <li><strong>Cache</strong>: výsledky sa držia 12 h na disku — opakované otvorenie neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
+    <li><strong>Cache</strong>: výsledky sa držia 12 h na disku — opakované otvorenie toho istého tickera neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
     <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
-    <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať.</li>
+    <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať, až keď ich reálne analyzuješ.</li>
   </ul>
 
   <h3>Reddit zmienky (r/N)</h3>
@@ -477,12 +477,11 @@
   <h3>Portfólio príznak (●)</h3>
   <p>Ak ticker už <strong>držíš v eToro portfóliu</strong> (ktorýkoľvek z dvoch účtov), zobrazí sa pri ňom farebná bodka s P/L: zelená <code>●+5.2%</code> = zisk, červená <code>●−3.1%</code> = strata, sivá = P/L sa nepodarilo vypočítať. Pomáha okamžite rozhodnúť, či ide o DCA (dokúpiť) alebo fresh entry. Dáta z portfolio cache, žiadne extra eToro volania.</p>
 
-  <h3>Earnings termín a sentiment badge</h3>
-  <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú dva indikátory:</p>
+  <h3>Earnings termín</h3>
+  <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú earnings indikátory:</p>
   <ul>
     <li><strong>E: dátum</strong> (sivý) — najbližší známy earnings termín. Ak ešte nie je zverejnený alebo zdroj nemá údaje, zobrazí sa <strong>E: n/a</strong>.</li>
     <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub s fallbackom Alpha Vantage EARNINGS_CALENDAR; cache 24 h. Čísla pred reportom nemusia platiť.</li>
-    <li><strong>Sentiment badge</strong> (zelený/červený/sivý, napr. <code>+0.21</code>) — relevanciou vážený priemer sentimentu článkov z news cache. Zobrazuje sa len pre tickery, ktoré už majú stiahnuté správy (cez 📰) — žiadne API requesty navyše; cache sa časom zaplní sama.</li>
   </ul>
   <p>Karta <strong>Najbližší Earnings</strong> v Analytike zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
 
@@ -657,7 +656,7 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>DASH_USER</code> / <code>DASH_PASS</code></td><td>Basic auth (povinné v produkcii).</td></tr>
     <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
-    <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v scanneri (free tier: 25 req/deň).</td></tr>
+    <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie).</td></tr>
     <tr><td><code>FINNHUB_API_KEY</code></td><td>Earnings, insider, EPS, analytický konsenzus a mapa ticker→sektor (profile2) pre sektorovú relatívnu silu.</td></tr>
     <tr><td><code>MASSIVE_API_KEY</code></td><td>End-of-day trhový kontext Nasdaq-100 a S&amp;P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako primárny zdroj denných/týždenných OHLCV (yfinance fallback).</td></tr>
     <tr><td><code>FRED_API_KEY</code></td><td>Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva vynechá.</td></tr>

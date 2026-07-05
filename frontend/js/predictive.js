@@ -1912,6 +1912,108 @@ async function pc_loadInsights(ticker) {
   } catch (e) { /* fail-soft */ }
 }
 
+const pc_newsCache = {};
+let pc_newsTicker = null;
+
+function pc_currentTicker() {
+  return (document.getElementById('tickerInput')?.value || '').trim().toUpperCase();
+}
+
+function pc_openNewsModal(refresh = false) {
+  const ticker = pc_currentTicker();
+  if (!ticker) {
+    const status = document.getElementById('statusMsg');
+    if (status) status.innerHTML = '<span style="color:var(--yellow)">Najprv vyber ticker.</span>';
+    return;
+  }
+  const overlay = document.getElementById('pcNewsOverlay');
+  const subtitle = document.getElementById('pcNewsSubtitle');
+  const body = document.getElementById('pcNewsBody');
+  if (!overlay || !body) return;
+  pc_newsTicker = ticker;
+  overlay.style.display = '';
+  if (subtitle) subtitle.textContent = `${ticker} · načítava sa až na vyžiadanie, cache šetrí free API limit`;
+  if (!refresh && pc_newsCache[ticker]) {
+    body.innerHTML = pc_renderNewsModalBlock(pc_newsCache[ticker]);
+    return;
+  }
+  body.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Načítavam správy a sentiment…</div>';
+  pc_fetchNews(ticker, refresh);
+}
+
+function pc_closeNewsModal(ev) {
+  if (ev && ev.target && ev.target.id !== 'pcNewsOverlay') return;
+  const overlay = document.getElementById('pcNewsOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function pc_fetchNews(ticker, refresh = false) {
+  const body = document.getElementById('pcNewsBody');
+  try {
+    const r = await fetch(`/api/news/${encodeURIComponent(ticker)}${refresh ? '?refresh=1' : ''}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let data = await r.json();
+    if (data.error && !(data.items || []).length && typeof fetchTickerNewsDirect === 'function') {
+      const direct = await fetchTickerNewsDirect(ticker);
+      if (direct) data = direct;
+    }
+    pc_newsCache[ticker] = data;
+    if (pc_newsTicker === ticker && body) body.innerHTML = pc_renderNewsModalBlock(data);
+  } catch (e) {
+    if (pc_newsTicker === ticker && body) {
+      body.innerHTML = `<div class="news-empty">Chyba načítania správ: ${escHtml(e.message)}</div>`;
+    }
+  }
+}
+
+function pc_refreshNewsModal(ev) {
+  if (ev) ev.stopPropagation();
+  const ticker = pc_newsTicker || pc_currentTicker();
+  if (!ticker) return;
+  delete pc_newsCache[ticker];
+  const body = document.getElementById('pcNewsBody');
+  if (body) body.innerHTML = '<div class="news-loading"><span class="cl-spinner"></span>Obnovujem správy…</div>';
+  pc_fetchNews(ticker, true);
+}
+
+function pc_renderNewsModalBlock(data) {
+  const items = data.items || [];
+  const fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '-';
+  const staleNote = data.stale ? ' <span class="news-stale">(staršia cache — refresh zlyhal)</span>' : '';
+  const summary = typeof newsSummaryFromItems === 'function' ? newsSummaryFromItems(items) : null;
+  const summaryHtml = summary
+    ? `<div class="pc-news-summary">
+        <span class="news-badge ${summary.avg >= 0.15 ? 'bull' : summary.avg <= -0.15 ? 'bear' : 'neutral'}">${summary.avg >= 0 ? '+' : ''}${summary.avg.toFixed(2)}</span>
+        <span>${summary.n} príbehov${summary.nArticles && summary.nArticles !== summary.n ? ` · ${summary.nArticles} článkov vrátane duplicít` : ''}</span>
+      </div>`
+    : '<div class="pc-news-summary muted">Bez vypočítateľného sentimentu.</div>';
+  const head = `<div class="news-head">
+    <span>Alpha Vantage NEWS_SENTIMENT — načítané ${fetched}${staleNote}</span>
+    <button class="btn" style="padding:1px 8px;font-size:11px;" onclick="pc_refreshNewsModal(event)">⟳ Obnoviť</button>
+  </div>${summaryHtml}`;
+  if (!items.length) {
+    const err = data.error ? ` (${escHtml(data.error)})` : '';
+    return head + `<div class="news-empty">Žiadne relevantné správy${err}.</div>`;
+  }
+  const rows = items.map(a => {
+    const t = a.time_published ? new Date(a.time_published).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
+    const rel = Number.isFinite(a.relevance) ? `<span class="news-rel" title="Relevancia článku pre ticker">rel ${(a.relevance*100).toFixed(0)} %</span>` : '';
+    const clusterSize = a.cluster_size || 1;
+    const clusterTag = (a.cluster_primary !== false && clusterSize > 1)
+      ? `<span class="news-cluster-tag" title="Ďalších ${clusterSize - 1} zdrojov o tej istej udalosti nepočítame zvlášť do priemeru">+${clusterSize - 1} zdrojov</span>`
+      : (a.cluster_primary === false ? `<span class="news-cluster-dup" title="Rovnaká udalosť ako vyššie — nepočíta sa zvlášť do priemerného sentimentu">duplicita</span>` : '');
+    const badge = typeof newsSentimentBadge === 'function'
+      ? newsSentimentBadge(a.sentiment_label, a.sentiment_score)
+      : `<span class="news-badge neutral">${escHtml(a.sentiment_label || 'Neutral')}</span>`;
+    return `<div class="news-item${a.cluster_primary === false ? ' news-item-dup' : ''}">
+      ${badge}
+      <a href="${escHtml(a.url || '#')}" target="_blank" rel="noopener" class="news-title">${escHtml(a.title || '(bez titulku)')}</a>
+      <span class="news-meta">${escHtml(a.source || '')} · ${t} ${rel} ${clusterTag}</span>
+    </div>`;
+  }).join('');
+  return head + `<div class="news-list">${rows}</div>`;
+}
+
 // Predictive fallback: keď /api/chart nedodá earnings dátum (Finnhub/AV na serveri
 // zlyhali), dotiahni kalendár vrátane browser-direct AV cesty a doplň kartu.
 async function pc_ensureEarningsDate(ticker) {
