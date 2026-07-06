@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260706-vivid1">
+<link rel="stylesheet" href="/dashboard.css?v=20260706-basic1">
 </head>
 <body>
 
@@ -41,6 +41,7 @@
   <button id="settings-btn" onclick="openSettingsModal()" title="Nastavenia prahov (DCA, Pozornosť, earnings)" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">⚙</button>
   <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>
   <a href="/help" target="_blank" title="Manuál k dashboardu" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">?</a>
+  <button id="ui-mode-btn" onclick="toggleUiMode()" title="Basic schová diagnostický šum, Advanced zobrazí všetky analytické vrstvy" class="btn mini">Advanced</button>
 
   <div class="sep"></div>
   <div class="lbl">STĹPCE
@@ -49,19 +50,12 @@
       <option value="3">3</option><option value="4">4</option>
     </select>
   </div>
-  <div class="sep"></div>
-  <div class="lbl">AUTO
-    <select class="sel" id="auto-sel" onchange="setAutoRefresh(this.value)" style="min-width:70px;">
-      <option value="0">OFF</option><option value="60">1 min</option>
-      <option value="300">5 min</option><option value="900">15 min</option>
-    </select>
-  </div>
   <div id="header-equities" aria-label="Live equity eToro uctov">
     <div class="header-equity acct1" onclick="switchAccount('1')" style="cursor:pointer;" title="Prepnúť na účet 1"><span class="header-equity-label" id="header-equity-label-1">Ucet 1</span><strong id="header-equity-1">--</strong></div>
     <div class="header-equity acct2" onclick="switchAccount('2')" style="cursor:pointer;" title="Prepnúť na účet 2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
   </div>
   <div id="ws-status" title="eToro WebSocket — live ceny" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);"><span id="ws-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block;"></span><span id="ws-status-txt">WS</span></div>
-  <span id="mem-profile-chip" style="display:none;font-size:9px;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;cursor:help;"></span>
+  <span id="mem-profile-chip" class="advanced-only" style="display:none;font-size:9px;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;cursor:help;"></span>
   <div id="hdr-status">—</div>
 </div>
 
@@ -486,15 +480,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260706-vivid1"></script>
-  <script src="/js/live.js?v=20260706-vivid1"></script>
-  <script src="/js/portfolio.js?v=20260706-vivid1"></script>
-  <script src="/js/watchlist.js?v=20260706-vivid1"></script>
-  <script src="/js/scanner.js?v=20260706-vivid1"></script>
-  <script src="/js/chart_patterns.js?v=20260706-vivid1"></script>
-  <script src="/js/predictive.js?v=20260706-vivid1"></script>
-  <script src="/js/verdict.js?v=20260706-vivid1"></script>
-  <script src="/js/charts.js?v=20260706-vivid1"></script>
-  <script src="/js/main.js?v=20260706-vivid1"></script>
+  <script src="/js/core.js?v=20260706-basic1"></script>
+  <script src="/js/live.js?v=20260706-basic1"></script>
+  <script src="/js/portfolio.js?v=20260706-basic1"></script>
+  <script src="/js/watchlist.js?v=20260706-basic1"></script>
+  <script src="/js/scanner.js?v=20260706-basic1"></script>
+  <script src="/js/chart_patterns.js?v=20260706-basic1"></script>
+  <script src="/js/predictive.js?v=20260706-basic1"></script>
+  <script src="/js/verdict.js?v=20260706-basic1"></script>
+  <script src="/js/charts.js?v=20260706-basic1"></script>
+  <script src="/js/main.js?v=20260706-basic1"></script>
 </body>
 </html>

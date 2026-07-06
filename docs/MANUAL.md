@@ -49,8 +49,8 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 | **📋 Tickery** | Import tickerov zo schránky. Vložíš zoznam tickerov (ideálne každý na samostatnom riadku), dashboard zruší aktuálne grafové panely a otvorí ich ako denné 1d grafy. Limit je 20 tickerov, aby omylom nevznikol príliš ťažký layout. |
 | **Farebná obruba grafu** | Ak je ticker otvoreného grafu v niektorom eToro portfóliu, panel má jemnú zeleno-tyrkysovú obrubu. Nerozlišuje účet, iba fakt, že titul už držíš. |
 | **STĹPCE (1–4)** | Počet stĺpcov v mriežke grafov. |
-| **AUTO ON/OFF** | Automatické obnovovanie dát. |
 | **Ucet 1 / Ucet 2 equity** | Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab. |
+| **Basic / Advanced** | Basic schová diagnostický šum a pokročilé pomocné vrstvy; Advanced zobrazí všetko. Výpočty a dáta sú rovnaké v oboch módoch. |
 | **⚙** | Nastavenia prahov: DCA (strata %, min. DIP, max. váha), Pozornosť (denný pohyb %), earnings varovanie (dni). Uložené na serveri — platia pre DCA kartu, Investor Inbox aj filter Pozornosť naraz, bez redeployu. |
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
@@ -166,6 +166,8 @@ koncentrácia, diverzifikácia je menšia než vyzerá; zelená = záporná kore
 sa správajú takmer identicky. Tituly bez dostatočných dát v cache sa preskočia
 (pomôže otvorenie grafov / prefetch). Čisto interpretačná pomôcka — nevstupuje
 do žiadneho skóre ani DCA logiky.
+V **Basic** móde je karta úplne skrytá; zobrazí sa len v **Advanced**, pretože je
+to doplnková riziková diagnostika.
 
 ### Ovládanie grafov a markerov
 

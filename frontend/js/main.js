@@ -5,6 +5,7 @@
 // dashboard.js (pôvodný monolit týmto zaniká).
 
 window.toggleSidebar = toggleSidebar;
+window.toggleUiMode = toggleUiMode;
 
 // Prepíš loadPortData aby použil port-inner-{pid} aj pre 'main'
 // renderPortPanel už to robí správne
@@ -47,6 +48,7 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   // Aplikuj tému a tint podľa aktívneho účtu hneď pri štarte
   isLightMode = localStorage.getItem('td_theme') === 'light';
   applyTheme();
+  applyUiMode();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   if (requestedTab === 'risk') {
     switchMainTab('portfolio');

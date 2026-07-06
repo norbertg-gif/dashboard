@@ -286,6 +286,37 @@ function toggleTheme() {
   applyTheme();
 }
 
+// ── BASIC / ADVANCED UI MODE ────────────────────────────────────────────────
+// Basic je len vizuálny filter: výpočty a dáta ostávajú rovnaké, schová sa šum.
+const UI_MODE_KEY = 'td_ui_mode';
+
+function currentUiMode() {
+  return localStorage.getItem(UI_MODE_KEY) === 'basic' ? 'basic' : 'advanced';
+}
+
+function isAdvancedUiMode() {
+  return currentUiMode() !== 'basic';
+}
+
+function applyUiMode() {
+  const mode = currentUiMode();
+  document.body.dataset.uiMode = mode;
+  const btn = document.getElementById('ui-mode-btn');
+  if (btn) {
+    btn.textContent = mode === 'basic' ? 'Basic' : 'Advanced';
+    btn.classList.toggle('active', mode === 'advanced');
+    btn.title = mode === 'basic'
+      ? 'Basic: diagnostický šum je schovaný'
+      : 'Advanced: zobrazuje aj diagnostické vrstvy';
+  }
+}
+
+function toggleUiMode() {
+  localStorage.setItem(UI_MODE_KEY, currentUiMode() === 'basic' ? 'advanced' : 'basic');
+  applyUiMode();
+  if (portState?.main?.data && typeof renderPortPanel === 'function') renderPortPanel('main');
+}
+
 // ── ETORO TRADE LINK ─────────────────────────────────────────────────────────
 function etoroTradeUrl(sym) {
   return `https://www.etoro.com/markets/${(sym||'').toLowerCase()}`;

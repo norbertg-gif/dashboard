@@ -359,13 +359,17 @@ function exportHistoryCSV() {
 
 let _dcaCache = { account: null, data: null };
 const PORT_DCA_COLLAPSED_KEY = 'td_portfolio_dca_collapsed';
+let _portfolioDcaTouched = false;
 
 function isPortfolioDcaCollapsed() {
+  if (!_portfolioDcaTouched) return true;
   return localStorage.getItem(PORT_DCA_COLLAPSED_KEY) === '1';
 }
 
 function togglePortfolioDca() {
-  localStorage.setItem(PORT_DCA_COLLAPSED_KEY, isPortfolioDcaCollapsed() ? '0' : '1');
+  const collapsed = isPortfolioDcaCollapsed();
+  _portfolioDcaTouched = true;
+  localStorage.setItem(PORT_DCA_COLLAPSED_KEY, collapsed ? '0' : '1');
   if (_dcaCache.data) renderDcaCard(_dcaCache.data);
   if (typeof syncChartDockPosition === 'function') setTimeout(syncChartDockPosition, 0);
 }
@@ -496,6 +500,7 @@ function corrCardHead(data = null) {
 }
 
 async function loadCorrelationCard(force = false) {
+  if (typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) return;
   const wrap = document.getElementById('portfolio-corr');
   if (!wrap || isPortfolioCorrCollapsed()) return;
   if (!force && _corrCache.data && Date.now() - _corrCache.ts < CORR_CARD_TTL_MS) {
@@ -1570,9 +1575,13 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
-    html += `<div id="portfolio-corr">${corrCardHead(_corrCache.data)}</div>`;
+    if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
+      html += `<div id="portfolio-corr" class="advanced-only">${corrCardHead(_corrCache.data)}</div>`;
+    }
     setTimeout(() => loadDcaCandidates(), 0);
-    setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
+    if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
+      setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
+    }
   }
 
   // Tabuľka pozícií

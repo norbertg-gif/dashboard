@@ -272,6 +272,10 @@ body {
   transition: background 0.3s ease, color 0.3s ease;
 }
 
+body[data-ui-mode="basic"] .advanced-only {
+  display: none !important;
+}
+
 /* ── SPOLOČNÉ DIZAJNY OVLÁDACÍCH PRVKOV ── */
 .btn {
   font-family: var(--font-ui);
@@ -308,6 +312,11 @@ body {
   border-color: var(--down);
   color: var(--down);
   background: var(--down-soft);
+}
+#ui-mode-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 select.sel {

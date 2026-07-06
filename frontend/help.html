@@ -132,8 +132,8 @@
     <tr><td><strong>VYMAŽ</strong></td><td>Vyčistí aktuálne rozloženie panelov.</td></tr>
     <tr><td><strong>📉 Top pohyby</strong></td><td>Dynamický preset — otvorí grafy titulov s najväčším denným pohybom (len akcie/ETF z watchlistu + portfólia, crypto sa ignoruje). Počet = 2 riadky podľa STĹPCE (3 stĺpce → 6, 4 → 8). Default poklesy; checkbox <strong>Rast</strong> prepne na najväčšie rasty. Pri tituloch z portfólia sa denný % počíta z eToro live ceny oproti predchádzajúcemu close; pri ostatných tituloch fallback na OHLCV cache. Graf v hlavičke zobrazuje rovnaký denný pohyb, podľa ktorého bol ticker vybraný, a pri 1d grafe dorovná poslednú sviečku na použitú live cenu.</td></tr>
     <tr><td><strong>STĹPCE (1–4)</strong></td><td>Počet stĺpcov v mriežke grafov.</td></tr>
-    <tr><td><strong>AUTO ON/OFF</strong></td><td>Automatické obnovovanie dát.</td></tr>
     <tr><td><strong>Ucet 1 / Ucet 2 equity</strong></td><td>Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab.</td></tr>
+    <tr><td><strong>Basic / Advanced</strong></td><td>Basic schová diagnostický šum a pokročilé pomocné vrstvy; Advanced zobrazí všetko. Výpočty a dáta sú rovnaké v oboch módoch.</td></tr>
     <tr><td><strong>⚙</strong></td><td>Nastavenia prahov (DCA strata/DIP/váha, Pozornosť denný pohyb, earnings varovanie). Uložené na serveri — jedna hodnota pre DCA kartu, Investor Inbox aj Pozornosť; zmena nevyžaduje redeploy.</td></tr>
     <tr><td><strong>🌙</strong></td><td>Prepínač témy (tmavá/svetlá).</td></tr>
     <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania.</td></tr>
@@ -231,7 +231,7 @@
   <p>Zobrazuje uzavreté obchody z eToro, filtrovateľné <strong>dátumovým intervalom od–do</strong> (podľa dátumu uzatvorenia). KPI nad tabuľkou (počet, win rate, net P/L, fees) sa prepočítajú pre zvolený interval; ak je „od" väčšie ako „do", interval sa automaticky prehodí. Stĺpce možno radiť; P/L je realizovaný výsledok, nie aktuálny odhad. Dátum otvorenia a zatvorenia pomáha spätne porovnať obchod so signálmi a stavom trhu.</p>
 
   <h3>DCA kandidáti v Portfóliu</h3>
-  <p><strong>Korelačná mapa</strong> (zbaliteľná karta pod DCA) ukazuje, ktoré držané tituly sa hýbu spolu — korelácia denných výnosov za ~90 dní z lokálnej cache. Červená bunka = tituly padajú/rastú spolu (skrytá koncentrácia), zelená = záporná korelácia (diverzifikácia). „Silné prekryvy ≥ 0.80" vypichnú páry správajúce sa takmer identicky. Interpretačná pomôcka, nevstupuje do žiadneho skóre.</p>
+  <p><strong>Korelačná mapa</strong> (zbaliteľná karta pod DCA) ukazuje, ktoré držané tituly sa hýbu spolu — korelácia denných výnosov za ~90 dní z lokálnej cache. Červená bunka = tituly padajú/rastú spolu (skrytá koncentrácia), zelená = záporná korelácia (diverzifikácia). „Silné prekryvy ≥ 0.80" vypichnú páry správajúce sa takmer identicky. Interpretačná pomôcka, nevstupuje do žiadneho skóre. V Basic móde je úplne skrytá; zobrazí sa len v Advanced.</p>
   <ul>
     <li><strong>Risk briefing</strong> je krátky slovný záver nad tabuľkami: povie, či portfólio pôsobí rozložene alebo koncentrovane, a vypichne najväčší sektor, najväčšiu pozíciu a Top 5 váhu.</li>
     <li><strong>Top 5 koncentrácia</strong> ukazuje, koľko percent equity tvorí päť najväčších pozícií. Vysoké číslo znamená, že výsledok portfólia závisí od malého počtu titulov.</li>
