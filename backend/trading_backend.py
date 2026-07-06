@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 _executor = ThreadPoolExecutor(max_workers=2)
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Query, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
@@ -2004,7 +2005,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
                         current_rate = None
             except Exception:
                 current_rate = None
-        prev_close = _get_prev_close(sym) if sym and not sym.isdigit() else None
+        prev_close = _get_market_prev_close(sym, asset_type) if sym and not sym.isdigit() else None
         if prev_close and current_rate and units_val:
             daily_pnl = round((current_rate - prev_close) * float(units_val) * (1 if is_buy else -1), 2)
         else:
@@ -2447,7 +2448,7 @@ def get_movers(
         dc = None
         price_source = "ohlcv_cache"
         live_rate = live_rates.get(sym)
-        prev_close = _get_prev_close(sym) if live_rate else None
+        prev_close = _get_market_prev_close(sym, "Stock") if live_rate else None
         if live_rate and prev_close:
             dc = ((live_rate - prev_close) / prev_close * 100, live_rate)
             price_source = "etoro_live"
@@ -2999,6 +3000,88 @@ def _get_prev_close(sym: str) -> float | None:
         return float(closed[-1].get("close") or closed[-1].get("c") or 0) or None
     except Exception:
         return None
+
+
+MARKET_PREV_CLOSE_TTL = 6 * 3600
+
+
+def _market_prev_close_cache_key(sym: str) -> _Path:
+    safe = re.sub(r"[^A-Z0-9_.-]+", "_", str(sym or "").upper())
+    return CACHE_DIR / "market_close" / safe
+
+
+def _market_close_cutoff_allows_today(now_local: datetime | None = None) -> bool:
+    """Po lokalnom eToro cut-offe moze byt baseline dnesna market close."""
+    now_local = now_local or datetime.now(ZoneInfo("Europe/Bratislava"))
+    return now_local.hour >= 22
+
+
+def _select_market_prev_close(df: pd.DataFrame) -> tuple[float | None, str | None]:
+    if df is None or len(df) < 2 or "Close" not in df.columns:
+        return None, None
+    work = df.dropna(subset=["Close"]).copy()
+    if work.empty:
+        return None, None
+    now_local = datetime.now(ZoneInfo("Europe/Bratislava"))
+    local_today = now_local.date()
+    allow_today = _market_close_cutoff_allows_today(now_local)
+    selected = []
+    for idx, row in work.iterrows():
+        try:
+            day = pd.Timestamp(idx).date()
+        except Exception:
+            continue
+        if day < local_today or (allow_today and day == local_today):
+            selected.append((day, row))
+    if not selected:
+        return None, None
+    day, row = selected[-1]
+    close = _num_or_none(row.get("Close"))
+    if close is None or close <= 0:
+        return None, None
+    return float(close), day.isoformat()
+
+
+def _get_market_prev_close(sym: str, asset_type: str | None = None) -> float | None:
+    """Market previous close pre portfolio daily P/L.
+
+    Stock/ETF pouziva daily data z Massive/yfinance. Ostatne typy ostavaju na
+    povodnom eToro OHLCV cache fallbacku.
+    """
+    sym = str(sym or "").upper().strip()
+    if not sym:
+        return None
+    typ = str(asset_type or "").lower()
+    if typ not in ("stock", "etf"):
+        return _get_prev_close(sym)
+
+    cache_path = _market_prev_close_cache_key(sym)
+    try:
+        cached = cache_read(cache_path)
+        if cached and cache_age_seconds(cache_path) < MARKET_PREV_CLOSE_TTL:
+            close = _num_or_none(cached.get("close"))
+            if close and close > 0:
+                return float(close)
+    except Exception:
+        pass
+
+    try:
+        raw = _yf_download_cached(sym, "1mo", "1d", prefer_massive=True)
+        close, close_date = _select_market_prev_close(raw)
+        if close and close > 0:
+            (CACHE_DIR / "market_close").mkdir(exist_ok=True)
+            cache_write(cache_path, {
+                "symbol": sym,
+                "close": round(float(close), 8),
+                "date": close_date,
+                "source": "massive_or_yfinance",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return float(close)
+    except Exception as exc:
+        print(f"[market_close] {sym}: {type(exc).__name__}")
+
+    return _get_prev_close(sym)
 
 
 def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
