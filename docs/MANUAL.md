@@ -741,7 +741,9 @@ Karta **Firma & očakávania** v Analytike dopĺňa technický signál o
 stručný externý kontext:
 
 - **Analytici** — súčet odporúčaní Buy / Hold / Sell z najnovšieho obdobia;
-  priemerná cieľová cena je uvedená priamo za konsenzom v zátvorke.
+  priemerná cieľová cena je uvedená priamo za konsenzom v zátvorke. Cieľová
+  cena sa zobrazí, aj keď konsenzus Buy/Hold/Sell chýba (rovnaké ako v
+  Portfóliu — cieľ a odporúčania sú z API nezávislé polia).
 - **Short interest** — percento voľne obchodovaných akcií predaných nakrátko:
   pod 5 % nízky, 5–10 % zvýšený, od 10 % vysoký.
 - Existujúce riadky **Insideri 90 d** a **EPS doručenie** zostávajú súčasťou

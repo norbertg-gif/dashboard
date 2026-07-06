@@ -1396,10 +1396,11 @@ function toggleHA(id) {
   loadChart(id);
 }
 
-// Farby pre oba účty: [zelena_profit, cervena_loss, border_profit, border_loss]
+// Farby pre oba účty: sýte/žiarivé, zámerne odlišné od tlmených farieb sviečok
+// (candle up/down #26a69a/#ef5350), inak sa kolieska obchodov strácajú v grafe.
 const ACCT_COLORS = {
-  '1': { profit: '#00c99a', loss: '#ff4560', profitDim: '#00c99a55', lossDim: '#ff456055' },
-  '2': { profit: '#00d4d4', loss: '#ff8c00', profitDim: '#00d4d455', lossDim: '#ff8c0055' },
+  '1': { profit: '#00ffab', loss: '#ff2965', profitDim: '#00ffab55', lossDim: '#ff296555' },
+  '2': { profit: '#00e5ff', loss: '#ffaa00', profitDim: '#00e5ff55', lossDim: '#ffaa0055' },
 };
 
 function chartTimeToMs(t) {

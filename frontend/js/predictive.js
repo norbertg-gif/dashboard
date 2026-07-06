@@ -1941,18 +1941,23 @@ async function pc_loadInsights(ticker) {
     }
     const ac = d.analyst_consensus;
     const pt = d.price_target;
-    if (ac) {
-      const buy = Number(ac.strong_buy || 0) + Number(ac.buy || 0);
-      const hold = Number(ac.hold || 0);
-      const sell = Number(ac.sell || 0) + Number(ac.strong_sell || 0);
-      const targetRaw = pt?.mean;
-      const target = targetRaw == null || targetRaw === '' ? NaN : Number(targetRaw);
-      const targetText = Number.isFinite(target) && target > 0
+    const targetRaw = pt?.mean;
+    const target = targetRaw == null || targetRaw === '' ? NaN : Number(targetRaw);
+    const hasTarget = Number.isFinite(target) && target > 0;
+    const buy = Number(ac?.strong_buy || 0) + Number(ac?.buy || 0);
+    const hold = Number(ac?.hold || 0);
+    const sell = Number(ac?.sell || 0) + Number(ac?.strong_sell || 0);
+    const hasConsensus = !!ac && (buy || hold || sell);
+    if (hasConsensus || hasTarget) {
+      const targetText = hasTarget
         ? ` <span style="color:var(--muted)">(${fmtPrice(target)} cieľ)</span>`
         : '';
-      rows.push(`<div class="pred-row" title="Najnovší dostupný analytický konsenzus${ac.period ? ` za ${escHtml(ac.period)}` : ''}. Kontext, nie súčasť C1–C4 ani ML.">
+      const consensusText = hasConsensus
+        ? `<span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span>`
+        : `<span style="color:var(--muted)">konsenzus n/a</span>`;
+      rows.push(`<div class="pred-row" title="Najnovší dostupný analytický konsenzus${ac?.period ? ` za ${escHtml(ac.period)}` : ''}. Kontext, nie súčasť C1–C4 ani ML.">
         <span class="key">Analytici</span>
-        <span class="val"><span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span>${targetText}</span></div>`);
+        <span class="val">${consensusText}${targetText}</span></div>`);
     }
     const si = d.short_interest;
     if (si && Number.isFinite(Number(si.percent_float))) {
