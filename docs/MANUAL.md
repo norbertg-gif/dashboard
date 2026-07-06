@@ -257,6 +257,10 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   voliteľne backtest overlay (reálne vs. predikované sviečky). Má **1/2 výšky
   hlavného grafu** (pomer 2:1) a dá sa zbaliť, keď chceš viac priestoru pre
   hlavný graf.
+  Tlačidlo **„Skryť omyly"** vyfiltruje z overlay predikčné sviečky, kde model
+  netrafil smer (červené bodky) — ostanú len trafené a zatiaľ nevyhodnotené.
+  Čisto vizuálny filter na čitateľnosť; úspešnosť v badge aj v Backtesting
+  karte sa vždy počíta zo všetkých predikcií. Stav prežíva reload.
   Predikčná sviečka je vždy binárna — buď očakáva pohyb hore, alebo dole.
   Ak je dostupná dostatočná história, používa analog model: nájde minulé setupy
   podobné aktuálnemu grafu a pozrie, kam išla nasledujúca sviečka. Ak história
