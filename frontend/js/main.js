@@ -52,6 +52,8 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   if (requestedTab === 'risk') {
     switchMainTab('portfolio');
+  } else if (requestedTab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
+    switchMainTab('portfolio');
   } else if (['charts','portfolio','history','predictive','scanner','verdict'].includes(requestedTab)) {
     switchMainTab(requestedTab);
   }

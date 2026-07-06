@@ -314,7 +314,11 @@ function applyUiMode() {
 function toggleUiMode() {
   localStorage.setItem(UI_MODE_KEY, currentUiMode() === 'basic' ? 'advanced' : 'basic');
   applyUiMode();
+  if (!isAdvancedUiMode() && document.getElementById('tab-history')?.classList.contains('active') && typeof switchMainTab === 'function') {
+    switchMainTab('portfolio');
+  }
   if (portState?.main?.data && typeof renderPortPanel === 'function') renderPortPanel('main');
+  if (typeof initPredictiveModelChartToggle === 'function') initPredictiveModelChartToggle();
 }
 
 // ── ETORO TRADE LINK ─────────────────────────────────────────────────────────

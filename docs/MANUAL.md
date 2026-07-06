@@ -169,6 +169,20 @@ do žiadneho skóre ani DCA logiky.
 V **Basic** móde je karta úplne skrytá; zobrazí sa len v **Advanced**, pretože je
 to doplnková riziková diagnostika.
 
+### Basic vs Advanced
+
+**Basic** je režim na bežné používanie: necháva rozhodovacie a pracovné prvky,
+ale schová pokročilú diagnostiku. V Scanneri skracuje trhový kontext na stručný
+stav trhu, skryje importné diagnostiky, raw počty a textový export. Radar
+watchlist/eToro ukazuje menej kariet pred rozbalením. V Analytike schová
+90D+ validačné detaily, analytiku signálov, backtesting, hit-rate, váhy
+indikátorov, prognózu modelu, vstupnú zónu a detailné chart-pattern filtre.
+V pravom paneli ostávajú najbližšie earnings, firma & očakávania a relatívna
+sila. Záložka História je v Basic skrytá.
+
+**Advanced** zobrazuje všetky diagnostické vrstvy. Režim nemení výpočty,
+scoring, portfólio účtovníctvo ani cache; mení iba viditeľnosť UI.
+
 ### Ovládanie grafov a markerov
 
 - V záložke **Grafy** aj **Analytika** používa crosshair režim
@@ -836,11 +850,6 @@ tickerov — jeden zdieľaný blok textu pre celý scanner).
 - Tlačidlo **Verdikt** v riadku kandidáta otvorí zjednodušené investičné
   vyhodnotenie. Klik na zvyšok riadku naďalej otvorí plný detail v Analytike.
 - Rovnaké tlačidlo je aj v hornej rozhodovacej lište Analytiky.
-
-### Export / kopírovanie
-
-Nad tabuľkou je zbalený blok **Export / kopírovanie** — `Ticker\tTech\t…`
-formát pripravený na vloženie do Excelu / Google Sheets.
 
 ### Watch vs. Buy
 

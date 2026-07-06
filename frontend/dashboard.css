@@ -275,6 +275,9 @@ body {
 body[data-ui-mode="basic"] .advanced-only {
   display: none !important;
 }
+body:not([data-ui-mode="basic"]) .basic-only {
+  display: none !important;
+}
 
 /* ── SPOLOČNÉ DIZAJNY OVLÁDACÍCH PRVKOV ── */
 .btn {
@@ -2467,8 +2470,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   flex-direction: column;
   gap: 8px;
 }
-#predictiveTab .scanner-copy-box,
-#main-scanner .scanner-copy-box {
+#predictiveTab .scanner-copy-box {
   width: 100%;
   min-height: 125px;
   resize: vertical;
@@ -3028,29 +3030,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--muted);
   border-color: var(--border);
   background: var(--bg-input);
-}
-.scanner-export {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  padding: 10px;
-}
-.scanner-export summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  margin-bottom: 8px;
-}
-#main-scanner .scanner-copy-box-wide {
-  height: 210px;
-  min-height: 180px;
-  max-height: 420px;
-  resize: vertical;
-  display: block;
-  box-sizing: border-box;
 }
 .scanner-label {
   display: inline-flex;

@@ -218,7 +218,8 @@ function applyPredictiveModelChartCollapsed(collapsed) {
 }
 
 function initPredictiveModelChartToggle() {
-  applyPredictiveModelChartCollapsed(localStorage.getItem(PC_MODEL_CHART_COLLAPSED_KEY) === '1');
+  const basic = typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode();
+  applyPredictiveModelChartCollapsed(basic || localStorage.getItem(PC_MODEL_CHART_COLLAPSED_KEY) === '1');
 }
 
 function togglePredictiveModelChart() {
@@ -1106,7 +1107,7 @@ function pc_renderDailyExtra(data) {
         </div>
       </div>
 
-      <div>
+      <div class="advanced-only">
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
                     letter-spacing:0.06em;margin-bottom:6px;">
           90D+ VALIDÁCIA
@@ -1115,7 +1116,7 @@ function pc_renderDailyExtra(data) {
         <div class="signal-outcome-note">Primárny horizont pre tvoje rozhodovanie. Kratšie 30D/60D ostávajú v dátach, ale UI ich netlačí dopredu.</div>
       </div>
 
-      <details class="signal-segments">
+      <details class="signal-segments advanced-only">
         <summary>
           <span>ANALYTIKA SIGNÁLOV</span>
           <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>

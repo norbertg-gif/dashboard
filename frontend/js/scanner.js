@@ -378,6 +378,7 @@ function opportunityReasons(row, pos, days) {
 }
 
 const OPP_DEFAULT_LIMIT = 6;
+const OPP_BASIC_LIMIT = 3;
 let _oppExpanded = false;
 let _oppLastRows = null;
 let _oppLastDays = null;
@@ -392,7 +393,8 @@ function renderOpportunities(rows, days) {
   const all = clean
     .map(r => ({...r, _score: scoreOpportunity(r), _pos: opportunityPositionInfo(r.ticker)}))
     .sort((a, b) => b._score - a._score || a.ticker.localeCompare(b.ticker));
-  const ranked = _oppExpanded ? all : all.slice(0, OPP_DEFAULT_LIMIT);
+  const defaultLimit = (typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) ? OPP_BASIC_LIMIT : OPP_DEFAULT_LIMIT;
+  const ranked = _oppExpanded ? all : all.slice(0, defaultLimit);
 
   if (!ranked.length) {
     el.className = 'opp-empty';
@@ -427,7 +429,7 @@ function renderOpportunities(rows, days) {
     </div>`;
   };
 
-  const hasMore = all.length > OPP_DEFAULT_LIMIT;
+  const hasMore = all.length > defaultLimit;
   const toggleBtn = hasMore
     ? `<button class="opp-toggle-btn" onclick="toggleOppExpanded()">${_oppExpanded ? '▲ Zobraziť menej' : `▼ Zobraziť všetky (${all.length})`}</button>`
     : '';
@@ -490,19 +492,14 @@ function scannerStatusLine(state, cache) {
   return 'Zatiaľ nie je spustený žiadny Nasdaq scan.';
 }
 
-const SCANNER_EXPORT_HEIGHT_KEY = 'td_scanner_export_height';
-
-function attachScannerExportResize() {
-  const box = document.querySelector('#main-scanner .scanner-copy-box-wide');
-  if (!box) return;
-  const saved = Number(localStorage.getItem(SCANNER_EXPORT_HEIGHT_KEY) || 0);
-  if (saved >= 160) box.style.height = `${saved}px`;
-  const save = () => {
-    const h = Math.round(box.getBoundingClientRect().height);
-    if (h >= 160) localStorage.setItem(SCANNER_EXPORT_HEIGHT_KEY, String(h));
-  };
-  box.addEventListener('mouseup', save);
-  box.addEventListener('keyup', save);
+function scannerBasicStatusLine(state, cache) {
+  if (state.running) return scannerStatusLine(state, cache);
+  if (cache && cache.generated_at) {
+    const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
+    const universe = cache.universe_label ? ` · ${escHtml(cache.universe_label)}` : '';
+    return `Posledný scan: ${dt}${universe}`;
+  }
+  return 'Zatiaľ nie je spustený žiadny scan.';
 }
 
 function fmtImportTime(iso) {
@@ -581,7 +578,7 @@ async function renderScannerView() {
             <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
           </div>
         </div>
-        <div class="scanner-meta-row">
+        <div class="scanner-meta-row advanced-only">
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
         </div>
@@ -675,7 +672,7 @@ function renderNasdaqScanner(payload) {
 
   if (!rows.length) {
     el.className = 'opp-empty';
-    el.innerHTML = `${status}<div class="scanner-hint">Klikni Scan pre importovaný DIP ranking. Bez importu sa použije Nasdaq-100 fallback.</div>`;
+    el.innerHTML = `<span class="advanced-only">${status}</span><span class="basic-only">${scannerBasicStatusLine(state, cache)}</span><div class="scanner-hint">Klikni Scan pre importovaný DIP ranking. Bez importu sa použije Nasdaq-100 fallback.</div>`;
     return;
   }
 
@@ -683,23 +680,6 @@ function renderNasdaqScanner(payload) {
     Number(b.dip_total ?? -1) - Number(a.dip_total ?? -1) ||
     Number(b.setup_score || 0) - Number(a.setup_score || 0)
   );
-  const copyText = ranked.map(r => {
-    const sig = r.recent_signal || {};
-    const score = Number(r.setup_score || 0);
-    const grade = r.setup_grade || (score >= 78 ? 'A' : score >= 62 ? 'B' : score >= 45 ? 'Watch' : 'Risky');
-    const signal = sig.date ? `${sig.date} ${sig.score || '-'}/4` : '-';
-    const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
-    const dip = Number.isFinite(Number(r.dip_total)) ? r.dip_total : '-';
-    const rank = r.dip_rank ?? '-';
-    const label = r.dip_label || 'TECH ONLY';
-    const market = r.market_day || {};
-    const marketText = Number.isFinite(Number(market.change_pct))
-      ? `${Number(market.change_pct) >= 0 ? '+' : ''}${Number(market.change_pct).toFixed(2)}%`
-      : '-';
-    const reason = (r.positive_factors || []).find(f => !/signal \d\/4/.test(f)) || (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
-    return `${r.ticker}\t${score}\t${dip}\t${rank}\t${label}\t${grade}\t${signal}\t${price}\t${marketText}\t${reason}`;
-  }).join('\n');
-
   const kpis = {
     total: ranked.length,
     crossover: Number(cache.crossover_matches || 0),
@@ -726,20 +706,15 @@ function renderNasdaqScanner(payload) {
 
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
-    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}${status}
-      <span class="scanner-compact-kpis">Signály ${kpis.total} · Crossover ${kpis.crossover} · Strong ${kpis.strong} · Tech only ${kpis.techOnly}</span>
+    <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}<span class="advanced-only">${status}</span><span class="basic-only">${scannerBasicStatusLine(state, cache)}</span>
+      <span class="scanner-compact-kpis advanced-only">Signály ${kpis.total} · Crossover ${kpis.crossover} · Strong ${kpis.strong} · Tech only ${kpis.techOnly}</span>
     </div>
     ${errorDetails}
-    <details class="scanner-export">
-      <summary>Export / kopírovanie</summary>
-      <textarea class="scanner-copy-box scanner-copy-box-wide" readonly spellcheck="false">Ticker\tTech\tDIP\tRank\tCrossover\tGrade\tSignal\tLast\tMarket\tReason
-${escHtml(copyText)}</textarea>
-    </details>
     <div class="scanner-main-row">
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th>FA</th><th>TA</th><th>Rank</th><th>Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
+          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th class="advanced-only">FA</th><th class="advanced-only">TA</th><th class="advanced-only">Rank</th><th class="advanced-only">Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -770,10 +745,10 @@ ${escHtml(copyText)}</textarea>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
-      <td class="r">${dip.fa ?? '-'}</td>
-      <td class="r">${dip.ta ?? '-'}</td>
-      <td class="r">${r.dip_rank ?? '-'}</td>
-      <td><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
+      <td class="r advanced-only">${dip.fa ?? '-'}</td>
+      <td class="r advanced-only">${dip.ta ?? '-'}</td>
+      <td class="r advanced-only">${r.dip_rank ?? '-'}</td>
+      <td class="advanced-only"><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
       <td>${escHtml(sig.date || '-')}</td>
       <td class="r">${price}</td>
       <td>${marketHtml}</td>
@@ -796,7 +771,6 @@ ${escHtml(copyText)}</textarea>
     </aside>
     </div>
   </div>`;
-  attachScannerExportResize();
   attachScannerNotesPanel();
   applyScannerBadges();
   resolveGfLinks();
@@ -816,7 +790,7 @@ function renderScannerErrorDetails(cache) {
   const sampleRows = samples.slice(0, 12)
     .map(item => `<li><b>${escHtml(item.ticker || '?')}</b> — ${escHtml(item.error || 'chyba')}</li>`)
     .join('');
-  return `<details class="scanner-error-details">
+  return `<details class="scanner-error-details advanced-only">
     <summary>Diagnostika chýb (${total})</summary>
     <div class="scanner-error-grid">
       <div><div class="scanner-error-title">Najčastejšie dôvody</div><ul>${countRows || '<li>Bez detailu</li>'}</ul></div>
@@ -924,7 +898,29 @@ function renderMarketContext() {
     const top = m.sectors[0], flop = m.sectors[m.sectors.length - 1];
     parts.push(`<span class="mc-chip mc-neutral" title="Sektorová rotácia (1M výkon SPDR ETF): najsilnejší ${top.name}, najslabší ${flop.name}">${top.etf} ${pct(top.perf_1m)} · ${flop.etf} ${pct(flop.perf_1m)}</span>`);
   }
-  el.innerHTML = `<span class="mc-label">TRH</span>${parts.join('')}`;
+  const regime = m.market_regime;
+  const qqqTrend = m.qqq?.trend;
+  const vixVal = Number(m.vix?.value);
+  const breadth = Number(m.breadth?.above_ema50_pct);
+  let basicLabel = regime?.label || 'Neutrálny';
+  let basicCls = 'mc-neutral';
+  if (regime?.quadrant === 'goldilocks' || (qqqTrend === 'up' && (!Number.isFinite(vixVal) || vixVal < 22))) {
+    basicLabel = 'Trh OK';
+    basicCls = 'mc-up';
+  } else if (regime?.quadrant === 'riskoff' || qqqTrend === 'down' || (Number.isFinite(vixVal) && vixVal >= 30) || (Number.isFinite(breadth) && breadth < 40)) {
+    basicLabel = 'Trh slabý';
+    basicCls = 'mc-down';
+  } else if (regime?.quadrant === 'overheat' || regime?.quadrant === 'lull') {
+    basicLabel = 'Trh opatrne';
+    basicCls = 'mc-side';
+  }
+  const basicTip = [
+    regime?.note,
+    qqqTrend ? `QQQ trend ${qqqTrend}` : '',
+    Number.isFinite(vixVal) ? `VIX ${vixVal}` : '',
+    Number.isFinite(breadth) ? `breadth ${breadth}%` : '',
+  ].filter(Boolean).join(' · ');
+  el.innerHTML = `<span class="mc-label">TRH</span><span class="mc-chip ${basicCls} basic-only" title="${escHtml(basicTip || 'Stručný trhový kontext')}">${basicLabel}</span><span class="advanced-only">${parts.join('')}</span>`;
 }
 
 async function loadRedditMentions(tickers) {
