@@ -48,6 +48,12 @@ python backend/trading_backend.py
 # Production fails-closed: requires DASH_USER + DASH_PASS when RENDER=1
 
 # Render redeploy: push to main, Render auto-deploys
+
+# ?v= cache-bust token: bumpne všetky tagy naraz (voliteľný vlastný token ako arg)
+scripts/bump_cache_token.sh [token]
+
+# Pre-commit hook (auto-bump tokenu pri zmene frontend JS/CSS) — aktivácia raz na klon:
+git config core.hooksPath .githooks
 ```
 
 No test suite, but there IS a smoke check: `python smoke_test.py` boots the app in-process and hits ~17 core endpoints (200 + response shape). Run it after backend changes — it catches "forgotten decorator" / "changed response shape" regressions in ~15 s. eToro-dependent endpoints are a tolerated tier (they need proxy credentials). For remote: `BASE_URL=https://... SMOKE_AUTH=user:pass python smoke_test.py`. Beyond that, verify by driving the UI.
@@ -65,7 +71,7 @@ No test suite, but there IS a smoke check: `python smoke_test.py` boots the app 
 
 These were already in the codebase and need to stay fixed:
 
-- **Bump `?v=` after every `frontend/js/*.js` or CSS change.** `trading_dashboard.html` loads every module with a cache-busting query param (one shared token, e.g. `?v=20260702-split8`) and the responses are `Cache-Control: immutable`. Forgetting to bump means browsers keep the old JS while serving new HTML — features silently missing. Bump ALL tags at once (one sed), never just the changed file.
+- **Bump `?v=` after every `frontend/js/*.js` or CSS change.** `trading_dashboard.html` loads every module with a cache-busting query param (one shared token, e.g. `?v=20260702-split8`) and the responses are `Cache-Control: immutable`. Forgetting to bump means browsers keep the old JS while serving new HTML — features silently missing. Bump ALL tags at once via `scripts/bump_cache_token.sh` (never just the changed file). The `.githooks/pre-commit` hook does this automatically when a commit touches frontend JS/CSS — but only on clones where `git config core.hooksPath .githooks` was run, so don't RELY on it; check the token before push. The lizard icon token is intentionally separate.
 - **New frontend module = 3 places.** A new file under `frontend/js/` must be added to `_JS_MODULES` whitelist in `trading_backend.py` AND as a `<script>` tag in `trading_dashboard.html` (before `main.js`). The smoke test fetches every script tag from the index, so a missing route fails fast.
 - **`main.js` is the only module with top-level exec code** (init IIFE, `window.*` exposures, document listeners, WS watchdog) and must stay the LAST script tag. All other modules contain only declarations — cross-file calls resolve at runtime through the shared global scope of classic scripts, so their relative order is irrelevant; a top-level statement referencing another module's `let/const` is the only ordering hazard (TDZ).
 - **`renderEtoroList` is defined twice in `core.js`** (pre-existing latent duplicate; the second definition wins, the first is dead code). Kept verbatim during the split on purpose — if you touch that area, delete the FIRST definition (the one without sort controls) and verify the eToro sidebar list still renders.

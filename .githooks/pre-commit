@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Auto-bump ?v= cache tokenu: keď commit mení frontend JS/CSS a token ostal
+# rovnaký ako v HEAD, bumpne ho a pridá HTML do commitu.
+# Aktivácia (raz na klon): git config core.hooksPath .githooks
+set -euo pipefail
+HTML=frontend/trading_dashboard.html
+
+staged=$(git diff --cached --name-only)
+echo "$staged" | grep -qE '^frontend/(js/.*\.js|dashboard\.css)$' || exit 0
+
+tok_re='s/.*dashboard\.css?v=\([A-Za-z0-9_-]*\).*/\1/p'
+# token zo STAGED verzie HTML (ak HTML nie je staged, zo working tree)
+if echo "$staged" | grep -q "^${HTML}$"; then
+  cur=$(git show ":${HTML}" | sed -n "$tok_re" | head -1)
+else
+  cur=$(sed -n "$tok_re" "$HTML" | head -1)
+fi
+head_tok=$(git show "HEAD:${HTML}" 2>/dev/null | sed -n "$tok_re" | head -1 || true)
+
+if [ -n "$cur" ] && [ "$cur" = "$head_tok" ]; then
+  scripts/bump_cache_token.sh >/dev/null
+  git add "$HTML"
+  new=$(sed -n "$tok_re" "$HTML" | head -1)
+  echo "[pre-commit] frontend JS/CSS zmenené -> cache token bumpnutý: ${cur} -> ${new}"
+fi
