@@ -69,6 +69,11 @@ async function getInstrumentId(sym) {
 let activeMainTab = 'charts';
 
 function switchMainTab(tab) {
+  // História je v Basic móde skrytá — presmeruj všetky vstupné cesty
+  // (URL param rieši init v main.js, toto kryje priame volania/popout linky)
+  if (tab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
+    tab = 'portfolio';
+  }
   if (tab !== 'rates') stopRatesAutoRefresh();
   const previousContextTicker = currentContextTicker();
   activeMainTab = tab;
@@ -329,6 +334,10 @@ function toggleUiMode() {
   }
   if (portState?.main?.data && typeof renderPortPanel === 'function') renderPortPanel('main');
   if (typeof initPredictiveModelChartToggle === 'function') initPredictiveModelChartToggle();
+  // Radar limit (3 karty v Basic) sa aplikuje pri renderi — po prepnutí módu re-renderuj z cache
+  if (typeof renderOpportunities === 'function' && typeof _oppLastRows !== 'undefined' && _oppLastRows !== null) {
+    renderOpportunities(_oppLastRows, _oppLastDays);
+  }
 }
 
 // ── ETORO TRADE LINK ─────────────────────────────────────────────────────────
