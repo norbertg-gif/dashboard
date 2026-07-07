@@ -1242,8 +1242,9 @@ function pc_renderSidebar(data) {
       ? `silná zhoda susedov (${an.up}:${an.down}) prebila drift`
       : `hlas slabý (${an.up}:${an.down}) — smer drží historický drift titulu (${an.up_rate}% týždňov hore)`;
     const decTip = 'Analógový model: nájde ' + an.neighbors + ' historicky najpodobnejších setupov (12 technických čŕt) a pozrie sa, kam trh šiel týždeň po nich. '
-      + 'Smer preberá ich hlasovanie len pri zhode ≥ 80/20 — inak platí dlhodobý drift titulu, ktorý je štatisticky spoľahlivejší. '
-      + 'Veľkosť pohybu (close) je vážený priemer výnosov susedov.';
+      + 'Smer preberá ich hlasovanie len pri zhode ≥ 80/20 — inak platí dlhodobý drift titulu. '
+      + 'Merané na reálnych dátach: smer týždennej sviečky NEMÁ v technických features hranu nad driftom (žiadny variant, gate ani režim). '
+      + 'Skutočná hodnota modelu je odhad VEĽKOSTI pohybu (vážený priemer výnosov susedov) a vysvetlenie setupu.';
     analogHtml = `<div class="pred-row"><span class="tt key" data-tip="${decTip}">Ako model rozhodol <span class="tt-icon">ⓘ</span></span>`
       + `<span class="val" style="font-size:10px;color:var(--muted);text-align:right">`
       + `<span style="color:${voteCol};font-weight:600">hlas ${(an.vote*100).toFixed(0)}%</span> · ${decTxt}</span></div>`;
@@ -1251,8 +1252,13 @@ function pc_renderSidebar(data) {
     analogHtml = `<div class="pred-row"><span class="key">Metóda</span><span class="val" style="color:var(--muted);font-size:10px">technický composite (málo histórie pre analóg)</span></div>`;
   }
 
+  const horizonNote = `<div style="font-size:10px;color:var(--muted);border-top:1px solid var(--border);margin-top:6px;padding-top:5px;line-height:1.45">`
+    + `Smer 1 týždňa je pri dlhodobom (12m+) horizonte šum — ber ho ako kontext. `
+    + `Model má merateľnú hodnotu v odhade rozsahu pohybu${bt && bt.avg_error_pct != null ? ` (avg chyba ${bt.avg_error_pct} %)` : ''}; `
+    + `pre vstupy sleduj C1–C4 signály a ich 90D+ validáciu.</div>`;
+
   document.getElementById('predInfo').innerHTML = `
-    <div class="pred-row"><span class="tt key" data-tip="Predikovaný smer nasledujúcej weekly sviečky. Bázou je dlhodobý drift titulu; analógový model (podobné historické setupy) ho prebije len pri silnej zhode susedov.">Smer <span class="tt-icon">ⓘ</span></span><span class="val">${dirHtml}</span></div>
+    <div class="pred-row"><span class="tt key" data-tip="Predikovaný smer nasledujúcej weekly sviečky. Bázou je dlhodobý drift titulu; analógový model ho prebije len pri silnej zhode susedov. Merané: smer nemá v technických features hranu nad driftom — kontext, nie signál.">Smer <span class="tt-icon">ⓘ</span></span><span class="val">${dirHtml}</span></div>
     ${analogHtml}
     ${regimeHtml}
     <div class="pred-row"><span class="key">Open</span><span class="val">${pc.open.toFixed(2)}</span></div>
@@ -1262,6 +1268,7 @@ function pc_renderSidebar(data) {
     <div class="pred-row"><span class="tt key" data-tip="Sila kombinovaného technického signálu. Rozsah -100% až +100%. Blízko nuly = model si nie je istý smerom.">Composite signal <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--pred)">${(p.composite*100).toFixed(1)}%</span></div>
     ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? CHART_COLORS.up : data.ml_bull_prob <= 45 ? CHART_COLORS.down : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
     ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Historická presnosť ML modelu na testovacej sade (30% dát). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
+    ${horizonNote}
   `;
 
   // Earnings card — keep it visible even when the provider has no date yet.
@@ -1319,11 +1326,24 @@ function pc_renderSidebar(data) {
   if (accBadge) {
     const accNum = Number(acc);
     const testNum = Number(accTest);
+    const baseNum = Number(bt.base_rate_up);
+    // Poctivé farbenie: zelená len keď model REÁLNE prekonáva base rate
+    // "vždy hore" (+2pp), nie pri prekročení absolútnej hranice. Merané:
+    // smer týždennej sviečky nemá v technických features hranu nad driftom.
     accBadge.classList.remove('bull', 'warn', 'bear');
-    accBadge.classList.add(Number.isFinite(accNum) && accNum >= 55 ? 'bull' : Number.isFinite(accNum) && accNum >= 50 ? 'warn' : 'bear');
-    accBadge.textContent = Number.isFinite(accNum)
-      ? `Úspešnosť ${accNum.toFixed(1)}%${Number.isFinite(testNum) ? ` · test ${testNum.toFixed(1)}%` : ''}`
-      : 'Úspešnosť —';
+    if (Number.isFinite(accNum) && Number.isFinite(baseNum)) {
+      const d = accNum - baseNum;
+      accBadge.classList.add(d >= 2 ? 'bull' : d >= -2 ? 'warn' : 'bear');
+      accBadge.textContent = `Smer ${accNum.toFixed(1)}% · drift ${baseNum.toFixed(1)}%`;
+      accBadge.title = `Úspešnosť smeru modelu ${accNum.toFixed(1)} % (test ${Number.isFinite(testNum) ? testNum.toFixed(1) : '—'} %) vs. base rate „vždy hore" ${baseNum.toFixed(1)} %. `
+        + `Smer týždennej sviečky nemá merateľnú hranu nad driftom trhu — hodnotou modelu je odhad ROZSAHU pohybu (avg chyba ${bt.avg_error_pct != null ? bt.avg_error_pct + ' %' : '—'}) a vysvetlenie setupu. `
+        + `Pri horizonte 12m+ je týždenný smer šum.`;
+    } else {
+      accBadge.classList.add(Number.isFinite(accNum) && accNum >= 55 ? 'bull' : Number.isFinite(accNum) && accNum >= 50 ? 'warn' : 'bear');
+      accBadge.textContent = Number.isFinite(accNum)
+        ? `Úspešnosť ${accNum.toFixed(1)}%${Number.isFinite(testNum) ? ` · test ${testNum.toFixed(1)}%` : ''}`
+        : 'Úspešnosť —';
+    }
   }
   const accDef  = data.accuracy_def;
   const accOpt  = data.accuracy_opt;
@@ -1341,11 +1361,16 @@ function pc_renderSidebar(data) {
       '<div class="stat-value">' + bt.test_total + '</div></div>'
     : '';
 
+  const baseHtml = bt.base_rate_up != null
+    ? '<div class="stat"><div class="stat-label tt" data-tip="Base rate „vždy hore“ — koľko % týždňov skončilo rastom. Poctivý benchmark: smer má zmysel len ak ho model prekonáva. Merané: v technických features taká hrana nie je, preto správnosť ~ base rate je očakávaný stav.">Base „hore“ <span class="tt-icon">ⓘ</span></div>' +
+      '<div class="stat-value" style="color:var(--muted)">' + bt.base_rate_up + '%</div></div>'
+    : '';
   document.getElementById('btInfo').innerHTML =
     '<div class="stat-grid">' +
-      '<div class="stat"><div class="stat-label tt" data-tip="Percentuálna správnosť predikcie smeru close voči predchádzajúcemu close. Nehodnotí farbu sviečky close vs open, aby gapy neskresľovali výsledok.">Celková správnosť <span class="tt-icon">ⓘ</span></div>' +
+      '<div class="stat"><div class="stat-label tt" data-tip="Percentuálna správnosť predikcie smeru close voči predchádzajúcemu close. Nehodnotí farbu sviečky close vs open, aby gapy neskresľovali výsledok. Porovnávaj s base rate vedľa.">Celková správnosť <span class="tt-icon">ⓘ</span></div>' +
         '<div class="stat-value ' + accColor + '">' + acc + '%</div></div>' +
-      '<div class="stat"><div class="stat-label tt" data-tip="Priemerná percentuálna odchýlka predikovanej close ceny od reálnej. Čím nižšie, tým presnejší model.">Priem. chyba <span class="tt-icon">ⓘ</span></div>' +
+      baseHtml +
+      '<div class="stat"><div class="stat-label tt" data-tip="Priemerná percentuálna odchýlka predikovanej close ceny od reálnej. Čím nižšie, tým presnejší model. TOTO je hlavná metrika modelu — rozsah, nie smer.">Priem. chyba <span class="tt-icon">ⓘ</span></div>' +
         '<div class="stat-value">' + bt.avg_error_pct + '%</div></div>' +
       testHtml +
       diffHtml +

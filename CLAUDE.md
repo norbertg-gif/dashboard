@@ -2,6 +2,8 @@
 
 Local trading dashboard for eToro account monitoring + technical analysis. Single-user, deployed on Render.com with a persistent `/data` disk. UI is Slovak, code/identifiers English.
 
+**User trading profile (premisa pre feature decisions):** obchody na 12+ mesiacov, pozície sa prioritne zatvárajú až po ročnom časovom teste (SR daňové oslobodenie), niektoré bežia 3+ roky. 90D validácia signálov je analytický checkpoint, nie obchodný horizont. Týždenný smer modelovej sviečky je pri tomto horizonte šum — UI ho má prezentovať ako kontext, nie ako signál.
+
 ## Stack
 
 - **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn

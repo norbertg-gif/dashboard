@@ -1074,11 +1074,18 @@ def run_backtest(df, weights: dict = None):
                     hits += 1
         ind_hit[k] = round(hits / count * 100, 1) if count else None
 
+    # Base rate "vždy hore" — poctivý benchmark pre direction_accuracy.
+    # Merané (2026-07): žiaden variant modelu base rate neprekonáva, smer je drift.
+    up_total = sum(1 for r in results if r["actual_dir"] == 1)
+    test_up = sum(1 for r in test_results if r["actual_dir"] == 1)
+
     return {
         "total_predictions":      total,
         "direction_accuracy":     round(correct / total * 100, 1),
         "test_accuracy":          round(test_correct / test_total * 100, 1) if test_total else None,
         "test_total":             test_total,
+        "base_rate_up":           round(up_total / total * 100, 1),
+        "test_base_rate_up":      round(test_up / test_total * 100, 1) if test_total else None,
         "avg_error_pct":          round(sum(r["error_pct"] for r in results) / total, 2),
         "indicator_hit_rate":     ind_hit,
         "detail":                 results,

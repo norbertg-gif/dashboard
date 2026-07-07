@@ -296,6 +296,17 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   silný dôkaz. Veľkosť pohybu (predikovaná close) sa vždy berie z vážených
   výnosov podobných setupov — tie sú na odhad rozsahu výrazne presnejšie
   než starý kompozit (priemerná chyba ceny ~4.5 % vs ~18.6 %).
+- **Čo od smeru čakať (a čo nie).** Rozsiahle meranie (3 kolá, ~6 000
+  predikcií na horizont, horizonty 1/4/12 týždňov, confidence gating aj
+  režimové podmieňovanie) ukázalo, že **smer sviečky sa z technických
+  čŕt predpovedať nedá lepšie než jednoduchým driftom trhu** — a keď model
+  povie „down", trafí menej než polovicu prípadov. Preto badge nad modelovým
+  chartom zobrazuje správnosť **vedľa base rate** („drift") a zelený je len
+  vtedy, keď ju model reálne prekonáva — čo je pri smere výnimka, nie cieľ.
+  Skutočná hodnota modelu je **odhad rozsahu pohybu** (priemerná chyba ceny)
+  a vysvetlenie setupu. Pri dlhodobom horizonte (12 mesiacov a viac, časový
+  test) je týždenný smer šum — rozhodnutia stavaj na C1–C4 signáloch, ich
+  90D+ validácii a týždennom trende.
 - **Volume Profile** (checkbox v *Indikátory — overlay*, skupina Objem) —
   horizontálny histogram pri pravom okraji ukazuje, **pri akých cenách** sa
   zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = **POC**
@@ -356,8 +367,9 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   Odlíši lídra od zaostávajúceho aj v rastúcom trhu. Interpretácia, neovplyvňuje
   C1–C4.
 - **Technická vstupná zóna** — len technický odhad vstupu.
-- **Backtesting** — celková správnosť, priemerná chyba, porovnanie vs. default
-  váhy.
+- **Backtesting** — celková správnosť, **base rate „hore"** (poctivý benchmark
+  smeru), priemerná chyba (hlavná metrika — rozsah, nie smer), porovnanie vs.
+  default váhy.
 - **Hit rate indikátorov / Váhy indikátorov** — výkonnosť a váhy jednotlivých
   indikátorov.
 

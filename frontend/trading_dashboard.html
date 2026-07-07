@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260707-150746">
+<link rel="stylesheet" href="/dashboard.css?v=20260707-153558">
 </head>
 <body>
 
@@ -230,7 +230,7 @@
         <span class="label">Modelový chart</span>
         <span class="badge badge-pred">+1 prognóza</span>
         <span class="badge badge-bt" id="btBadge" style="display:none;">backtest overlay</span>
-        <span class="badge pc-accuracy-badge" id="pcAccuracyBadge" title="Percentuálna úspešnosť smeru close voči predchádzajúcemu close">—</span>
+        <span class="badge pc-accuracy-badge" id="pcAccuracyBadge" title="Úspešnosť smeru modelu vs. base rate „vždy hore" (drift). Zelený len keď model drift reálne prekonáva — hodnotou modelu je odhad rozsahu pohybu, nie smer.">—</span>
         <button class="pc-inline-toggle" id="predictiveModelToggle" onclick="togglePredictiveModelChart()" title="Zbaliť alebo rozbaliť modelový chart">−</button>
       </div>
       <div class="chart-body"><div id="predChart"></div></div>
@@ -481,15 +481,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260707-150746"></script>
-  <script src="/js/live.js?v=20260707-150746"></script>
-  <script src="/js/portfolio.js?v=20260707-150746"></script>
-  <script src="/js/watchlist.js?v=20260707-150746"></script>
-  <script src="/js/scanner.js?v=20260707-150746"></script>
-  <script src="/js/chart_patterns.js?v=20260707-150746"></script>
-  <script src="/js/predictive.js?v=20260707-150746"></script>
-  <script src="/js/verdict.js?v=20260707-150746"></script>
-  <script src="/js/charts.js?v=20260707-150746"></script>
-  <script src="/js/main.js?v=20260707-150746"></script>
+  <script src="/js/core.js?v=20260707-153558"></script>
+  <script src="/js/live.js?v=20260707-153558"></script>
+  <script src="/js/portfolio.js?v=20260707-153558"></script>
+  <script src="/js/watchlist.js?v=20260707-153558"></script>
+  <script src="/js/scanner.js?v=20260707-153558"></script>
+  <script src="/js/chart_patterns.js?v=20260707-153558"></script>
+  <script src="/js/predictive.js?v=20260707-153558"></script>
+  <script src="/js/verdict.js?v=20260707-153558"></script>
+  <script src="/js/charts.js?v=20260707-153558"></script>
+  <script src="/js/main.js?v=20260707-153558"></script>
 </body>
 </html>
