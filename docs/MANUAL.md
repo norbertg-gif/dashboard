@@ -109,6 +109,10 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 - Každý panel má ticker, timeframe, refresh, Heikin-Ashi, eToro Trade odkaz,
   indikátory a správy. Stav panelov, timeframe a viditeľný rozsah sa ukladajú.
+- Tlačidlo **🔬** v hlavičke panelu pošle aktuálny ticker rovno do záložky
+  **Analytika** (rovnaké správanie ako klik na ticker v Scanneri).
+- Ak titul držíš, panel ukazuje badge `N× · $suma · ±P/L` — počet otvorených
+  obchodov, **celkovú investovanú sumu** a agregovaný otvorený zisk/stratu.
 - **EMA** ukazuje krátkodobý/strednodobý trend, **Ichimoku** trend a zóny,
   **RSI** prekúpenosť/prepredanosť, **ADX** silu trendu a **MACD** momentum.
 - **Volume Profile** ukazuje objem podľa ceny za práve viditeľný úsek:
@@ -779,6 +783,20 @@ pre akcie. Zobrazuje priemernú cieľovú cenu a pod ňou počty
 `Buy/Hold/Sell`. Zelená znamená prevahu Buy, červená prevahu Sell a žltá
 prevahu Hold alebo nerozhodný konsenzus. Údaje sa načítajú až po zapnutí
 stĺpca a rovnaký ticker sa sťahuje iba raz.
+
+### O firme
+
+Nad kartou Firma & očakávania je v Analytike karta **O firme** — stručný
+firemný profil: čím sa firma zaoberá (popis biznisu v angličtine), odvetvie,
+market cap, počet zamestnancov, rok vstupu na burzu, sídlo a odkaz na web.
+Dlhší popis je orezaný na pár riadkov; **viac ▾ / menej ▴** ho rozbalí.
+
+Zdroje sa skúšajú v poradí Massive (referenčné dáta tickera) → Yahoo
+(assetProfile) → Finnhub (profile2); prvý dostupný zdroj je základ a ďalšie
+len doplnia chýbajúce polia. Profil je prakticky statický, preto sa drží
+v 30-dňovej cache na disku. Ak žiadny zdroj nie je dostupný, karta sa
+jednoducho nezobrazí. Je to čisto informačný kontext — nevstupuje do C1–C4,
+ML ani Verdiktu.
 
 ### Ako používať Investičný Verdikt
 

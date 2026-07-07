@@ -181,6 +181,8 @@
     <li>Zoom, viditeľný rozsah, timeframe a stav panelu sa ukladajú, aby sa graf po návrate otvoril podobne ako naposledy.</li>
     <li><strong>HA</strong> prepína Heikin-Ashi zobrazenie. Je vizuálne hladšie, ale jeho ceny nie sú skutočné obchodné OHLC hodnoty.</li>
     <li><strong>Trade</strong> otvorí stránku titulu na eToro; nejde o automatické zadanie pokynu.</li>
+    <li><strong>🔬</strong> pošle aktuálny ticker panelu rovno do záložky <strong>Analytika</strong>.</li>
+    <li>Pri držanom titule badge <code>N× · $suma · ±P/L</code> ukazuje počet otvorených obchodov, celkovú investovanú sumu a agregovaný otvorený zisk/stratu.</li>
   </ul>
 
   <h3>Indikátory a overlay</h3>
@@ -496,6 +498,9 @@
   <p>V <strong>Portfóliu → Stĺpce</strong> je voliteľný stĺpec <strong>Cieľ</strong> pre akcie. Ukazuje cieľovú cenu a počty Buy/Hold/Sell. Zelená = prevaha Buy, červená = prevaha Sell, žltá = Hold alebo nerozhodný konsenzus. Dáta sa načítajú až po zapnutí stĺpca.</p>
   <p>Šírku každého stĺpca možno meniť samostatne potiahnutím úchytu v hlavičke. Ostatné stĺpce sa nemenia; nevyužité miesto zostane napravo a široká tabuľka sa posúva horizontálne.</p>
   <p>Táto karta zatiaľ <strong>nemení C1–C4 ani ML predikciu</strong>. Vysoký short interest môže zosilniť odraz aj riziko, preto nie je automatickým Buy signálom.</p>
+
+  <h3>O firme</h3>
+  <p>Karta <strong>O firme</strong> (nad Firmou &amp; očakávaniami) ukazuje firemný profil: popis biznisu (v angličtine), odvetvie, market cap, počet zamestnancov, rok vstupu na burzu, sídlo a web. Dlhý popis je orezaný — <strong>viac ▾ / menej ▴</strong> ho rozbalí. Zdroje: Massive → Yahoo → Finnhub, cache 30 dní. Ak žiadny zdroj nie je dostupný, karta sa nezobrazí. Čisto informačný kontext — nevstupuje do C1–C4, ML ani Verdiktu.</p>
 
   <h3>Interpretácia sentiment hodnôt</h3>
   <p>Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:</p>

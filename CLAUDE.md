@@ -320,6 +320,25 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   `MASSIVE_API_KEY` against daily bars, previous-day aggregates, the grouped
   U.S. daily market snapshot, and ticker reference data. It returns capability
   metadata only and never includes the key or raw request URL.
+- **Company profile "O firme"** (`GET /api/ticker/profile/{symbol}`): karta
+  `#companyCard` v Analytika sidebar nad `#insightsCard` (`pc_loadCompanyProfile`,
+  volaná vedľa `pc_loadInsights`). Zdrojová reťaz Massive
+  `/v3/reference/tickers/{sym}` (jediný zdroj s plným `description`) → Yahoo
+  `assetProfile` → Finnhub profile2; prvý zdroj je základ, ďalšie len dopĺňajú
+  chýbajúce polia, stop keď existuje popis. Disk cache
+  `DATA_ROOT/company_profiles/{SYM}.json` (30d TTL, 1h negative, stale
+  fallback, v .gitignore). Popis je anglicky (žiadny preklad). Dlhý popis má
+  CSS line-clamp + `pc_toggleCompanyDesc()` viac/menej. Fail-soft: pri chybe
+  sa karta jednoducho nezobrazí. Interpretačná vrstva — NEVSTUPUJE do C1–C4,
+  ML ani Verdiktu.
+- **Chart panel → Analytika button:** `.p-btn-an` (🔬) v hlavičke každého
+  panelu (aj chart dock — rovnaký `createPanel` factory) volá
+  `openPanelInAnalytika(id)` → číta aktuálnu hodnotu `.p-sym` (nie
+  `cfg.symbol` — ticker sa dá v paneli prepísať) → `openScannerTicker(sym)`.
+- **Chart position badge:** `renderChartPositionBadge` ukazuje
+  `N× · $invested · ±P/L` — invested je `live.amount` z
+  `getPortfolioLiveAggregateForSymbol` (súčet `pos.amount` cez oba účty,
+  rovnaká agregácia ako P/L), formát `toLocaleString('sk-SK')` bez desatín.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Removed virtual trading bot

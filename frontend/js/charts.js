@@ -388,15 +388,24 @@ function getPanelChangeForSymbol(sym, r, candlePct) {
   };
 }
 
+function openPanelInAnalytika(id) {
+  const sym = document.getElementById(id)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  if (sym && typeof openScannerTicker === 'function') openScannerTicker(sym);
+}
+
 function renderChartPositionBadge(sym) {
   const live = typeof getPortfolioLiveAggregateForSymbol === 'function'
     ? getPortfolioLiveAggregateForSymbol(sym)
     : null;
   if (!live?.count) return '';
   const pnl = Number(live.pnl || 0);
+  const amount = Number(live.amount || 0);
+  const amountTxt = amount > 0
+    ? ` · $${Math.round(amount).toLocaleString('sk-SK')}`
+    : '';
   return `<span class="p-pos-badge" style="font-family:var(--font-mono);font-size:11px;padding:2px 7px;border-radius:3px;background:var(--bg3);border:1px solid var(--border2);color:var(--muted);"
-           title="Otvorene pozicie: ${live.count}">
-           ${live.count}x <span class="p-pos-badge-pnl" style="color:${pnl>=0?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
+           title="Otvorene pozicie: ${live.count}${amount > 0 ? ` · investovane spolu $${Math.round(amount).toLocaleString('sk-SK')}` : ''}">
+           ${live.count}x${amountTxt} <span class="p-pos-badge-pnl" style="color:${pnl>=0?'var(--green)':'var(--red)'};">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
          </span>`;
 }
 
@@ -715,6 +724,7 @@ function createPanel(cfg) {
         onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
         onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'">Trade ↗</a>
       ${watchlistButtonHtml(cfg.symbol, 'chart-wl-btn')}
+      <button class="p-btn-an" title="Otvoriť v Analytike" onclick="event.stopPropagation();openPanelInAnalytika('${id}')">🔬</button>
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
     <div class="p-inds" onclick="setActivePanel('${id}')">

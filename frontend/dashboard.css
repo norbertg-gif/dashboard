@@ -1030,6 +1030,50 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--yellow-soft);
 }
 
+.p-btn-an {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted2);
+  cursor: pointer;
+  transition: var(--transition);
+  line-height: 1;
+}
+.p-btn-an:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* karta "O firme" v Analytike */
+.company-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.company-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.company-desc.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.company-desc-btn {
+  background: transparent;
+  border: none;
+  color: var(--blue);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0 0;
+}
+
 .p-btn-rm {
   margin-left: auto;
   font-size: 14px;

@@ -7268,6 +7268,142 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         pass
     return payload
 
+# ── Company profile — karta "O firme" v Analytike ────────────────────────────
+COMPANY_PROFILE_DIR = DATA_ROOT / "company_profiles"
+COMPANY_PROFILE_TTL_H = 24 * 30   # popis biznisu je prakticky statický
+COMPANY_PROFILE_SCHEMA_VERSION = 1
+
+
+def _profile_fetch_massive(sym: str) -> dict | None:
+    """Massive /v3/reference/tickers — jediný náš zdroj s plným 'description'."""
+    api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+    if not api_key:
+        return None
+    r = requests.get(f"https://api.massive.com/v3/reference/tickers/{sym}",
+                     params={"apiKey": api_key}, timeout=20)
+    r.raise_for_status()
+    res = (r.json() or {}).get("results") or {}
+    if not isinstance(res, dict) or not res.get("name"):
+        return None
+    addr = res.get("address") or {}
+    return {
+        "name": res.get("name"),
+        "description": res.get("description"),
+        "industry": res.get("sic_description"),
+        "employees": res.get("total_employees"),
+        "listed_since": res.get("list_date"),
+        "market_cap": res.get("market_cap"),
+        "website": res.get("homepage_url"),
+        "exchange": res.get("primary_exchange"),
+        "hq": ", ".join(x for x in (addr.get("city"), addr.get("state")) if x) or None,
+    }
+
+
+def _profile_fetch_yahoo(sym: str) -> dict | None:
+    """Yahoo assetProfile — longBusinessSummary + sektor/odvetvie (z Render IP
+    zvyčajne neprejde, ale lokálne/fallbackovo áno)."""
+    qs = _yahoo_quote_summary(sym, "assetProfile")
+    prof = (qs or {}).get("assetProfile") or {}
+    if not prof:
+        return None
+    return {
+        "name": None,
+        "description": prof.get("longBusinessSummary"),
+        "industry": ", ".join(x for x in (prof.get("sector"), prof.get("industry")) if x) or None,
+        "employees": _yraw(prof.get("fullTimeEmployees")),
+        "listed_since": None,
+        "market_cap": None,
+        "website": prof.get("website"),
+        "exchange": None,
+        "hq": ", ".join(x for x in (prof.get("city"), prof.get("country")) if x) or None,
+    }
+
+
+def _profile_fetch_finnhub(sym: str) -> dict | None:
+    """Finnhub profile2 — bez popisu, ale meno/odvetvie/IPO/market cap má vždy."""
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        return None
+    r = requests.get("https://finnhub.io/api/v1/stock/profile2",
+                     params={"symbol": sym, "token": api_key}, timeout=15)
+    r.raise_for_status()
+    prof = r.json() or {}
+    if not prof.get("name"):
+        return None
+    mcap = prof.get("marketCapitalization")
+    return {
+        "name": prof.get("name"),
+        "description": None,
+        "industry": prof.get("finnhubIndustry"),
+        "employees": None,
+        "listed_since": prof.get("ipo"),
+        "market_cap": float(mcap) * 1e6 if mcap else None,   # Finnhub udáva milióny USD
+        "website": prof.get("weburl"),
+        "exchange": prof.get("exchange"),
+        "hq": prof.get("country"),
+    }
+
+
+@app.get("/api/ticker/profile/{symbol}")
+def get_ticker_profile(symbol: str, refresh: int = Query(0)):
+    """Firemný profil pre kartu "O firme": popis biznisu, odvetvie, zamestnanci,
+    market cap. Massive reference → Yahoo assetProfile → Finnhub profile2;
+    prvý zdroj je základ, ďalšie len dopĺňajú chýbajúce polia, stop pri popise.
+    30d disk cache (1h negative), stale fallback. Čisto interpretačná vrstva."""
+    sym = re.sub(r"[^A-Za-z0-9.\-]", "", symbol.upper())
+    if not sym:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    fpath = COMPANY_PROFILE_DIR / f"{sym}.json"
+    cached = None
+    if fpath.exists():
+        try:
+            cached = json.loads(fpath.read_text(encoding="utf-8"))
+            age_h = (datetime.now(timezone.utc)
+                     - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+            schema_ok = cached.get("schema_version") == COMPANY_PROFILE_SCHEMA_VERSION
+            if schema_ok and age_h < (1 if cached.get("error") else COMPANY_PROFILE_TTL_H) and not refresh:
+                return cached
+        except Exception:
+            cached = None
+    core = None
+    errs = []
+    for source, fetcher in (("massive", _profile_fetch_massive),
+                            ("yahoo", _profile_fetch_yahoo),
+                            ("finnhub", _profile_fetch_finnhub)):
+        try:
+            got = fetcher(sym)
+        except Exception as e:
+            errs.append(f"{source}: {_scrub_token(e)}")
+            continue
+        if not got:
+            continue
+        if core is None:
+            core = {**got, "source": source}
+        else:
+            filled = [k for k, v in got.items() if not core.get(k) and v]
+            for k in filled:
+                core[k] = got[k]
+            if filled:
+                core["source"] += "+" + source
+        if core.get("description"):
+            break
+    if core is None:
+        if cached and not cached.get("error"):
+            return {**cached, "stale": True}
+        payload = {"ticker": sym, "schema_version": COMPANY_PROFILE_SCHEMA_VERSION,
+                   "error": " | ".join(errs) or "no data",
+                   "fetched_at": datetime.now(timezone.utc).isoformat()}
+    else:
+        payload = {"ticker": sym, "schema_version": COMPANY_PROFILE_SCHEMA_VERSION, **core,
+                   "fetched_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        COMPANY_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+    return payload
+
+
 def _earnings_next_date(symbol: str) -> str | None:
     """Najbližší earnings dátum pre symbol: bulk kalendár → Finnhub per-symbol
     (bulk free kalendár veľké tituly občas vynecháva) → yfinance fallback."""

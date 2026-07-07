@@ -1286,6 +1286,7 @@ function pc_renderSidebar(data) {
   earningsCard.style.display = '';
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
+  pc_loadCompanyProfile(data.ticker);
   pc_loadRS(data.ticker);
 
   // Backtest card
@@ -1971,6 +1972,66 @@ async function pc_loadInsights(ticker) {
     }
     if (!rows.length) return;
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
+    card.style.display = '';
+  } catch (e) { /* fail-soft */ }
+}
+
+// ── Karta "O firme" — firemný profil (popis biznisu, odvetvie, market cap) ────
+let _profileForTicker = null;
+
+function pc_marketCapFmt(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)} bil.`;
+  if (n >= 1e9)  return `$${(n / 1e9).toFixed(1)} mld.`;
+  if (n >= 1e6)  return `$${(n / 1e6).toFixed(0)} mil.`;
+  return `$${Math.round(n).toLocaleString('sk-SK')}`;
+}
+
+function pc_toggleCompanyDesc() {
+  const el = document.querySelector('#companyCard .company-desc');
+  const btn = document.getElementById('companyDescBtn');
+  if (!el) return;
+  const clamped = el.classList.toggle('clamped');
+  if (btn) btn.textContent = clamped ? 'viac ▾' : 'menej ▴';
+}
+
+async function pc_loadCompanyProfile(ticker) {
+  const card = document.getElementById('companyCard');
+  if (!card || !ticker) return;
+  const sym = String(ticker).toUpperCase();
+  _profileForTicker = sym;
+  card.style.display = 'none';
+  try {
+    const r = await fetch('/api/ticker/profile/' + encodeURIComponent(sym));
+    if (!r.ok || _profileForTicker !== sym) return;
+    const d = await r.json();
+    if (_profileForTicker !== sym || d.error) return;
+
+    const meta = [];
+    if (d.industry) meta.push(escHtml(d.industry));
+    const mcap = pc_marketCapFmt(d.market_cap);
+    if (mcap) meta.push(`market cap ${mcap}`);
+    if (Number.isFinite(Number(d.employees)) && Number(d.employees) > 0)
+      meta.push(`${Number(d.employees).toLocaleString('sk-SK')} zamestnancov`);
+    if (d.listed_since) meta.push(`na burze od ${escHtml(String(d.listed_since).slice(0, 4))}`);
+    if (d.hq) meta.push(escHtml(d.hq));
+    if (d.website) {
+      let host = String(d.website);
+      try { host = new URL(d.website).hostname.replace(/^www\./, ''); } catch (e) {}
+      meta.push(`<a href="${escHtml(d.website)}" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:none;">${escHtml(host)} ↗</a>`);
+    }
+
+    const parts = [];
+    if (d.name && d.name.toUpperCase() !== sym) parts.push(`<div style="font-weight:600;color:var(--text);font-size:12px;">${escHtml(d.name)}</div>`);
+    if (meta.length) parts.push(`<div class="company-meta">${meta.join(' · ')}</div>`);
+    if (d.description) {
+      const long = String(d.description).length > 300;
+      parts.push(`<div class="company-desc${long ? ' clamped' : ''}">${escHtml(d.description)}</div>`);
+      if (long) parts.push(`<button type="button" id="companyDescBtn" class="company-desc-btn" onclick="pc_toggleCompanyDesc()">viac ▾</button>`);
+    }
+    if (!parts.length) return;
+    card.innerHTML = `<div class="card-title" title="Firemný profil (Massive/Yahoo/Finnhub, obnova 30 d). Kontext, nevstupuje do C1–C4 ani ML.">O firme</div>` + parts.join('');
     card.style.display = '';
   } catch (e) { /* fail-soft */ }
 }
