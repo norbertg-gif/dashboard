@@ -2,9 +2,10 @@
 // Zdieľané jadro: API base, instrument-ID + logo cache, main taby, sidebar chrome
 // + search, ⚙ nastavenia prahov (server-side), téma, eToro/GF linky, background
 // prefetch, eToro sidebar list, XLSX lazy-load, generické helpery (escHtml,
-// fmtPrice). Načítava sa PRVÝ. Pozn.: renderEtoroList je tu zámerne 2× — latentná
-// predexistujúca duplicita (druhá vyhráva), viď poznámka v SESSION_HANDOFF.
-// Súčasť splitu dashboard.js.
+// fmtPrice). Načítava sa PRVÝ. Súčasť splitu dashboard.js.
+// Pozn.: eToro sidebar list (#etoro-list-inner) už v HTML neexistuje —
+// loadEtoroPositions/renderEtoroList sú fail-soft no-op, ostávajú kvôli
+// call-sites pri prepínaní účtov (portfolio.js) a loadEtoroAccounts flow.
 
 const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8766' : '';
@@ -460,51 +461,11 @@ async function loadEtoroPositions(forceRefresh = false) {
 
 function renderEtoroList() {
   const inner = document.getElementById('etoro-list-inner');
-
-  // Summary panel
-  const sumEl = document.getElementById('etoro-summary');
-  const s = etoroSummary[activeAccount];
-  if (sumEl && s) {
-    sumEl.style.display = 'grid';
-    const fmtU = v => v != null ? (v>=0?'+':'')+v.toFixed(2)+'$' : '—';
-    sumEl.innerHTML = `
-      <span style="color:var(--muted)">Cash:</span><span style="color:var(--green)">${s.cash!=null?s.cash.toFixed(2)+'$':'—'}</span>
-      <span style="color:var(--muted)">Invested:</span><span style="color:var(--text)">${s.invested!=null?s.invested.toFixed(2)+'$':'—'}</span>
-      <span style="color:var(--muted)">P&L:</span><span style="color:${(s.total_pnl||0)>=0?'var(--green)':'var(--red)'}">${fmtU(s.total_pnl)}</span>
-      <span style="color:var(--muted)">Equity:</span><span style="color:var(--blue)">${s.equity!=null?s.equity.toFixed(2)+'$':'—'}</span>
-    `;
-  }
-
+  if (!inner) return;
   if (!etoroPositions.length) {
     inner.innerHTML = '<div class="etoro-loading">Žiadne pozície</div>';
     return;
   }
-
-  // Zobraz sort bar a vyrenderuj zoznam
-  const sortBar = document.getElementById('etoro-sort-bar');
-  if (sortBar) sortBar.style.display = 'flex';
-  updateEtoroSort();
-}
-
-function updateEtoroSort() {
-  // Aktualizuj vzhľad tlačidiel
-  const modes = ['pnl','az','za'];
-  const labels = {'pnl':'P/L ↓','az':'A→Z','za':'Z→A'};
-  modes.forEach(m => {
-    const btn = document.getElementById('sort-' + m);
-    if (!btn) return;
-    const active = etoroSortMode === m;
-    btn.style.borderColor = active ? 'var(--blue)' : 'var(--border2)';
-    btn.style.background  = active ? 'var(--blue-dim)' : 'transparent';
-    btn.style.color       = active ? 'var(--blue)' : 'var(--muted)';
-  });
-  // Prerender len zoznam
-  renderEtoroList();
-}
-
-function renderEtoroList() {
-  const inner = document.getElementById('etoro-list-inner');
-  if (!inner) return;
   const bySymbol = {};
   for (const pos of etoroPositions) {
     if (!bySymbol[pos.symbol]) bySymbol[pos.symbol] = { positions:[], name: pos.name };
