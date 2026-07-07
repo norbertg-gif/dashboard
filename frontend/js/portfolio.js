@@ -246,14 +246,23 @@ async function renderHistoryView(force = false) {
   el.innerHTML = `<div class="tool-panel">
     <div class="tool-toolbar">
       <div class="tool-title">Historia obchodov</div>
-      <label style="color:var(--muted);font-size:11px;">od
-        <input id="hist-min-date" type="date" value="${escHtml(historyData.minDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
-      </label>
-      <label style="color:var(--muted);font-size:11px;">do
-        <input id="hist-max-date" type="date" value="${escHtml(historyData.maxDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
-      </label>
-      <button class="btn primary" onclick="applyHistoryRange()">Nacitat</button>
-      <button class="btn" onclick="exportHistoryCSV()">Export CSV</button>
+      <div class="tb-group">
+        <span class="tb-label">Obdobie</span>
+        <div class="tb-items">
+          <label style="color:var(--muted);font-size:11px;">od
+            <input id="hist-min-date" type="date" value="${escHtml(historyData.minDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
+          </label>
+          <label style="color:var(--muted);font-size:11px;">do
+            <input id="hist-max-date" type="date" value="${escHtml(historyData.maxDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
+          </label>
+          <button class="btn primary" onclick="applyHistoryRange()">Nacitat</button>
+        </div>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-group">
+        <span class="tb-label">Export</span>
+        <div class="tb-items"><button class="btn" onclick="exportHistoryCSV()">Export CSV</button></div>
+      </div>
     </div>
     <div class="tool-kpis">
       <div class="tool-kpi"><div class="tool-kpi-label">Trades</div><div class="tool-kpi-val">${s.count || 0}</div></div>
@@ -1515,35 +1524,37 @@ function renderPortPanel(pid) {
   // Toolbar
   html += `<div class="port-toolbar">`;
   // Účty
+  html += `<div class="tb-group"><span class="tb-label">Účet</span><div class="tb-items">`;
   for (const acc of accts) {
     html += `<button class="port-acct-btn${s.account===acc.id?' active':''}"
       onclick="portSetAccount('${pid}','${acc.id}')">${acc.name}</button>`;
   }
-  html += `<div class="port-sep"></div>`;
+  html += `</div></div><div class="tb-sep"></div>`;
   // Filtre
+  html += `<div class="tb-group"><span class="tb-label">Filter</span><div class="tb-items">`;
   const filters = ['all','Stock','ETF','Crypto','Forex','mirrors'];
   const fLabels = {all:'Všetko',Stock:'Akcie',ETF:'ETF',Crypto:'Krypto',Forex:'Forex',mirrors:'Smart/Copy'};
   for (const f of filters) {
     html += `<button class="port-filter-btn${s.filter===f?' active':''}"
       onclick="portSetFilter('${pid}','${f}')">${fLabels[f]}</button>`;
   }
-  html += `<div class="port-sep"></div>`;
+  html += `</div></div><div class="tb-sep"></div>`;
   // View
+  html += `<div class="tb-group"><span class="tb-label">Pohľad</span><div class="tb-items">`;
   html += `<button class="port-view-btn${s.view==='ticker'?' active':''}" onclick="portSetView('${pid}','ticker')">Per ticker</button>`;
   html += `<button class="port-view-btn${s.view==='trade'?' active':''}" onclick="portSetView('${pid}','trade')">Per trade</button>`;
   html += `<button class="port-attention-toggle${s.attentionOnly?' active':''}" onclick="portToggleAttention('${pid}')" title="Zobraz len tituly, ktoré majú dôvod na kontrolu z Investor Inboxu alebo výrazný denný pohyb">Pozornosť</button>`;
-  // Akcie
+  html += `</div></div>`;
   // Späť tlačidlo pri drilldown
   if (s._symFilter) {
-    html += `<button class="port-filter-btn active" onclick="portClearDrillDown('${pid}')" style="border-color:var(--blue);color:var(--blue);">← ${s._symFilter}</button>`;
-    html += `<div class="port-sep"></div>`;
+    html += `<div class="tb-sep"></div><button class="port-filter-btn active" onclick="portClearDrillDown('${pid}')" style="border-color:var(--blue);color:var(--blue);align-self:center;">← ${s._symFilter}</button>`;
   }
-  html += `<div class="port-actions">`;
+  html += `<div class="port-actions"><div class="tb-group"><span class="tb-label">Tabuľka</span><div class="tb-items">`;
   html += `<button class="port-cols-btn" onclick="portToggleColDrop('${pid}')">⚙ Stĺpce</button>`;
   html += `<button class="port-cols-btn" onclick="portSaveCols('${pid}')" title="Uložiť konfiguráciu stĺpcov" style="border-color:var(--green);color:var(--green);">💾</button>`;
   html += `<button class="port-export-btn" onclick="exportPortCSV('${pid}')">↓ CSV</button>`;
   html += `<button class="port-export-btn" onclick="loadPortData('${pid}')" style="color:var(--blue);">⟳</button>`;
-  html += `</div></div>`;
+  html += `</div></div></div></div>`;
 
   // Summary bar
   const liveSummaryPnl = Number(sum._liveTotalPnl ?? sum.total_pnl ?? 0);

@@ -571,11 +571,22 @@ async function renderScannerView() {
             <div class="tool-title">Kandidáti</div>
           </div>
           <div class="scanner-actions">
-            <button class="btn" onclick="openChecklist()">☰ Skenuj watchlist</button>
-            <button class="btn" onclick="refreshOpportunities(true)">⟳ Obnoviť watchlist/eToro</button>
-            <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
-            <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
-            <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+            <div class="tb-group">
+              <span class="tb-label">Watchlist / eToro</span>
+              <div class="tb-items">
+                <button class="btn" onclick="openChecklist()">☰ Skenuj watchlist</button>
+                <button class="btn" onclick="refreshOpportunities(true)">⟳ Obnoviť</button>
+              </div>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-group">
+              <span class="tb-label">DIP univerzum</span>
+              <div class="tb-items">
+                <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
+                <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
+                <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="scanner-meta-row advanced-only">

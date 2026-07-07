@@ -39,6 +39,14 @@ v slovenčine, dáta z eToro + yfinance. Tento manuál pokrýva ovládanie aplik
 
 ## 2. Horná lišta
 
+Horná časť má dve úrovne s odlíšeným pozadím, aby vrstvy nesplývali:
+**hlavná lišta** (najtmavšia) nesie logo, prepínanie záložiek a napravo live
+equity účtov, WS indikátor a globálne ikony (⚙ 🌙 ? Basic/Advanced);
+**workspace lišta** pod ňou zoskupuje ovládanie do označených skupín
+WORKSPACE · DÁTA · ZOBRAZENIE · MRIEŽKA. Rovnaký vzor skupín s mikro-labelmi
+používajú aj sub-lišty jednotlivých záložiek (napr. v Analytike TICKER ·
+SLEDOVANIE · BACKTEST · EXPORT).
+
 | Prvok | Význam |
 |---|---|
 | **PRESET — vyber** | Výber uloženého rozloženia panelov (watchlist + grafy). |

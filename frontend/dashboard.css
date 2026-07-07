@@ -228,10 +228,14 @@ body.light-mode {
   --page-glow: none;
 }
 
-body.light-mode #hdr,
-body.light-mode #main-tabs,
+/* Kontrastná hierarchia: hlavná lišta tmavšia než workspace lišta aj obsah */
+body.light-mode #hdr {
+  background: color-mix(in srgb, var(--bg-card) 72%, #96a0ae);
+  border-bottom-color: color-mix(in srgb, var(--border) 70%, #6b7280);
+}
+body.light-mode #toolbar,
 body.light-mode #active-hint {
-  background: color-mix(in oklch, var(--bg-card) 88%, var(--bg));
+  background: color-mix(in srgb, var(--bg-card) 88%, var(--bg));
 }
 body.light-mode #sidebar,
 body.light-mode #chart-dock {
@@ -455,20 +459,68 @@ select.sel:focus {
   box-shadow: var(--shadow-sm);
 }
 
-#preset-bar {
+#hdr-right {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 3px 8px;
+  flex-shrink: 0;
 }
+
+/* ── WORKSPACE LIŠTA (riadok 2) + segmentované skupiny ─────────────────────
+   .tb-group = mikro-label + rad ovládačov; .tb-sep = zvislý oddeľovač.
+   Rovnaký vzor používajú aj sub-lišty jednotlivých tabov. */
+#toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 5px 14px 7px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  z-index: 150;
+}
+#toolbar::-webkit-scrollbar { display: none; }
+.tb-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.tb-label {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted3);
+  line-height: 1;
+  user-select: none;
+}
+.tb-items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tb-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 3px 0;
+}
+.tb-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 #preset-sel {
   min-width: 140px;
-  border: none;
-  background: var(--bg-input);
-  padding-left: 0;
 }
 
 #hdr-status {
@@ -864,32 +916,40 @@ body.sidebar-collapsed #sb-resizer {
   position: relative;
 }
 
+/* Taby žijú v hlavnej lište (#hdr) — pill štýl v oboch témach */
 #main-tabs {
-  height: 40px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-card);
-  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+#main-tabs::-webkit-scrollbar { display: none; }
 .main-tab {
   font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  padding: 0 16px;
-  height: 40px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 0 14px;
+  height: 32px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   color: var(--muted2);
-  border-bottom: 2px solid transparent;
   cursor: pointer;
   transition: var(--transition);
   user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .main-tab:hover {
   color: var(--text);
+  background: var(--hover-overlay, rgba(128,128,128,0.12));
 }
 .main-tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
+  color: var(--accent-grad-ink, #fff);
+  background: var(--accent-grad, var(--accent));
 }
 .tab-popout {
   border: 0;
@@ -1261,13 +1321,14 @@ body.sidebar-collapsed #sb-resizer {
 }
 .port-toolbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  align-items: stretch;
+  gap: 10px;
+  padding: 6px 16px 8px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+.port-toolbar .port-actions { align-items: stretch; }
 .port-acct-btn {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1693,11 +1754,12 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 .tool-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 8px 16px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
 }
+.tool-toolbar .tb-sep { align-self: stretch; }
 .tool-title {
   font-size: 13px;
   font-weight: 800;
@@ -1905,13 +1967,14 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .controls {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  align-items: stretch;
+  gap: 12px;
+  padding: 6px 16px 8px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+#predictiveTab .controls .tb-right { align-self: center; }
 #predictiveTab .controls input[type="text"] {
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -4261,13 +4324,35 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
    ostávajú netknuté; rollback = zmena data-variant atribútu v HTML.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Header (top bar) ── */
+/* ── Header (top bar) — kontrastná, výrazne tmavšia než workspace lišta aj obsah ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) #hdr {
-  background: oklch(16% 0.008 260 / 0.9);
+  background: oklch(9% 0.005 260 / 0.97);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-bottom: 1px solid oklch(100% 0 0 / 0.08);
+  box-shadow: 0 1px 0 oklch(0% 0 0 / 0.4);
+}
+/* Workspace lišta (riadok 2) — medzistupeň medzi headerom a obsahom */
+:where(html[data-variant="glass"] body:not(.light-mode)) #toolbar {
+  background: oklch(17% 0.008 260 / 0.92);
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
   border-bottom: 1px solid oklch(100% 0 0 / 0.06);
-  box-shadow: none;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .tb-label {
+  color: oklch(48% 0.012 260);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .tb-sep {
+  background: oklch(100% 0 0 / 0.08);
+}
+/* Sub-lišty tabov — rovnaký medzistupeň ako workspace lišta, nech sa vrstvy
+   nelepia na obsah (hierarchia: header 9 % < sub-lišty ~16 % < obsah 13 % bg
+   s kartami 18 %) */
+:where(html[data-variant="glass"] body:not(.light-mode)) .tool-toolbar,
+:where(html[data-variant="glass"] body:not(.light-mode)) #predictiveTab .controls,
+:where(html[data-variant="glass"] body:not(.light-mode)) .port-toolbar {
+  background: oklch(16% 0.008 260 / 0.92);
+  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .logo-icon {
   border-radius: 9px;
@@ -4279,19 +4364,14 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   letter-spacing: -0.01em;
 }
 
-/* ── Hlavná navigácia — segmented pill group ── */
+/* ── Hlavná navigácia — pill group v hlavnej lište ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) #main-tabs {
-  height: 46px;
-  background: transparent;
-  border-bottom: 1px solid oklch(100% 0 0 / 0.05);
-  padding: 6px 12px;
   gap: 6px;
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab {
   height: 32px;
   padding: 0 14px;
   border-radius: 8px;
-  border-bottom: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: oklch(70% 0.01 260);
@@ -4304,7 +4384,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active {
   background: var(--accent-grad);
   color: #fff;
-  border-bottom: 0;
   box-shadow: 0 2px 8px oklch(60% 0.2 260 / 0.5), inset 0 1px 0 oklch(100% 0 0 / 0.25);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active .tab-popout { color: oklch(100% 0 0 / 0.7); }
