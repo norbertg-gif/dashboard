@@ -12,7 +12,7 @@ function sigTier(tier, score) {
 }
 function sigTierColor(tier, score) {
   const t = sigTier(tier, score);
-  return t === 'buy' ? '#26a69a' : t === 'counter' ? '#ef5350' : '#f59e0b';
+  return t === 'buy' ? CHART_COLORS.up : t === 'counter' ? CHART_COLORS.down : '#f59e0b';
 }
 function sigTierLabel(tier, score) {
   const t = sigTier(tier, score);
@@ -472,14 +472,14 @@ function initCharts() {
   // TOP: real weekly candlestick chart
   pc_realChartInst = pc_makeChart('realChart');
   pc_realSeries = pc_realChartInst.addSeries(LightweightCharts.CandlestickSeries, {
-    upColor: '#26a69a', downColor: '#ef5350',
-    borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
+    borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
+    wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
   });
   // Volume histogram (dole, farebne zelená/červená ako v štandardných grafoch)
   pc_realVolSeries = pc_realChartInst.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' }, priceScaleId: 'vol',
-    color: '#26a69a55', lastValueVisible: false, priceLineVisible: false,
+    color: CHART_COLORS.upDim, lastValueVisible: false, priceLineVisible: false,
   });
   pc_realChartInst.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
   pc_attachMarkerTooltip(pc_realChartInst, 'realChart');
@@ -622,7 +622,7 @@ function renderCharts(data) {
     pc_realVolSeries.setData(candles.map(c => ({
       time: c.time,
       value: Number(c.volume) || 0,
-      color: c.close >= c.open ? '#26a69a55' : '#ef535055',
+      color: c.close >= c.open ? CHART_COLORS.upDim : CHART_COLORS.downDim,
     })));
   }
   // Markers: earnings + open week indicator + weekly buy signals (z daily)
@@ -733,7 +733,7 @@ function renderCharts(data) {
     const markers = visibleOverlay.map(r => ({
       time:     r.time,
       position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
-      color:    r.correct === null ? '#94a3b8' : r.correct ? '#26a69a' : '#ef5350',
+      color:    r.correct === null ? '#94a3b8' : r.correct ? CHART_COLORS.up : CHART_COLORS.down,
       shape:    'circle',
       size:     r.correct === null ? 0.7 : 0.5,
     }));
@@ -762,9 +762,9 @@ function renderCharts(data) {
   if (pc_dailyChartInst && data.daily_candles && data.daily_candles.length) {
     if (!pc_dailySeries) {
       pc_dailySeries = pc_dailyChartInst.addSeries(LightweightCharts.CandlestickSeries, {
-        upColor: '#26a69a', downColor: '#ef5350',
-        borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-        wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
+        borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
+        wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
       });
     }
     pc_dailySeries.setData(data.daily_candles);
@@ -779,7 +779,7 @@ function renderCharts(data) {
         const entry  = Number(s.close) || Number(data.daily_candles[idx].close);
         const latest = data.daily_candles[data.daily_candles.length - 1].close;
         const pct    = (latest - entry) / entry * 100;
-        color = pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8';
+        color = pct >= 1.5 ? CHART_COLORS.up : pct <= -1.5 ? CHART_COLORS.down : '#94a3b8';
         text = (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
       }
       return { time: s.time, position: 'belowBar', color, shape: 'circle', text, size: s.score >= 3 ? 0.8 : 0.5 };
@@ -792,7 +792,7 @@ function renderCharts(data) {
     const sig = data.daily_signal;
     const badge = document.getElementById('dailySignalBadge');
     if (badge) {
-      const col  = sig > 0.05 ? '#26a69a' : sig < -0.05 ? '#ef5350' : '#64748b';
+      const col  = sig > 0.05 ? CHART_COLORS.up : sig < -0.05 ? CHART_COLORS.down : '#64748b';
       const lbl  = sig > 0.05 ? '▲' : sig < -0.05 ? '▼' : '—';
       badge.textContent = lbl + ' ' + (sig * 100).toFixed(0) + '%';
       badge.style.color = col;
@@ -803,7 +803,7 @@ function renderCharts(data) {
       const last = data.daily_candles[data.daily_candles.length - 1];
       const prev = data.daily_candles[data.daily_candles.length - 2];
       const chg  = prev ? ((last.close - prev.close) / prev.close * 100).toFixed(2) : '—';
-      const col  = parseFloat(chg) >= 0 ? '#26a69a' : '#ef5350';
+      const col  = parseFloat(chg) >= 0 ? CHART_COLORS.up : CHART_COLORS.down;
       info.innerHTML = '<span style="color:var(--text);font-weight:500">' + last.close.toFixed(2) + '</span>' +
         ' <span style="color:' + col + '">' + (parseFloat(chg)>=0?'+':'') + chg + '%</span>';
     }
@@ -821,7 +821,7 @@ function renderCharts(data) {
     const sig = data.daily_signal;
     const badge = document.getElementById('dailySignalBadge');
     if (badge) {
-      const col = sig > 0.05 ? '#26a69a' : sig < -0.05 ? '#ef5350' : '#64748b';
+      const col = sig > 0.05 ? CHART_COLORS.up : sig < -0.05 ? CHART_COLORS.down : '#64748b';
       badge.textContent = (sig > 0.05 ? '+' : '') + (sig * 100).toFixed(0) + '%';
       badge.style.color = col;
     }
@@ -935,15 +935,15 @@ function pc_renderDailyExtra(data) {
   })();
 
   // ── Render ──────────────────────────────────────────────────────────────
-  const arrow = (t) => t === 'up' ? '<span style="color:#26a69a">▲</span>'
-                     : t === 'down' ? '<span style="color:#ef5350">▼</span>'
+  const arrow = (t) => t === 'up' ? `<span style="color:${CHART_COLORS.up}">▲</span>`
+                     : t === 'down' ? `<span style="color:${CHART_COLORS.down}">▼</span>`
                      : '<span style="color:#64748b">—</span>';
 
   // Timeline body — pozícia v % od ľavej strany podľa času
   const dots = evaluated.map(s => {
     const x = ((s.time - startTs) / span) * 100;
-    const col = s.outcome === 'win'  ? '#26a69a'
-             : s.outcome === 'loss' ? '#ef5350'
+    const col = s.outcome === 'win'  ? CHART_COLORS.up
+             : s.outcome === 'loss' ? CHART_COLORS.down
              : s.outcome === 'flat' ? '#94a3b8'
              : '#f59e0b';   // pending
     const sz = s.score >= 3 ? 7 : 5;
@@ -1031,8 +1031,8 @@ function pc_renderDailyExtra(data) {
     </div>`;
   };
   const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
-    const col = s.outcome === 'win'  ? '#26a69a'
-             : s.outcome === 'loss' ? '#ef5350'
+    const col = s.outcome === 'win'  ? CHART_COLORS.up
+             : s.outcome === 'loss' ? CHART_COLORS.down
              : s.outcome === 'flat' ? '#94a3b8'
              : '#f59e0b';
     const label = s.outcome || 'pending';
@@ -1085,8 +1085,8 @@ function pc_renderDailyExtra(data) {
 
         <div style="display:flex;gap:4px;font-size:9px;color:var(--muted2);
                     margin-bottom:6px;">
-          <span style="color:#26a69a">●${win} úspešné</span>
-          <span style="color:#ef5350">●${loss} neúspešné</span>
+          <span style="color:${CHART_COLORS.up}">●${win} úspešné</span>
+          <span style="color:${CHART_COLORS.down}">●${loss} neúspešné</span>
           <span style="color:#94a3b8">●${flat} neutrálne</span>
           ${pending > 0 ? `<span style="color:#f59e0b">●${pending} čaká</span>` : ''}
         </div>
@@ -1173,10 +1173,10 @@ function pc_renderDailyExtra(data) {
           const downs = trends.filter(t => t === 'down').length;
           const valid = trends.filter(t => t !== null).length;
           let label, color;
-          if (ups === valid && valid >= 3) { label = 'PLNÁ ZHODA BULL'; color = '#26a69a'; }
-          else if (downs === valid && valid >= 3) { label = 'PLNÁ ZHODA BEAR'; color = '#ef5350'; }
-          else if (ups >= 3) { label = 'PREVAHA BULL'; color = '#26a69a'; }
-          else if (downs >= 3) { label = 'PREVAHA BEAR'; color = '#ef5350'; }
+          if (ups === valid && valid >= 3) { label = 'PLNÁ ZHODA BULL'; color = CHART_COLORS.up; }
+          else if (downs === valid && valid >= 3) { label = 'PLNÁ ZHODA BEAR'; color = CHART_COLORS.down; }
+          else if (ups >= 3) { label = 'PREVAHA BULL'; color = CHART_COLORS.up; }
+          else if (downs >= 3) { label = 'PREVAHA BEAR'; color = CHART_COLORS.down; }
           else { label = 'ZMIEŠANÉ'; color = '#94a3b8'; }
           return `<div style="margin-top:8px;padding:5px 8px;text-align:center;
                               font-size:10.5px;font-weight:700;letter-spacing:0.04em;
@@ -1220,9 +1220,9 @@ function pc_renderSidebar(data) {
   let regimeHtml = '';
   if (regime.regime && !regime.error) {
     const regimeMeta = {
-      bull:            { label: 'Bull',         col: '#26a69a', tip: 'HMM model identifikoval bull režim. Buy signály sú dôveryhodnejšie.' },
+      bull:            { label: 'Bull',         col: CHART_COLORS.up, tip: 'HMM model identifikoval bull režim. Buy signály sú dôveryhodnejšie.' },
       sideways:        { label: 'Sideways',      col: '#f59e0b', tip: 'HMM model identifikoval sideways režim. Signály sú menej spoľahlivé, vstupuj opatrne.' },
-      bear:            { label: 'Bear',          col: '#ef5350', tip: 'HMM model identifikoval bear režim. Buy signály sú len na sledovanie, nie entry.' },
+      bear:            { label: 'Bear',          col: CHART_COLORS.down, tip: 'HMM model identifikoval bear režim. Buy signály sú len na sledovanie, nie entry.' },
       high_volatility: { label: 'High Vol',      col: '#a78bfa', tip: 'Volatilita výrazne nad normálom — trhový regime je nestabilný.' },
     };
     const rm = regimeMeta[regime.regime] || { label: regime.regime, col: 'var(--muted)', tip: '' };
@@ -1237,7 +1237,7 @@ function pc_renderSidebar(data) {
   let analogHtml = '';
   if (p.method === 'analog_similarity' && an) {
     const overrode = an.decision === 'analog_override';
-    const voteCol = an.vote >= 0 ? '#26a69a' : '#ef5350';
+    const voteCol = an.vote >= 0 ? CHART_COLORS.up : CHART_COLORS.down;
     const decTxt = overrode
       ? `silná zhoda susedov (${an.up}:${an.down}) prebila drift`
       : `hlas slabý (${an.up}:${an.down}) — smer drží historický drift titulu (${an.up_rate}% týždňov hore)`;
@@ -1260,7 +1260,7 @@ function pc_renderSidebar(data) {
     <div class="pred-row"><span class="tt key" data-tip="Predikované minimum sviečky. Počítané ako stred (open+close)/2 - ATR×0.75">Low <span class="tt-icon">ⓘ</span></span><span class="val">${pc.low.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Predikovaná záverečná cena. Vypočítaná z váženého composite signálu a ATR.">Close <span class="tt-icon">ⓘ</span></span><span class="val">${pc.close.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Sila kombinovaného technického signálu. Rozsah -100% až +100%. Blízko nuly = model si nie je istý smerom.">Composite signal <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--pred)">${(p.composite*100).toFixed(1)}%</span></div>
-    ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? '#26a69a' : data.ml_bull_prob <= 45 ? '#ef5350' : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
+    ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? CHART_COLORS.up : data.ml_bull_prob <= 45 ? CHART_COLORS.down : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
     ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Historická presnosť ML modelu na testovacej sade (30% dát). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
   `;
 
@@ -1294,7 +1294,7 @@ function pc_renderSidebar(data) {
   const ez = data.prediction && data.prediction.entry_zone;
   if (ez) {
     const bullish = data.prediction.composite >= 0;
-    const zoneColor = bullish ? '#26a69a' : '#ef5350';
+    const zoneColor = bullish ? CHART_COLORS.up : CHART_COLORS.down;
     const levels = ez.levels || {};
     document.getElementById('entryZoneInfo').innerHTML =
       '<div style="margin-bottom:8px;">' +
@@ -1364,9 +1364,9 @@ function pc_renderSidebar(data) {
         const defVal = data.weights_default[k] || 0;
         const diff   = v - defVal;
         const diffStr = diff > 0.005
-          ? '<span style="color:#26a69a;font-size:10px">+' + (diff*100).toFixed(0) + '%</span>'
+          ? '<span style="color:' + CHART_COLORS.up + ';font-size:10px">+' + (diff*100).toFixed(0) + '%</span>'
           : diff < -0.005
-          ? '<span style="color:#ef5350;font-size:10px">' + (diff*100).toFixed(0) + '%</span>'
+          ? '<span style="color:' + CHART_COLORS.down + ';font-size:10px">' + (diff*100).toFixed(0) + '%</span>'
           : '<span style="color:var(--muted);font-size:10px">=</span>';
         const pct   = Math.round(v * 100);
         const color = pct >= 25 ? '#a78bfa' : pct >= 15 ? '#60a5fa' : 'var(--muted)';
@@ -1396,7 +1396,7 @@ function pc_renderSidebar(data) {
     .map(([k, v]) => {
       if (v === null) return '';
       const pct = v;
-      const color = pct >= 55 ? '#26a69a' : pct >= 50 ? '#7c6af7' : '#ef5350';
+      const color = pct >= 55 ? CHART_COLORS.up : pct >= 50 ? '#7c6af7' : CHART_COLORS.down;
       const tip = (indTips[k] || '') + ' Hit rate: ' + pct + '% správnych predikcií smeru.';
       return '<div class="ind-row">' +
         '<span class="ind-name tt" data-tip="' + tip + '">' + (indNames[k] || k) + ' <span class="tt-icon">ⓘ</span></span>' +
@@ -1686,7 +1686,7 @@ function buildSubpanel(type, ind, candles) {
     s.setData(ind.rsi);
     // overbought/oversold lines
     const times = ind.rsi.map(d => d.time);
-    [[70,'#ef5350'],[30,'#26a69a']].forEach(([lvl, color]) => {
+    [[70,CHART_COLORS.down],[30,CHART_COLORS.up]].forEach(([lvl, color]) => {
       const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       ref.setData(times.map(t => ({ time: t, value: lvl })));
     });
@@ -1700,9 +1700,9 @@ function buildSubpanel(type, ind, candles) {
     sigLine.setData(ind.macd_sig);
     const hist = pc_subChartInst.addSeries(LightweightCharts.HistogramSeries, {
       priceLineVisible: false, lastValueVisible: false,
-      color: '#26a69a',
+      color: CHART_COLORS.up,
     });
-    hist.setData(ind.macd_hist.map(d => ({ time: d.time, value: d.value, color: d.value >= 0 ? '#26a69a' : '#ef5350' })));
+    hist.setData(ind.macd_hist.map(d => ({ time: d.time, value: d.value, color: d.value >= 0 ? CHART_COLORS.up : CHART_COLORS.down })));
 
   } else if (type === 'stoch') {
     label.textContent = 'Stochastic RSI';
@@ -1711,7 +1711,7 @@ function buildSubpanel(type, ind, candles) {
     const d = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, title: '%D' });
     d.setData(ind.stoch_d);
     const times = ind.stoch_k.map(p => p.time);
-    [[80,'#ef5350'],[20,'#26a69a']].forEach(([lvl, color]) => {
+    [[80,CHART_COLORS.down],[20,CHART_COLORS.up]].forEach(([lvl, color]) => {
       const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
       ref.setData(times.map(t => ({ time: t, value: lvl })));
     });
@@ -1721,9 +1721,9 @@ function buildSubpanel(type, ind, candles) {
     label.textContent = 'ADX + DI';
     const adx = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'ADX' });
     adx.setData(ind.adx);
-    const dip = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#26a69a', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI+' });
+    const dip = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: CHART_COLORS.up, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI+' });
     dip.setData(ind.di_plus);
-    const dim = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#ef5350', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI-' });
+    const dim = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: CHART_COLORS.down, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI-' });
     dim.setData(ind.di_minus);
     // ADX 25 reference
     if (ind.adx.length) {
@@ -1799,7 +1799,7 @@ function dailySignalReturnMarker(signal, candles) {
   }
   const pct = (latest - entry) / entry * 100;
   return {
-    color: pct >= 1.5 ? '#26a69a' : pct <= -1.5 ? '#ef5350' : '#94a3b8',
+    color: pct >= 1.5 ? CHART_COLORS.up : pct <= -1.5 ? CHART_COLORS.down : '#94a3b8',
     text: (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%',
     shape: 'circle',
   };
@@ -1817,9 +1817,9 @@ function renderDailyMain(data) {
   }).observe(el);
 
   const cs = pc_dailyMainInst.addSeries(LightweightCharts.CandlestickSeries, {
-    upColor: '#26a69a', downColor: '#ef5350',
-    borderUpColor: '#26a69a', borderDownColor: '#ef5350',
-    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
+    borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
+    wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
   });
   pc_dailyMainSeries = cs;
   cs.setData(data.daily_candles);

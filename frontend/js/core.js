@@ -10,6 +10,15 @@
 const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8766' : '';
 
+// Zdieľaná candle/tier paleta pre chart canvas a inline štýly.
+// LWC canvas nevie čítať CSS var() — hodnoty MUSIA zodpovedať CSS tokenom
+// --up / --down v dashboard.css. Pri zmene témy zmeň tu aj v CSS.
+const CHART_COLORS = {
+  up: '#26a69a', down: '#ef5350',
+  upDim: '#26a69a55', downDim: '#ef535055',
+  neutral: '#94a3b8', pending: '#f59e0b',
+};
+
 // instrumentId cache: symbol -> id (immutable)
 const instrumentIdCache = {};
 function cacheInstrumentId(sym, instrumentId) {

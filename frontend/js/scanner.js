@@ -1289,10 +1289,10 @@ async function runChecklist() {
       const rowCls  = hasSig ? 'has-signal' : '';
       const wt = r.weekly_trend;
       const wtKey = wt?.key;
-      const biasCol = (wtKey === 'strong_up' || wtKey === 'up') ? '#26a69a'
+      const biasCol = (wtKey === 'strong_up' || wtKey === 'up') ? CHART_COLORS.up
                     : (wtKey === 'range') ? '#94a3b8'
-                    : (wtKey === 'down' || wtKey === 'strong_down') ? '#ef5350'
-                    : (r.weekly_bullish ? '#26a69a' : '#ef5350');
+                    : (wtKey === 'down' || wtKey === 'strong_down') ? CHART_COLORS.down
+                    : (r.weekly_bullish ? CHART_COLORS.up : CHART_COLORS.down);
       const wtIcon = wt?.icon || (r.weekly_bullish ? '▲' : '▼');
       const wtLbl  = wt?.label || (r.weekly_bullish ? 'Uptrend' : 'Downtrend');
       const biasLbl = `${wtIcon} ${wtLbl}`;

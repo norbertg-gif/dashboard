@@ -1454,7 +1454,7 @@ function resolveMarkerTime(pos, chartData) {
 }
 
 // ── PATTERN MARKERS ───────────────────────────────────────────────────────────
-const _PC = {bull:'#26a69a', bear:'#ef5350', neut:'#94a3b8'};
+const _PC = {bull: CHART_COLORS.up, bear: CHART_COLORS.down, neut: CHART_COLORS.neutral};
 function applyPatternMarkers(id, r, patterns) {
   if (!r.candleSeries || !patterns?.length) return;
   r._markerMeta ||= {};
