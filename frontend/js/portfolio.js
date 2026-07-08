@@ -965,6 +965,7 @@ async function loadPortData(pid) {
     s.data = await r.json();
     preparePortfolioSnapshot(s.data);
     rememberLiveInstruments(s.data.positions);
+    rememberLiveInstruments(s.data.orders);   // WS live ceny aj pre tickery limitiek
     portfolioAccountData[String(s.account)] = s.data;
     updateHeaderEquities();
   } catch(e) {
@@ -1589,6 +1590,7 @@ function renderPortPanel(pid) {
     <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
+    ${(sum.orders_count || (s.data.orders || []).length) ? `<div class="port-sum-item"><div class="port-sum-label">Objednávky</div><div class="port-sum-val" style="color:var(--yellow);">${sum.orders_count || s.data.orders.length}</div></div>` : ''}
   </div>`;
 
   // Výkonnostný panel (gain)
@@ -1718,6 +1720,59 @@ function renderPortPanel(pid) {
     html += `</tbody></table></div>`;
   }
 
+  // Čakajúce objednávky (limitky + market orders čakajúce na exekúciu)
+  const orders = s.data.orders || [];
+  if (!s.attentionOnly && orders.length) {
+    const open = s.ordersOpen !== false;   // default rozbalené
+    html += `<div class="port-mirrors-hdr" onclick="portToggleOrders('${pid}')">
+      ${open ? '▾' : '▸'} Čakajúce objednávky (${orders.length})
+    </div>`;
+    if (open) {
+      html += `<div class="port-table-wrap" style="max-height:240px;"><table class="port-table"><thead><tr>
+        <th>Ticker</th><th>Typ</th><th>Smer</th><th class="r">Cieľová cena</th>
+        <th class="r">Aktuálna</th><th class="r">Vzdialenosť</th><th class="r">Suma</th>
+        <th class="r">SL / TP</th><th>Vytvorená</th>
+      </tr></thead><tbody>`;
+      for (const o of orders) {
+        const iid = Number(o.instrumentId);
+        // aktuálna cena: WS live → currentRate držanej pozície rovnakého tickera
+        let cur = null;
+        const wsp = (typeof wsLivePrices === 'object' && wsLivePrices) ? wsLivePrices[iid] : null;
+        if (wsp) cur = [wsp.last, wsp.bid, wsp.ask].map(Number).find(v => Number.isFinite(v) && v > 0) ?? null;
+        if (cur == null) {
+          const held = (s.data.positions || []).find(p => p.symbol === o.symbol && Number(p.currentRate) > 0);
+          if (held) cur = Number(held.currentRate);
+        }
+        const rate = Number(o.rate);
+        const dist = (cur && Number.isFinite(rate) && rate > 0)
+          ? (rate - cur) / cur * 100
+          : null;
+        const slTp = [o.stopLoss ? `SL ${o.stopLoss}${o.isTsl ? ' (TSL)' : ''}` : null,
+                      o.takeProfit ? `TP ${o.takeProfit}` : null].filter(Boolean).join(' · ') || '—';
+        html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')" style="cursor:pointer;">
+          <td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
+            ${getLogoWrapper(o.symbol, 22)}
+            <div style="display:flex;flex-direction:column;gap:1px;">
+              <span class="port-sym">${o.symbol}</span>
+              <span class="port-name">${o.name || ''}</span>
+            </div>
+          </div></td>
+          <td><span class="port-type-badge">${o.kind === 'limit' ? 'Limit' : 'Market'}</span></td>
+          <td>${fmtPortVal(o.isBuy, 'dir')}</td>
+          <td class="r" style="font-weight:600;">${Number.isFinite(rate) && rate > 0 ? rate.toFixed(4) : '—'}</td>
+          <td class="r">${cur != null ? cur.toFixed(4) : '—'}</td>
+          <td class="r">${dist != null
+            ? `<span class="${Math.abs(dist) <= 1 ? 'port-pos' : ''}" style="${Math.abs(dist) <= 1 ? 'font-weight:700;' : 'color:var(--muted);'}" title="O koľko % sa musí cena pohnúť, aby sa objednávka vyplnila">${dist >= 0 ? '+' : ''}${dist.toFixed(2)}%</span>`
+            : '—'}</td>
+          <td class="r">$${Number(o.amount || 0).toFixed(2)}${o.leverage > 1 ? ` <span style="color:var(--muted);font-size:9px;">x${o.leverage}</span>` : ''}</td>
+          <td class="r" style="font-size:10px;color:var(--muted);">${slTp}</td>
+          <td style="font-size:10px;color:var(--muted);">${fmtPortVal(o.openDateTime, 'date')}</td>
+        </tr>`;
+      }
+      html += `</tbody></table></div>`;
+    }
+  }
+
   // Mirrors sekcia
   if (showMirrors) {
     html += `<div class="port-mirrors-hdr" onclick="portToggleMirrors('${pid}')">
@@ -1789,6 +1844,10 @@ function portSort(pid, col) {
 }
 function portToggleMirrors(pid) {
   const s = getPortState(pid); s.mirrorOpen = !s.mirrorOpen;
+  renderPortPanel(pid);
+}
+function portToggleOrders(pid) {
+  const s = getPortState(pid); s.ordersOpen = s.ordersOpen === false ? true : false;
   renderPortPanel(pid);
 }
 async function portSaveCols(pid) {

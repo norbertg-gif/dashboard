@@ -144,6 +144,17 @@ SLEDOVANIE · BACKTEST · EXPORT).
   prepne obsah toho istého panelu, neotvára ďalšie okná.
 - Stĺpce možno zapínať, radiť a nezávisle meniť ich šírku. Nastavenie sa uloží.
   Stĺpec **Cieľ** pre akcie zobrazuje priemernú cieľovú cenu a Buy/Hold/Sell.
+- **Čakajúce objednávky** — zbaliteľná sekcia pod tabuľkou pozícií (nad
+  Smart/Copy). Zobrazuje limitky aj market objednávky čakajúce na exekúciu
+  (napr. zadané mimo obchodných hodín): smer, cieľovú cenu, aktuálnu cenu
+  (live z WS, fallback cena držanej pozície), **vzdialenosť v %** k vyplneniu
+  (zvýrazní sa, keď je cena bližšie než 1 %), sumu, SL/TP a dátum vytvorenia.
+  Dáta idú z toho istého eToro portfólio payloadu ako pozície — žiadne extra
+  API volania. Súčet čakajúcich súm je už započítaný v Invested (eToro ich
+  drží mimo voľného cash). Klik na riadok otvorí graf, logo otvorí chart dock.
+- Názov **browser tabu** sa mení podľa otvorenej záložky (`TD · Grafy`,
+  `TD · Portfólio`, …; v Analytike aj s tickerom) — pri viacerých oknách
+  dashboardu je hneď vidno, kde čo je.
 - **História** je záznam uzavretých obchodov, filtrovateľný **dátumovým
   intervalom od–do** (podľa dátumu uzatvorenia obchodu). KPI (počet, win rate,
   net P/L, fees) sa prepočítajú pre zvolený interval.

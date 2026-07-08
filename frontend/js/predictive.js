@@ -251,6 +251,7 @@ function restorePredictiveTicker() {
 
 function rememberPredictiveTicker(ticker) {
   const sym = String(ticker || '').trim().toUpperCase();
+  if (sym && activeMainTab === 'predictive') document.title = `TD · Analytika · ${sym}`;
   if (sym) localStorage.setItem(PC_LAST_TICKER_KEY, sym);
 }
 

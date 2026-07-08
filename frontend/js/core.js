@@ -141,6 +141,11 @@ function switchMainTab(tab) {
     initVerdictView(previousContextTicker);
   }
   if (typeof syncChartDockVisibilityForTab === 'function') syncChartDockVisibilityForTab();
+  // Názov browser tabu podľa otvorenej záložky — pri viacerých oknách
+  // dashboardu je hneď vidno, kde čo je
+  const TAB_TITLES = { charts: 'Grafy', portfolio: 'Portfólio', history: 'História',
+                       predictive: 'Analytika', scanner: 'Scanner', verdict: 'Verdikt' };
+  document.title = `TD · ${TAB_TITLES[tab] || 'Dashboard'}`;
   const url = new URL(window.location.href);
   url.searchParams.set('tab', tab);
   history.replaceState(null, '', url);

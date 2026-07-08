@@ -1961,7 +1961,8 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
     cached = _positions_cache.get(account)
     if cached and not refresh and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
         return {"positions": cached["data"], "summary": cached["summary"],
-                "mirrors": cached.get("mirrors", []), "cached": True}
+                "mirrors": cached.get("mirrors", []),
+                "orders": cached.get("orders", []), "cached": True}
 
     instruments = load_instruments()
 
@@ -2057,6 +2058,37 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "posCount":   len(m.get("positions", [])),
         })
 
+    # Čakajúce objednávky — orders (limitky) + ordersForOpen (market objednávky
+    # čakajúce na exekúciu, napr. mimo obchodných hodín); mirror orders vynechané
+    type_map_orders = {1: "Forex", 2: "Index", 4: "Commodity", 5: "Stock", 6: "ETF", 10: "Crypto"}
+    orders = []
+    for kind, raw_list in (("limit", port.get("orders") or []),
+                           ("market", port.get("ordersForOpen") or [])):
+        for o in raw_list:
+            if kind == "market" and (o.get("mirrorID") or o.get("mirrorId") or 0) != 0:
+                continue
+            iid = o.get("instrumentID") or o.get("instrumentId")
+            info = instruments.get(iid, {})
+            sym = info.get("symbol") or str(iid or "?")
+            orders.append({
+                "orderId":      o.get("orderID") or o.get("orderId"),
+                "kind":         kind,
+                "instrumentId": iid,
+                "symbol":       sym,
+                "name":         info.get("name") or sym,
+                "type":         type_map_orders.get(info.get("typeID") or 0, "Other"),
+                "isBuy":        o.get("isBuy", True),
+                "rate":         o.get("rate"),
+                "amount":       round(o.get("amount") or 0, 2),
+                "units":        o.get("units"),
+                "leverage":     o.get("leverage", 1),
+                "stopLoss":     o.get("stopLossRate"),
+                "takeProfit":   o.get("takeProfitRate"),
+                "isTsl":        bool(o.get("isTslEnabled")),
+                "openDateTime": o.get("openDateTime", ""),
+            })
+    orders.sort(key=lambda x: (x["symbol"], x["openDateTime"]))
+
     # Summary
     credit      = port.get("credits", 0) or port.get("credit", 0) or 0
     pend_open   = sum(o.get("amount", 0) or 0 for o in port.get("ordersForOpen", []) if (o.get("mirrorID") or 0) == 0)
@@ -2077,10 +2109,13 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
         "total_pnl": round(total_pnl, 2), "equity": round(equity, 2),
         "daily_pnl": round(daily_pnl, 2),
         "positions_count": len(result), "mirrors_count": len(mirrors),
+        "orders_count": len(orders),
     }
 
-    _positions_cache[account] = {"data": result, "summary": summary, "mirrors": mirrors, "ts": time.time()}
-    return {"positions": result, "summary": summary, "mirrors": mirrors, "cached": False}
+    _positions_cache[account] = {"data": result, "summary": summary, "mirrors": mirrors,
+                                 "orders": orders, "ts": time.time()}
+    return {"positions": result, "summary": summary, "mirrors": mirrors,
+            "orders": orders, "cached": False}
 
 
 @app.get("/api/etoro/trade-history")
