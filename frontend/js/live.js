@@ -217,15 +217,18 @@ function onLivePriceUpdate(instrumentId) {
   // 3. Portfólio tab — aktualizuj currentRate, pnl, pnlPct bunky
   if (sym) {
     for (const [pid, state] of Object.entries(portState)) {
-      if (!state?.data?.positions) continue;
+      if (!state?.data) continue;
       updatePositionRowsWithLive(state.data.positions, sym, livePrice);
+      if (typeof updateOrderRowsWithLive === 'function') updateOrderRowsWithLive(state.data.orders, sym, livePrice);
       recalcPortfolioLiveSummary(state.data);
       updatePortfolioSummaryDom(pid, state.data);
       updatePortfolioTickerRowsDom(pid, state, sym);
+      if (typeof updatePortfolioOrderRowsDom === 'function') updatePortfolioOrderRowsDom(pid, state, sym);
     }
     for (const data of Object.values(portfolioAccountData)) {
-      if (!data?.positions || Object.values(portState).some(state => state?.data === data)) continue;
+      if (!data || Object.values(portState).some(state => state?.data === data)) continue;
       updatePositionRowsWithLive(data.positions, sym, livePrice);
+      if (typeof updateOrderRowsWithLive === 'function') updateOrderRowsWithLive(data.orders, sym, livePrice);
       recalcPortfolioLiveSummary(data);
     }
     updateHeaderEquities();

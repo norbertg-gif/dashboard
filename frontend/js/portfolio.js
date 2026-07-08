@@ -966,6 +966,7 @@ async function loadPortData(pid) {
     preparePortfolioSnapshot(s.data);
     rememberLiveInstruments(s.data.positions);
     rememberLiveInstruments(s.data.orders);   // WS live ceny aj pre tickery limitiek
+    await hydrateOrderRates(s.data, s.account);
     portfolioAccountData[String(s.account)] = s.data;
     updateHeaderEquities();
   } catch(e) {
@@ -973,6 +974,69 @@ async function loadPortData(pid) {
   }
   s.loading = false;
   renderPortPanel(pid);
+}
+
+function livePriceForInstrument(instrumentId) {
+  const iid = Number(instrumentId);
+  if (!iid || typeof wsLivePrices !== 'object' || !wsLivePrices) return null;
+  const wsp = wsLivePrices[iid];
+  if (!wsp) return null;
+  return [wsp.last, wsp.bid, wsp.ask].map(Number).find(v => Number.isFinite(v) && v > 0) ?? null;
+}
+
+async function hydrateOrderRates(data, account) {
+  const orders = Array.isArray(data?.orders) ? data.orders : [];
+  const ids = [...new Set(orders.map(o => Number(o.instrumentId)).filter(v => Number.isFinite(v) && v > 0))];
+  if (!ids.length) return;
+  try {
+    const r = await fetch(`${API}/api/etoro/rates-batch?instrument_ids=${encodeURIComponent(ids.join(','))}&account=${encodeURIComponent(account || '1')}`);
+    if (!r.ok) return;
+    const payload = await r.json();
+    const byId = {};
+    for (const item of (payload.rates || [])) {
+      const iid = Number(item.instrumentId);
+      const price = [item.last, item.bid, item.ask].map(Number).find(v => Number.isFinite(v) && v > 0);
+      if (iid && price) byId[iid] = price;
+    }
+    for (const o of orders) {
+      const price = byId[Number(o.instrumentId)];
+      if (price) o.currentRate = price;
+    }
+  } catch(e) {}
+}
+
+function updateOrderRowsWithLive(rows, sym, livePrice) {
+  let touched = false;
+  for (const order of (rows || [])) {
+    if ((order.symbol || '').toUpperCase() !== sym) continue;
+    order.currentRate = livePrice;
+    touched = true;
+  }
+  return touched;
+}
+
+function updatePortfolioOrderRowsDom(pid, state, sym) {
+  const orders = state?.data?.orders || [];
+  for (const o of orders) {
+    if ((o.symbol || '').toUpperCase() !== sym) continue;
+    const cur = Number(o.currentRate);
+    const rate = Number(o.rate);
+    const dist = Number.isFinite(cur) && cur > 0 && Number.isFinite(rate) && rate > 0
+      ? (rate - cur) / cur * 100
+      : null;
+    document.querySelectorAll(`[data-port-order-current="${pid}-${sym}"]`).forEach(el => {
+      el.textContent = Number.isFinite(cur) && cur > 0 ? cur.toFixed(4) : '—';
+    });
+    document.querySelectorAll(`[data-port-order-distance="${pid}-${sym}"]`).forEach(el => {
+      if (dist == null) {
+        el.textContent = '—';
+        el.className = 'r';
+        el.removeAttribute('title');
+        return;
+      }
+      el.innerHTML = `<span class="${Math.abs(dist) <= 1 ? 'port-pos' : ''}" style="${Math.abs(dist) <= 1 ? 'font-weight:700;' : 'color:var(--muted);'}" title="O koľko % sa musí cena pohnúť, aby sa objednávka vyplnila">${dist >= 0 ? '+' : ''}${dist.toFixed(2)}%</span>`;
+    });
+  }
 }
 
 const portfolioAnalystCache = new Map();
@@ -1737,8 +1801,8 @@ function renderPortPanel(pid) {
         const iid = Number(o.instrumentId);
         // aktuálna cena: WS live → currentRate držanej pozície rovnakého tickera
         let cur = null;
-        const wsp = (typeof wsLivePrices === 'object' && wsLivePrices) ? wsLivePrices[iid] : null;
-        if (wsp) cur = [wsp.last, wsp.bid, wsp.ask].map(Number).find(v => Number.isFinite(v) && v > 0) ?? null;
+        cur = livePriceForInstrument(iid);
+        if (cur == null && Number(o.currentRate) > 0) cur = Number(o.currentRate);
         if (cur == null) {
           const held = (s.data.positions || []).find(p => p.symbol === o.symbol && Number(p.currentRate) > 0);
           if (held) cur = Number(held.currentRate);
@@ -1760,8 +1824,8 @@ function renderPortPanel(pid) {
           <td><span class="port-type-badge">${o.kind === 'limit' ? 'Limit' : 'Market'}</span></td>
           <td>${fmtPortVal(o.isBuy, 'dir')}</td>
           <td class="r" style="font-weight:600;">${Number.isFinite(rate) && rate > 0 ? rate.toFixed(4) : '—'}</td>
-          <td class="r">${cur != null ? cur.toFixed(4) : '—'}</td>
-          <td class="r">${dist != null
+          <td class="r" data-port-order-current="${pid}-${o.symbol}">${cur != null ? cur.toFixed(4) : '—'}</td>
+          <td class="r" data-port-order-distance="${pid}-${o.symbol}">${dist != null
             ? `<span class="${Math.abs(dist) <= 1 ? 'port-pos' : ''}" style="${Math.abs(dist) <= 1 ? 'font-weight:700;' : 'color:var(--muted);'}" title="O koľko % sa musí cena pohnúť, aby sa objednávka vyplnila">${dist >= 0 ? '+' : ''}${dist.toFixed(2)}%</span>`
             : '—'}</td>
           <td class="r">$${Number(o.amount || 0).toFixed(2)}${o.leverage > 1 ? ` <span style="color:var(--muted);font-size:9px;">x${o.leverage}</span>` : ''}</td>
