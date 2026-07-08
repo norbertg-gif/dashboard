@@ -1305,6 +1305,7 @@ function updatePortfolioTickerRowsDom(pid, state, sym) {
         });
       }
     }
+    updatePortfolioTotalsDom(pid, state);
     return;
   }
   const rows = getFilteredPositions(state);
@@ -1326,6 +1327,23 @@ function updatePortfolioTickerRowsDom(pid, state, sym) {
     });
     break;
   }
+  updatePortfolioTotalsDom(pid, state);
+}
+
+// SPOLU riadok: rovnaké live hodnoty ako bunky riadkov — počítané z toho
+// istého zdroja (getFilteredPositions), takže sedí aj s filtrami/drilldownom.
+function updatePortfolioTotalsDom(pid, state) {
+  const pnlEl = document.querySelector(`[data-port-total="${pid}-pnl"]`);
+  const pctEl = document.querySelector(`[data-port-total="${pid}-pnlPct"]`);
+  if (!pnlEl && !pctEl) return;
+  const rows = getFilteredPositions(state);
+  const invested = rows.reduce((s, r) => s + (r.amount || 0), 0);
+  const pnl = rows.reduce((s, r) => s + Number(r._livePnl ?? r.pnl ?? 0), 0);
+  const pct = invested ? pnl / invested * 100 : 0;
+  const cls = pnl >= 0 ? 'port-pos' : 'port-neg';
+  const sign = pnl >= 0 ? '+' : '';
+  if (pnlEl) pnlEl.innerHTML = `<span class="${cls}" style="font-weight:700;">${sign}$${pnl.toFixed(2)}</span>`;
+  if (pctEl) pctEl.innerHTML = `<span class="${cls}" style="font-weight:700;">${sign}${pct.toFixed(2)}%</span>`;
 }
 
 function getVisibleCols(s) {
@@ -1409,6 +1427,9 @@ function getFilteredPositions(s) {
         amount:   r.amount   || 0,
         pnl:      r.pnl      || 0,
         _livePnl: r._livePnl ?? r.pnl ?? 0,
+        // pct aj pre single-trade skupinu — else vetva sa pri nej nespustí
+        // a zdedená hodnota z ...r by bola snapshot (nekonzistentná s live pnl)
+        _livePnlPct: r.amount ? (Number(r._livePnl ?? r.pnl ?? 0) / r.amount * 100) : (r.pnlPct || 0),
         dailyPnl: r.dailyPnl || 0,
         fees:     r.fees     || 0,
         _count: 1, _trades: [r]
@@ -1646,12 +1667,15 @@ function renderPortPanel(pid) {
           const liveCols = ['currentRate','dailyPnl','pnl','pnlPct'];
           const liveRowKey = s.view === 'ticker' ? `${pid}-${sym}` : `${pid}-${row.positionId || sym}`;
           const liveAttr = liveCols.includes(col.key) ? `data-port-cell="${liveRowKey}-${col.key}"` : '';
-          const useLiveEstimate = s.view === 'ticker';
-          const val = useLiveEstimate && col.key === 'pnl'
-            ? (row._livePnl ?? row.pnl)
-            : useLiveEstimate && col.key === 'pnlPct'
-              ? (row._livePnlPct ?? row.pnlPct)
-              : useLiveEstimate && col.key === 'dailyPnl'
+          // Live hodnoty v OBOCH pohľadoch — currentRate/dailyPnl sa mutujú
+          // live priamo na pozíciách, takže snapshot pnl vedľa live ceny by
+          // bol vnútorne nekonzistentný riadok (a pri prepnutí view by čísla skákali).
+          const livePnlVal = row._livePnl ?? row.pnl;
+          const val = col.key === 'pnl'
+            ? livePnlVal
+            : col.key === 'pnlPct'
+              ? (row._livePnlPct ?? (row.amount ? Number(livePnlVal ?? 0) / row.amount * 100 : row.pnlPct))
+              : col.key === 'dailyPnl'
                 ? (row._liveDailyPnl ?? row.dailyPnl)
                 : row[col.key];
           html += `<td ${liveAttr} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(val, col.fmt)}</td>`;
@@ -1662,10 +1686,11 @@ function renderPortPanel(pid) {
     if (!rows.length) {
       html += `<tr><td colspan="${cols.length}" style="padding:20px;text-align:center;color:var(--muted);">Žiadne pozície</td></tr>`;
     }
-    // Súhrnný riadok
+    // Súhrnný riadok — z LIVE hodnôt (rovnaký zdroj ako bunky riadkov),
+    // inak SPOLU po WS tickoch protirečí riadkom nad sebou
     if (rows.length) {
       const totalInvested = rows.reduce((s, r) => s + (r.amount || 0), 0);
-      const totalPnl      = rows.reduce((s, r) => s + (r.pnl    || 0), 0);
+      const totalPnl      = rows.reduce((s, r) => s + Number(r._livePnl ?? r.pnl ?? 0), 0);
       const totalPnlPct   = totalInvested ? totalPnl / totalInvested * 100 : 0;
       const totalFees     = rows.reduce((s, r) => s + (r.fees   || 0), 0);
       const pnlCls = totalPnl >= 0 ? 'port-pos' : 'port-neg';
@@ -1679,9 +1704,9 @@ function renderPortPanel(pid) {
         } else if (col.key === 'amount') {
           html += `<td class="r" style="font-weight:700;">$${totalInvested.toFixed(2)}</td>`;
         } else if (col.key === 'pnl') {
-          html += `<td class="r"><span class="${pnlCls}" style="font-weight:700;">${pnlSign}$${totalPnl.toFixed(2)}</span></td>`;
+          html += `<td class="r" data-port-total="${pid}-pnl"><span class="${pnlCls}" style="font-weight:700;">${pnlSign}$${totalPnl.toFixed(2)}</span></td>`;
         } else if (col.key === 'pnlPct') {
-          html += `<td class="r"><span class="${pnlCls}" style="font-weight:700;">${pnlSign}${totalPnlPct.toFixed(2)}%</span></td>`;
+          html += `<td class="r" data-port-total="${pid}-pnlPct"><span class="${pnlCls}" style="font-weight:700;">${pnlSign}${totalPnlPct.toFixed(2)}%</span></td>`;
         } else if (col.key === 'fees') {
           html += `<td class="r" style="color:var(--muted);">$${totalFees.toFixed(2)}</td>`;
         } else {
