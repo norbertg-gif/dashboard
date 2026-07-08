@@ -3744,6 +3744,36 @@ def search_ticker(q: str = ""):
 
 
 
+_CHART_WEEKLY_PERIOD_TO_COUNT = {"1y": 52, "2y": 104, "3y": 156, "5y": 260}
+
+
+def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "1") -> list | None:
+    """Rovnaké OHLCV dáta ako Grafy panel (eToro broker feed z /api/ohlcv) — LEN
+    na vykreslenie sviečok v Analytike. Signály/backtest/predikcia zostávajú
+    počítané z yfinance/Massive (nemenené). Fail-soft: None → volajúci použije
+    pôvodné yfinance sviečky (ticker mimo eToro univerza, proxy nedostupný...)."""
+    try:
+        fetch_period = "5y" if interval == "1wk" else "6mo"
+        payload = get_ohlcv(symbol=sym, period=fetch_period, interval=interval,
+                            indicators="", ha=0, account=account, refresh=1,
+                            limit=count, before="")
+    except Exception:
+        return None
+    rows = payload.get("data") or []
+    out = []
+    for r in rows:
+        o, h, l, c = r.get("open"), r.get("high"), r.get("low"), r.get("close")
+        if None in (o, h, l, c):
+            continue
+        try:
+            ts = int(pd.Timestamp(r["time"]).timestamp())
+        except Exception:
+            continue
+        out.append({"time": ts, "open": o, "high": h, "low": l, "close": c,
+                    "volume": r.get("volume")})
+    return out if len(out) >= 2 else None
+
+
 @app.get("/api/chart")
 def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False):
     import logging
@@ -4199,6 +4229,16 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         except Exception:
             pass
 
+        # Vykresľovacie sviečky = rovnaký eToro broker feed ako Grafy panel
+        # (/api/ohlcv), aby graf v Analytike vyzeral rovnako ako v Grafoch.
+        # Signály/backtest/predikcia vyššie zostávajú počítané z yfinance/Massive
+        # (candles/daily_candles interné premenné) — mení sa len to, čo sa vracia
+        # na vykreslenie. Fail-soft: bez eToro dát (ticker mimo univerza, proxy
+        # nedostupný) ostáva pôvodná yfinance sada.
+        display_candles = _etoro_display_candles(
+            ticker, "1wk", _CHART_WEEKLY_PERIOD_TO_COUNT.get(period, 104)) or candles
+        display_daily_candles = _etoro_display_candles(ticker, "1d", 90) or daily_candles
+
         return {
             "ticker":             ticker.upper(),
             "weights":            opt_weights,
@@ -4211,7 +4251,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "ml_accuracy":        ml_acc,
             "ml_bull_prob":       round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
             "current_week_open":  current_week_open,
-            "daily_candles":      daily_candles,
+            "daily_candles":      display_daily_candles,
             "daily_signal":       round(daily_signal, 3),
             "daily_indicators":   daily_indicators,
             "daily_buy_signals":  daily_buy_signals,
@@ -4223,7 +4263,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             "today_details":      today_details,
             "earnings_dates": sorted(earnings_dates),
             "regime":             regime_info,
-            "candles":     candles,
+            "candles":     display_candles,
             "prediction":  pred,
             "pred_candle": pred_candle,
             "pred_current_candle": pred_current_candle,

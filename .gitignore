@@ -14,3 +14,6 @@ massive_market/
 dashboard_settings.json
 watchlist.json
 company_profiles/
+predictive_signals_log.json
+predictive_signals_archive.json
+predictive_weights_log.json

@@ -281,6 +281,12 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 
 ### Graf
 
+- **Zobrazené sviečky sú rovnaké ako v Grafoch** — obe záložky ukazujú eToro
+  broker feed, takže cena a tvar sviečky v Analytike sedí s tým, čo vidíš pri
+  bežnom grafe alebo na eToro. Signály, backtest a predikcia sa naďalej počítajú
+  z yfinance/Massive histórie (nemenené) — mení sa len to, čo je nakreslené,
+  nie ako sa počíta. Ak ticker nie je na eToro alebo je dátový zdroj dočasne
+  nedostupný, graf sa ticho vráti k pôvodným yfinance sviečkam.
 - Hlavný graf prepína **Weekly / Daily**. V režime Daily možno markery prepnúť
   medzi **Sila** (`2/4`, `3/4`, `4/4`) a **Výnos %** voči aktuálnej cene.
 - **Buy signál markery** (šípky pod sviečkami) — viď farby nižšie.
