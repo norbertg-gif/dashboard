@@ -282,28 +282,43 @@ function initWebSocket() {
 // Cache pozícií pre oba účty { '1': [...], '2': [...] }
 const etoroPositionsAll = { '1': [], '2': [] };
 const etoroPositionsFetchedAt = { '1': 0, '2': 0 };
-const ETORO_POSITIONS_TTL_MS = 60000;
+// 30 min, zrkadlí backend POSITIONS_CACHE_TTL — pri štýle max pár obchodov
+// týždenne sa zoznam pozícií/objednávok mení zriedka, živé ceny idú aj tak
+// nezávisle cez WS. Manuálne obnovenie: ⟳ v Portfóliu (loadPortData force=true).
+const ETORO_POSITIONS_TTL_MS = 30 * 60 * 1000;
 function positionsStale(acct) {
-  return !etoroPositionsAll[acct]?.length || (Date.now() - (etoroPositionsFetchedAt[acct] || 0)) > ETORO_POSITIONS_TTL_MS;
+  // Pozor: NEkontrolovať podľa .length — účet bez otvorených pozícií (0 dlžka)
+  // by inak vyzeral "stale" navždy a fetchoval by sa pri každom otvorení grafu.
+  return !etoroPositionsFetchedAt[acct] || (Date.now() - etoroPositionsFetchedAt[acct]) > ETORO_POSITIONS_TTL_MS;
 }
 
 // Cache čakajúcich objednávok pre oba účty — z toho istého fetchu ako pozície
 // (get_portfolio vracia orders[] vedľa positions[]), žiadne extra API volanie.
 const etoroOrdersAll = { '1': [], '2': [] };
 
-async function loadPositionsForAccount(accountId) {
-  try {
-    const r = await fetch(`${API}/api/etoro/portfolio?account=${accountId}`);
-    if (!r.ok) return [];
-    const data = await r.json();
-    if (typeof preparePortfolioSnapshot === 'function') preparePortfolioSnapshot(data);
-    etoroPositionsAll[accountId] = (data.positions || []).map(p => ({
-      ...p,
-      openDate: p.openDateTime ? p.openDateTime.substring(0, 10) : null,
-      openTimestamp: p.openDateTime || null,
-    }));
-    etoroOrdersAll[accountId] = data.orders || [];
-    etoroPositionsFetchedAt[accountId] = Date.now();
-    return etoroPositionsAll[accountId];
-  } catch(e) { return []; }
+// In-flight dedup: keď viacero panelov naraz zistí "stale" (napr. Load All),
+// nech zdieľajú JEDEN fetch namiesto N súbežných redundantných requestov.
+const _positionsFetchInFlight = { '1': null, '2': null };
+
+async function loadPositionsForAccount(accountId, forceRefresh = false) {
+  if (!forceRefresh && _positionsFetchInFlight[accountId]) return _positionsFetchInFlight[accountId];
+  const p = (async () => {
+    try {
+      const r = await fetch(`${API}/api/etoro/portfolio?account=${accountId}${forceRefresh ? '&refresh=1' : ''}`);
+      if (!r.ok) return [];
+      const data = await r.json();
+      if (typeof preparePortfolioSnapshot === 'function') preparePortfolioSnapshot(data);
+      etoroPositionsAll[accountId] = (data.positions || []).map(p => ({
+        ...p,
+        openDate: p.openDateTime ? p.openDateTime.substring(0, 10) : null,
+        openTimestamp: p.openDateTime || null,
+      }));
+      etoroOrdersAll[accountId] = data.orders || [];
+      etoroPositionsFetchedAt[accountId] = Date.now();
+      return etoroPositionsAll[accountId];
+    } catch(e) { return []; }
+    finally { _positionsFetchInFlight[accountId] = null; }
+  })();
+  _positionsFetchInFlight[accountId] = p;
+  return p;
 }

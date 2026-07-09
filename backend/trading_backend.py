@@ -1601,7 +1601,12 @@ INSTRUMENTS_CACHE_TTL  = 86400  # 24 hodín
 # Cache pre pozície — RAM + disk
 import time
 _positions_cache: dict = {}
-POSITIONS_CACHE_TTL = 120   # sekúnd — refresh každé 2 minúty
+# 30 min: zoznam pozícií/objednávok sa pri bežnom štýle (max niekoľko obchodov
+# týždenne) mení zriedka — živé ceny a P/L idú aj tak nezávisle cez WS tick
+# vrstvu (estimatePositionLivePnl), takže dlhší TTL neznamená zastarané čísla
+# na obrazovke, len menej zbytočných eToro round-tripov pri otváraní grafov.
+# Manuálne obnovenie: ⟳ v Portfóliu posiela refresh=1 a obíde cache úplne.
+POSITIONS_CACHE_TTL = 1800
 
 # Typy nástrojov ktoré chceme (akcie + ETF) — podľa InstrumentTypeID
 # 1=Forex, 2=CFD, 3=Crypto, 4=Commodity, 5=Index, 6=ETF, 7=Stocks
@@ -1954,11 +1959,26 @@ def get_ws_keys(account: str = Query("1")):
         return {"api_key": None, "user_key": None}
 
 
+PORTFOLIO_DISK_CACHE_DIR = CACHE_DIR / "portfolio"
+
+
+def _portfolio_disk_path(account: str):
+    return PORTFOLIO_DISK_CACHE_DIR / f"processed_{account}"
+
+
 @app.get("/api/etoro/portfolio")
 def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
-    """Vracia kompletné portfolio dáta pre portfolio panel — pozície + mirrors."""
-    # Použi cache z positions endpointu ak existuje
+    """Vracia kompletné portfolio dáta pre portfolio panel — pozície + mirrors.
+    RAM cache (POSITIONS_CACHE_TTL) je zálohovaná na disk, aby cold start
+    (Render free tier po nečinnosti) nemusel vždy čakať na live eToro round-trip —
+    poslednou známy stav sa načíta z disku hneď pri prvom requeste po reštarte."""
+    disk_path = _portfolio_disk_path(account)
     cached = _positions_cache.get(account)
+    if not cached:
+        disk = cache_read(disk_path)
+        if disk:
+            _positions_cache[account] = disk
+            cached = disk
     if cached and not refresh and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
         return {"positions": cached["data"], "summary": cached["summary"],
                 "mirrors": cached.get("mirrors", []),
@@ -1971,6 +1991,12 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
+        # Stale-while-erroring: eToro proxy výpadok nesmie zhodiť graf/portfólio,
+        # keď máme (aj staršie) dáta z predošlého úspešného fetchu.
+        if cached:
+            return {"positions": cached["data"], "summary": cached["summary"],
+                    "mirrors": cached.get("mirrors", []),
+                    "orders": cached.get("orders", []), "cached": True, "stale": True}
         raise HTTPException(502, f"eToro proxy nedostupný: {e}")
 
     port = data.get("clientPortfolio", {})
@@ -2114,6 +2140,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
 
     _positions_cache[account] = {"data": result, "summary": summary, "mirrors": mirrors,
                                  "orders": orders, "ts": time.time()}
+    cache_write(disk_path, _positions_cache[account])
     return {"positions": result, "summary": summary, "mirrors": mirrors,
             "orders": orders, "cached": False}
 

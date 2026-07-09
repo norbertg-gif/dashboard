@@ -222,6 +222,7 @@
   <ul>
     <li><strong>Account 1 / Account 2</strong> prepína účet. Filtre Akcie, ETF, Krypto, Forex a Smart/Copy obmedzia zobrazenie.</li>
     <li><strong>Per ticker</strong> zlúči všetky obchody rovnakého titulu. Klik na ticker otvorí jeho jednotlivé pozície. <strong>Per trade</strong> ukáže každý obchod osobitne.</li>
+    <li>Zoznam pozícií a objednávok sa cachuje <strong>30 minút</strong> (server aj prehliadač) — mení sa zriedka pri obchodovaní max. pár krát týždenne; živá cena a P/L bežia nezávisle cez WebSocket. <strong>⟳</strong> v lište vynúti čerstvé dáta z eToro a prejaví sa aj v otvorených grafoch.</li>
     <li>Klik na <strong>logo/ticker</strong> otvorí graf v bočnom <strong>Chart docku</strong> vpravo — rovnaký panel ako v Grafoch (indikátory, wizard, news), bez opustenia Portfólia. Zavrie sa krížikom v hlavičke docku, šírka sa dá ťahať za ľavý okraj.</li>
     <li><strong>Čakajúce objednávky</strong> — zbaliteľná sekcia pod tabuľkou pozícií: limitky aj market objednávky čakajúce na exekúciu. Ukazuje smer, cieľovú cenu, aktuálnu cenu (live), <strong>vzdialenosť v %</strong> k vyplneniu (zvýrazní sa pod 1 %), sumu, SL/TP a dátum. Dáta sú z rovnakého eToro payloadu ako pozície — žiadne extra API volania; čakajúce sumy sú už súčasťou Invested.</li>
     <li>Názov <strong>browser tabu</strong> sa mení podľa otvorenej záložky (<code>TD · Portfólio</code>, v Analytike aj s tickerom) — pri viacerých oknách dashboardu je hneď vidno, kde čo je.</li>

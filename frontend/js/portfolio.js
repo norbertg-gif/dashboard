@@ -954,13 +954,13 @@ function loadPortStateFromStorage(pid) {
   } catch(e) {}
 }
 
-async function loadPortData(pid) {
+async function loadPortData(pid, forceRefresh = false) {
   const s = getPortState(pid);
   if (s.loading) return;
   s.loading = true;
   renderPortPanel(pid);
   try {
-    const r = await fetch(`${API}/api/etoro/portfolio?account=${s.account}`);
+    const r = await fetch(`${API}/api/etoro/portfolio?account=${s.account}${forceRefresh ? '&refresh=1' : ''}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     s.data = await r.json();
     preparePortfolioSnapshot(s.data);
@@ -968,6 +968,15 @@ async function loadPortData(pid) {
     rememberLiveInstruments(s.data.orders);   // WS live ceny aj pre tickery limitiek
     await hydrateOrderRates(s.data, s.account);
     portfolioAccountData[String(s.account)] = s.data;
+    // Force refresh nech je vidieť aj v grafoch (etoroPositionsAll/etoroOrdersAll
+    // sú samostatná cache pre chart panely) — inak by graf ešte 30 min ukazoval
+    // staré objednávky/pozície, hoci Portfólio už má čerstvé dáta.
+    if (forceRefresh) {
+      const acct = String(s.account);
+      etoroPositionsAll[acct] = s.data.positions || [];
+      etoroOrdersAll[acct] = s.data.orders || [];
+      etoroPositionsFetchedAt[acct] = Date.now();
+    }
     updateHeaderEquities();
   } catch(e) {
     s.data = { error: e.message };
@@ -1639,7 +1648,7 @@ function renderPortPanel(pid) {
   html += `<button class="port-cols-btn" onclick="portToggleColDrop('${pid}')">⚙ Stĺpce</button>`;
   html += `<button class="port-cols-btn" onclick="portSaveCols('${pid}')" title="Uložiť konfiguráciu stĺpcov" style="border-color:var(--green);color:var(--green);">💾</button>`;
   html += `<button class="port-export-btn" onclick="exportPortCSV('${pid}')">↓ CSV</button>`;
-  html += `<button class="port-export-btn" onclick="loadPortData('${pid}')" style="color:var(--blue);">⟳</button>`;
+  html += `<button class="port-export-btn" onclick="loadPortData('${pid}', true)" title="Vynútiť čerstvé dáta z eToro (obíde cache)" style="color:var(--blue);">⟳</button>`;
   html += `</div></div></div></div>`;
 
   // Summary bar

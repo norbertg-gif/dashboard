@@ -142,6 +142,11 @@ SLEDOVANIE · BACKTEST · EXPORT).
   účtu. P/L a Equity sa medzi eToro snapshotmi prepočítavajú z live cien.
 - Account 1/2, typ aktíva a Per ticker/Per trade menia pohľad, nie samotné
   eToro dáta. Per ticker agreguje viac obchodov; Per trade ich rozbalí.
+- **Zoznam pozícií a objednávok sa cachuje 30 minút** (server aj prehliadač) —
+  pri obchodovaní max. pár krát týždenne sa mení zriedka a netreba ho ťahať
+  z eToro pri každom otvorení grafu. Live cena a P/L sa aj tak prepočítavajú
+  priebežne cez WebSocket nezávisle od tejto cache. Tlačidlo **⟳** v lište
+  Portfólia vynúti čerstvé dáta z eToro a prejaví sa aj v Grafoch/Analytike.
 - **Klik na logo/ticker** v Portfóliu otvorí graf v bočnom **Chart docku**
   vpravo — presne v štýle záložky Grafy (indikátory, wizard, news, watchlist
   tlačidlo), bez opustenia Portfólia. Panel sa dá zavrieť krížikom v hlavičke
