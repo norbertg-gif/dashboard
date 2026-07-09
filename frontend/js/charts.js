@@ -1692,6 +1692,12 @@ async function loadChart(id, opts = {}) {
     r._rawChartData = [];
     r._chartData = [];
     r.hasMoreHistory = false;
+    // Mover live-patch (Top pohyby) platí len pre ticker, ktorým bol panel
+    // vytvorený — inak reused panel (watchlist klik/zmena symbolu) prilepí
+    // starú mover cenu iného tickera na poslednú sviečku nového (viditeľný spike).
+    r.moverChangePct = null;
+    r.moverLastPrice = null;
+    r.moverPriceSource = null;
   }
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
