@@ -287,6 +287,10 @@ function positionsStale(acct) {
   return !etoroPositionsAll[acct]?.length || (Date.now() - (etoroPositionsFetchedAt[acct] || 0)) > ETORO_POSITIONS_TTL_MS;
 }
 
+// Cache čakajúcich objednávok pre oba účty — z toho istého fetchu ako pozície
+// (get_portfolio vracia orders[] vedľa positions[]), žiadne extra API volanie.
+const etoroOrdersAll = { '1': [], '2': [] };
+
 async function loadPositionsForAccount(accountId) {
   try {
     const r = await fetch(`${API}/api/etoro/portfolio?account=${accountId}`);
@@ -298,6 +302,7 @@ async function loadPositionsForAccount(accountId) {
       openDate: p.openDateTime ? p.openDateTime.substring(0, 10) : null,
       openTimestamp: p.openDateTime || null,
     }));
+    etoroOrdersAll[accountId] = data.orders || [];
     etoroPositionsFetchedAt[accountId] = Date.now();
     return etoroPositionsAll[accountId];
   } catch(e) { return []; }

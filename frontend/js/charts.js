@@ -836,7 +836,7 @@ function createPanel(cfg) {
     viewRange: initialViewRange,
     suppressViewSave: false,
     viewSaveTimer: null,
-    lastWizardData: null, avgPriceLine: null, entryPriceLines: [], etoroPct: null,
+    lastWizardData: null, avgPriceLine: null, entryPriceLines: [], orderPriceLines: [], etoroPct: null,
     abortController: null, loadSeq: 0,
     _rawChartData: [], hasMoreHistory: false, historyLoading: false,
     _markerMeta: {},
@@ -1487,13 +1487,37 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
   }
   r.entryPriceLines = [];
+  if (r.orderPriceLines) {
+    r.orderPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
+  }
+  r.orderPriceLines = [];
   r._etoroMarkersList = [];
 
   // Načítaj pozície pre oba účty ak ešte nie sú, alebo ak je cache staršia než ETORO_POSITIONS_TTL_MS
+  // (rovnaký fetch dopĺňa aj etoroOrdersAll — žiadne extra volanie)
   const accts = ['1', '2'];
   for (const acct of accts) {
     if (positionsStale(acct)) {
       await loadPositionsForAccount(acct);
+    }
+  }
+
+  // Čakajúce objednávky pre tento ticker (oba účty) — jemná žltá čiara na
+  // cieľovej cene, nezávislé od toho, či titul aj reálne držíš.
+  for (const acct of accts) {
+    const orders = (etoroOrdersAll[acct] || []).filter(o => o.symbol === symbol && Number(o.rate) > 0);
+    for (const o of orders) {
+      try {
+        const pl = r.candleSeries.createPriceLine({
+          price:            Number(o.rate),
+          color:            CHART_COLORS.pendingDim,
+          lineWidth:        1,
+          lineStyle:        LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title:            'Order' + (acct === '2' ? ' ·2' : ''),
+        });
+        r.orderPriceLines.push(pl);
+      } catch(e) {}
     }
   }
 

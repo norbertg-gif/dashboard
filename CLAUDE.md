@@ -348,6 +348,23 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   `N× · $invested · ±P/L` — invested je `live.amount` z
   `getPortfolioLiveAggregateForSymbol` (súčet `pos.amount` cez oba účty,
   rovnaká agregácia ako P/L), formát `toLocaleString('sk-SK')` bez desatín.
+- **Čakajúca objednávka na grafe — jemná žltá čiara.** `etoroOrdersAll` (`live.js`,
+  vedľa `etoroPositionsAll`) sa plní z toho istého `/api/etoro/portfolio` fetchu
+  ako pozície (`loadPositionsForAccount`), žiadne extra API volanie. Line sa
+  kreslí pre KAŽDÝ ticker s objednávkou, nezávisle od toho, či ho aj držíš —
+  v `charts.js` `applyEtoroMarkers()` (Grafy panely + chart dock, zdieľaný
+  `createPanel`) je preto pred "no positions → return" vetvou, inak by sa
+  objednávka bez pozície nikdy nevykreslila. V `predictive.js` je duplicitne pre
+  weekly (`pc_realSeries`, `renderCharts()`) aj daily (`pc_dailyMainSeries`,
+  `renderDailyMain()`). Market order bez `rate` (0/null) sa ticho preskočí —
+  nedá sa nakresliť čiara bez cieľovej ceny. Farba `CHART_COLORS.pendingDim`
+  (`#f59e0b66`, poloпriehľadný amber), `LineStyle.Dotted` — odlíšené od
+  pozičných čiar (`Dashed`, plná farba účtu). **Čistenie pretrvávajúcich sérií:**
+  `pc_realSeries`/`r.candleSeries` (chart panely) žijú medzi reloadmi tickera,
+  takže staré čiary sa MUSIA explicitne zmazať (`removePriceLine`) pred
+  pridaním nových — `r.orderPriceLines`/`pc_orderPriceLines` polia na to;
+  `renderDailyMain()` naopak celý chart/sériu vytvára nanovo pri každom
+  volaní, takže tam čistenie netreba.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Removed virtual trading bot

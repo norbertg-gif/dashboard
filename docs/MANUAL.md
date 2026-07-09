@@ -152,6 +152,8 @@ SLEDOVANIE · BACKTEST · EXPORT).
   Dáta idú z toho istého eToro portfólio payloadu ako pozície — žiadne extra
   API volania. Súčet čakajúcich súm je už započítaný v Invested (eToro ich
   drží mimo voľného cash). Klik na riadok otvorí graf, logo otvorí chart dock.
+  Tá istá objednávka sa zobrazí aj priamo v grafe daného titulu (Grafy aj
+  Analytika) ako jemná žltá čiara — pozri sekciu Graf.
 - Názov **browser tabu** sa mení podľa otvorenej záložky (`TD · Grafy`,
   `TD · Portfólio`, …; v Analytike aj s tickerom) — pri viacerých oknách
   dashboardu je hneď vidno, kde čo je.
@@ -293,6 +295,12 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
 - **eToro kolieska** — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa
   malé krúžky pod sviečkou v ktorej bola pozícia otvorená (zelená = v zisku,
   červená = v strate, odlíšené podľa účtu).
+- **Čakajúca objednávka** — ak má ticker v niektorom eToro účte čakajúcu
+  objednávku (limitku alebo market order čakajúci na exekúciu), na grafe sa
+  objaví jemná bodkovaná žltá čiara na cieľovej cene. Nezávisí od toho, či
+  titul aj reálne držíš — slúži na to, aby si pri prezeraní grafu hneď videl,
+  že si naň už niekde zadal objednávku a prípadne ju prehodnotil. Market
+  objednávka bez pevnej ceny čiaru nemá (nedá sa nakresliť bez cieľa).
 - Hover nad eToro kolieskom, buy šípkou alebo pattern markerom zobrazí presný
   detail markera. Tooltip používa natívny LWC hit-testing, takže sa nezobrazí
   iba preto, že kurzor prešiel cez sviečku s rovnakým dátumom.

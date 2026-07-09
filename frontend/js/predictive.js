@@ -230,6 +230,7 @@ function togglePredictiveModelChart() {
 
 let pc_realChartInst = null, pc_predChartInst = null;
 let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testing)
+let pc_orderPriceLines = [];   // čakajúce objednávky na hlavnom weekly grafe — treba čistiť medzi reloadmi (pc_realSeries pretrváva)
 
 let pc_realSeries = null, pc_predSeries = null;
 let pc_realVolSeries = null;
@@ -704,6 +705,28 @@ function renderCharts(data) {
     });
   }
   setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
+
+  // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
+  // pc_realSeries pretrváva medzi reloadmi (initCharts beží raz), takže staré
+  // čiary treba explicitne zmazať — na rozdiel od markerov nejde o deklaratívny setData.
+  pc_orderPriceLines.forEach(pl => { try { pc_realSeries.removePriceLine(pl); } catch(e) {} });
+  pc_orderPriceLines = [];
+  for (const acct of ['1', '2']) {
+    const orders = (etoroOrdersAll[acct] || []).filter(o => o.symbol === ticker && Number(o.rate) > 0);
+    for (const o of orders) {
+      try {
+        const pl = pc_realSeries.createPriceLine({
+          price:            Number(o.rate),
+          color:            CHART_COLORS.pendingDim,
+          lineWidth:        1,
+          lineStyle:        LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title:            'Order' + (acct === '2' ? ' ·2' : ''),
+        });
+        pc_orderPriceLines.push(pl);
+      } catch(e) {}
+    }
+  }
   if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
@@ -1849,6 +1872,26 @@ function renderDailyMain(data) {
   });
   pc_dailyMainSeries = cs;
   cs.setData(data.daily_candles);
+
+  // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
+  // Celý chart/séria sa tu vytvára nanovo pri každom volaní, takže staré
+  // čiary netreba čistiť (na rozdiel od weekly pc_realSeries).
+  const dailyTicker = (data.ticker || document.getElementById('tickerInput')?.value || '').trim().toUpperCase();
+  for (const acct of ['1', '2']) {
+    const orders = (etoroOrdersAll[acct] || []).filter(o => o.symbol === dailyTicker && Number(o.rate) > 0);
+    for (const o of orders) {
+      try {
+        cs.createPriceLine({
+          price:            Number(o.rate),
+          color:            CHART_COLORS.pendingDim,
+          lineWidth:        1,
+          lineStyle:        LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title:            'Order' + (acct === '2' ? ' ·2' : ''),
+        });
+      } catch(e) {}
+    }
+  }
 
   const ind = data.daily_indicators || {};
   if (ind.ema20 && ind.ema20.length) {

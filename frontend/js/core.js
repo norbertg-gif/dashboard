@@ -16,7 +16,7 @@ const API = (window.location.hostname === 'localhost' || window.location.hostnam
 const CHART_COLORS = {
   up: '#26a69a', down: '#ef5350',
   upDim: '#26a69a55', downDim: '#ef535055',
-  neutral: '#94a3b8', pending: '#f59e0b',
+  neutral: '#94a3b8', pending: '#f59e0b', pendingDim: '#f59e0b66',
 };
 
 // instrumentId cache: symbol -> id (immutable)
