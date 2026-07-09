@@ -365,6 +365,15 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   pridaním nových — `r.orderPriceLines`/`pc_orderPriceLines` polia na to;
   `renderDailyMain()` naopak celý chart/sériu vytvára nanovo pri každom
   volaní, takže tam čistenie netreba.
+- **Chart order badge** (`renderChartOrderBadge`, len `charts.js` — čiara vidno
+  aj v Analytike, ale panel info riadok je len v Grafoch/chart docku): pod
+  `.p-pos-badge` v info riadku panelu (`Order: cena` / `Orders: cena1, cena2 ·2`
+  keď je viac objednávok na ten istý ticker) — vertikálny scroll v LWC nie je,
+  takže žltá čiara na grafe môže byť mimo viditeľnej oblasti; badge je odpoveď
+  na to, nie zmena grafu. Rovnaký `Number(o.rate) > 0` filter ako čiara (market
+  order bez ceny sa nezobrazí). Patchované v `updateChartLiveBadges()` presne
+  ako `p-pos-badge` (insert/replace/remove pri každom reloade), aj v initial
+  `infoEl.innerHTML` render.
 - **Scanner insider badge:** zatiaľ NEIMPLEMENTOVANÝ — batch cez 100 tickerov treba riešiť šetrne (sekvenčný worker ako breadth), nie per-row fetch.
 
 ## Removed virtual trading bot

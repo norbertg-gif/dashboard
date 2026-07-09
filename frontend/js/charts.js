@@ -409,6 +409,20 @@ function renderChartPositionBadge(sym) {
          </span>`;
 }
 
+function renderChartOrderBadge(sym) {
+  const items = [];
+  for (const acct of ['1', '2']) {
+    for (const o of (etoroOrdersAll?.[acct] || [])) {
+      if (o.symbol === sym && Number(o.rate) > 0) items.push({ acct, rate: Number(o.rate) });
+    }
+  }
+  if (!items.length) return '';
+  const label = items.length > 1 ? 'Orders' : 'Order';
+  const text = items.map(it => `${fmtPrice(it.rate)}${it.acct === '2' ? ' ·2' : ''}`).join(', ');
+  return `<span class="p-order-badge" style="font-family:var(--font-mono);font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;background:${CHART_COLORS.pending}22;color:var(--yellow);border:1px solid ${CHART_COLORS.pending}44;"
+           title="Čakajúca objednávka na tento ticker (cieľová cena)">${label}: ${text}</span>`;
+}
+
 function updateChartLiveBadges(id) {
   const panel = document.getElementById(id);
   const r = registry[id];
@@ -437,6 +451,17 @@ function updateChartLiveBadges(id) {
     if (cnts) cnts.insertAdjacentHTML('beforebegin', html);
   } else if (oldBadge && !html) {
     oldBadge.remove();
+  }
+
+  const oldOrderBadge = panel.querySelector('.p-order-badge');
+  const orderHtml = renderChartOrderBadge(sym);
+  if (oldOrderBadge && orderHtml) {
+    oldOrderBadge.outerHTML = orderHtml;
+  } else if (!oldOrderBadge && orderHtml) {
+    const cnts = panel.querySelector('.p-cnts');
+    if (cnts) cnts.insertAdjacentHTML('beforebegin', orderHtml);
+  } else if (oldOrderBadge && !orderHtml) {
+    oldOrderBadge.remove();
   }
   applyChartPortfolioFlag(id);
 }
@@ -1863,6 +1888,7 @@ async function loadChart(id, opts = {}) {
            title="Otvoriť na eToro">${ePct>=0?'+':''}${ePct.toFixed(2)}% eToro ↗</a>`
       : '';
     const ePosBadge = _portfolioLive?.count ? renderChartPositionBadge(sym) : '';
+    const eOrderBadge = renderChartOrderBadge(sym);
     infoEl.innerHTML = `
       ${(name&&name!==sym)?`<span class="p-name">${name}</span>`:''}
       <span class="p-price">${fmtPrice(last.close)}</span>
@@ -1870,6 +1896,7 @@ async function loadChart(id, opts = {}) {
       ${haBadge}
       ${eBadge}
       ${ePosBadge}
+      ${eOrderBadge}
       <span class="p-cnts">${data.length} sviečok</span>
     `;
     // Aktualizuj Trade tlačidlo v panel headeri

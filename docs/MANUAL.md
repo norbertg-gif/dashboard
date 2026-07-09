@@ -121,6 +121,11 @@ SLEDOVANIE · BACKTEST · EXPORT).
   **Analytika** (rovnaké správanie ako klik na ticker v Scanneri).
 - Ak titul držíš, panel ukazuje badge `N× · $suma · ±P/L` — počet otvorených
   obchodov, **celkovú investovanú sumu** a agregovaný otvorený zisk/stratu.
+- Ak má ticker čakajúcu objednávku, panel navyše ukazuje žltý badge
+  `Order: cena` (alebo `Orders: cena1, cena2 ·2`, keď je objednávok na ten istý
+  titul viac naraz — druhý účet má značku `·2`). Je to doplnok k žltej čiare
+  priamo v grafe — grafy sa nedajú vertikálne posúvať, takže čiara môže byť
+  mimo viditeľnej oblasti; badge cenu ukáže vždy, bez ohľadu na zoom.
 - **EMA** ukazuje krátkodobý/strednodobý trend, **Ichimoku** trend a zóny,
   **RSI** prekúpenosť/prepredanosť, **ADX** silu trendu a **MACD** momentum.
 - **Volume Profile** ukazuje objem podľa ceny za práve viditeľný úsek:
