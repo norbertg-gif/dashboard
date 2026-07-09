@@ -282,10 +282,11 @@ function initWebSocket() {
 // Cache pozícií pre oba účty { '1': [...], '2': [...] }
 const etoroPositionsAll = { '1': [], '2': [] };
 const etoroPositionsFetchedAt = { '1': 0, '2': 0 };
-// 30 min, zrkadlí backend POSITIONS_CACHE_TTL — pri štýle max pár obchodov
-// týždenne sa zoznam pozícií/objednávok mení zriedka, živé ceny idú aj tak
-// nezávisle cez WS. Manuálne obnovenie: ⟳ v Portfóliu (loadPortData force=true).
-const ETORO_POSITIONS_TTL_MS = 30 * 60 * 1000;
+// 24h (2026-07-09, raised from 30 min), zrkadlí backend POSITIONS_CACHE_TTL —
+// pri štýle max pár obchodov týždenne sa zoznam pozícií/objednávok mení
+// zriedka, živé ceny idú aj tak nezávisle cez WS. Manuálne obnovenie:
+// ⟳ v Portfóliu (loadPortData force=true).
+const ETORO_POSITIONS_TTL_MS = 24 * 60 * 60 * 1000;
 function positionsStale(acct) {
   // Pozor: NEkontrolovať podľa .length — účet bez otvorených pozícií (0 dlžka)
   // by inak vyzeral "stale" navždy a fetchoval by sa pri každom otvorení grafu.

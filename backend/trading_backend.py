@@ -1601,12 +1601,13 @@ INSTRUMENTS_CACHE_TTL  = 86400  # 24 hodín
 # Cache pre pozície — RAM + disk
 import time
 _positions_cache: dict = {}
-# 30 min: zoznam pozícií/objednávok sa pri bežnom štýle (max niekoľko obchodov
-# týždenne) mení zriedka — živé ceny a P/L idú aj tak nezávisle cez WS tick
-# vrstvu (estimatePositionLivePnl), takže dlhší TTL neznamená zastarané čísla
-# na obrazovke, len menej zbytočných eToro round-tripov pri otváraní grafov.
+# 24h (2026-07-09, raised from 30 min): zoznam pozícií/objednávok sa pri
+# bežnom štýle (max niekoľko obchodov týždenne) mení zriedka — živé ceny a P/L
+# idú aj tak nezávisle cez WS tick vrstvu (estimatePositionLivePnl), takže
+# dlhší TTL neznamená zastarané čísla na obrazovke, len menej zbytočných
+# eToro round-tripov pri otváraní grafov.
 # Manuálne obnovenie: ⟳ v Portfóliu posiela refresh=1 a obíde cache úplne.
-POSITIONS_CACHE_TTL = 1800
+POSITIONS_CACHE_TTL = 86400
 
 # Typy nástrojov ktoré chceme (akcie + ETF) — podľa InstrumentTypeID
 # 1=Forex, 2=CFD, 3=Crypto, 4=Commodity, 5=Index, 6=ETF, 7=Stocks
