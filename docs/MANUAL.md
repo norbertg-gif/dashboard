@@ -58,7 +58,7 @@ SLEDOVANIE · BACKTEST · EXPORT).
 | **Farebná obruba grafu** | Ak je ticker otvoreného grafu v niektorom eToro portfóliu, panel má jemnú zeleno-tyrkysovú obrubu. Nerozlišuje účet, iba fakt, že titul už držíš. |
 | **STĹPCE (1–4)** | Počet stĺpcov v mriežke grafov. |
 | **Ucet 1 / Ucet 2 equity** | Live equity oboch eToro portfólií prepočítaná rovnakou logikou ako Portfólio tab. |
-| **Basic / Advanced** | Basic schová diagnostický šum a pokročilé pomocné vrstvy; Advanced zobrazí všetko. Výpočty a dáta sú rovnaké v oboch módoch. |
+| **Basic / Advanced** | Basic schová diagnostický šum a v Analytike načíta ľahší dátový balík; Advanced zobrazí a dopočíta všetky analytické vrstvy. |
 | **⚙** | Nastavenia prahov: DCA (strata %, min. DIP, max. váha), Pozornosť (denný pohyb %), earnings varovanie (dni). Uložené na serveri — platia pre DCA kartu, Investor Inbox aj filter Pozornosť naraz, bez redeployu. |
 | **🌙** | Prepínač témy (tmavá/svetlá). |
 | **OK + čas** | Indikátor stavu spojenia a čas posledného úspešného načítania. |
@@ -215,8 +215,11 @@ indikátorov, prognózu modelu, vstupnú zónu a detailné chart-pattern filtre.
 V pravom paneli ostávajú najbližšie earnings, firma & očakávania a relatívna
 sila. Záložka História je v Basic skrytá.
 
-**Advanced** zobrazuje všetky diagnostické vrstvy. Režim nemení výpočty,
-scoring, portfólio účtovníctvo ani cache; mení iba viditeľnosť UI.
+**Advanced** zobrazuje všetky diagnostické vrstvy. V Analytike sa Basic zámerne
+vyhne ML/HMM, segmentovej 90D analytike a detailným váham/hit-rate; graf, setup,
+história signálov a percento úspešnosti ostávajú dostupné. Prepnutie na Advanced
+plný balík automaticky donačíta. Režim nemení C1–C4, portfólio účtovníctvo ani
+uložené signály.
 
 ### Ovládanie grafov a markerov
 

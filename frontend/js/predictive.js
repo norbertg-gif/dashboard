@@ -264,8 +264,6 @@ let pc_dailyMainInst = null;
 let pc_dailyMainRO = null;   // ResizeObserver — disconnect pred recreate, inak sa hromadia (renderDailyMain beží pri kazdom loade/view switchi)
 let pc_dailyMainSeries = null;
 let pc_currentView = 'weekly';
-let pc_oppLoading = false;
-let pc_oppLoadedAt = 0;
 let pc_scannerPollTimer = null;
 let pc_scannerLoading = false;
 let pc_signalSegmentHorizon = 90;
@@ -2294,7 +2292,8 @@ async function loadData(reoptimize = false) {
   document.getElementById('indInfo').innerHTML  = '<div class="loading"><div class="spinner"></div></div>';
 
   try {
-    const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}`);
+    const detail = isAdvancedUiMode() ? 'advanced' : 'basic';
+    const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}`);
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail || res.statusText);

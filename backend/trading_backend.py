@@ -121,6 +121,7 @@ def admin_memory():
         },
         "cache_sizes": {
             "model": len(_MODEL_CACHE) if "_MODEL_CACHE" in globals() else None,
+            "backtest": len(_BACKTEST_CACHE) if "_BACKTEST_CACHE" in globals() else None,
             "yf": len(_YF_CACHE) if "_YF_CACHE" in globals() else None,
             "disk_mem": len(_cache_mem) if "_cache_mem" in globals() else None,
             "positions": len(_positions_cache) if "_positions_cache" in globals() else None,
@@ -1090,6 +1091,35 @@ def run_backtest(df, weights: dict = None):
         "indicator_hit_rate":     ind_hit,
         "detail":                 results,
     }
+
+
+# Backtest je CPU-heavy walk-forward slučka. Držíme iba niekoľko posledných
+# výsledkov; kľúč sa zmení pri novej weekly sviečke alebo zmene váh.
+_BACKTEST_CACHE: dict = {}
+_BACKTEST_CACHE_LOCK = threading.Lock()
+_BACKTEST_CACHE_MAX = 8 if _LOW_MEMORY else 24
+
+
+def run_backtest_cached(df, weights: dict = None):
+    effective = weights or DEFAULT_WEIGHTS
+    weight_key = tuple(sorted((str(k), round(float(v), 6)) for k, v in effective.items()))
+    try:
+        last_key = str(pd.Timestamp(df.index[-1]).date())
+    except Exception:
+        last_key = str(len(df))
+    key = (last_key, len(df), weight_key)
+    with _BACKTEST_CACHE_LOCK:
+        cached = _BACKTEST_CACHE.get(key)
+        if cached is not None:
+            return cached
+    result = run_backtest(df, weights=effective)
+    with _BACKTEST_CACHE_LOCK:
+        if len(_BACKTEST_CACHE) >= _BACKTEST_CACHE_MAX:
+            oldest = next(iter(_BACKTEST_CACHE), None)
+            if oldest is not None:
+                _BACKTEST_CACHE.pop(oldest, None)
+        _BACKTEST_CACHE[key] = result
+    return result
 
 # ── Serialize ─────────────────────────────────────────────────────────────────
 
@@ -3780,17 +3810,23 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
 
 
 @app.get("/api/chart")
-def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False):
+def get_chart(
+    ticker: str = "AAPL",
+    period: str = "2y",
+    reoptimize: bool = False,
+    detail: str = "advanced",
+):
     import logging
-    logging.warning(f"[CHART] Request received: ticker={ticker} period={period}")
-    print(f"[CHART] Request: {ticker} {period}", flush=True)
+    detail_mode = "advanced" if str(detail).lower() == "advanced" else "basic"
+    logging.warning(f"[CHART] Request received: ticker={ticker} period={period} detail={detail_mode}")
+    print(f"[CHART] Request: {ticker} {period} {detail_mode}", flush=True)
     try:
         # Zdieľaná 30-min yf cache (rovnaká ako scanner/RS) — opakované otvorenie
         # tickera neťahá yfinance znova. prefer_massive=False + munge_dots=False
         # zachovávajú pôvodné správanie (yfinance primárny, bodkové LSE tickery).
         raw = _yf_download_cached(ticker, period, "1wk",
                                   prefer_massive=False, munge_dots=False)
-        if isinstance(raw.columns, pd.MultiIndex):
+        if raw is not None and isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
         if raw is None or raw.empty:
             # yfinance zlyhal (rate-limit/timeout) → skús Massive ako záchranu
@@ -3819,13 +3855,9 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         df      = add_indicators(raw)
         candles = df_to_candles(df)
 
-        # Run backtest with default weights first to get hit rates
-        print("[CHART] Step 6: starting backtest...", flush=True)
-        bt_default = run_backtest(df, weights=DEFAULT_WEIGHTS)
-        print("[CHART] Step 7: backtest done", flush=True)
-
-        # Derive weights from hit rate on test set
-        hit_rate = bt_default.get("indicator_hit_rate", {})
+        # Bežné otvorenie používa posledné uložené váhy a iba jeden backtest.
+        # Dvojitý default→optimalizovaný beh sa spustí výhradne po explicitnom
+        # kliknutí na „Prepočítať váhy“ (reoptimize=1).
         keys     = ["ema", "rsi", "macd", "vol", "ichi", "stoch"]
 
         def hit_rate_weights(hit_rate, keys, floor=0.05, cap_below=0.10, cap_above=0.50):
@@ -3878,29 +3910,44 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                 w[best] = round(w[best] + diff, 4)
             return w
 
-        log        = load_weights_log()
+        log = load_weights_log()
         ticker_key = ticker.upper()
+        saved_entry = log.get(ticker_key, {}) if isinstance(log.get(ticker_key), dict) else {}
+        saved_weights = saved_entry.get("weights")
+        if isinstance(saved_weights, dict) and all(k in saved_weights for k in keys):
+            final_weights = {k: float(saved_weights[k]) for k in keys}
+            weights_source = "stored-hit-rate"
+        else:
+            final_weights = DEFAULT_WEIGHTS.copy()
+            weights_source = "default"
 
-        print("[CHART] Step 8: weights...", flush=True)
-        try:
-            print(f"[CHART] hit_rate = {hit_rate}", flush=True)
-            final_weights = hit_rate_weights(hit_rate, keys)
-            weights_source = "hit-rate"
+        bt_default = None
+        if reoptimize:
+            print("[CHART] Step 6: recalculating indicator weights...", flush=True)
+            bt_default = run_backtest_cached(df, weights=DEFAULT_WEIGHTS)
+            try:
+                hit_rate = bt_default.get("indicator_hit_rate", {})
+                final_weights = hit_rate_weights(hit_rate, keys)
+                weights_source = "hit-rate"
+            except Exception as e_w:
+                print(f"[CHART] weights error: {e_w}, using defaults", flush=True)
+                final_weights = DEFAULT_WEIGHTS.copy()
+                weights_source = "default"
+
+        print(f"[CHART] Step 7: backtest ({weights_source})...", flush=True)
+        backtest = run_backtest_cached(df, weights=final_weights)
+        print("[CHART] Step 8: backtest done", flush=True)
+
+        if reoptimize:
             log[ticker_key] = {
-                "weights":      final_weights,
+                "weights": final_weights,
                 "optimized_at": pd.Timestamp.now("UTC").tz_localize(None).strftime("%Y-%m-%d"),
-                "candles":      len(df),
+                "candles": len(df),
+                "accuracy_default": bt_default.get("direction_accuracy") if bt_default else None,
+                "accuracy_optimized": backtest.get("direction_accuracy"),
             }
             save_weights_log(log)
-        except Exception as e_w:
-            print(f"[CHART] weights error: {e_w}, using defaults", flush=True)
-            final_weights  = DEFAULT_WEIGHTS.copy()
-            weights_source = "default"
-        print(f"[CHART] Step 8 done: {weights_source}", flush=True)
-
-        print("[CHART] Step 9: final backtest...", flush=True)
-        backtest    = run_backtest(df, weights=final_weights)
-        print("[CHART] Step 10: backtest2 done", flush=True)
+            saved_entry = log[ticker_key]
 
         # Cache key pre ML + HMM: kým je posledná uzavretá sviečka rovnaká,
         # výsledok fitu je identický → cacheujeme do najbližšej novej sviečky.
@@ -3910,7 +3957,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             _model_key = None
 
         print("[CHART] Step 11: ML training...", flush=True)
-        if ENABLE_PREDICTIVE_ML:
+        if detail_mode == "advanced" and ENABLE_PREDICTIVE_ML:
             try:
                 _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
                 print("[CHART] Step 12: ML done", flush=True)
@@ -3921,7 +3968,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             print("[CHART] Step 12: ML skipped (ENABLE_PREDICTIVE_ML=0)", flush=True)
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
-        if ENABLE_PREDICTIVE_HMM:
+        if detail_mode == "advanced" and ENABLE_PREDICTIVE_HMM:
             try:
                 regime_info = detect_market_regime(df, cache_key=_model_key)
             except Exception as e:
@@ -3930,8 +3977,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             regime_info = {"label": "disabled", "disabled": True,
                            "reason": "ENABLE_PREDICTIVE_HMM=0"}
 
-        pred        = predict_next_candle(df, weights=final_weights, ml_bull_prob=ml_bull_prob)
-        pred_default = predict_next_candle(df, weights=DEFAULT_WEIGHTS)
+        pred = predict_next_candle(df, weights=final_weights, ml_bull_prob=ml_bull_prob)
+        pred_default = predict_next_candle(df, weights=DEFAULT_WEIGHTS) if detail_mode == "advanced" else None
         opt_weights = final_weights
 
         last_ts = candles[-1]["time"]
@@ -4162,7 +4209,7 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
                     _reg = (_ctx.get("regime") or {}).get("label")
                     if _reg:
                         _s["regime"] = _reg
-                if ENABLE_SIGNAL_ANALYTICS:
+                if detail_mode == "advanced" and ENABLE_SIGNAL_ANALYTICS:
                     daily_buy_signals, signal_outcome_summary, signal_outcome_segments = build_signal_outcome_analytics(
                         df_d, daily_buy_signals
                     )
@@ -4247,43 +4294,55 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
             ticker, "1wk", _CHART_WEEKLY_PERIOD_TO_COUNT.get(period, 104)) or candles
         display_daily_candles = _etoro_display_candles(ticker, "1d", 90) or daily_candles
 
-        return {
-            "ticker":             ticker.upper(),
-            "weights":            opt_weights,
-            "weights_source":     weights_source,
-            "weights_default":    DEFAULT_WEIGHTS,
-            "optimized_at":       log.get(ticker_key, {}).get("optimized_at"),
-            "accuracy_opt":       backtest.get("direction_accuracy"),
-            "accuracy_def":       bt_default.get("direction_accuracy"),
-            "pred_default_close": round(pred_default["close"], 4),
-            "ml_accuracy":        ml_acc,
-            "ml_bull_prob":       round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
-            "current_week_open":  current_week_open,
-            "daily_candles":      display_daily_candles,
-            "daily_signal":       round(daily_signal, 3),
-            "daily_indicators":   daily_indicators,
-            "daily_buy_signals":  daily_buy_signals,
-            "signal_outcome_summary": signal_outcome_summary,
-            "signal_outcome_segments": signal_outcome_segments,
-            "weekly_bias":        weekly_bias,
-            "today_score":        today_score,
-            "today_raw_score":    today_raw_score,
-            "today_details":      today_details,
-            "earnings_dates": sorted(earnings_dates),
-            "regime":             regime_info,
-            "candles":     display_candles,
-            "prediction":  pred,
-            "pred_candle": pred_candle,
+        response = {
+            "detail":              detail_mode,
+            "ticker":              ticker.upper(),
+            "current_week_open":   current_week_open,
+            "daily_candles":       display_daily_candles,
+            "daily_signal":        round(daily_signal, 3),
+            "daily_indicators":    daily_indicators,
+            "daily_buy_signals":   daily_buy_signals,
+            "weekly_bias":         weekly_bias,
+            "today_score":         today_score,
+            "today_raw_score":     today_raw_score,
+            "today_details":       today_details,
+            "earnings_dates":      sorted(earnings_dates),
+            "candles":             display_candles,
+            "prediction":          pred,
+            "pred_candle":         pred_candle,
             "pred_current_candle": pred_current_candle,
-            "indicators":  indicators,
+            "indicators":          indicators,
             "backtest": {
                 "total":              backtest.get("total_predictions"),
                 "direction_accuracy": backtest.get("direction_accuracy"),
+                "test_accuracy":      backtest.get("test_accuracy"),
+                "test_total":         backtest.get("test_total"),
+                "base_rate_up":       backtest.get("base_rate_up"),
+                "test_base_rate_up":  backtest.get("test_base_rate_up"),
                 "avg_error_pct":      backtest.get("avg_error_pct"),
-                "indicator_hit_rate": backtest.get("indicator_hit_rate"),
+                "indicator_hit_rate": backtest.get("indicator_hit_rate") if detail_mode == "advanced" else {},
                 "overlay":            overlay,
             },
         }
+        if detail_mode == "advanced":
+            response.update({
+                "weights": final_weights,
+                "weights_source": weights_source,
+                "weights_default": DEFAULT_WEIGHTS,
+                "optimized_at": saved_entry.get("optimized_at"),
+                "accuracy_opt": backtest.get("direction_accuracy"),
+                "accuracy_def": (
+                    bt_default.get("direction_accuracy") if bt_default
+                    else saved_entry.get("accuracy_default")
+                ),
+                "pred_default_close": round(pred_default["close"], 4) if pred_default else None,
+                "ml_accuracy": ml_acc,
+                "ml_bull_prob": round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
+                "regime": regime_info,
+                "signal_outcome_summary": signal_outcome_summary,
+                "signal_outcome_segments": signal_outcome_segments,
+            })
+        return response
     except HTTPException:
         raise
     except Exception as e:

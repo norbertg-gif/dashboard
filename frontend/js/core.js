@@ -339,6 +339,13 @@ function toggleUiMode() {
   }
   if (portState?.main?.data && typeof renderPortPanel === 'function') renderPortPanel('main');
   if (typeof initPredictiveModelChartToggle === 'function') initPredictiveModelChartToggle();
+  if (isAdvancedUiMode()
+      && typeof pc_lastData !== 'undefined'
+      && pc_lastData?.detail === 'basic'
+      && document.getElementById('tab-predictive')?.classList.contains('active')
+      && typeof loadData === 'function') {
+    loadData();
+  }
   // Radar limit (3 karty v Basic) sa aplikuje pri renderi — po prepnutí módu re-renderuj z cache
   if (typeof renderOpportunities === 'function' && typeof _oppLastRows !== 'undefined' && _oppLastRows !== null) {
     renderOpportunities(_oppLastRows, _oppLastDays);

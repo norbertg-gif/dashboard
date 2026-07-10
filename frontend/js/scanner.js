@@ -20,8 +20,10 @@ const SCANNER_CLIENT_CACHE_MS = {
   earningsWidget: 24 * 60 * 60 * 1000,
   dipStatus: 24 * 60 * 60 * 1000,
   scannerResults: 24 * 60 * 60 * 1000,
+  opportunities: 24 * 60 * 60 * 1000,
 };
 const scannerClientCache = {};
+let pc_oppLoading = false;
 
 async function scannerCachedJson(key, url, ttlMs, force = false) {
   const hit = scannerClientCache[key];
@@ -447,7 +449,6 @@ function toggleOppExpanded() {
 async function refreshOpportunities(force = false) {
   const el = document.getElementById('opportunitiesInfo');
   if (!el || pc_oppLoading) return;
-  if (!force && pc_oppLoadedAt && Date.now() - pc_oppLoadedAt < 5 * 60 * 1000) return;
 
   const symbols = getOpportunitySymbols();
   if (!symbols.length) {
@@ -461,11 +462,10 @@ async function refreshOpportunities(force = false) {
   el.innerHTML = '<span class="cl-spinner"></span>Skenujem opportunities...';
   try {
     const days = 10;
-    const res = await fetch('/api/checklist?tickers=' + encodeURIComponent(symbols.join(',')) + '&days=' + days);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    const url = '/api/checklist?tickers=' + encodeURIComponent(symbols.join(',')) + '&days=' + days;
+    const cacheKey = `opportunities:${symbols.join(',')}:${days}`;
+    const data = await scannerCachedJson(cacheKey, url, SCANNER_CLIENT_CACHE_MS.opportunities, force);
     renderOpportunities(data.results || [], days);
-    pc_oppLoadedAt = Date.now();
   } catch(e) {
     renderErrorBox(el, 'Opportunities chyba: ' + e.message, 'refreshOpportunities(true)');
   } finally {
@@ -658,7 +658,7 @@ async function renderScannerView() {
   loadInvestorInbox();
   loadEarningsCalendarWidget();
   // Opportunities (prepočet) bežia na pozadí, neblokujú scan
-  refreshOpportunities(true);
+  refreshOpportunities(false);
 }
 
 function renderNasdaqScanner(payload) {

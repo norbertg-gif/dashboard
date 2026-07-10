@@ -1,5 +1,20 @@
 # Session Handoff — 2026-07-02 (pokračovanie v novom vlákne, token limit)
 
+## Doplnenie 2026-07-10 — audit a optimalizácia
+
+- eToro instrument map má single-flight lock, kompaktnú 24h disk cache a stale
+  fallback; súbežné requesty už nenačítavajú približne 11 MB mapping opakovane.
+- `/api/etoro/portfolio` je jediný writer/cache zdroj pozícií, mirrors a orders.
+  Legacy `/api/etoro/positions` je iba kompatibilný stock/ETF transform nad tým
+  istým snapshotom, bez druhého eToro round-tripu a bez druhého dátového tvaru v cache.
+- `/api/chart` podporuje `detail=basic|advanced`. Bežné načítanie používa uložené
+  váhy a jeden backtest s malou cache (8 záznamov v low-memory profile); dvojitý
+  default→optimalizovaný beh ostal iba za `reoptimize=1`. Basic navyše preskočí
+  ML/HMM a segmentovú signal analytics, ale zachová graf, setup, históriu signálov,
+  overlay a percento úspešnosti. Prepnutie na Advanced donačíta plný payload.
+- Scanner pri obyčajnom renderi používa Opportunities cache; force refresh ostal
+  iba na explicitnom tlačidle.
+
 ## Najnovšie v tejto session
 
 - Pridaný **Chart Pattern overlay V1** do Analytiky:
