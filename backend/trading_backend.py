@@ -1103,11 +1103,16 @@ _BACKTEST_CACHE_MAX = 8 if _LOW_MEMORY else 24
 def run_backtest_cached(df, weights: dict = None):
     effective = weights or DEFAULT_WEIGHTS
     weight_key = tuple(sorted((str(k), round(float(v), 6)) for k, v in effective.items()))
+    # Dátum + počet riadkov nestačia: väčšina tickerov má rovnaký weekly kalendár
+    # a predtým preto mohli omylom zdieľať backtest iného titulu. Fingerprint
+    # OHLCV je lacný pri ~100–250 riadkoch a zároveň pokryje opravené historické dáta.
+    source_cols = [col for col in ("Open", "High", "Low", "Close", "Volume") if col in df.columns]
     try:
-        last_key = str(pd.Timestamp(df.index[-1]).date())
+        hashed = pd.util.hash_pandas_object(df[source_cols], index=True).values.tobytes()
+        data_key = hashlib.blake2b(hashed, digest_size=12).hexdigest()
     except Exception:
-        last_key = str(len(df))
-    key = (last_key, len(df), weight_key)
+        data_key = hashlib.blake2b(repr((tuple(df.index), len(df))).encode("utf-8"), digest_size=12).hexdigest()
+    key = (data_key, weight_key)
     with _BACKTEST_CACHE_LOCK:
         cached = _BACKTEST_CACHE.get(key)
         if cached is not None:
@@ -1255,12 +1260,12 @@ def _public_token_from_headers(
     x_api_token: str | None,
     query_token: str | None,
 ) -> str:
-    if query_token:
-        return query_token.strip()
-    if x_api_token:
-        return x_api_token.strip()
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
+    if x_api_token:
+        return x_api_token.strip()
+    if query_token and PUBLIC_ALLOW_QUERY_TOKEN:
+        return query_token.strip()
     return ""
 
 # ── PUBLIC ENDPOINT — pre Claude / externý prístup ────────────────────────────
@@ -1282,75 +1287,21 @@ def get_public_portfolio(
     if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid token")
 
-    # 1. RAM cache — najrýchlejší (rovnaký TTL ako /api/etoro/portfolio,
-    # inak by verejný endpoint mohol donekonečna vracať deň starý stav ako "čerstvý")
-    cached = _positions_cache.get(account)
-    if cached and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
-        return {
-            "positions": cached["data"],
-            "summary":   cached["summary"],
-            "timestamp": cached["ts"],
-            "source":    "ram_cache",
-        }
-
-    # 2. Disk cache fallback
-    from pathlib import Path as _P
-    port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{account}"
-    stale = cache_read(port_cache_path)
-    if stale:
-        positions_raw = stale.get("clientPortfolio", {}).get("positions", [])
-        return {
-            "positions": positions_raw,
-            "summary":   stale.get("clientPortfolio", {}).get("credit", {}),
-            "timestamp": None,
-            "source":    "disk_cache",
-        }
-
-    # 3. Živé načítanie z eToro proxy
+    # Jediný zdroj pravdy: rovnaký processed snapshot ako Portfólio tab.
+    # get_portfolio rieši RAM/disk cache, live fetch aj stale fallback; verejná
+    # cesta už nesmie mať vlastnú summary logiku ani starý raw cache formát.
     try:
-        instruments = load_instruments()
-        resp = fetch_with_retry(
-            f"{ETORO_PROXY}/pnl/real?account={account}",
-            timeout=ETORO_PROXY_TIMEOUT, retries=2
-        )
-        data = resp.json()
-        cache_write(port_cache_path, data)
-
-        positions_raw = data.get("clientPortfolio", {}).get("positions", [])
-        result = []
-        for pos in positions_raw:
-            inst_id = pos.get("instrumentID")
-            inst = instruments.get(inst_id)
-            if not inst or inst["typeID"] not in ALLOWED_INSTRUMENT_TYPES:
-                continue
-            symbol_yf = etoro_symbol_to_yf(inst["symbol"])
-            pnl_data = pos.get("unrealizedPnL", {})
-            result.append({
-                "instrumentId": inst_id,
-                "symbol":      symbol_yf,
-                "name":        inst["name"],
-                "openDate":    pos.get("openDateTime", "")[:10],
-                "openRate":    pos.get("openRate"),
-                "currentRate": pnl_data.get("closeRate"),
-                "pnl":         pnl_data.get("pnL"),
-                "amount":      pos.get("amount"),
-                "units":       pos.get("units"),
-            })
-        result.sort(key=lambda x: (x["symbol"], x["openDate"]))
-
-        port = data.get("clientPortfolio", {})
-        summary = {
-            "equity":           port.get("equity"),
-            "available":        port.get("availableToTrade"),
-            "total_positions":  len(result),
-            "currency":         port.get("currency", "USD"),
-        }
+        payload = get_portfolio(account=account, refresh=0)
+        cache_entry = _positions_cache.get(account) or {}
+        source = "stale_cache" if payload.get("stale") else ("cache" if payload.get("cached") else "live")
         return {
-            "positions": result,
-            "summary":   summary,
-            "timestamp": _time_module.time(),
-            "source":    "live",
+            "positions": payload.get("positions", []),
+            "summary": payload.get("summary", {}),
+            "timestamp": cache_entry.get("ts"),
+            "source": source,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         err_type = type(e).__name__
         raise HTTPException(502, f"Portfolio nedostupné ({err_type}) — skontrolujte eToro proxy")
@@ -1483,7 +1434,7 @@ AUTO_INTERVAL_TO_COUNT = {
 # ── TICKER SEARCH ─────────────────────────────────────────────────────────────
 
 @app.get("/api/search")
-def search_ticker(q: str = Query(..., min_length=1)):
+def search_ticker_yahoo(q: str = Query(..., min_length=1)):
     """Yahoo Finance autocomplete — fuzzy, rýchly, spoľahlivý."""
     url = (
         "https://query2.finance.yahoo.com/v1/finance/search"
@@ -1527,8 +1478,16 @@ CACHE_DIR.mkdir(exist_ok=True)
 _cache_mem: dict[str, tuple[float, dict]] = {}   # key → (mtime, data)
 _cache_mem_lock = threading.Lock()
 _CACHE_MEM_MAX = 50    # max položiek v RAM cache (znížené z 75 — RAM rezerva)
+# Pevný počet lock stripes: chráni súbory pred concurrent read/write bez toho,
+# aby slovník lockov rástol s každým tickerom počas života procesu.
+_CACHE_FILE_LOCKS = tuple(threading.Lock() for _ in range(32))
 WATCHLIST_PATH = _Path(DATA_ROOT) / "watchlist.json"
 _watchlist_lock = threading.Lock()
+
+
+def _cache_file_lock(path: _Path):
+    digest = hashlib.blake2b(str(path).encode("utf-8"), digest_size=2).digest()
+    return _CACHE_FILE_LOCKS[int.from_bytes(digest, "big") % len(_CACHE_FILE_LOCKS)]
 
 def _normalize_watchlist_items(items):
     out = []
@@ -1579,21 +1538,32 @@ def put_watchlist(body: dict):
     return _write_watchlist_file(body.get("items", []))
 
 def cache_write(path: _Path, data: dict):
-    """Ulož JSON.gz na disk."""
+    """Ulož JSON.gz atómovo; čitateľ nikdy neuvidí rozpracovaný gzip."""
+    target = _Path(str(path) + ".gz")
+    tmp = target.with_name(
+        f"{target.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp"
+    )
     try:
-        with _gzip.open(str(path) + ".gz", "wt", encoding="utf-8") as f:
-            _json.dump(data, f)
-        p = _Path(str(path) + ".gz")
-        key = str(path)
-        with _cache_mem_lock:
-            _cache_mem[key] = (p.stat().st_mtime, data)
-            # Evict najstaršie záznamy ak prekročíme limit
-            if len(_cache_mem) > _CACHE_MEM_MAX:
-                oldest = sorted(_cache_mem, key=lambda k: _cache_mem[k][0])
-                for k in oldest[:len(_cache_mem) - _CACHE_MEM_MAX]:
-                    del _cache_mem[k]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with _cache_file_lock(path):
+            with _gzip.open(tmp, "wt", encoding="utf-8") as f:
+                _json.dump(data, f)
+            os.replace(tmp, target)
+            key = str(path)
+            with _cache_mem_lock:
+                _cache_mem[key] = (target.stat().st_mtime, data)
+                # Evict najstaršie záznamy ak prekročíme limit
+                if len(_cache_mem) > _CACHE_MEM_MAX:
+                    oldest = sorted(_cache_mem, key=lambda k: _cache_mem[k][0])
+                    for k in oldest[:len(_cache_mem) - _CACHE_MEM_MAX]:
+                        del _cache_mem[k]
     except Exception as e:
         print(f"  cache_write error: {e}")
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 def cache_read(path: _Path) -> dict | None:
     """Načítaj JSON.gz z disku. Vráti None ak neexistuje."""
@@ -1601,17 +1571,20 @@ def cache_read(path: _Path) -> dict | None:
         p = _Path(str(path) + ".gz")
         if not p.exists():
             return None
-        mtime = p.stat().st_mtime
-        key = str(path)
-        with _cache_mem_lock:
-            cached = _cache_mem.get(key)
-            if cached and cached[0] == mtime:
-                return cached[1]
-        with _gzip.open(str(p), "rt", encoding="utf-8") as f:
-            data = _json.load(f)
-        with _cache_mem_lock:
-            _cache_mem[key] = (mtime, data)
-        return data
+        with _cache_file_lock(path):
+            if not p.exists():
+                return None
+            mtime = p.stat().st_mtime
+            key = str(path)
+            with _cache_mem_lock:
+                cached = _cache_mem.get(key)
+                if cached and cached[0] == mtime:
+                    return cached[1]
+            with _gzip.open(str(p), "rt", encoding="utf-8") as f:
+                data = _json.load(f)
+            with _cache_mem_lock:
+                _cache_mem[key] = (mtime, data)
+            return data
     except Exception as e:
         print(f"  cache_read error: {e}")
         return None
@@ -3759,7 +3732,7 @@ def resample_ohlcv(df, rule):
 # ══ PREDICTIVE CHART — routes ══════════════════════════════
 
 @app.get("/api/search/predictive")
-def search_ticker(q: str = ""):
+def search_ticker_predictive(q: str = ""):
     if not q or len(q) < 1:
         return {"results": []}
     try:
