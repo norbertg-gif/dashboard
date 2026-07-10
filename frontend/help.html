@@ -664,7 +664,8 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
   <table>
     <tr><th>Premenná</th><th>Účel</th></tr>
     <tr><td><code>DASH_USER</code> / <code>DASH_PASS</code></td><td>Basic auth (povinné v produkcii).</td></tr>
-    <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>.</td></tr>
+    <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>; bezpečne sa posiela v hlavičke <code>Authorization: Bearer</code> alebo <code>X-API-Token</code>.</td></tr>
+    <tr><td><code>PUBLIC_ALLOW_QUERY_TOKEN</code></td><td>Voliteľná kompatibilita: hodnota <code>1</code> povolí token aj v URL. Predvolene je vypnutá, aby token nekončil v logoch a histórii.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
     <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie).</td></tr>
     <tr><td><code>FINNHUB_API_KEY</code></td><td>Earnings, insider, EPS, analytický konsenzus a mapa ticker→sektor (profile2) pre sektorovú relatívnu silu.</td></tr>

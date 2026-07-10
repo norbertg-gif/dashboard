@@ -107,6 +107,12 @@ function switchMainTab(tab) {
     } else {
       initPredictiveCollapsibles();
       initPredictiveModelChartToggle();
+      const needsAdvancedPayload = isAdvancedUiMode()
+        && typeof pc_lastData !== 'undefined'
+        && pc_lastData?.detail === 'basic';
+      if (needsAdvancedPayload && typeof loadData === 'function') {
+        setTimeout(() => loadData(), 0);
+      }
       setTimeout(() => {
         const rc = document.getElementById('realChart');
         if (window.pc_realChartInst && rc && rc.offsetWidth > 0)

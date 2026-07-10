@@ -211,3 +211,11 @@ Prebehla rozsiahla revízia + performance/UX vylepšenia:
 - Bod C z UI/perf/funkcie analýzy (daňový export ★ pre časový test, backtest
   alert pravidiel) — používateľ explicitne povedal "zatiaľ nepotrebujem",
   nezačínať bez vyžiadania.
+# Session handoff — 2026-07-11 audit fixes
+
+- Backtest cache je izolovaná fingerprintom OHLCV; tickery s rovnakým počtom a dátumami sviečok už nemôžu zdieľať cudzí výsledok.
+- `/api/public/portfolio` používa rovnaký spracovaný snapshot ako Portfólio a rešpektuje `PUBLIC_ALLOW_QUERY_TOKEN`; preferované sú auth hlavičky.
+- Gzip disk cache používa atómový temp-file + `os.replace()` zápis a striped lock spoločný s čítaním.
+- Prepnutie Basic → Advanced pri už inicializovanej Analytike vynúti načítanie plného payloadu.
+- Duplicitné Python názvy search handlerov boli odstránené bez zmeny URL kontraktov.
+- Pribudol `test_regressions.py` pre uvedené kritické regresie.
