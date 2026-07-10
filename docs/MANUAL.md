@@ -1154,7 +1154,7 @@ render.yaml            # web service + 1GB disk na /data
   prekreslenia celej série.
 - **Indikátory sú lazy** — backend počíta len zapnuté indikátory; kompletná sada
   pre Wizard sa dopočíta až po jeho otvorení.
-- **Portfolio cache TTL = 120 s RAM**, fallback na disk pri výpadku proxy.
+- **Portfolio cache TTL = 24 h RAM + disk**, fallback na (aj staršiu) cache pri výpadku proxy.
 - **WebSocket** (`wss://ws.etoro.com/ws`) ženie živé ceny; REST refresh každých
   15 s ako fallback.
 - **Background prefetch** (`/api/prefetch`) zahrieva OHLCV cache pre watchlist +

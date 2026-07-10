@@ -192,17 +192,20 @@ function onLivePriceUpdate(instrumentId) {
   if (!Number.isFinite(livePrice)) return;
   const sym = symbolForInstrumentId(instrumentId);
 
-  // 1. Watchlist sidebar
-  let changed = false;
+  // 1. Watchlist sidebar — patchni len cenu/% bunky, nerob full re-render ani
+  // localStorage/server save na každý tick (viacero tickov/s pri likvidnom
+  // tickeri by inak stálo desiatky ms + zbytočný PUT /api/watchlist).
+  // chg sa počíta proti dennému previousClose (z fetchWatchlistPrice), nie
+  // tick-na-tick — inak by % po prvom ticku ukazovalo šum namiesto denného pohybu.
   for (const item of watchlist) {
     if (Number(item.instrumentId) === Number(instrumentId)) {
-      const prevPrice = item.price;
       item.price = livePrice;
-      if (prevPrice) item.chg = (item.price - prevPrice) / prevPrice * 100;
-      changed = true;
+      if (Number.isFinite(item.previousClose) && item.previousClose > 0) {
+        item.chg = (livePrice - item.previousClose) / item.previousClose * 100;
+      }
+      if (typeof updateSidebarPriceCell === 'function') updateSidebarPriceCell(item.symbol);
     }
   }
-  if (changed) { saveWatchlist(); renderSidebar(); }
 
   // 2. Ceny tab
   if (activeMainTab === 'rates') updateRatesCells();

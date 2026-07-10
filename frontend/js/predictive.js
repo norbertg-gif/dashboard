@@ -261,6 +261,7 @@ let pc_dailyChartInst = null;
 let pc_dailySeries = null;
 // Daily main chart
 let pc_dailyMainInst = null;
+let pc_dailyMainRO = null;   // ResizeObserver — disconnect pred recreate, inak sa hromadia (renderDailyMain beží pri kazdom loade/view switchi)
 let pc_dailyMainSeries = null;
 let pc_currentView = 'weekly';
 let pc_oppLoading = false;
@@ -275,6 +276,9 @@ let pc_oKumoA = null, pc_oKumoB = null;
 let pc__kumoAreaSeries = [];
 // Subpanel
 let pc_subChartInst = null;
+let pc_subRO = null;   // ResizeObserver pre subpanel — treba disconnect() pri clearSubpanel, inak sa hromadia
+let pc_realRangeHandler = null;      // subscribeVisibleLogicalRangeChange handler na pc_realChartInst (persistentný chart)
+let pc_realCrosshairHandler = null;  // subscribeCrosshairMove handler na pc_realChartInst
 let pc_currentSubpanel = 'none';
 
 function getPcChartOpts() {
@@ -1691,6 +1695,15 @@ function pc_applyOverlays() {
 }
 
 function clearSubpanel() {
+  if (pc_subRO) { try { pc_subRO.disconnect(); } catch(e) {} pc_subRO = null; }
+  if (pc_realRangeHandler) {
+    try { pc_realChartInst?.timeScale().unsubscribeVisibleLogicalRangeChange(pc_realRangeHandler); } catch(e) {}
+    pc_realRangeHandler = null;
+  }
+  if (pc_realCrosshairHandler) {
+    try { pc_realChartInst?.unsubscribeCrosshairMove(pc_realCrosshairHandler); } catch(e) {}
+    pc_realCrosshairHandler = null;
+  }
   if (pc_subChartInst) { try { pc_subChartInst.remove(); } catch(e) {} pc_subChartInst = null; }
   const _sb = document.getElementById('subpanelBlock'); if (_sb) _sb.style.display = 'none';
 }
@@ -1717,9 +1730,10 @@ function buildSubpanel(type, ind, candles) {
     timeScale: { borderColor: _t.border, timeVisible: false },
   };
   pc_subChartInst = LightweightCharts.createChart(el, opts);
-  new ResizeObserver(() => {
+  pc_subRO = new ResizeObserver(() => {
     if (pc_subChartInst) pc_subChartInst.applyOptions({ width: el.offsetWidth, height: el.offsetHeight });
-  }).observe(el);
+  });
+  pc_subRO.observe(el);
   const anchor = pc_subChartInst.addSeries(LightweightCharts.LineSeries, {
     color: 'rgba(0,0,0,0)',
     lineWidth: 0,
@@ -1781,14 +1795,18 @@ function buildSubpanel(type, ind, candles) {
     }
   }
 
-  // Sync subpanel timeScale with real chart
+  // Sync subpanel timeScale with real chart. pc_realChartInst pretrváva medzi
+  // subpanel prepnutiami (RSI->MACD->...) — bez uloženia referencie a
+  // unsubscribe v clearSubpanel by sa handlery hromadili (každý ďalší by
+  // volal setVisibleLogicalRange navyše, redundantne, pri každom pane/zoome).
   let subSyncing = false;
-  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
+  pc_realRangeHandler = range => {
     if (subSyncing || !range || !pc_subChartInst) return;
     subSyncing = true;
     pc_subChartInst.timeScale().setVisibleLogicalRange(range);
     subSyncing = false;
-  });
+  };
+  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(pc_realRangeHandler);
   pc_subChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (subSyncing || !range) return;
     subSyncing = true;
@@ -1796,11 +1814,12 @@ function buildSubpanel(type, ind, candles) {
     subSyncing = false;
   });
   // Sync crosshair
-  pc_realChartInst.subscribeCrosshairMove(param => {
+  pc_realCrosshairHandler = param => {
     if (!param.time || !pc_subChartInst) return;
     const firstSeries = pc_subChartInst.getSeries ? pc_subChartInst.getSeries()[0] : null;
     if (firstSeries) pc_subChartInst.setCrosshairPosition(0, param.time, firstSeries);
-  });
+  };
+  pc_realChartInst.subscribeCrosshairMove(pc_realCrosshairHandler);
 
   requestAnimationFrame(() => {
     const range = pc_realChartInst.timeScale().getVisibleLogicalRange();
@@ -1857,13 +1876,15 @@ function dailySignalReturnMarker(signal, candles) {
 function renderDailyMain(data) {
   if (!data.daily_candles || !data.daily_candles.length) return;
   const el = document.getElementById('dailyMainChart');
+  if (pc_dailyMainRO) { try { pc_dailyMainRO.disconnect(); } catch(e) {} pc_dailyMainRO = null; }
   if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; pc_dailyMainSeries = null; }
   pc_dailyMainInst = LightweightCharts.createChart(el, {
     ...getPcChartOpts(), width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight),
   });
-  new ResizeObserver(() => {
+  pc_dailyMainRO = new ResizeObserver(() => {
     if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
-  }).observe(el);
+  });
+  pc_dailyMainRO.observe(el);
 
   const cs = pc_dailyMainInst.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,

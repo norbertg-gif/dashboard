@@ -338,6 +338,7 @@ async function fetchWatchlistPrice(symbol) {
     const item  = watchlist.find(w => w.symbol === symbol);
     if (item) {
       item.price = last.close; item.chg = chg;
+      item.previousClose = prev ? prev.close : null;   // WS ticky rátajú chg proti tomuto, nie tick-na-tick
       // Uložíme spark dáta (5d close prices)
       if (data.length >= 2) sparkCache[symbol] = data.map(d => d.close);
       // Ulož instrumentId ak vráti backend
@@ -560,6 +561,25 @@ function renderSidebar() {
   watchlist.forEach(item => {
     if (!sparkCache[item.symbol] && !sparkMissing.has(item.symbol)) fetchSpark(item.symbol);
   });
+}
+
+// Rýchla cesta pre WS live ticky — patchne LEN cenu/% v existujúcom riadku,
+// bez prekreslenia celého #sb-list (merané ~6.6 ms/tick pri 40 tickeroch vs.
+// toto). Nerobí nič, ak riadok nie je v DOMe (napr. iný tab).
+function updateSidebarPriceCell(sym) {
+  const row = document.querySelector(`#sb-list [data-sym="${sym}"]`);
+  if (!row) return;
+  const item = watchlist.find(w => w.symbol === sym);
+  if (!item) return;
+  const priceEl = row.querySelector('.sb-price');
+  const chgEl = row.querySelector('.sb-chg');
+  if (priceEl) priceEl.textContent = fmtSbPrice(item.price);
+  if (chgEl) {
+    const chg = item.chg;
+    const chgCls = chg == null ? 'flat' : chg > 0.05 ? 'up' : chg < -0.05 ? 'down' : 'flat';
+    chgEl.className = `sb-chg ${chgCls}`;
+    chgEl.textContent = chg == null ? '—' : (chg >= 0 ? '▲' : '▼') + Math.abs(chg).toFixed(2) + '%';
+  }
 }
 
 function clearWatchlist() {

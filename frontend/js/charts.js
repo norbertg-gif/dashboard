@@ -137,12 +137,17 @@ function applyThemeToAllCharts() {
     if (r.adxChart)  applyChartTheme(r.adxChart);
     if (r.macdChart) applyChartTheme(r.macdChart);
   }
-  // Predictive tab grafy
-  if (window.pc_realChartInst) applyChartTheme(window.pc_realChartInst);
-  if (window.pc_predChartInst) applyChartTheme(window.pc_predChartInst);
-  if (window.pc_dailyChartInst) applyChartTheme(window.pc_dailyChartInst);
-  if (window.pc_dailyMainInst)  applyChartTheme(window.pc_dailyMainInst);
-  if (window.pc_subChartInst)   applyChartTheme(window.pc_subChartInst);
+  // Predictive tab grafy. Pozn.: classic-script top-level `let` nevytvára
+  // window.* vlastnosť (main.js to rieši len pre pc_realChartInst/
+  // pc_predChartInst cez defineProperty) — pc_dailyChartInst/pc_dailyMainInst/
+  // pc_subChartInst boli cez window.* vždy undefined, takže Daily graf a
+  // subpanel po prepnutí témy zostávali v starej téme až do ďalšieho reloadu.
+  // Bežné identifikátory fungujú, lebo charts.js sa načíta až po predictive.js.
+  if (typeof pc_realChartInst !== 'undefined' && pc_realChartInst) applyChartTheme(pc_realChartInst);
+  if (typeof pc_predChartInst !== 'undefined' && pc_predChartInst) applyChartTheme(pc_predChartInst);
+  if (typeof pc_dailyChartInst !== 'undefined' && pc_dailyChartInst) applyChartTheme(pc_dailyChartInst);
+  if (typeof pc_dailyMainInst !== 'undefined' && pc_dailyMainInst) applyChartTheme(pc_dailyMainInst);
+  if (typeof pc_subChartInst !== 'undefined' && pc_subChartInst) applyChartTheme(pc_subChartInst);
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -927,6 +932,13 @@ function createPanel(cfg) {
 // ── CLOUD CANVAS ─────────────────────────────────────────────────────────────
 function drawCloudCanvas(id, r) {
   document.getElementById('cloud-canvas-' + id)?.remove();
+  // r.mainChart pretrváva medzi reloadmi/indicator togglami — starý render
+  // handler (ak existuje z predošlého drawCloudCanvas volania) treba odhlásiť,
+  // inak sa pri každom Ichimoku re-toggle hromadí ďalší subscriber na to isté.
+  if (r.cloudCanvasRender) {
+    try { r.mainChart.timeScale().unsubscribeVisibleTimeRangeChange(r.cloudCanvasRender); } catch(e) {}
+    r.cloudCanvasRender = null;
+  }
   const chartEl = document.getElementById('chart-' + id);
   if (!chartEl || !r.cloudData?.length) return;
 

@@ -1252,9 +1252,10 @@ def get_public_portfolio(
     if not PUBLIC_API_TOKEN or not _secrets.compare_digest(provided_token, PUBLIC_API_TOKEN):
         raise HTTPException(status_code=403, detail="Invalid token")
 
-    # 1. RAM cache — najrýchlejší
+    # 1. RAM cache — najrýchlejší (rovnaký TTL ako /api/etoro/portfolio,
+    # inak by verejný endpoint mohol donekonečna vracať deň starý stav ako "čerstvý")
     cached = _positions_cache.get(account)
-    if cached:
+    if cached and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
         return {
             "positions": cached["data"],
             "summary":   cached["summary"],
@@ -1601,6 +1602,9 @@ INSTRUMENTS_CACHE_TTL  = 86400  # 24 hodín
 # Cache pre pozície — RAM + disk
 import time
 _positions_cache: dict = {}
+# Samostatná cache pre legacy /api/etoro/positions (2026-07-09) — iný tvar dát
+# (len akcie/ETF, žiadne orders/mirrors), nesmie sa miešať s _positions_cache.
+_legacy_positions_cache: dict = {}
 # 24h (2026-07-09, raised from 30 min): zoznam pozícií/objednávok sa pri
 # bežnom štýle (max niekoľko obchodov týždenne) mení zriedka — živé ceny a P/L
 # idú aj tak nezávisle cez WS tick vrstvu (estimatePositionLivePnl), takže
@@ -1666,12 +1670,18 @@ def etoro_symbol_to_yf(symbol: str) -> str:
 @app.get("/api/etoro/positions")
 def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
     """
-    Vráti aktuálne pozície z eToro reálneho účtu.
-    Len akcie a ETF, namapované na Yahoo Finance tickery.
-    Cache TTL: 120 sekúnd. refresh=1 vynutí nové načítanie.
+    LEGACY/nepoužívaný frontendom (core.js loadEtoroPositions je no-op od
+    5115f1f — #etoro-list-inner v HTML neexistuje) — endpoint ostáva funkčný
+    pre priame volanie, ale MUSÍ mať vlastný cache kľúč. Predtým zdieľal
+    _positions_cache[account] s /api/etoro/portfolio a písal iný tvar dát
+    (len akcie/ETF, chýbajú orders/mirrors) — jedno volanie by na 24h
+    (POSITIONS_CACHE_TTL) "otrávilo" Portfolio tab, čakajúce objednávky aj
+    žlté čiary v grafe nesprávnym tvarom.
+    Vráti aktuálne pozície z eToro reálneho účtu. Len akcie a ETF, namapované
+    na Yahoo Finance tickery. Cache TTL: POSITIONS_CACHE_TTL. refresh=1 vynutí
+    nové načítanie.
     """
-    # Skontroluj cache
-    cached = _positions_cache.get(account)
+    cached = _legacy_positions_cache.get(account)
     if cached and not refresh and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
         return {"positions": cached["data"], "summary": cached["summary"], "cached": True}
 
@@ -1772,8 +1782,8 @@ def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
         "mirrors_count":   len(port.get("mirrors", [])),
     }
 
-    # Ulož do cache
-    _positions_cache[account] = {"data": result, "summary": summary, "ts": time.time()}
+    # Ulož do VLASTNEJ cache (nie zdieľanej s /api/etoro/portfolio, viz docstring)
+    _legacy_positions_cache[account] = {"data": result, "summary": summary, "ts": time.time()}
 
     return {"positions": result, "summary": summary, "cached": False}
 
@@ -2631,23 +2641,25 @@ PREFETCH_INTERVALS = ["OneDay", "OneWeek", "OneHour", "FourHours"]
 
 def _get_portfolio_holdings() -> dict:
     """Agreguje pozície oboch účtov na {YF_SYMBOL: {pnl, amount, pnl_pct}}.
-    Číta z portfolio cache (disk) — žiadne extra eToro volania."""
+    Číta z RAM cache get_portfolio (fallback disk processed_{acct}) — žiadne
+    extra eToro volania. Predtým čítala legacy raw-payload disk cache
+    (portfolio_{acct}), ktorú od zavedenia processed cache (de2fe81) už nikto
+    nezapisoval — Scanner PORT badge/DCA/Inbox/Verdikt tak stáli na navždy
+    zamrznutých dátach. get_portfolio.result už je stocks/ETF aj ostatné typy,
+    preto sa tu type filter aplikuje explicitne (rovnaký zámer ako predtým)."""
     holdings: dict = {}
-    instruments = load_instruments()
     for acct in ["1", "2"]:
         try:
-            cached = cache_read(CACHE_DIR / "portfolio" / f"portfolio_{acct}")
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
             if not cached:
                 continue
-            for pos in cached.get("clientPortfolio", {}).get("positions", []):
-                iid = pos.get("instrumentID") or pos.get("instrumentId")
-                inst = instruments.get(iid)
-                if not inst or inst.get("typeID") not in ALLOWED_INSTRUMENT_TYPES:
+            for pos in cached.get("data", []):
+                if pos.get("type") not in ("Stock", "ETF"):
                     continue
-                sym = etoro_symbol_to_yf(inst.get("symbol"))
+                sym = pos.get("symbol")
                 if not sym:
                     continue
-                pnl = (pos.get("unrealizedPnL") or {}).get("pnL", 0) or 0
+                pnl = pos.get("pnl", 0) or 0
                 amt = pos.get("amount", 0) or 0
                 h = holdings.setdefault(sym, {"pnl": 0.0, "amount": 0.0})
                 h["pnl"] += pnl
@@ -2758,9 +2770,16 @@ def _get_portfolio_symbols() -> set:
             port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{acct}"
             cached = cache_read(port_cache_path)
             if cached:
-                for pos in cached.get("positions", []):
-                    if pos.get("symbol"):
-                        syms.add(pos["symbol"])
+                # BUG (fixed 2026-07-09): cache_read vracia surový /pnl/real
+                # payload — pozície sú pod clientPortfolio.positions, nie na
+                # top-level "positions". Predtým to vždy vrátilo [] a prefetch
+                # tak ticho vynechával všetky portfolio symboly.
+                for pos in cached.get("clientPortfolio", {}).get("positions", []):
+                    iid = pos.get("instrumentID") or pos.get("instrumentId")
+                    inst = load_instruments().get(iid, {})
+                    sym = inst.get("symbol")
+                    if sym:
+                        syms.add(sym)
             else:
                 # Načítaj live
                 resp = fetch_with_retry(f"{ETORO_PROXY}/pnl/real?account={acct}", timeout=15, retries=2)
@@ -3624,16 +3643,22 @@ async def get_ohlcv_batch(request: Request):
         except Exception as e:
             return key, {"error": str(e)}
 
-    max_workers = min(len(reqs), 4)
-    results = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        from concurrent.futures import as_completed
-        futures = {pool.submit(fetch_one, r): r for r in reqs}
-        for future in as_completed(futures):
-            key, data = future.result()
-            results[key] = data
+    def run_batch():
+        max_workers = min(len(reqs), 4)
+        results = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            from concurrent.futures import as_completed
+            futures = {pool.submit(fetch_one, r): r for r in reqs}
+            for future in as_completed(futures):
+                key, data = future.result()
+                results[key] = data
+        return results
 
-    return results
+    # POZOR: čakanie na futures MUSÍ bežať mimo event loopu — synchrónne
+    # as_completed/result() v async funkcii zmrazí celú appku na dobu batchu
+    # (eToro fetch má 6-20 s timeouty a batch beží pri každom multi-chart loade).
+    from fastapi.concurrency import run_in_threadpool
+    return await run_in_threadpool(run_batch)
 
 
 # ── INDIKÁTORY ────────────────────────────────────────────────────────────────
@@ -3808,8 +3833,11 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
     logging.warning(f"[CHART] Request received: ticker={ticker} period={period}")
     print(f"[CHART] Request: {ticker} {period}", flush=True)
     try:
-        raw = yf.download(ticker, period=period, interval="1wk",
-                          auto_adjust=True, progress=False)
+        # Zdieľaná 30-min yf cache (rovnaká ako scanner/RS) — opakované otvorenie
+        # tickera neťahá yfinance znova. prefer_massive=False + munge_dots=False
+        # zachovávajú pôvodné správanie (yfinance primárny, bodkové LSE tickery).
+        raw = _yf_download_cached(ticker, period, "1wk",
+                                  prefer_massive=False, munge_dots=False)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
         if raw is None or raw.empty:
@@ -4056,8 +4084,8 @@ def get_chart(ticker: str = "AAPL", period: str = "2y", reoptimize: bool = False
         try:
             # Dva roky dávajú priestor na vyhodnotenie 30/60/90 obchodných
             # sviečok aj pre staršie signály. Do grafu sa naďalej posiela len tail.
-            raw_d = yf.download(ticker, period="2y", interval="1d",
-                                auto_adjust=True, progress=False)
+            raw_d = _yf_download_cached(ticker, "2y", "1d",
+                                        prefer_massive=False, munge_dots=False)
             if isinstance(raw_d.columns, pd.MultiIndex):
                 raw_d.columns = raw_d.columns.get_level_values(0)
             raw_d = raw_d.dropna(subset=["Open", "High", "Low", "Close"])
@@ -5502,7 +5530,11 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
         return None
 
 
-def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive: bool = True):
+def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive: bool = True,
+                        munge_dots: bool = True):
+    """munge_dots: BRK.B -> BRK-B pre yfinance (US class shares). get_chart volá
+    s False, lebo jeho tickery môžu byť burzové suffixy (VWRD.L, CNDX.L), kde
+    bodka MUSÍ ostať — pomlčková forma by vrátila prázdno."""
     key = (ticker, period, interval)
     now = time.time()
     with _YF_CACHE_LOCK:
@@ -5511,7 +5543,7 @@ def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive:
             return hit[1].copy()
     raw = _massive_daily_bars(ticker, period, interval) if prefer_massive else None
     if raw is None or len(raw) < 2:
-        yf_symbol = ticker.replace(".", "-")
+        yf_symbol = ticker.replace(".", "-") if munge_dots else ticker
         raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
@@ -6670,8 +6702,16 @@ def _earnings_fetch_finnhub() -> dict:
     return dates
 
 
+_earnings_bulk_failed_at = 0.0   # 2026-07-09: backoff keď OBAJA provideri zlyhali,
+                                 # ale cache má (staršie) dates — bez toho by sa
+                                 # Finnhub+AV skúšali odznova pri každom volaní
+                                 # (get_chart, inbox, calendar widget...) donekonečna
+EARNINGS_BULK_FAIL_BACKOFF = 900  # 15 min
+
+
 @app.get("/api/earnings")
 def get_earnings_calendar(refresh: int = Query(0)):
+    global _earnings_bulk_failed_at
     cached = _earnings_cache_read()
     if cached and not refresh:
         try:
@@ -6682,6 +6722,8 @@ def get_earnings_calendar(refresh: int = Query(0)):
                 return {**cached, "stale": False}
         except Exception:
             pass
+    if not refresh and cached and cached.get("dates") and time.time() < _earnings_bulk_failed_at + EARNINGS_BULK_FAIL_BACKOFF:
+        return {**cached, "stale": True}
     # Primárne Finnhub (60 req/min, bez zdieľaného IP limitu), fallback Alpha Vantage
     try:
         payload = _earnings_save_cache(_earnings_fetch_finnhub())
@@ -6701,6 +6743,7 @@ def get_earnings_calendar(refresh: int = Query(0)):
         payload = _earnings_save_cache(_earnings_parse_csv(resp.text))
         return {**payload, "stale": False}
     except Exception as e:
+        _earnings_bulk_failed_at = time.time()
         err = _news_scrub_error(str(e))
         if cached and cached.get("dates"):
             return {**cached, "stale": True, "error": err}
@@ -6733,8 +6776,12 @@ _earnings_sym_failed_at: dict[str, float] = {}   # sym → ts neúspechu (1h bac
 # ── Yahoo quoteSummary (cookie + crumb session, ako yfinance ale pod kontrolou) ──
 _YAHOO_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-_yahoo_auth: dict = {"cookie": None, "crumb": None, "expiry": 0.0}
+_yahoo_auth: dict = {"cookie": None, "crumb": None, "expiry": 0.0, "failed_until": 0.0}
 _yahoo_auth_lock = threading.Lock()
+_YAHOO_AUTH_BACKOFF = 600  # 10 min — Yahoo z Render IP prakticky nikdy neprejde
+                          # (CLAUDE.md), bez backoffu každý fail-soft caller
+                          # (insights, earnings, profile fallback) zopakuje
+                          # 2 blokujúce HTTP volania nadarmo.
 
 
 def _yahoo_get_auth(force: bool = False) -> dict | None:
@@ -6742,6 +6789,8 @@ def _yahoo_get_auth(force: bool = False) -> dict | None:
     with _yahoo_auth_lock:
         if not force and _yahoo_auth["crumb"] and time.time() < _yahoo_auth["expiry"]:
             return dict(_yahoo_auth)
+        if not force and time.time() < _yahoo_auth.get("failed_until", 0):
+            return None   # známy nedávny fail — neskúšaj znova naslepo
         try:
             s = requests.Session()
             s.headers["User-Agent"] = _YAHOO_UA
@@ -6752,10 +6801,11 @@ def _yahoo_get_auth(force: bool = False) -> dict | None:
             crumb = r.text.strip()
             if not cookie or not crumb or "<" in crumb:
                 raise RuntimeError(f"bad crumb/cookie (crumb={crumb[:30]!r})")
-            _yahoo_auth.update({"cookie": cookie, "crumb": crumb, "expiry": time.time() + 1800})
+            _yahoo_auth.update({"cookie": cookie, "crumb": crumb, "expiry": time.time() + 1800, "failed_until": 0.0})
             return dict(_yahoo_auth)
         except Exception as e:
             print(f"[yahoo] auth failed: {e}")
+            _yahoo_auth.update({"cookie": None, "crumb": None, "failed_until": time.time() + _YAHOO_AUTH_BACKOFF})
             return None
 
 
@@ -6883,8 +6933,11 @@ def _insights_parse(qs: dict) -> dict:
 
 
 def _scrub_token(msg: str) -> str:
-    """requests chyby obsahujú celú URL vrátane ?token= — maskuj kľúč."""
-    return re.sub(r"token=[^&\s]+", "token=***", str(msg))
+    """requests chyby obsahujú celú URL vrátane ?token=/?apiKey= — maskuj kľúč.
+    apiKey pridané 2026-07-09: Massive volania (raise_for_status()) mohli
+    dostať MASSIVE_API_KEY do error stringu, ktorý sa ukladal aj do
+    company_profiles/{SYM}.json na disku."""
+    return re.sub(r"(token|apiKey)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
 
 
 def _insights_fetch_finnhub(sym: str) -> dict:

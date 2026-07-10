@@ -969,9 +969,13 @@ async function loadPortData(pid, forceRefresh = false) {
     await hydrateOrderRates(s.data, s.account);
     portfolioAccountData[String(s.account)] = s.data;
     // Force refresh nech je vidieť aj v grafoch (etoroPositionsAll/etoroOrdersAll
-    // sú samostatná cache pre chart panely) — inak by graf ešte 30 min ukazoval
+    // sú samostatná cache pre chart panely) — inak by graf ešte 24h ukazoval
     // staré objednávky/pozície, hoci Portfólio už má čerstvé dáta.
-    if (forceRefresh) {
+    // POZOR: ak backend vrátil stale:true (eToro proxy výpadok, fallback na
+    // starú cache), nesmieme "potvrdiť" tieto dáta ako čerstvé — inak by ⟳
+    // počas výpadku predĺžil platnosť starých dát o ďalších 24h namiesto toho,
+    // aby appka skúsila znova pri najbližšej príležitosti.
+    if (forceRefresh && !s.data.stale) {
       const acct = String(s.account);
       etoroPositionsAll[acct] = s.data.positions || [];
       etoroOrdersAll[acct] = s.data.orders || [];
@@ -1033,10 +1037,12 @@ function updatePortfolioOrderRowsDom(pid, state, sym) {
     const dist = Number.isFinite(cur) && cur > 0 && Number.isFinite(rate) && rate > 0
       ? (rate - cur) / cur * 100
       : null;
-    document.querySelectorAll(`[data-port-order-current="${pid}-${sym}"]`).forEach(el => {
+    // orderId v selektore — bez neho by 2+ objednávky na ten istý ticker
+    // prepisovali navzájom svoje bunky poslednou iterovanou hodnotou.
+    document.querySelectorAll(`[data-port-order-current="${pid}-${sym}-${o.orderId}"]`).forEach(el => {
       el.textContent = Number.isFinite(cur) && cur > 0 ? cur.toFixed(4) : '—';
     });
-    document.querySelectorAll(`[data-port-order-distance="${pid}-${sym}"]`).forEach(el => {
+    document.querySelectorAll(`[data-port-order-distance="${pid}-${sym}-${o.orderId}"]`).forEach(el => {
       if (dist == null) {
         el.textContent = '—';
         el.className = 'r';
@@ -1649,6 +1655,9 @@ function renderPortPanel(pid) {
   html += `<button class="port-cols-btn" onclick="portSaveCols('${pid}')" title="Uložiť konfiguráciu stĺpcov" style="border-color:var(--green);color:var(--green);">💾</button>`;
   html += `<button class="port-export-btn" onclick="exportPortCSV('${pid}')">↓ CSV</button>`;
   html += `<button class="port-export-btn" onclick="loadPortData('${pid}', true)" title="Vynútiť čerstvé dáta z eToro (obíde cache)" style="color:var(--blue);">⟳</button>`;
+  if (s.data?.stale) {
+    html += `<span style="font-size:10px;color:var(--yellow);white-space:nowrap;" title="eToro proxy nedostupný — zobrazujú sa posledné známe dáta">⚠ zastarané dáta</span>`;
+  }
   html += `</div></div></div></div>`;
 
   // Summary bar
@@ -1833,8 +1842,8 @@ function renderPortPanel(pid) {
           <td><span class="port-type-badge">${o.kind === 'limit' ? 'Limit' : 'Market'}</span></td>
           <td>${fmtPortVal(o.isBuy, 'dir')}</td>
           <td class="r" style="font-weight:600;">${Number.isFinite(rate) && rate > 0 ? rate.toFixed(4) : '—'}</td>
-          <td class="r" data-port-order-current="${pid}-${o.symbol}">${cur != null ? cur.toFixed(4) : '—'}</td>
-          <td class="r" data-port-order-distance="${pid}-${o.symbol}">${dist != null
+          <td class="r" data-port-order-current="${pid}-${o.symbol}-${o.orderId}">${cur != null ? cur.toFixed(4) : '—'}</td>
+          <td class="r" data-port-order-distance="${pid}-${o.symbol}-${o.orderId}">${dist != null
             ? `<span class="${Math.abs(dist) <= 1 ? 'port-pos' : ''}" style="${Math.abs(dist) <= 1 ? 'font-weight:700;' : 'color:var(--muted);'}" title="O koľko % sa musí cena pohnúť, aby sa objednávka vyplnila">${dist >= 0 ? '+' : ''}${dist.toFixed(2)}%</span>`
             : '—'}</td>
           <td class="r">$${Number(o.amount || 0).toFixed(2)}${o.leverage > 1 ? ` <span style="color:var(--muted);font-size:9px;">x${o.leverage}</span>` : ''}</td>
