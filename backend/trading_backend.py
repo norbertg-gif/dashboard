@@ -1596,15 +1596,13 @@ def cache_age_seconds(path: _Path) -> float:
 # Cache pre instrument mapping (11MB — načítame raz, ukladáme na disk)
 _instruments_cache: dict = {}
 _instruments_loaded = False
+_instruments_lock = threading.Lock()
 INSTRUMENTS_CACHE_PATH = CACHE_DIR / "instruments"
 INSTRUMENTS_CACHE_TTL  = 86400  # 24 hodín
 
 # Cache pre pozície — RAM + disk
 import time
 _positions_cache: dict = {}
-# Samostatná cache pre legacy /api/etoro/positions (2026-07-09) — iný tvar dát
-# (len akcie/ETF, žiadne orders/mirrors), nesmie sa miešať s _positions_cache.
-_legacy_positions_cache: dict = {}
 # 24h (2026-07-09, raised from 30 min): zoznam pozícií/objednávok sa pri
 # bežnom štýle (max niekoľko obchodov týždenne) mení zriedka — živé ceny a P/L
 # idú aj tak nezávisle cez WS tick vrstvu (estimatePositionLivePnl), takže
@@ -1629,28 +1627,71 @@ def load_instruments():
     global _instruments_cache, _instruments_loaded
     if _instruments_loaded:
         return _instruments_cache
-    try:
-        resp = requests.get(f"{ETORO_PROXY}/instruments", timeout=20)
-        resp.raise_for_status()
-        items = resp.json().get("InstrumentDisplayDatas", [])
-        _instruments_cache = {}
-        for item in items:
-            iid = item["InstrumentID"]
-            images = item.get("Images", [])
-            logo = ""
-            for img in sorted(images, key=lambda x: x.get("Width",999)*x.get("Height",999)):
-                uri = img.get("Uri","")
-                if uri: logo = uri; break
-            _instruments_cache[iid] = {
-                "symbol": item.get("SymbolFull",""),
-                "name":   item.get("InstrumentDisplayName",""),
-                "typeID": item.get("InstrumentTypeID",0),
-                "logo":   logo,
-            }
-        _instruments_loaded = True
-        print(f"  Instruments načítané: {len(_instruments_cache)} záznamov")
-    except Exception as e:
-        print(f"  WARN: Instruments cache zlyhalo: {e}")
+    with _instruments_lock:
+        if _instruments_loaded:
+            return _instruments_cache
+
+        def restore_disk(payload):
+            rows = payload.get("items", []) if isinstance(payload, dict) else []
+            restored = {}
+            for row in rows:
+                try:
+                    iid = int(row["instrumentId"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                restored[iid] = {
+                    "symbol": row.get("symbol", ""),
+                    "name": row.get("name", ""),
+                    "typeID": row.get("typeID", 0),
+                    "logo": row.get("logo", ""),
+                }
+            return restored
+
+        disk_payload = cache_read(INSTRUMENTS_CACHE_PATH)
+        if cache_age_seconds(INSTRUMENTS_CACHE_PATH) < INSTRUMENTS_CACHE_TTL:
+            restored = restore_disk(disk_payload)
+            if restored:
+                _instruments_cache = restored
+                _instruments_loaded = True
+                print(f"  Instruments z disk cache: {len(restored)} záznamov")
+                return _instruments_cache
+
+        try:
+            resp = requests.get(f"{ETORO_PROXY}/instruments", timeout=20)
+            resp.raise_for_status()
+            items = resp.json().get("InstrumentDisplayDatas", [])
+            compact = {}
+            for item in items:
+                iid = item["InstrumentID"]
+                images = item.get("Images", [])
+                logo = ""
+                for img in sorted(images, key=lambda x: x.get("Width", 999) * x.get("Height", 999)):
+                    uri = img.get("Uri", "")
+                    if uri:
+                        logo = uri
+                        break
+                compact[iid] = {
+                    "symbol": item.get("SymbolFull", ""),
+                    "name": item.get("InstrumentDisplayName", ""),
+                    "typeID": item.get("InstrumentTypeID", 0),
+                    "logo": logo,
+                }
+            if compact:
+                _instruments_cache = compact
+                _instruments_loaded = True
+                cache_write(INSTRUMENTS_CACHE_PATH, {
+                    "schema": 1,
+                    "items": [dict(instrumentId=iid, **meta) for iid, meta in compact.items()],
+                })
+                print(f"  Instruments načítané: {len(compact)} záznamov")
+        except Exception as e:
+            restored = restore_disk(disk_payload)
+            if restored:
+                _instruments_cache = restored
+                _instruments_loaded = True
+                print(f"  Instruments stale disk fallback: {len(restored)} záznamov")
+            else:
+                print(f"  WARN: Instruments cache zlyhalo: {e}")
     return _instruments_cache
 
 
@@ -1669,125 +1710,36 @@ def etoro_symbol_to_yf(symbol: str) -> str:
 
 @app.get("/api/etoro/positions")
 def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
-    """
-    LEGACY/nepoužívaný frontendom (core.js loadEtoroPositions je no-op od
-    5115f1f — #etoro-list-inner v HTML neexistuje) — endpoint ostáva funkčný
-    pre priame volanie, ale MUSÍ mať vlastný cache kľúč. Predtým zdieľal
-    _positions_cache[account] s /api/etoro/portfolio a písal iný tvar dát
-    (len akcie/ETF, chýbajú orders/mirrors) — jedno volanie by na 24h
-    (POSITIONS_CACHE_TTL) "otrávilo" Portfolio tab, čakajúce objednávky aj
-    žlté čiary v grafe nesprávnym tvarom.
-    Vráti aktuálne pozície z eToro reálneho účtu. Len akcie a ETF, namapované
-    na Yahoo Finance tickery. Cache TTL: POSITIONS_CACHE_TTL. refresh=1 vynutí
-    nové načítanie.
-    """
-    cached = _legacy_positions_cache.get(account)
-    if cached and not refresh and (time.time() - cached["ts"]) < POSITIONS_CACHE_TTL:
-        return {"positions": cached["data"], "summary": cached["summary"], "cached": True}
-
-    # 1. Načítaj instrument mapping
-    instruments = load_instruments()
-    if not instruments:
-        raise HTTPException(502, "Instrument mapping nedostupný — beží eToro proxy?")
-
-    # 2. Načítaj pozície
-    port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{account}"
-    PORT_DISK_CACHE_TTL = 120  # 2 minúty
-
-    try:
-        resp = fetch_with_retry(
-            f"{ETORO_PROXY}/pnl/real?account={account}",
-            timeout=ETORO_PROXY_TIMEOUT, retries=2
-        )
-        data = resp.json()
-        cache_write(port_cache_path, data)
-    except Exception as e:
-        # Stale fallback — vráť posledné známe dáta
-        stale = cache_read(port_cache_path)
-        if stale:
-            data = stale
-            print(f"  Portfolio stale fallback pre account {account}")
-        else:
-            raise HTTPException(502, "eToro proxy nedostupný — skúste neskôr alebo skontrolujte localhost:8765")
-
-    positions_raw = data.get("clientPortfolio", {}).get("positions", [])
-
-    # 3. Filtruj a mapuj
-    result = []
-    for pos in positions_raw:
-        inst_id = pos.get("instrumentID")
-        inst    = instruments.get(inst_id)
-        if not inst:
+    """Kompatibilný stock/ETF pohľad nad jednotným portfóliovým snapshotom."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    positions = []
+    for pos in portfolio.get("positions", []):
+        if pos.get("type") not in {"Stock", "ETF"}:
             continue
-
-        # Len akcie a ETF
-        if inst["typeID"] not in ALLOWED_INSTRUMENT_TYPES:
-            continue
-
-        symbol_etoro = inst["symbol"]
-        symbol_yf    = etoro_symbol_to_yf(symbol_etoro)
-        if not symbol_yf:
-            continue
-
-        pnl_data = pos.get("unrealizedPnL", {})
-
-        result.append({
-            "instrumentId": inst_id,
-            "symbol":      symbol_yf,
-            "name":        inst["name"],
-            "openDate":    pos.get("openDateTime", "")[:10],   # YYYY-MM-DD
-            "openRate":    pos.get("openRate"),
-            "currentRate": pnl_data.get("closeRate"),
-            "pnl":         pnl_data.get("pnL"),
-            "isBuy":       pos.get("isBuy", True),
-            "amount":      pos.get("amount"),
-            "units":       pos.get("units"),
-            "positionID":  pos.get("positionID"),
+        positions.append({
+            "instrumentId": pos.get("instrumentId"),
+            "symbol": pos.get("symbol"),
+            "name": pos.get("name"),
+            "openDate": (pos.get("openDateTime") or "")[:10],
+            "openRate": pos.get("openRate"),
+            "currentRate": pos.get("currentRate"),
+            "pnl": pos.get("pnl"),
+            "isBuy": pos.get("isBuy", True),
+            "amount": pos.get("amount"),
+            "units": pos.get("units"),
+            "positionID": pos.get("positionId"),
         })
 
-    # Zoraď podľa symbolu, potom dátumu
-    result.sort(key=lambda x: (x["symbol"], x["openDate"]))
-
-    # Vypočítaj summary — rovnaká logika ako etoro_dashboard.html
-    port = data.get("clientPortfolio", {})
-
-    # Presný výpočet podľa eToro API dokumentácie
-    # credits (s!) je správny kľúč
-    credit      = port.get("credits", 0) or port.get("credit", 0) or 0
-    pend_open   = sum(o.get("amount", 0) or 0 for o in port.get("ordersForOpen", []) if (o.get("mirrorID") or o.get("mirrorId") or 0) == 0)
-    pend_orders = sum(o.get("amount", 0) or 0 for o in port.get("orders", []))
-    cash        = credit - pend_open - pend_orders
-
-    # Total Invested = positions + mirror.positions + (mirror.availableAmount - mirror.closedPositionsNetProfit) + pendingOrders + externalCosts
-    pos_inv     = sum(p.get("amount", 0) or 0 for p in port.get("positions", []))
-    mir_pos_inv = sum(p.get("amount", 0) or 0 for m in port.get("mirrors", []) for p in m.get("positions", []))
-    mir_adj_inv = sum((m.get("availableAmount") or 0) - (m.get("closedPositionsNetProfit") or 0) for m in port.get("mirrors", []))
-    ext_costs   = sum(o.get("totalExternalCosts", 0) or 0 for o in port.get("ordersForOpen", []) if (o.get("mirrorID") or 0) == 0)
-    invested    = pos_inv + mir_pos_inv + mir_adj_inv + pend_open + pend_orders + ext_costs
-
-    # Unrealized PnL = positions + mirror.positions + mirror.closedPositionsNetProfit
-    pos_pnl = sum((p.get("unrealizedPnL") or {}).get("pnL", 0) or 0 for p in port.get("positions", []))
-    mir_pnl = sum((pp.get("unrealizedPnL") or {}).get("pnL", 0) or 0 for m in port.get("mirrors", []) for pp in m.get("positions", []))
-    mir_closed = sum((m.get("closedPositionsNetProfit") or 0) for m in port.get("mirrors", []))
-    total_pnl   = pos_pnl + mir_pnl + mir_closed
-
-    equity = cash + invested + total_pnl
-
-    summary = {
-        "cash":            round(cash, 2),
-        "invested":        round(invested, 2),
-        "total_pnl":       round(total_pnl, 2),
-        "equity":          round(equity, 2),
-        "positions_count": len(result),
-        "mirrors_count":   len(port.get("mirrors", [])),
+    summary = dict(portfolio.get("summary") or {})
+    summary["positions_count"] = len(positions)
+    response = {
+        "positions": positions,
+        "summary": summary,
+        "cached": bool(portfolio.get("cached")),
     }
-
-    # Ulož do VLASTNEJ cache (nie zdieľanej s /api/etoro/portfolio, viz docstring)
-    _legacy_positions_cache[account] = {"data": result, "summary": summary, "ts": time.time()}
-
-    return {"positions": result, "summary": summary, "cached": False}
-
-
+    if portfolio.get("stale"):
+        response["stale"] = True
+    return response
 @app.get("/api/etoro/accounts")
 def etoro_accounts():
     """Vráti zoznam dostupných eToro účtov z proxy."""
