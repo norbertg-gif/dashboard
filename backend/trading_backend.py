@@ -4608,6 +4608,7 @@ SIGNAL_VOLUME_MULT = 1.2
 SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je štatisticky lacná
 DIP_STRONG_THRESHOLD = 90
 DIP_VERY_STRONG_THRESHOLD = 100
+DIP_SCANNER_VISIBILITY_THRESHOLD = 80  # show all imported WATCH+ DIP rows even without a fresh technical signal
 SIGNAL_BUY_THRESHOLD = 3   # 3/4+ = plný buy signál, 2/4 = watch
 SIGNAL_OUTCOME_HORIZONS = (30, 60, 90)
 SIGNAL_OUTCOME_MOVE_THRESHOLD = 1.5  # fallback keď ATR nie je k dispozícii
@@ -5269,6 +5270,15 @@ def enrich_scanner_payload(payload: dict) -> dict:
     return out
 
 
+def _include_scanner_result(row: dict, dip_scores: dict) -> bool:
+    """Keep live signals plus imported DIP titles worth manual chart review."""
+    if row.get("recent_signal"):
+        return True
+    ticker = str(row.get("ticker") or "").upper()
+    dip_total = _num_or_none((dip_scores.get(ticker) or {}).get("total"))
+    return dip_total is not None and dip_total >= DIP_SCANNER_VISIBILITY_THRESHOLD
+
+
 def scanner_universe_from_dip() -> tuple[list[str], str, str]:
     """Scanner universe = imported DIP ranking, with Nasdaq-100 fallback.
 
@@ -5651,6 +5661,7 @@ def _run_nasdaq_scanner(days: int):
     slog_source = load_signals_log()
     slog_work = {k: dict(v) if isinstance(v, dict) else v for k, v in slog_source.items()}
     tickers, universe_label, universe_key = scanner_universe_from_dip()
+    dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
 
     with _scanner_lock:
         _scanner_state.update({
@@ -5698,7 +5709,7 @@ def _run_nasdaq_scanner(days: int):
                             slog_work[ticker] = slog_update
                         if row.get("error"):
                             errors.append(row)
-                        elif row.get("recent_signal"):
+                        elif _include_scanner_result(row, dip_scores):
                             results.append(row)
                     except Exception as e:
                         errors.append({"ticker": ticker, "error": str(e)[:80]})
@@ -5714,7 +5725,6 @@ def _run_nasdaq_scanner(days: int):
         save_signals_log(slog_work)
         del slog_work, slog_source
         gc.collect()
-        dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
         results = [enrich_with_dip(r, dip_scores) for r in results]
         results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
         error_counts = {}
@@ -5727,7 +5737,9 @@ def _run_nasdaq_scanner(days: int):
             "days": days,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "total": len(tickers),
-            "matches": len(results),
+            "matches": sum(1 for row in results if row.get("recent_signal")),
+            "high_dip_rows": sum(1 for row in results if _num_or_none(row.get("dip_total")) is not None and row.get("dip_total") >= DIP_SCANNER_VISIBILITY_THRESHOLD),
+            "displayed_rows": len(results),
             "errors": len(errors),
             "error_counts": error_counts,
             "error_samples": errors[:25],

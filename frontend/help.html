@@ -420,7 +420,7 @@
     <li><strong>Skenuj watchlist</strong> — kontrola tickerov za zvolený počet dní v samostatnej fullscreen tabuľke.</li>
     <li><strong>Vybrať súbor → Import DIP Excel</strong> — nahrá DIP ranking (FA/TA) z XLSX, ideálne zo záložky <code>Ranking</code>.</li>
     <li>Import je zámerne manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom nahráš súbor.</li>
-    <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre scanner a DCA kartu. Tickery z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100. Bez importu scanner použije Nasdaq-100 fallback.</li>
+    <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre scanner a DCA kartu. Tickery z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100. Bez importu scanner použije Nasdaq-100 fallback. Po scane zostane v hlavnej tabuľke každý úspešne spracovaný ticker s <strong>TOTAL ≥80</strong>, aj keď nemá čerstvý technický signál; nižšie skóre sa ukáže iba pri aktuálnom signále.</li>
     <li><strong>Spustiť scanner</strong> — paralelný sken importovaných DIP tickerov (progress bar, beží na pozadí).</li>
   </ul>
 
@@ -428,6 +428,7 @@
   <table>
     <tr><th>Hodnota</th><th>Význam</th></tr>
     <tr><td><strong>Signály</strong></td><td>Počet tickerov s čerstvým signálom.</td></tr>
+    <tr><td><strong>Zobrazené / DIP ≥80</strong></td><td>Počet všetkých riadkov v tabuľke; druhé číslo z nich ukazuje kvalitné DIP tituly viditeľné aj bez čerstvého technického signálu.</td></tr>
     <tr><td><strong>Crossover</strong></td><td>Stretnutie technického signálu s vysokým DIP rankingom.</td></tr>
     <tr><td><strong>Strong</strong></td><td>Tickery s labelom STRONG / VERY STRONG.</td></tr>
     <tr><td><strong>Tech only</strong></td><td>Signály bez DIP dát (len technické).</td></tr>

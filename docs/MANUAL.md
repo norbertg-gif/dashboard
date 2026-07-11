@@ -682,6 +682,10 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
 - XLSX import aktualizuje DIP cache používanú scannerom a DCA kartou. Tickery
   z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100
   (napr. NYSE). Bez importu scanner použije Nasdaq-100 fallback.
+- V hlavnej tabuľke Scanner zobrazí každý úspešne spracovaný ticker z importu s
+  **TOTAL ≥80**, aj keď nemá čerstvý technický signál. Nižšie DIP skóre sa zobrazí
+  iba pri aktuálnom signále. Tak zostanú viditeľné kvalitné kandidáty na manuálnu
+  kontrolu grafu bez zahltenia celým Excelom.
 - **Spustiť scanner** — spustí paralelný sken importovaných DIP tickerov
   (progress bar ukazuje priebeh). Beží na pozadí, výsledky sa priebežne dopĺňajú.
 

@@ -585,7 +585,9 @@ function scannerStatusLine(state, cache) {
     const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
     const universe = cache.universe_label ? ` · ${escHtml(cache.universe_label)}` : '';
     const errors = cache.errors ? ` · ${cache.errors} chýb` : '';
-    return `Posledný scan: ${dt}${universe} · ${cache.matches || 0}/${cache.total || 0} signálov${errors}`;
+    const displayed = Number(cache.displayed_rows ?? cache.matches ?? 0);
+    const highDip = Number(cache.high_dip_rows || 0);
+    return `Posledný scan: ${dt}${universe} · ${cache.matches || 0}/${cache.total || 0} signálov · ${displayed} zobrazené (DIP ≥80: ${highDip})${errors}`;
   }
   return 'Zatiaľ nie je spustený žiadny Nasdaq scan.';
 }
@@ -823,7 +825,7 @@ function renderNasdaqScanner(payload) {
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}<span class="advanced-only">${status}</span><span class="basic-only">${scannerBasicStatusLine(state, cache)}</span>
-      <span class="scanner-compact-kpis advanced-only">Signály ${kpis.total} · Crossover ${kpis.crossover} · Strong ${kpis.strong} · Tech only ${kpis.techOnly}</span>
+      <span class="scanner-compact-kpis advanced-only">Zobrazené ${kpis.total} · Signály ${Number(cache.matches || 0)} · DIP ≥80 ${Number(cache.high_dip_rows || 0)} · Crossover ${kpis.crossover}</span>
     </div>
     ${errorDetails}
     <div class="scanner-main-row">
@@ -912,7 +914,7 @@ function renderScannerErrorDetails(cache) {
       <div><div class="scanner-error-title">Najčastejšie dôvody</div><ul>${countRows || '<li>Bez detailu</li>'}</ul></div>
       <div><div class="scanner-error-title">Vzorka tickerov</div><ul>${sampleRows || '<li>Bez detailu</li>'}</ul></div>
     </div>
-    <div class="scanner-error-note">Ticker bez aktuálneho signálu sa v hlavnej tabuľke nezobrazí ani vtedy, keď má vysoké DIP skóre.</div>
+    <div class="scanner-error-note">Ticker bez aktuálneho signálu zostáva v hlavnej tabuľke, ak má importovaný DIP TOTAL ≥80. Tickery s chybou spracovania sú uvedené len tu, lebo nemajú spoľahlivé chart dáta.</div>
   </details>`;
 }
 
