@@ -213,7 +213,7 @@ Prebehla rozsiahla revízia + performance/UX vylepšenia:
   nezačínať bez vyžiadania.
 # Session handoff — 2026-07-11 audit fixes
 
-- `GET /api/assistant/export` je Basic-Auth-only, read-only a sťahuje sa cez tlačidlo AI export v Scanneri. Schéma 1.1 je full weekly diagnostic pre Stock/ETF: normalizované `attention_items`, earnings mapa, current/market weights a DCA kontext s open lots; žiadne interné eToro ID ani kľúče.
+- `GET /api/assistant/export` je Basic-Auth-only, read-only a sťahuje sa cez tlačidlo AI export v Scanneri. Schéma 1.2 je full weekly diagnostic pre Stock/ETF: normalizované `attention_items`, earnings mapa, current/market weights a DCA kontext s open lots; oddeľuje priority/watch/low-confidence kandidátov, vysvetľuje top DIP tickery nevybrané do priority a uvádza rezervovaný cash objednávok. Žiadne interné eToro ID ani kľúče.
 
 - Watchlist supports server-synced add dates and local A-Z/add-date ordering; the holdings snapshot exposes pending-order symbols for the yellow `X` marker.
 

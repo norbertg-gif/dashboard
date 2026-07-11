@@ -140,26 +140,55 @@ class AssistantExportRegressionTests(unittest.TestCase):
         }
         with (
             patch.object(tb, "_assistant_snapshot", side_effect=lambda account: snapshot if account == "1" else {}),
-            patch.object(tb, "load_dip_scores", return_value={"AAPL": {"rank": 1, "total": 105, "fa": 70, "ta": 35, "label": "VERY STRONG"}}),
-            patch.object(tb, "load_scanner_cache", return_value={"results": [{"ticker": "AAPL", "recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Bad"}}}]}),
+            patch.object(tb, "load_dip_scores", return_value={
+                "AAPL": {"rank": 1, "total": 105, "fa": 70, "ta": 35, "label": "VERY STRONG"},
+                "MSFT": {"rank": 2, "total": 95, "fa": 65, "ta": 30, "label": "STRONG"},
+                "CTSH": {"rank": 3, "total": 100, "fa": 67, "ta": 33, "label": "VERY STRONG"},
+            }),
+            patch.object(tb, "load_scanner_cache", return_value={"results": [
+                {"ticker": "AAPL", "recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Bad"}}},
+                {"ticker": "MSFT", "name": "Microsoft", "recent_signal": {"score": 3, "tier": "buy"}},
+            ]}),
             patch.object(tb, "get_investor_inbox", return_value={"generated_at": "now", "items": [{"ticker": "AAPL", "kinds": ["dca", "broken"], "priority": 10, "reasons": [{"title": "Graf potrebuje kontrolu"}]}]}),
             patch.object(tb, "get_earnings_calendar_view", return_value={"items": [{"ticker": "AAPL", "date": "2026-07-15", "days": 4, "in_portfolio": True}]}),
-            patch.object(tb, "get_scanner_notes", return_value={"content": "note"}),
             patch.object(tb, "_read_watchlist_file", return_value=[]),
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.1")
+        self.assertEqual(payload["schema_version"], "1.2")
         self.assertEqual(payload["positions"][0]["ticker"], "AAPL")
         self.assertEqual(payload["positions"][0]["earnings"]["date"], "2026-07-15")
+        self.assertEqual(payload["positions"][0]["dca_context"]["change_from_last_entry_pct"], 10.0)
+        self.assertNotIn("dca_drawdown_from_last_entry_pct", payload["positions"][0]["dca_context"])
         self.assertEqual(payload["attention_items"][0]["action_type"], "chart_review")
         self.assertEqual(payload["analysis_scope"]["exclude_crypto_from_export"], True)
+        self.assertEqual(payload["portfolio_summary"]["positions_count_total"], 2)
+        self.assertEqual(payload["portfolio_summary"]["positions_count_exported"], 1)
+        self.assertEqual(payload["portfolio_summary"]["positions_count_excluded_crypto"], 1)
+        self.assertEqual(payload["portfolio_summary"]["cash_reserved_for_orders"], 50.0)
+        self.assertEqual(payload["portfolio_summary"]["cash_free_after_orders"], 50.0)
+        self.assertEqual(payload["new_candidates_priority"][0]["ticker"], "MSFT")
+        self.assertTrue(payload["new_candidates_priority"][0]["passes_dip_threshold"])
+        self.assertEqual(payload["top_ranked_not_selected"][0], {"ticker": "CTSH", "dip_rank": 3, "dip_score": 100, "reason": "not_in_scanner_cache"})
         self.assertNotIn("weekly_plan", payload)
         self.assertNotIn("investor_inbox", payload)
+        self.assertNotIn("notes", payload)
         self.assertEqual(payload["pending_orders"][0]["ticker"], "MSFT")
         rendered = json.dumps(payload)
         self.assertNotIn("positionId", rendered)
         self.assertNotIn("orderId", rendered)
+
+    def test_dca_context_can_be_eligible_without_chart_blockers(self):
+        position = tb._assistant_export_position(
+            "AAPL",
+            [{"symbol": "AAPL", "name": "Apple", "type": "Stock", "amount": 100, "pnl": -20,
+              "pnlPct": -20, "openRate": 100, "currentRate": 80, "openDateTime": "2026-07-01T12:00:00Z"}],
+            {"recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Good"}, "weekly": {"status": "Good"}}},
+            {"total": 100, "rank": 1},
+            {}, {"dca_loss_pct": 15, "dca_dip_min": 90}, 1000,
+        )
+        self.assertEqual(position["dca_context"]["status"], "eligible")
+        self.assertEqual(position["dca_context"]["dca_drawdown_from_last_entry_pct"], -20.0)
 
 
 if __name__ == "__main__":

@@ -1020,15 +1020,17 @@ Watchlist v ľavom paneli podporuje zoradenie podľa A–Z alebo dátumu pridani
 
 V Scanneri tlačidlo **AI export** stiahne read-only súbor JSON určený na manuálne
 vloženie do ChatGPT alebo inej AI. Dashboard ho nikam neodosiela. Export vyžaduje
-bežné prihlásenie do dashboardu a obsahuje aktuálny snapshot portfólia, čakajúce
-objednávky, Týždenný plán, Investor Inbox, earnings do 30 dní, watchlist,
-importovaný DIP ranking, scanner kandidátov a poznámky.
+bežné prihlásenie do dashboardu a obsahuje aktuálny Stock/ETF snapshot portfólia,
+čakajúce objednávky, earnings držaných titulov, watchlist, importovaný DIP ranking,
+rozdelených scanner kandidátov a dôvody, pre ktoré top DIP titul nebol vybraný do priority.
 
-Schéma `1.1` je jeden plný týždenný diagnostický export pre **Stock/ETF**; crypto
+Schéma `1.2` je jeden plný týždenný diagnostický export pre **Stock/ETF**; crypto
 sa zámerne ignoruje. Obsahuje otvorené tranže pre DCA kontext, ale namiesto
 prekrývania Týždenného plánu a Inboxu používa jediný normalizovaný zoznam
 `attention_items`. Pri pozícii sú priamo `current_value`, investovaná aj trhová
-váha a `dca_context` vrátane rozdielu od posledného nákupu.
+váha a `dca_context` vrátane podpísanej zmeny od posledného nákupu. Súhrn rozlišuje
+všetky pozície od exportovaných, uvádza cash rezervovaný na čakajúce buy objednávky a
+kandidátov delí na priority, watch a nízku dôveru podľa aktuálneho DIP prahu.
 
 Súbor má `schema_version`, definície polí a blok `data_quality`, aby AI vedela
 odlíšiť fakty od interpretačných vrstiev a videla vek jednotlivých zdrojov.

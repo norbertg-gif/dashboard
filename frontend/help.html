@@ -609,7 +609,7 @@
   <p>Watchlist v ľavom paneli podporuje zoradenie podľa A–Z alebo dátumu pridania. Dátum sa synchronizuje so serverom; zelená bodka znamená držaný titul a žlté <strong>X</strong> čakajúcu eToro objednávku.</p>
   <h3>AI export pre konzultáciu</h3>
   <p>Tlačidlo <strong>AI export</strong> v Scanneri stiahne read-only JSON, ktorý môžeš ručne vložiť do ChatGPT alebo inej AI. Dashboard ho nikam neodosiela. Ide o plný týždenný diagnostický export pre akcie a ETF; crypto sa zámerne ignoruje.</p>
-  <p>Obsahuje otvorené tranže pre DCA kontext, aktuálnu hodnotu a obe váhy pozície, earnings držaných titulov, DIP ranking, kandidátov a jeden zjednotený zoznam titulov vyžadujúcich pozornosť. Export má schému <code>1.1</code>, definície polí a upozornenia na vek zdrojov. Neobsahuje API kľúče, eToro interné identifikátory ani kompletnú históriu uzavretých obchodov.</p>
+  <p>Obsahuje otvorené tranže pre DCA kontext, aktuálnu hodnotu a obe váhy pozície, earnings držaných titulov, DIP ranking, kandidátov a jeden zjednotený zoznam titulov vyžadujúcich pozornosť. Kandidáti sú oddelení na prioritu, watch a nízku dôveru podľa DIP prahu; pri top tickeroch mimo priority je uvedený dôvod. Export má schému <code>1.2</code>, rozlišuje všetky a exportované pozície, uvádza cash rezervovaný na pending buy objednávky, definície polí a upozornenia na vek zdrojov. Neobsahuje API kľúče, eToro interné identifikátory ani kompletnú históriu uzavretých obchodov.</p>
   <ul>
     <li><strong>Watchlist</strong> — sledované tickery (Grafy, Watchlist / eToro radar, prefetch).</li>
     <li><strong>Presety</strong> — uložené rozloženia (watchlist + panely). Ulož cez „Ulož ako…", načítaj cez „PRESET".</li>

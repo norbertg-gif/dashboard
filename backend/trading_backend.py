@@ -6229,7 +6229,7 @@ def get_investor_plan(refresh: int = Query(0)):
     return _investor_cache_set(cache_key, payload)
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.1"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.2"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -6305,9 +6305,9 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     current_price = _assistant_number(current_rate)
     total_pnl_pct = round(pnl / amount * 100, 2) if amount else None
     last_lot_pnl_pct = _assistant_number(last_buy.get("pnlPct"))
-    decline_from_last_entry = round((current_price - last_entry) / last_entry * 100, 2) if current_price and last_entry else None
+    change_from_last_entry = round((current_price - last_entry) / last_entry * 100, 2) if current_price and last_entry else None
     dip_total = _assistant_number((dip or {}).get("total"))
-    trigger_from_last_entry = decline_from_last_entry is not None and decline_from_last_entry <= -float(settings["dca_loss_pct"])
+    trigger_from_last_entry = change_from_last_entry is not None and change_from_last_entry <= -float(settings["dca_loss_pct"])
     trigger_from_total = total_pnl_pct is not None and total_pnl_pct <= -float(settings["dca_loss_pct"])
     dip_ok = dip_total is not None and dip_total >= float(settings["dca_dip_min"])
     blocking = [
@@ -6356,7 +6356,8 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "status": dca_status,
             "portfolio_pnl_pct": total_pnl_pct,
             "last_lot_pnl_pct": last_lot_pnl_pct,
-            "decline_from_last_entry_pct": decline_from_last_entry,
+            "change_from_last_entry_pct": change_from_last_entry,
+            "dca_drawdown_from_last_entry_pct": change_from_last_entry if change_from_last_entry is not None and change_from_last_entry < 0 else None,
             "trigger_met_from_last_entry": trigger_from_last_entry,
             "trigger_met_on_total_position": trigger_from_total,
             "dip_score_threshold_met": dip_ok,
@@ -6374,6 +6375,9 @@ def get_assistant_export():
     settings = _dash_settings()
     snapshots = {account: _assistant_snapshot(account) for account in ("1", "2")}
     positions_by_symbol: dict[str, list[dict]] = {}
+    all_position_symbols: set[str] = set()
+    excluded_crypto_symbols: set[str] = set()
+    excluded_other_symbols: set[str] = set()
     orders = []
     summary = {"cash": 0.0, "invested": 0.0, "equity": 0.0, "total_pnl": 0.0, "daily_pnl": 0.0}
     source_times = {}
@@ -6382,9 +6386,16 @@ def get_assistant_export():
         for key in summary:
             summary[key] += float((snapshot.get("summary") or {}).get(key) or 0)
         for position in snapshot.get("data") or []:
-            if str(position.get("type") or "") not in {"Stock", "ETF"}:
-                continue
             symbol = str(position.get("symbol") or "").upper()
+            asset_type = str(position.get("type") or "")
+            if symbol:
+                all_position_symbols.add(symbol)
+            if asset_type not in {"Stock", "ETF"}:
+                if asset_type == "Crypto":
+                    excluded_crypto_symbols.add(symbol)
+                else:
+                    excluded_other_symbols.add(symbol)
+                continue
             if symbol:
                 positions_by_symbol.setdefault(symbol, []).append(position)
         for order in snapshot.get("orders") or []:
@@ -6509,7 +6520,10 @@ def get_assistant_export():
 
     ranked_dip = sorted(dip_scores.items(), key=lambda item: (_assistant_number(item[1].get("rank")) or 999999, item[0]))
     dip_scan = [dip_export_row(symbol, dip) for symbol, dip in ranked_dip[:100]]
-    new_candidates = []
+    new_candidates_priority = []
+    new_candidates_watch = []
+    new_candidates_low_confidence = []
+    selected_priority_symbols = set()
     for symbol, scan in scanner_by_symbol.items():
         if symbol in positions_by_symbol:
             continue
@@ -6517,20 +6531,48 @@ def get_assistant_export():
         if not signal:
             continue
         dip = dip_scores.get(symbol) or {}
-        new_candidates.append(_assistant_compact({
+        candidate = _assistant_compact({
             "ticker": symbol, "company": scan.get("name") or dip.get("company"),
             "dip_rank": _assistant_number(dip.get("rank")), "dip_score": _assistant_number(dip.get("total")),
             "fa_score": _assistant_number(dip.get("fa")), "ta_score": _assistant_number(dip.get("ta")),
             "signal_strength": signal.get("score"), "signal_tier": signal.get("tier"),
             "last_price": _assistant_number(scan.get("last") or scan.get("price")),
             "chart_state": _assistant_chart_state(scan),
-        }))
-    new_candidates.sort(key=lambda item: (-(item.get("dip_score") or 0), item.get("ticker", "")))
+            "passes_dip_threshold": _assistant_number(dip.get("total")) is not None and _assistant_number(dip.get("total")) >= float(settings["dca_dip_min"]),
+        })
+        if candidate.get("passes_dip_threshold"):
+            new_candidates_priority.append(candidate)
+            selected_priority_symbols.add(symbol)
+        elif candidate.get("dip_score") is not None:
+            new_candidates_watch.append(candidate)
+        else:
+            new_candidates_low_confidence.append(candidate)
+    for candidates in (new_candidates_priority, new_candidates_watch, new_candidates_low_confidence):
+        candidates.sort(key=lambda item: (-(item.get("dip_score") or 0), item.get("ticker", "")))
 
-    try:
-        notes = get_scanner_notes()
-    except Exception:
-        notes = {"content": ""}
+    top_ranked_not_selected = []
+    for symbol, dip in ranked_dip:
+        if symbol in positions_by_symbol or symbol in selected_priority_symbols:
+            continue
+        scan = scanner_by_symbol.get(symbol)
+        signal = (scan or {}).get("recent_signal") or {}
+        dip_score = _assistant_number(dip.get("total"))
+        if not scan:
+            reason = "not_in_scanner_cache"
+        elif not signal:
+            reason = "no_scanner_signal"
+        elif dip_score is None:
+            reason = "missing_dip_score"
+        else:
+            reason = "dip_score_below_threshold"
+        top_ranked_not_selected.append(_assistant_compact({
+            "ticker": symbol, "company": dip.get("company"), "dip_rank": _assistant_number(dip.get("rank")),
+            "dip_score": dip_score, "reason": reason,
+        }))
+        if len(top_ranked_not_selected) >= 25:
+            break
+
+    cash_reserved_for_orders = sum(float(order.get("invested") or 0) for order in orders if order.get("side") == "buy")
     watchlist = _read_watchlist_file()
     source_times.update({
         "dip_import": dip_meta.get("updated_at"),
@@ -6547,7 +6589,10 @@ def get_assistant_export():
         "invested_weight_pct": "Original invested value divided by total dashboard equity.",
         "market_value_weight_pct": "Current value divided by total dashboard equity, including asset classes excluded from this analysis; use this for concentration review.",
         "dca_context": "Explicit DCA evidence. eligible means current conditions pass; conditional means positive conditions exist but chart blockers require manual review.",
+        "change_from_last_entry_pct": "Signed price change from the latest open lot entry. Positive means current price is above that entry; negative means below it.",
+        "dca_drawdown_from_last_entry_pct": "Negative-only price change from the latest open lot entry. Omitted when the current price is at or above that entry.",
         "attention_items": "One normalized list of held tickers that need review. It replaces duplicated weekly-plan and inbox text in this export.",
+        "passes_dip_threshold": "Whether the imported DIP score meets the configured DCA minimum. It separates priority candidates from scanner-only watch candidates.",
     }
     return {
         "schema_version": ASSISTANT_EXPORT_SCHEMA_VERSION,
@@ -6578,8 +6623,12 @@ def get_assistant_export():
         },
         "portfolio_summary": {
             "account_value": round(summary["equity"], 2), "invested_value": round(summary["invested"], 2),
-            "cash_available": round(summary["cash"], 2), "profit_loss": round(summary["total_pnl"], 2),
-            "daily_profit_loss": round(summary["daily_pnl"], 2), "positions_count": len(portfolio),
+            "cash_available": round(summary["cash"], 2),
+            "cash_reserved_for_orders": round(cash_reserved_for_orders, 2),
+            "cash_free_after_orders": round(max(0.0, summary["cash"] - cash_reserved_for_orders), 2),
+            "profit_loss": round(summary["total_pnl"], 2), "daily_profit_loss": round(summary["daily_pnl"], 2),
+            "positions_count_total": len(all_position_symbols), "positions_count_exported": len(portfolio),
+            "positions_count_excluded_crypto": len(excluded_crypto_symbols), "positions_count_excluded_other": len(excluded_other_symbols),
             "pending_orders_count": len(orders),
         },
         "attention_items": attention_items,
@@ -6592,8 +6641,10 @@ def get_assistant_export():
         "positions": portfolio,
         "pending_orders": orders,
         "dip_ranking_top_100": {"meta": dip_meta, "items": dip_scan},
-        "new_candidates": new_candidates[:50],
-        "notes": {"content": notes.get("content") or "", "updated_at": notes.get("updated_at")},
+        "new_candidates_priority": new_candidates_priority[:50],
+        "new_candidates_watch": new_candidates_watch[:50],
+        "new_candidates_low_confidence": new_candidates_low_confidence[:50],
+        "top_ranked_not_selected": top_ranked_not_selected,
         "analysis_request": {
             "task": "Analyze portfolio and DIP scan.",
             "questions": [
