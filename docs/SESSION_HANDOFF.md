@@ -219,3 +219,4 @@ Prebehla rozsiahla revízia + performance/UX vylepšenia:
 - Prepnutie Basic → Advanced pri už inicializovanej Analytike vynúti načítanie plného payloadu.
 - Duplicitné Python názvy search handlerov boli odstránené bez zmeny URL kontraktov.
 - Pribudol `test_regressions.py` pre uvedené kritické regresie.
+- Týždenný plán funguje aj ako ľahká Review Queue: lokálne denné `Hotovo`, počet zostávajúcich a Prev/Next navigácia do Verdiktu bez nového backend výpočtu.

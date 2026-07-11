@@ -14,6 +14,59 @@ function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX
 const WEEKLY_PLAN_COLLAPSED_KEY = 'td_weekly_plan_collapsed';
 function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) === '1'; }
 
+const WEEKLY_PLAN_REVIEWED_PREFIX = 'td_weekly_plan_reviewed_';
+let weeklyPlanQueueIndex = 0;
+
+function weeklyPlanReviewKey() {
+  const now = new Date();
+  const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return `${WEEKLY_PLAN_REVIEWED_PREFIX}${localDate}`;
+}
+
+function weeklyPlanReviewed() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(weeklyPlanReviewKey()) || '[]');
+    return new Set(Array.isArray(rows) ? rows.map(t => String(t).toUpperCase()) : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function weeklyPlanQueue(plan = window._lastWeeklyPlanPayload) {
+  const seen = new Set();
+  const queue = [];
+  for (const group of [plan?.focus, plan?.buy_candidates, plan?.dca, plan?.risks]) {
+    for (const row of (group || [])) {
+      const ticker = String(row?.ticker || '').toUpperCase();
+      if (ticker && !seen.has(ticker)) {
+        seen.add(ticker);
+        queue.push(ticker);
+      }
+    }
+  }
+  return queue;
+}
+
+function toggleWeeklyPlanReviewed(ticker, event) {
+  event?.stopPropagation();
+  ticker = String(ticker || '').toUpperCase();
+  if (!ticker) return;
+  const reviewed = weeklyPlanReviewed();
+  reviewed.has(ticker) ? reviewed.delete(ticker) : reviewed.add(ticker);
+  localStorage.setItem(weeklyPlanReviewKey(), JSON.stringify([...reviewed]));
+  if (window._lastWeeklyPlanPayload) renderWeeklyPlan(window._lastWeeklyPlanPayload);
+}
+
+function openWeeklyPlanQueue(step = 0) {
+  const all = weeklyPlanQueue();
+  const reviewed = weeklyPlanReviewed();
+  const pending = all.filter(ticker => !reviewed.has(ticker));
+  const queue = pending.length ? pending : all;
+  if (!queue.length) return;
+  weeklyPlanQueueIndex = Math.max(0, Math.min(queue.length - 1, weeklyPlanQueueIndex + Number(step || 0)));
+  openVerdictTicker(queue[weeklyPlanQueueIndex]);
+}
+
 const SCANNER_CLIENT_CACHE_MS = {
   weeklyPlan: 24 * 60 * 60 * 1000,
   investorInbox: 24 * 60 * 60 * 1000,
@@ -176,12 +229,14 @@ function toggleWeeklyPlanCollapsed() {
   else loadWeeklyPlan();
 }
 
-function weeklyPlanRow(row, cls) {
+function weeklyPlanRow(row, cls, reviewed) {
   const t = escHtml(row.ticker || '');
-  return `<div class="plan-row">
+  const isReviewed = reviewed.has(String(row.ticker || '').toUpperCase());
+  return `<div class="plan-row${isReviewed ? ' reviewed' : ''}">
     <span class="plan-ticker ${cls}" onclick="openScannerTicker('${t}')" title="Otvoriť v Analytike">${t}</span>
     <span class="plan-text">${escHtml(row.summary || '')}</span>
     <button class="scanner-verdict-btn" onclick="openVerdictTicker('${t}', event)">Verdikt</button>
+    <button class="plan-reviewed-btn${isReviewed ? ' active' : ''}" onclick="toggleWeeklyPlanReviewed('${t}', event)" title="${isReviewed ? 'Označiť ako neprejdené' : 'Označiť ako prejdené'}">${isReviewed ? 'Prejdené' : 'Hotovo'}</button>
   </div>`;
 }
 
@@ -198,11 +253,23 @@ function renderWeeklyPlan(plan) {
     return;
   }
 
+  const reviewed = weeklyPlanReviewed();
+  const queue = weeklyPlanQueue(plan);
+  weeklyPlanQueueIndex = Math.max(0, Math.min(queue.length - 1, weeklyPlanQueueIndex));
+  const doneCount = queue.filter(ticker => reviewed.has(ticker)).length;
   const sections = [];
   const block = (title, rows, cls, emptyNote) => {
     if (!rows?.length) return emptyNote ? `<div class="plan-section"><h4>${title}</h4><div class="plan-quiet">${emptyNote}</div></div>` : '';
-    return `<div class="plan-section"><h4>${title}</h4>${rows.map(r => weeklyPlanRow(r, cls)).join('')}</div>`;
+    return `<div class="plan-section"><h4>${title}</h4>${rows.map(r => weeklyPlanRow(r, cls, reviewed)).join('')}</div>`;
   };
+  sections.push(`<div class="plan-review-toolbar">
+    <span><b>${doneCount}/${queue.length}</b> prejdených · ${Math.max(0, queue.length - doneCount)} zostáva</span>
+    <div>
+      <button class="btn mini" onclick="openWeeklyPlanQueue(-1)" ${queue.length ? '' : 'disabled'} title="Predchádzajúci ticker">‹</button>
+      <button class="btn mini" onclick="openWeeklyPlanQueue(0)" ${queue.length ? '' : 'disabled'}>Otvoriť vo Verdikte</button>
+      <button class="btn mini" onclick="openWeeklyPlanQueue(1)" ${queue.length ? '' : 'disabled'} title="Ďalší ticker">›</button>
+    </div>
+  </div>`);
   sections.push(block('Pozri dnes', plan.focus, 'sev-mixed'));
   sections.push(block('Možný nákup', plan.buy_candidates, 'sev-buy'));
   sections.push(block('Možné DCA', plan.dca, 'sev-buy'));

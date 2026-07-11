@@ -191,6 +191,10 @@ Main source sections:
    +/− button pattern as the Portfolio DCA card; collapsed state shows a
    one-line count summary (`renderWeeklyPlan`/`renderInvestorInbox` still fetch
    normally, only the DOM output changes) and persists across reloads.
+   Weekly-plan rows also have a client-only daily review state (`td_weekly_plan_reviewed_YYYY-MM-DD`):
+   `Hotovo` dims a reviewed ticker and the Prev/Next Verdikt controls prioritize
+   remaining tickers. This is workflow state only; never feed it back into scoring
+   or server-side candidate selection.
 - **Investor Inbox / Tento týždeň** — `GET /api/investor/inbox` is a pull-based
    weekly triage panel at the top of Scanner. It merges existing cached sources:
    DCA candidates (`/api/portfolio/dca` for both accounts), large portfolio wins

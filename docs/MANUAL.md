@@ -562,6 +562,11 @@ Tlačidlo **+/−** vľavo od nadpisu kartu zbalí na jeden riadok („5 položi
 v pláne") — rovnaký princíp ako pri DCA karte v Portfóliu. Stav sa pamätá
 medzi návštevami. To isté zbaľovanie má aj **Investor Inbox** nižšie.
 
+Riadky plánu sa dajú označiť tlačidlom **Hotovo**. Počítadlo ukazuje, koľko
+titulov ešte zostáva, a šípky pri **Otvoriť vo Verdikte** prechádzajú prednostne
+neprejdené tickery. Stav je lokálny pre daný deň a prehliadač; nemení scanner,
+skóre ani serverové dáta a nasledujúci deň sa začne čistý zoznam.
+
 ### Investor Inbox — Tento týždeň
 
 Horná karta **Tento týždeň** je ľudský filter nad portfóliom a scannerom.

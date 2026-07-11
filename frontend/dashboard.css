@@ -4244,6 +4244,8 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 .plan-row:last-child { border-bottom: 0; }
+.plan-row.reviewed { opacity: 0.48; }
+.plan-row.reviewed .plan-text { text-decoration: line-through; text-decoration-thickness: 1px; }
 .plan-ticker {
   font-family: var(--font-mono);
   font-weight: 700;
@@ -4257,6 +4259,32 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .plan-ticker.sev-mixed { color: var(--yellow); }
 .plan-text { flex: 1; line-height: 1.45; }
 .plan-quiet { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+.plan-review-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0 8px;
+  color: var(--muted2);
+  font-size: 10.5px;
+  border-bottom: 1px solid var(--border);
+}
+.plan-review-toolbar > div { display: flex; gap: 4px; }
+.plan-reviewed-btn {
+  min-width: 56px;
+  padding: 3px 7px;
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  background: var(--bg3);
+  color: var(--muted2);
+  font-size: 9.5px;
+  cursor: pointer;
+}
+.plan-reviewed-btn:hover,
+.plan-reviewed-btn.active {
+  border-color: color-mix(in srgb, var(--up) 55%, var(--border2));
+  color: var(--up);
+}
 
 
 /* ── Verdikt: "Prečo NEkúpiť" ── */
