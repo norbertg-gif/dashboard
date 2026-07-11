@@ -1024,6 +1024,12 @@ bežné prihlásenie do dashboardu a obsahuje aktuálny snapshot portfólia, ča
 objednávky, Týždenný plán, Investor Inbox, earnings do 30 dní, watchlist,
 importovaný DIP ranking, scanner kandidátov a poznámky.
 
+Schéma `1.1` je jeden plný týždenný diagnostický export pre **Stock/ETF**; crypto
+sa zámerne ignoruje. Obsahuje otvorené tranže pre DCA kontext, ale namiesto
+prekrývania Týždenného plánu a Inboxu používa jediný normalizovaný zoznam
+`attention_items`. Pri pozícii sú priamo `current_value`, investovaná aj trhová
+váha a `dca_context` vrátane rozdielu od posledného nákupu.
+
 Súbor má `schema_version`, definície polí a blok `data_quality`, aby AI vedela
 odlíšiť fakty od interpretačných vrstiev a videla vek jednotlivých zdrojov.
 Neobsahuje API kľúče, eToro interné ID ani kompletnú uzavretú obchodnú históriu.

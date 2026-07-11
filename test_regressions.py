@@ -135,23 +135,27 @@ class AssistantExportRegressionTests(unittest.TestCase):
                 "positionId": 999, "symbol": "AAPL", "name": "Apple", "type": "Stock",
                 "amount": 200, "pnl": 20, "pnlPct": 10, "openRate": 100,
                 "currentRate": 110, "openDateTime": "2026-07-01T12:00:00Z",
-            }],
-            "orders": [{"orderId": 555, "symbol": "MSFT", "kind": "limit", "isBuy": True, "rate": 400, "amount": 50}],
+            }, {"symbol": "BTC", "name": "Bitcoin", "type": "Crypto", "amount": 50, "pnl": 5}],
+            "orders": [{"orderId": 555, "symbol": "MSFT", "type": "Stock", "kind": "limit", "isBuy": True, "rate": 400, "amount": 50}],
         }
         with (
             patch.object(tb, "_assistant_snapshot", side_effect=lambda account: snapshot if account == "1" else {}),
             patch.object(tb, "load_dip_scores", return_value={"AAPL": {"rank": 1, "total": 105, "fa": 70, "ta": 35, "label": "VERY STRONG"}}),
-            patch.object(tb, "load_scanner_cache", return_value={"results": [{"ticker": "AAPL", "recent_signal": {"score": 3, "tier": "buy"}}]}),
-            patch.object(tb, "get_investor_inbox", return_value={"generated_at": "now", "items": []}),
-            patch.object(tb, "get_investor_plan", return_value={"headline": "Test"}),
-            patch.object(tb, "get_earnings_calendar_view", return_value={"items": []}),
+            patch.object(tb, "load_scanner_cache", return_value={"results": [{"ticker": "AAPL", "recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Bad"}}}]}),
+            patch.object(tb, "get_investor_inbox", return_value={"generated_at": "now", "items": [{"ticker": "AAPL", "kinds": ["dca", "broken"], "priority": 10, "reasons": [{"title": "Graf potrebuje kontrolu"}]}]}),
+            patch.object(tb, "get_earnings_calendar_view", return_value={"items": [{"ticker": "AAPL", "date": "2026-07-15", "days": 4, "in_portfolio": True}]}),
             patch.object(tb, "get_scanner_notes", return_value={"content": "note"}),
             patch.object(tb, "_read_watchlist_file", return_value=[]),
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.0")
-        self.assertEqual(payload["portfolio"][0]["ticker"], "AAPL")
+        self.assertEqual(payload["schema_version"], "1.1")
+        self.assertEqual(payload["positions"][0]["ticker"], "AAPL")
+        self.assertEqual(payload["positions"][0]["earnings"]["date"], "2026-07-15")
+        self.assertEqual(payload["attention_items"][0]["action_type"], "chart_review")
+        self.assertEqual(payload["analysis_scope"]["exclude_crypto_from_export"], True)
+        self.assertNotIn("weekly_plan", payload)
+        self.assertNotIn("investor_inbox", payload)
         self.assertEqual(payload["pending_orders"][0]["ticker"], "MSFT")
         rendered = json.dumps(payload)
         self.assertNotIn("positionId", rendered)

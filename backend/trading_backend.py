@@ -6229,7 +6229,7 @@ def get_investor_plan(refresh: int = Query(0)):
     return _investor_cache_set(cache_key, payload)
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.0"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.1"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -6264,8 +6264,30 @@ def _assistant_chart_state(row: dict) -> dict:
     }
 
 
+def _assistant_compact(data: dict) -> dict:
+    """Keep export factual and compact: omit unavailable fields instead of null noise."""
+    out = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            value = _assistant_compact(value)
+        elif isinstance(value, list):
+            value = [_assistant_compact(item) if isinstance(item, dict) else item for item in value]
+        if value is not None and value != [] and value != {}:
+            out[key] = value
+    return out
+
+
+def _assistant_days_since(timestamp: str | None) -> int | None:
+    try:
+        then = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        return max(0, (datetime.now(timezone.utc).date() - then.date()).days)
+    except (TypeError, ValueError):
+        return None
+
+
 def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
-                               dip: dict, inbox_item: dict, dca_reason: dict) -> dict:
+                               dip: dict, earnings: dict, settings: dict,
+                               total_equity: float) -> dict:
     amount = sum(float(p.get("amount") or 0) for p in lots)
     pnl = sum(float(p.get("pnl") or 0) for p in lots)
     current_rate = next((p.get("currentRate") for p in reversed(lots) if p.get("currentRate") is not None), None)
@@ -6279,20 +6301,39 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     } for p in lots[:20]]
     signal = scanner_row.get("recent_signal") or {}
     chart_state = _assistant_chart_state(scanner_row)
-    reasons = (inbox_item or {}).get("reasons") or []
-    kinds = set((inbox_item or {}).get("kinds") or [])
-    return {
+    last_entry = _assistant_number(last_buy.get("openRate"))
+    current_price = _assistant_number(current_rate)
+    total_pnl_pct = round(pnl / amount * 100, 2) if amount else None
+    last_lot_pnl_pct = _assistant_number(last_buy.get("pnlPct"))
+    decline_from_last_entry = round((current_price - last_entry) / last_entry * 100, 2) if current_price and last_entry else None
+    dip_total = _assistant_number((dip or {}).get("total"))
+    trigger_from_last_entry = decline_from_last_entry is not None and decline_from_last_entry <= -float(settings["dca_loss_pct"])
+    trigger_from_total = total_pnl_pct is not None and total_pnl_pct <= -float(settings["dca_loss_pct"])
+    dip_ok = dip_total is not None and dip_total >= float(settings["dca_dip_min"])
+    blocking = [
+        name for name, state in (("daily_bad", chart_state.get("daily_state")), ("weekly_bad", chart_state.get("weekly_state")))
+        if str(state or "").lower() == "bad"
+    ]
+    dca_status = "not_eligible"
+    if trigger_from_total and dip_ok:
+        dca_status = "conditional" if blocking else "eligible"
+    return _assistant_compact({
         "ticker": symbol,
         "name": next((p.get("name") for p in lots if p.get("name")), symbol),
         "asset_type": next((p.get("type") for p in lots if p.get("type")), None),
         "position": {
             "invested": round(amount, 2),
-            "current_price": _assistant_number(current_rate),
+            "current_value": round(amount + pnl, 2),
+            "current_price": current_price,
             "profit_loss": round(pnl, 2),
-            "profit_loss_pct": round(pnl / amount * 100, 2) if amount else None,
+            "profit_loss_pct": total_pnl_pct,
+            "invested_weight_pct": round(amount / total_equity * 100, 2) if total_equity else None,
+            "market_value_weight_pct": round((amount + pnl) / total_equity * 100, 2) if total_equity else None,
             "last_buy": {
                 "opened_at": last_buy.get("openDateTime") or None,
-                "entry_price": _assistant_number(last_buy.get("openRate")),
+                "entry_price": last_entry,
+                "profit_loss_pct": last_lot_pnl_pct,
+                "days_since": _assistant_days_since(last_buy.get("openDateTime")),
             },
             "open_lots": open_lots,
         },
@@ -6306,23 +6347,29 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "signal_tier": signal.get("tier"),
             **chart_state,
         },
-        "risk": {
-            "earnings_date": next((r.get("date") for r in reasons if r.get("kind") == "earnings"), None),
-            "broken_chart_warning": "broken" in kinds,
-            "value_trap_warning": bool((dca_reason or {}).get("flag") in {"value_trap", "no_data"}),
+        "earnings": _assistant_compact({
+            "date": (earnings or {}).get("date"),
+            "days_remaining": (earnings or {}).get("days"),
+            "confirmed": bool((earnings or {}).get("date")),
+        }),
+        "dca_context": {
+            "status": dca_status,
+            "portfolio_pnl_pct": total_pnl_pct,
+            "last_lot_pnl_pct": last_lot_pnl_pct,
+            "decline_from_last_entry_pct": decline_from_last_entry,
+            "trigger_met_from_last_entry": trigger_from_last_entry,
+            "trigger_met_on_total_position": trigger_from_total,
+            "dip_score_threshold_met": dip_ok,
+            "positive_conditions": [name for name, met in (("portfolio_drawdown", trigger_from_total), ("dip_score", dip_ok)) if met],
+            "blocking_conditions": blocking,
         },
-        "dashboard_recommendation": {
-            "action": (inbox_item or {}).get("title") or "hold_review",
-            "reason": (inbox_item or {}).get("summary") or "No current dashboard exception.",
-            "reasons": [r.get("label") for r in reasons if r.get("label")],
-        },
-    }
+    })
 
 
 @app.get("/api/assistant/export")
 def get_assistant_export():
     """Read-only AI handoff. Protected by normal Basic Auth, never public-token auth.
-    It reuses dashboard snapshots and scanner/DIP cache; no eToro refresh is started."""
+    It reuses dashboard snapshots and scanner/DIP cache; it never explicitly requests refresh=1."""
     now = datetime.now(timezone.utc)
     settings = _dash_settings()
     snapshots = {account: _assistant_snapshot(account) for account in ("1", "2")}
@@ -6335,10 +6382,14 @@ def get_assistant_export():
         for key in summary:
             summary[key] += float((snapshot.get("summary") or {}).get(key) or 0)
         for position in snapshot.get("data") or []:
+            if str(position.get("type") or "") not in {"Stock", "ETF"}:
+                continue
             symbol = str(position.get("symbol") or "").upper()
             if symbol:
                 positions_by_symbol.setdefault(symbol, []).append(position)
         for order in snapshot.get("orders") or []:
+            if str(order.get("type") or "") not in {"Stock", "ETF"}:
+                continue
             orders.append({
                 "ticker": str(order.get("symbol") or "").upper(),
                 "kind": order.get("kind"),
@@ -6360,58 +6411,121 @@ def get_assistant_export():
         inbox = get_investor_inbox(refresh=0)
     except Exception:
         inbox = {"items": [], "generated_at": None}
-    inbox_by_symbol = {str(item.get("ticker") or "").upper(): item for item in (inbox.get("items") or []) if isinstance(item, dict)}
-    try:
-        plan = get_investor_plan(refresh=0)
-    except Exception:
-        plan = {}
     try:
         earnings = get_earnings_calendar_view(days=30, refresh=0)
     except Exception:
         earnings = {"items": [], "generated_at": None}
-
-    dca_by_symbol = {}
-    for account, snapshot in snapshots.items():
-        equity = float((snapshot.get("summary") or {}).get("equity") or 0)
-        for symbol, lots in positions_by_symbol.items():
-            # Aggregate once below; account-level duplicate work is harmless but avoided.
-            if symbol in dca_by_symbol:
-                continue
-            amount = sum(float(p.get("amount") or 0) for p in lots)
-            pnl = sum(float(p.get("pnl") or 0) for p in lots)
-            pnl_pct = pnl / amount * 100 if amount else 0.0
-            dip = dip_scores.get(symbol) or {}
-            dip_total = _assistant_number(dip.get("total"))
-            if pnl_pct <= -float(settings["dca_loss_pct"]):
-                flag = "dca" if dip_total is not None and dip_total >= settings["dca_dip_min"] else ("value_trap" if dip_total is not None else "no_data")
-                dca_by_symbol[symbol] = {"flag": flag, "pnl_pct": round(pnl_pct, 2), "dip_total": dip_total, "equity_reference": equity}
+    earnings_by_symbol = {
+        str(item.get("ticker") or "").upper(): item
+        for item in (earnings.get("items") or []) if isinstance(item, dict)
+    }
 
     total_equity = summary["equity"]
     portfolio = []
     for symbol in sorted(positions_by_symbol):
         row = _assistant_export_position(symbol, positions_by_symbol[symbol], scanner_by_symbol.get(symbol) or {},
-                                         dip_scores.get(symbol) or {}, inbox_by_symbol.get(symbol) or {}, dca_by_symbol.get(symbol) or {})
-        row["position"]["portfolio_weight_pct"] = round(row["position"]["invested"] / total_equity * 100, 2) if total_equity else None
+                                         dip_scores.get(symbol) or {}, earnings_by_symbol.get(symbol) or {}, settings, total_equity)
         portfolio.append(row)
 
+    portfolio_by_symbol = {row["ticker"]: row for row in portfolio}
+
+    def attention_item(inbox_item: dict) -> dict | None:
+        ticker = str(inbox_item.get("ticker") or "").upper()
+        position = portfolio_by_symbol.get(ticker)
+        if not position:
+            return None
+        kinds = set(inbox_item.get("kinds") or [])
+        reasons = inbox_item.get("reasons") or []
+        broken_titles = {str(reason.get("title") or "").lower() for reason in reasons if isinstance(reason, dict)}
+        has_chart_break = any("graf" in title for title in broken_titles)
+        has_dca_quality_warning = "broken" in kinds and not has_chart_break
+        dca = position.get("dca_context") or {}
+        types = []
+        if dca.get("status") in {"eligible", "conditional"}:
+            types.append("dca_candidate")
+        if has_chart_break:
+            types.append("broken_chart")
+        elif has_dca_quality_warning:
+            types.append("dca_quality_warning")
+        if "earnings" in kinds:
+            types.append("earnings")
+        if "profit" in kinds:
+            types.append("profit_review")
+        if not types:
+            return None
+        action_type = "chart_review" if "broken_chart" in types else (
+            "dca_review" if {"dca_candidate", "dca_quality_warning"} & set(types) else (
+                "earnings_review" if "earnings" in types else "profit_review"
+            )
+        )
+        status = "conditional" if dca.get("status") == "conditional" else (
+            "confirmed" if dca.get("status") == "eligible" else "review")
+        if "broken_chart" in types:
+            severity = "warning"
+        elif "earnings" in types:
+            severity = "watch"
+        else:
+            severity = "info"
+        return _assistant_compact({
+            "ticker": ticker,
+            "types": types,
+            "action_type": action_type,
+            "priority": inbox_item.get("priority"),
+            "status": status,
+            "severity": severity,
+            "facts": {
+                "position_pnl_pct": position["position"].get("profit_loss_pct"),
+                "last_lot_pnl_pct": (position.get("dca_context") or {}).get("last_lot_pnl_pct"),
+                "dip_score": (position.get("signals") or {}).get("dip_score"),
+                "daily_state": (position.get("signals") or {}).get("daily_state"),
+                "weekly_state": (position.get("signals") or {}).get("weekly_state"),
+                "earnings_date": (position.get("earnings") or {}).get("date"),
+            },
+            "positive_conditions": (position.get("dca_context") or {}).get("positive_conditions"),
+            "blocking_conditions": (position.get("dca_context") or {}).get("blocking_conditions"),
+        })
+
+    attention_items = [item for item in (attention_item(item) for item in (inbox.get("items") or [])) if item]
+    attention_tickers = {item["ticker"] for item in attention_items}
+    for ticker, position in portfolio_by_symbol.items():
+        dca = position.get("dca_context") or {}
+        if ticker in attention_tickers or dca.get("status") not in {"eligible", "conditional"}:
+            continue
+        attention_items.append(_assistant_compact({
+            "ticker": ticker, "types": ["dca_candidate"], "priority": 50,
+            "status": dca.get("status"), "severity": "watch" if dca.get("status") == "conditional" else "info",
+            "facts": {"position_pnl_pct": position["position"].get("profit_loss_pct"), "dip_score": position["signals"].get("dip_score")},
+            "positive_conditions": dca.get("positive_conditions"), "blocking_conditions": dca.get("blocking_conditions"),
+        }))
+    attention_items.sort(key=lambda item: (item.get("priority", 99), item.get("ticker", "")))
+
     def dip_export_row(symbol: str, dip: dict) -> dict:
-        scan = scanner_by_symbol.get(symbol) or {}
-        signal = scan.get("recent_signal") or {}
-        return {
+        return _assistant_compact({
             "rank": _assistant_number(dip.get("rank")), "ticker": symbol,
-            "company": dip.get("company") or scan.get("name"),
-            "in_portfolio": symbol in positions_by_symbol,
+            "company": dip.get("company"), "in_portfolio": symbol in positions_by_symbol,
             "dip_score": _assistant_number(dip.get("total")), "fa_score": _assistant_number(dip.get("fa")),
             "ta_score": _assistant_number(dip.get("ta")), "dip_strength": dip.get("label"),
-            "signal_strength": signal.get("score"), "signal_tier": signal.get("tier"),
-            "last_price": _assistant_number(scan.get("last") or scan.get("price")),
-            "reason": signal.get("reason") or scan.get("reason"),
-            **_assistant_chart_state(scan),
-        }
+        })
 
     ranked_dip = sorted(dip_scores.items(), key=lambda item: (_assistant_number(item[1].get("rank")) or 999999, item[0]))
     dip_scan = [dip_export_row(symbol, dip) for symbol, dip in ranked_dip[:100]]
-    new_candidates = [row for row in dip_scan if not row["in_portfolio"] and row.get("signal_strength")]
+    new_candidates = []
+    for symbol, scan in scanner_by_symbol.items():
+        if symbol in positions_by_symbol:
+            continue
+        signal = scan.get("recent_signal") or {}
+        if not signal:
+            continue
+        dip = dip_scores.get(symbol) or {}
+        new_candidates.append(_assistant_compact({
+            "ticker": symbol, "company": scan.get("name") or dip.get("company"),
+            "dip_rank": _assistant_number(dip.get("rank")), "dip_score": _assistant_number(dip.get("total")),
+            "fa_score": _assistant_number(dip.get("fa")), "ta_score": _assistant_number(dip.get("ta")),
+            "signal_strength": signal.get("score"), "signal_tier": signal.get("tier"),
+            "last_price": _assistant_number(scan.get("last") or scan.get("price")),
+            "chart_state": _assistant_chart_state(scan),
+        }))
+    new_candidates.sort(key=lambda item: (-(item.get("dip_score") or 0), item.get("ticker", "")))
 
     try:
         notes = get_scanner_notes()
@@ -6429,10 +6543,11 @@ def get_assistant_export():
         "fa_score": "Fundamental-analysis component of the imported DIP score.",
         "ta_score": "Technical-analysis component of the imported DIP score.",
         "signal_strength": "Number of fulfilled dashboard setup conditions, typically from 0 to 4.",
-        "daily_state": "Daily chart-health classification from the latest scanner cache.",
-        "weekly_state": "Weekly chart-health classification from the latest scanner cache.",
-        "profit_loss_pct": "Open eToro position P/L divided by invested amount; may differ slightly from eToro UI due to fees and rounding.",
-        "portfolio_weight_pct": "Invested value divided by total dashboard equity, not a target allocation.",
+        "current_value": "Invested value plus open P/L. It is the dashboard market-value approximation for concentration review.",
+        "invested_weight_pct": "Original invested value divided by total dashboard equity.",
+        "market_value_weight_pct": "Current value divided by total dashboard equity, including asset classes excluded from this analysis; use this for concentration review.",
+        "dca_context": "Explicit DCA evidence. eligible means current conditions pass; conditional means positive conditions exist but chart blockers require manual review.",
+        "attention_items": "One normalized list of held tickers that need review. It replaces duplicated weekly-plan and inbox text in this export.",
     }
     return {
         "schema_version": ASSISTANT_EXPORT_SCHEMA_VERSION,
@@ -6446,9 +6561,14 @@ def get_assistant_export():
             "buy_only": True,
             "notes": ["DIP signal is not an automatic buy.", "Verify weekly and daily chart before DCA."],
         },
+        "analysis_scope": {
+            "include_asset_types": ["Stock", "ETF"],
+            "exclude_crypto_from_dip_analysis": True,
+            "exclude_crypto_from_export": True,
+        },
         "field_definitions": field_definitions,
         "data_quality": {
-            "source_timestamps": source_times,
+            "source_timestamps": _assistant_compact(source_times),
             "portfolio_source": "Processed eToro snapshot cache; this export does not force a refresh.",
             "limitations": [
                 "Daily P/L is a dashboard approximation based on live price and previous market close.",
@@ -6462,13 +6582,16 @@ def get_assistant_export():
             "daily_profit_loss": round(summary["daily_pnl"], 2), "positions_count": len(portfolio),
             "pending_orders_count": len(orders),
         },
-        "weekly_plan": plan,
-        "investor_inbox": {"generated_at": inbox.get("generated_at"), "items": inbox.get("items") or []},
-        "earnings_next_30_days": earnings,
+        "attention_items": attention_items,
+        "earnings_held_positions": [
+            _assistant_compact({"ticker": item.get("ticker"), "date": item.get("date"), "days_remaining": item.get("days"),
+                                "position_pnl_pct": item.get("pnl_pct")})
+            for item in (earnings.get("items") or []) if item.get("in_portfolio") and str(item.get("ticker") or "").upper() in positions_by_symbol
+        ],
         "watchlist": [{"ticker": item.get("symbol"), "name": item.get("name"), "added_at": item.get("addedAt")} for item in watchlist],
-        "portfolio": portfolio,
+        "positions": portfolio,
         "pending_orders": orders,
-        "dip_import": {"meta": dip_meta, "top_100": dip_scan},
+        "dip_ranking_top_100": {"meta": dip_meta, "items": dip_scan},
         "new_candidates": new_candidates[:50],
         "notes": {"content": notes.get("content") or "", "updated_at": notes.get("updated_at")},
         "analysis_request": {
