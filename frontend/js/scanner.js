@@ -179,6 +179,24 @@ function inboxModeMeta(mode) {
   }[mode] || null;
 }
 
+function investorInboxSummaryHtml(counts, total) {
+  const stats = [
+    ['dca', 'DCA', 'var(--accent)'],
+    ['profit', 'Profit', 'var(--up)'],
+    ['earnings', 'Earnings', 'var(--yellow)'],
+    ['broken', 'Riziko', 'var(--down)'],
+    ['opportunity', 'Nové', '#bca8ff'],
+  ];
+  return `<div class="inbox-summary">
+    <div class="inbox-summary-caption">${total} vecí na kontrolu tento týždeň</div>
+    <div class="inbox-stat-grid">${stats.map(([key, label, color]) => `
+      <div class="inbox-stat" title="${label}: ${Number(counts?.[key]) || 0}">
+        <strong style="color:${color}">${Number(counts?.[key]) || 0}</strong>
+        <span>${label}</span>
+      </div>`).join('')}</div>
+  </div>`;
+}
+
 function setInvestorInboxMode(mode) {
   if (!inboxModeMeta(mode)) mode = 'defensive';
   investorInboxMode = mode;
@@ -226,26 +244,22 @@ function renderInvestorInbox(payload) {
     const meta = inboxModeMeta(modeKey);
     return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')" title="${escHtml(meta.tooltip)}">${meta.label}</button>`;
   }).join('');
+  const summary = investorInboxSummaryHtml(counts, allItems.length);
+  const modeSwitch = `<div class="inbox-filter-row">
+    <span>${escHtml(mode.label)} režim · ${escHtml(mode.note)}</span>
+    <div class="inbox-mode-switch">${modeButtons}</div>
+  </div>`;
   if (isInvestorInboxCollapsed()) {
     box.innerHTML = `<div class="inbox-collapsed-summary">${allItems.length ? `${allItems.length} vecí na kontrolu${countText ? ` · ${escHtml(countText)}` : ''}` : 'Tento týždeň nič urgentné'}</div>`;
     return;
   }
   if (!items.length) {
-    box.innerHTML = `<div class="inbox-headline">
-      <span>${escHtml(mode.label)} režim</span>
-      <div class="inbox-mode-switch">${modeButtons}</div>
-    </div>
-    <div class="inbox-empty">
+    box.innerHTML = `${summary}${modeSwitch}<div class="inbox-empty">
       V režime ${escHtml(mode.label)} tento týždeň nevidím nič urgentné. ${escHtml(mode.note)} sú momentálne bez zásahu.
     </div>`;
     return;
   }
-  box.innerHTML = `<div class="inbox-headline">
-      <span>${items.length} vecí na kontrolu</span>
-      <small>${escHtml(mode.note)}${countText ? ` · ${escHtml(countText)}` : ''}</small>
-      <div class="inbox-mode-switch">${modeButtons}</div>
-    </div>
-    <div class="inbox-list">${items.map(investorInboxRow).join('')}</div>`;
+  box.innerHTML = `${summary}${modeSwitch}<div class="inbox-list">${items.map(investorInboxRow).join('')}</div>`;
   refreshWatchlistButtons();
 }
 
