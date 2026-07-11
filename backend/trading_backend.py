@@ -4598,9 +4598,10 @@ NASDAQ100_TICKERS = [
     "TSLA", "TTD", "TTWO", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS",
 ]
 
-SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
+SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "2" if _LOW_MEMORY else "3"))
 SCANNER_YF_TIMEOUT = int(os.getenv("SCANNER_YF_TIMEOUT", "8"))
 SCANNER_DIP_UNIVERSE_MAX = int(os.getenv("SCANNER_DIP_UNIVERSE_MAX", "300"))
+SCANNER_GC_INTERVAL = int(os.getenv("SCANNER_GC_INTERVAL", "20"))
 SCANNER_DEFAULT_DAYS = 3
 SIGNAL_PROXIMITY_TOL = 0.005     # fallback keď ATR nie je k dispozícii
 SIGNAL_RSI_PULLBACK = 45
@@ -5026,6 +5027,8 @@ _scanner_state = {
     "total": 0,
     "current": None,
     "error": None,
+    "memory_start_mb": None,
+    "memory_peak_mb": None,
 }
 
 
@@ -5535,7 +5538,7 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
 
 
 def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive: bool = True,
-                        munge_dots: bool = True):
+                        munge_dots: bool = True, retain_in_memory: bool = True):
     """munge_dots: BRK.B -> BRK-B pre yfinance (US class shares). get_chart volá
     s False, lebo jeho tickery môžu byť burzové suffixy (VWRD.L, CNDX.L), kde
     bodka MUSÍ ostať — pomlčková forma by vrátila prázdno."""
@@ -5552,24 +5555,25 @@ def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive:
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
         raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
-    with _YF_CACHE_LOCK:
-        if len(_YF_CACHE) >= _YF_CACHE_MAX:
-            oldest = sorted(_YF_CACHE.items(), key=lambda kv: kv[1][0])[: _YF_CACHE_MAX // 3]
-            for k, _ in oldest:
-                _YF_CACHE.pop(k, None)
-        _YF_CACHE[key] = (now, raw)
+    if retain_in_memory:
+        with _YF_CACHE_LOCK:
+            if len(_YF_CACHE) >= _YF_CACHE_MAX:
+                oldest = sorted(_YF_CACHE.items(), key=lambda kv: kv[1][0])[: _YF_CACHE_MAX // 3]
+                for k, _ in oldest:
+                    _YF_CACHE.pop(k, None)
+            _YF_CACHE[key] = (now, raw)
     return raw.copy()
 
 
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
-    raw_d = _yf_download_cached(ticker, "6mo", "1d", prefer_massive=False)
+    raw_d = _yf_download_cached(ticker, "6mo", "1d", prefer_massive=False, retain_in_memory=False)
     if len(raw_d) < 20:
         return {"ticker": ticker, "error": "Nedostatok dat"}
 
     df_d = add_indicators(raw_d)
     daily_health = chart_health(df_d, "daily")
 
-    raw_w = _yf_download_cached(ticker, "1y", "1wk", prefer_massive=False)
+    raw_w = _yf_download_cached(ticker, "1y", "1wk", prefer_massive=False, retain_in_memory=False)
     weekly_bullish = None
     weekly_status = "insufficient_history"
     weekly_trend = None
@@ -5662,6 +5666,7 @@ def _run_nasdaq_scanner(days: int):
     slog_work = {k: dict(v) if isinstance(v, dict) else v for k, v in slog_source.items()}
     tickers, universe_label, universe_key = scanner_universe_from_dip()
     dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
+    scanner_memory_start = _process_memory_mb().get("rss_mb")
 
     with _scanner_lock:
         _scanner_state.update({
@@ -5672,6 +5677,8 @@ def _run_nasdaq_scanner(days: int):
             "total": len(tickers),
             "current": None,
             "error": None,
+            "memory_start_mb": scanner_memory_start,
+            "memory_peak_mb": scanner_memory_start,
         })
 
     try:
@@ -5714,8 +5721,15 @@ def _run_nasdaq_scanner(days: int):
                     except Exception as e:
                         errors.append({"ticker": ticker, "error": str(e)[:80]})
                     done_count += 1
+                    if SCANNER_GC_INTERVAL > 0 and done_count % SCANNER_GC_INTERVAL == 0:
+                        gc.collect()
+                    scanner_memory_peak = _process_memory_mb().get("rss_mb")
                     with _scanner_lock:
-                        _scanner_state.update({"progress": done_count, "current": ticker})
+                        _scanner_state.update({
+                            "progress": done_count,
+                            "current": ticker,
+                            "memory_peak_mb": max(_scanner_state.get("memory_peak_mb") or 0, scanner_memory_peak or 0) or None,
+                        })
                     newest = submit_next()
                     if newest is not None:
                         pending.add(newest)

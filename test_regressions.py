@@ -18,6 +18,7 @@ from backend import trading_backend as tb
 class CacheRegressionTests(unittest.TestCase):
     def setUp(self):
         tb._BACKTEST_CACHE.clear()
+        tb._YF_CACHE.clear()
 
     @staticmethod
     def _frame(offset):
@@ -45,6 +46,13 @@ class CacheRegressionTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertEqual(first, repeated)
         self.assertEqual(len(calls), 2)
+
+    def test_scanner_ohlcv_download_does_not_fill_memory_cache(self):
+        frame = self._frame(0)
+        with patch.object(tb.yf, "download", return_value=frame):
+            result = tb._yf_download_cached("AAPL", "6mo", "1d", prefer_massive=False, retain_in_memory=False)
+        self.assertEqual(len(result), len(frame))
+        self.assertNotIn(("AAPL", "6mo", "1d"), tb._YF_CACHE)
 
     def test_atomic_cache_survives_concurrent_writes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

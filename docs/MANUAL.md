@@ -1148,9 +1148,10 @@ render.yaml            # web service + 1GB disk na /data
 | `FINNHUB_API_KEY` | Earnings, insider, EPS, analytický konsenzus a **mapa ticker→sektor** (profile2) pre sektorovú relatívnu silu. |
 | `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako **primárny zdroj denných/týždenných OHLCV** (yfinance fallback). |
 | `FRED_API_KEY` | Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva ticho vynechá. |
-| `SCANNER_MAX_WORKERS` | Paralelizmus skenera (default 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
+| `SCANNER_MAX_WORKERS` | Paralelizmus skenera (v low-memory profile default 2, inak 3 — kompromis medzi rýchlosťou a RAM na Render free tier; 8 workerov spôsobovalo OOM restarty). |
 | `SCANNER_YF_TIMEOUT` | Timeout yfinance volania v scanneri (default 8 s). |
 | `SCANNER_DIP_UNIVERSE_MAX` | Maximálny počet tickerov z importovaného DIP Excelu, ktoré scanner prejde (default 300). Ak Excel nie je importovaný, použije sa Nasdaq-100 fallback. |
+| `SCANNER_GC_INTERVAL` | Počet dokončených tickerov medzi explicitným uvoľnením dočasných objektov počas scanu (default 20). |
 | `RENDER` | Príznak produkcie. |
 
 ### Portfolio attention filter
