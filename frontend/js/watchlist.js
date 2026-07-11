@@ -4,6 +4,10 @@
 // a mini-watchlist Predictive tabu (wl*). Súčasť splitu dashboard.js.
 
 const DEFAULT_WATCHLIST = ['AAPL','MSFT','NVDA','TSLA','GOOGL','AMZN','SPY','QQQ'];
+const WATCHLIST_SORT_KEY = 'td_watchlist_sort';
+let watchlistSort = ['added-desc', 'added-asc', 'alpha'].includes(localStorage.getItem(WATCHLIST_SORT_KEY))
+  ? localStorage.getItem(WATCHLIST_SORT_KEY)
+  : 'added-asc';
 
 // ── ETORO WATCHLIST SYNC ──────────────────────────────────────────────────────
 let etoroWatchlistId = null;   // ID primárneho eToro watchlistu pre sync
@@ -231,10 +235,11 @@ function scheduleServerWatchlistSave() {
 }
 async function saveWatchlistToServer() {
   try {
-    const items = watchlist.map(({symbol, name, instrumentId}) => {
+    const items = watchlist.map(({symbol, name, instrumentId, addedAt}) => {
       const item = {symbol};
       if (name) item.name = name;
       if (instrumentId) item.instrumentId = instrumentId;
+      if (addedAt) item.addedAt = addedAt;
       return item;
     });
     await fetch(`${API}/api/watchlist`, {
@@ -269,7 +274,7 @@ async function syncWatchlistFromServer() {
 function addToWatchlist(symbol, name = null, instrumentId = null) {
   symbol = symbol.toUpperCase().trim();
   if (!symbol || watchlist.find(w => w.symbol === symbol)) return;
-  const item = {symbol, price:null, chg:null};
+  const item = {symbol, price:null, chg:null, addedAt:new Date().toISOString()};
   if (name) item.name = name;
   if (instrumentId) {
     item.instrumentId = instrumentId;
@@ -281,6 +286,29 @@ function addToWatchlist(symbol, name = null, instrumentId = null) {
   renderSidebar();
   fetchWatchlistPrice(symbol);
   refreshWatchlistButtons(symbol);
+}
+
+function setWatchlistSort(value) {
+  if (!['added-desc', 'added-asc', 'alpha'].includes(value)) return;
+  watchlistSort = value;
+  localStorage.setItem(WATCHLIST_SORT_KEY, value);
+  renderSidebar();
+}
+
+function watchlistForSidebar() {
+  const indexed = watchlist.map((item, index) => ({ item, index }));
+  if (watchlistSort === 'alpha') {
+    indexed.sort((a, b) => a.item.symbol.localeCompare(b.item.symbol));
+  } else {
+    const newest = watchlistSort === 'added-desc';
+    indexed.sort((a, b) => {
+      const aTs = Date.parse(a.item.addedAt || '') || 0;
+      const bTs = Date.parse(b.item.addedAt || '') || 0;
+      if (aTs !== bTs) return newest ? bTs - aTs : aTs - bTs;
+      return newest ? b.index - a.index : a.index - b.index;
+    });
+  }
+  return indexed.map(row => row.item);
 }
 
 function isInWatchlist(symbol) {
@@ -483,7 +511,9 @@ function renderSidebar() {
   const activeSym = activePanelId ? getActivePanelSymbol() : null;
   const panelSyms = new Set([...document.querySelectorAll('.panel')].map(p => p.querySelector('.p-sym')?.value?.trim()?.toUpperCase()).filter(Boolean));
 
-  list.innerHTML = watchlist.map(item => {
+  const sortSelect = document.getElementById('sb-sort');
+  if (sortSelect && sortSelect.value !== watchlistSort) sortSelect.value = watchlistSort;
+  list.innerHTML = watchlistForSidebar().map(item => {
     const sym    = item.symbol;
     const inPanel  = panelSyms.has(sym);
     const isActive = sym === activeSym;
@@ -502,6 +532,9 @@ function renderSidebar() {
     const hasTriggered = symAlerts.some(a => a.triggered);
     const holdingIcon = _holdings?.[sym]
       ? '<span class="sb-holding-dot" title="Titul je kupeny v portfoliu">&#9679;</span>'
+      : '';
+    const orderIcon = _pendingOrderSymbols?.has(sym)
+      ? '<span class="sb-order-mark" title="Cakajuca objednavka na tento titul">X</span>'
       : '';
     const bellIcon = hasAlert ? `<span class="sb-bell" style="color:${hasTriggered?'var(--yellow)':'var(--muted2)'};" onclick="event.stopPropagation();toggleAlertEditor('${sym}',event)" title="Alertné podmienky">${hasTriggered?'🔔':'🔕'}</span>` : `<span class="sb-bell" style="color:var(--muted);opacity:.4;" onclick="event.stopPropagation();toggleAlertEditor('${sym}',event)" title="Nastaviť alert">🔕</span>`;
 
@@ -546,6 +579,7 @@ function renderSidebar() {
         ${getLogoWrapper(sym, 22, chgCls==='up'?'var(--green)':chgCls==='down'?'var(--red)':'var(--muted)')}
         <span class="sb-sym" style="flex:1;min-width:0;">${sym}</span>
         ${holdingIcon}
+        ${orderIcon}
         <div data-spark="${sym}" style="flex-shrink:0;">${drawSparkSvg(sparkCache[sym], chgCls !== 'down', 38, 15)}</div>
         <span class="sb-price" style="flex-shrink:0;min-width:42px;text-align:right;">${fmtSbPrice(item.price)}</span>
         <span class="sb-chg ${chgCls}" style="flex-shrink:0;min-width:38px;text-align:right;">${chgStr}</span>

@@ -55,6 +55,19 @@ class CacheRegressionTests(unittest.TestCase):
             self.assertIn(payload["value"], range(40))
             self.assertFalse(list(Path(tmp_dir).glob("*.tmp")))
 
+    def test_watchlist_preserves_added_timestamp(self):
+        items = tb._normalize_watchlist_items([
+            {"symbol": "aapl", "addedAt": "2026-07-11T09:00:00Z"},
+        ])
+        self.assertEqual(items[0]["symbol"], "AAPL")
+        self.assertEqual(items[0]["addedAt"], "2026-07-11T09:00:00Z")
+
+    def test_holdings_snapshot_exposes_pending_order_symbols(self):
+        cached = {"1": {"data": [], "orders": [{"symbol": "MSFT"}]}, "2": {"data": [], "orders": [{"symbol": "AAPL"}]}}
+        with patch.object(tb, "_positions_cache", cached), patch.object(tb, "_get_portfolio_holdings", return_value={}):
+            payload = tb.get_portfolio_holdings()
+        self.assertEqual(payload["order_symbols"], ["AAPL", "MSFT"])
+
 
 class PublicPortfolioRegressionTests(unittest.TestCase):
     @staticmethod

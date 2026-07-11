@@ -662,6 +662,27 @@ body.sidebar-collapsed #sb-resizer {
 #sb-search input::placeholder {
   color: var(--muted2);
 }
+.sb-sort-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.sb-sort-row select {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  background: var(--bg3);
+  color: var(--text);
+  font: 600 10px var(--font-ui);
+}
 
 #sb-tabs {
   display: flex;
@@ -3232,6 +3253,17 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 8px;
   line-height: 1;
   text-shadow: 0 0 7px var(--up-soft);
+}
+.sb-order-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 1px solid var(--yellow);
+  border-radius: 3px;
+  color: var(--yellow);
+  font: 800 8px var(--font-mono);
 }
 .chart-wl-btn {
   margin-left: 0;

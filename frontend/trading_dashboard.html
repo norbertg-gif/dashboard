@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260711-reviewqueue1">
+<link rel="stylesheet" href="/dashboard.css?v=20260711-watchlistsort1">
 </head>
 <body>
 
@@ -101,6 +101,15 @@
              onkeydown="onSbKeydown(event)"
              onfocus="if(this.value.trim().length>0){openSbDd(this);}"
              onblur="setTimeout(closeSbDd,150)">
+    </div>
+
+    <div class="sb-sort-row">
+      <span>Zoradiť</span>
+      <select id="sb-sort" onchange="setWatchlistSort(this.value)" title="Zoradenie watchlistu">
+        <option value="added-asc">Pridané: najstaršie</option>
+        <option value="added-desc">Pridané: najnovšie</option>
+        <option value="alpha">Ticker: A–Z</option>
+      </select>
     </div>
 
     <div id="sb-list"></div>
@@ -530,15 +539,15 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/live.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/portfolio.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/watchlist.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/scanner.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/chart_patterns.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/predictive.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/verdict.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/charts.js?v=20260711-reviewqueue1"></script>
-  <script src="/js/main.js?v=20260711-reviewqueue1"></script>
+  <script src="/js/core.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/live.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/portfolio.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/watchlist.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/scanner.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/chart_patterns.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/predictive.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/verdict.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/charts.js?v=20260711-watchlistsort1"></script>
+  <script src="/js/main.js?v=20260711-watchlistsort1"></script>
 </body>
 </html>

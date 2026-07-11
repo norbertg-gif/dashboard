@@ -703,7 +703,7 @@ Sheet: ${sheetName}`);
       const name = companyKey ? String(row[companyKey] || '').trim() : '';
       if (!sym) continue;
       if (!watchlist.find(w => w.symbol === sym)) {
-        watchlist.push({ symbol: sym, price: null, chg: null, name: name || null });
+        watchlist.push({ symbol: sym, price: null, chg: null, name: name || null, addedAt: new Date().toISOString() });
         added++;
       }
     }

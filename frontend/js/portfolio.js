@@ -2178,6 +2178,7 @@ function addPortfolioPanel() {
 }
 
 let _holdings = null;          // {TICKER: {pnl, pnl_pct, amount}}
+let _pendingOrderSymbols = new Set();
 
 async function loadHoldings() {
   try {
@@ -2185,6 +2186,7 @@ async function loadHoldings() {
     if (!r.ok) return;
     const data = await r.json();
     _holdings = data.holdings || {};
+    _pendingOrderSymbols = new Set((data.order_symbols || []).map(sym => String(sym).toUpperCase()));
     applyAllChartPortfolioFlags();
     if (typeof renderSidebar === 'function') renderSidebar();
   } catch (e) { /* non-critical */ }

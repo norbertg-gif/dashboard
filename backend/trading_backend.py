@@ -1504,7 +1504,7 @@ def _normalize_watchlist_items(items):
             continue
         seen.add(symbol)
         clean = {"symbol": symbol}
-        for key in ("name", "price", "chg", "lastUpdated", "instrumentId"):
+        for key in ("name", "price", "chg", "lastUpdated", "instrumentId", "addedAt"):
             if item.get(key) is not None:
                 clean[key] = item.get(key)
         out.append(clean)
@@ -2630,8 +2630,18 @@ def _get_portfolio_holdings() -> dict:
 
 @app.get("/api/portfolio/holdings")
 def get_portfolio_holdings():
-    """Mapa {symbol: {pnl, pnl_pct, amount}} pre scanner badge (V portfóliu + zisk/strata)."""
-    return {"holdings": _get_portfolio_holdings()}
+    """Ľahký snapshot držaných titulov a čakajúcich objednávok z cache."""
+    order_symbols = set()
+    for acct in ("1", "2"):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for order in (cached or {}).get("orders", []):
+                symbol = str(order.get("symbol") or "").strip().upper()
+                if symbol:
+                    order_symbols.add(symbol)
+        except Exception:
+            pass
+    return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
 # ── Korelačná mapa portfólia ──────────────────────────────────────────────────

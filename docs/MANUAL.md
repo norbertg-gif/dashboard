@@ -1014,6 +1014,8 @@ jazykom.
 
 ## 8. Presety, watchlist, eToro
 
+Watchlist v ľavom paneli podporuje zoradenie podľa A–Z alebo dátumu pridania. Dátum sa synchronizuje so serverom; zelená bodka znamená držaný titul a žlté `X` čakajúcu eToro objednávku.
+
 - **Watchlist** — zoznam sledovaných tickerov, ktoré sa zobrazujú v Grafoch a
   vstupujú do Watchlist / eToro radaru a prefetchu.
 - **Presety** — uložené rozloženia (watchlist + usporiadanie panelov). Ulož cez

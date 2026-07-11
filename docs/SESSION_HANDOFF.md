@@ -213,6 +213,8 @@ Prebehla rozsiahla revízia + performance/UX vylepšenia:
   nezačínať bez vyžiadania.
 # Session handoff — 2026-07-11 audit fixes
 
+- Watchlist supports server-synced add dates and local A-Z/add-date ordering; the holdings snapshot exposes pending-order symbols for the yellow `X` marker.
+
 - Backtest cache je izolovaná fingerprintom OHLCV; tickery s rovnakým počtom a dátumami sviečok už nemôžu zdieľať cudzí výsledok.
 - `/api/public/portfolio` používa rovnaký spracovaný snapshot ako Portfólio a rešpektuje `PUBLIC_ALLOW_QUERY_TOKEN`; preferované sú auth hlavičky.
 - Gzip disk cache používa atómový temp-file + `os.replace()` zápis a striped lock spoločný s čítaním.
