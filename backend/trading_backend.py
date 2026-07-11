@@ -5282,6 +5282,15 @@ def _include_scanner_result(row: dict, dip_scores: dict) -> bool:
     return dip_total is not None and dip_total >= DIP_SCANNER_VISIBILITY_THRESHOLD
 
 
+def _scanner_result_sort_key(row: dict) -> tuple:
+    """Sort signal and high-DIP-only rows safely; recent_signal can be None."""
+    return (
+        _num_or_none(row.get("dip_total")) or -1,
+        row.get("setup_score") or 0,
+        (row.get("recent_signal") or {}).get("date", ""),
+    )
+
+
 def scanner_universe_from_dip() -> tuple[list[str], str, str]:
     """Scanner universe = imported DIP ranking, with Nasdaq-100 fallback.
 
@@ -5740,7 +5749,7 @@ def _run_nasdaq_scanner(days: int):
         del slog_work, slog_source
         gc.collect()
         results = [enrich_with_dip(r, dip_scores) for r in results]
-        results.sort(key=lambda r: (_num_or_none(r.get("dip_total")) or -1, r.get("setup_score") or 0, r.get("recent_signal", {}).get("date", "")), reverse=True)
+        results.sort(key=_scanner_result_sort_key, reverse=True)
         error_counts = {}
         for err in errors:
             reason = str(err.get("error") or "Unknown")
@@ -5757,7 +5766,11 @@ def _run_nasdaq_scanner(days: int):
             "errors": len(errors),
             "error_counts": error_counts,
             "error_samples": errors[:25],
-            "crossover_matches": sum(1 for r in results if _num_or_none(r.get("dip_total")) is not None and r.get("dip_total") >= DIP_STRONG_THRESHOLD),
+            "crossover_matches": sum(
+                1 for r in results
+                if r.get("recent_signal") and _num_or_none(r.get("dip_total")) is not None
+                and r.get("dip_total") >= DIP_STRONG_THRESHOLD
+            ),
             "results": results,
         }
         save_scanner_cache(payload)

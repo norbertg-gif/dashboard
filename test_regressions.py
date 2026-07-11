@@ -211,6 +211,14 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
             {"ticker": "SIG", "recent_signal": {"score": 2}}, {"SIG": {"total": 10}}
         ))
 
+    def test_high_dip_row_without_signal_sorts_safely(self):
+        rows = [
+            {"ticker": "WATCH", "dip_total": 80, "setup_score": 2, "recent_signal": None},
+            {"ticker": "SIGNAL", "dip_total": 90, "setup_score": 3, "recent_signal": {"date": "2026-07-11"}},
+        ]
+        ranked = sorted(rows, key=tb._scanner_result_sort_key, reverse=True)
+        self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
