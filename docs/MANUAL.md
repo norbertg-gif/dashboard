@@ -1016,6 +1016,20 @@ jazykom.
 
 Watchlist v ľavom paneli podporuje zoradenie podľa A–Z alebo dátumu pridania. Dátum sa synchronizuje so serverom; zelená bodka znamená držaný titul a žlté `X` čakajúcu eToro objednávku.
 
+### AI export pre konzultáciu
+
+V Scanneri tlačidlo **AI export** stiahne read-only súbor JSON určený na manuálne
+vloženie do ChatGPT alebo inej AI. Dashboard ho nikam neodosiela. Export vyžaduje
+bežné prihlásenie do dashboardu a obsahuje aktuálny snapshot portfólia, čakajúce
+objednávky, Týždenný plán, Investor Inbox, earnings do 30 dní, watchlist,
+importovaný DIP ranking, scanner kandidátov a poznámky.
+
+Súbor má `schema_version`, definície polí a blok `data_quality`, aby AI vedela
+odlíšiť fakty od interpretačných vrstiev a videla vek jednotlivých zdrojov.
+Neobsahuje API kľúče, eToro interné ID ani kompletnú uzavretú obchodnú históriu.
+Pri exporte sa nevynucuje čerstvé načítanie eToro; pracuje s rovnakými cache
+snapshotmi ako dashboard.
+
 - **Watchlist** — zoznam sledovaných tickerov, ktoré sa zobrazujú v Grafoch a
   vstupujú do Watchlist / eToro radaru a prefetchu.
 - **Presety** — uložené rozloženia (watchlist + usporiadanie panelov). Ulož cez

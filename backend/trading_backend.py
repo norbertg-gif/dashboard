@@ -6229,6 +6229,263 @@ def get_investor_plan(refresh: int = Query(0)):
     return _investor_cache_set(cache_key, payload)
 
 
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.0"
+
+
+def _assistant_snapshot(account: str) -> dict:
+    """Return the existing processed portfolio snapshot without triggering eToro."""
+    try:
+        return _positions_cache.get(account) or cache_read(_portfolio_disk_path(account)) or {}
+    except Exception:
+        return {}
+
+
+def _assistant_iso_timestamp(value) -> str | None:
+    try:
+        return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _assistant_number(value):
+    value = _num_or_none(value)
+    return value if value is not None else None
+
+
+def _assistant_chart_state(row: dict) -> dict:
+    health = row.get("chart_health") or {}
+    daily = health.get("daily") or {}
+    weekly = health.get("weekly") or {}
+    return {
+        "daily_state": daily.get("status"),
+        "weekly_state": weekly.get("status"),
+        "daily_reason": daily.get("reason"),
+        "weekly_reason": weekly.get("reason"),
+    }
+
+
+def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
+                               dip: dict, inbox_item: dict, dca_reason: dict) -> dict:
+    amount = sum(float(p.get("amount") or 0) for p in lots)
+    pnl = sum(float(p.get("pnl") or 0) for p in lots)
+    current_rate = next((p.get("currentRate") for p in reversed(lots) if p.get("currentRate") is not None), None)
+    last_buy = max(lots, key=lambda p: str(p.get("openDateTime") or ""), default={})
+    open_lots = [{
+        "opened_at": p.get("openDateTime") or None,
+        "entry_price": _assistant_number(p.get("openRate")),
+        "invested": _assistant_number(p.get("amount")),
+        "profit_loss": _assistant_number(p.get("pnl")),
+        "profit_loss_pct": _assistant_number(p.get("pnlPct")),
+    } for p in lots[:20]]
+    signal = scanner_row.get("recent_signal") or {}
+    chart_state = _assistant_chart_state(scanner_row)
+    reasons = (inbox_item or {}).get("reasons") or []
+    kinds = set((inbox_item or {}).get("kinds") or [])
+    return {
+        "ticker": symbol,
+        "name": next((p.get("name") for p in lots if p.get("name")), symbol),
+        "asset_type": next((p.get("type") for p in lots if p.get("type")), None),
+        "position": {
+            "invested": round(amount, 2),
+            "current_price": _assistant_number(current_rate),
+            "profit_loss": round(pnl, 2),
+            "profit_loss_pct": round(pnl / amount * 100, 2) if amount else None,
+            "last_buy": {
+                "opened_at": last_buy.get("openDateTime") or None,
+                "entry_price": _assistant_number(last_buy.get("openRate")),
+            },
+            "open_lots": open_lots,
+        },
+        "signals": {
+            "dip_rank": _assistant_number((dip or {}).get("rank")),
+            "dip_score": _assistant_number((dip or {}).get("total")),
+            "fa_score": _assistant_number((dip or {}).get("fa")),
+            "ta_score": _assistant_number((dip or {}).get("ta")),
+            "dip_strength": (dip or {}).get("label"),
+            "signal_strength": signal.get("score"),
+            "signal_tier": signal.get("tier"),
+            **chart_state,
+        },
+        "risk": {
+            "earnings_date": next((r.get("date") for r in reasons if r.get("kind") == "earnings"), None),
+            "broken_chart_warning": "broken" in kinds,
+            "value_trap_warning": bool((dca_reason or {}).get("flag") in {"value_trap", "no_data"}),
+        },
+        "dashboard_recommendation": {
+            "action": (inbox_item or {}).get("title") or "hold_review",
+            "reason": (inbox_item or {}).get("summary") or "No current dashboard exception.",
+            "reasons": [r.get("label") for r in reasons if r.get("label")],
+        },
+    }
+
+
+@app.get("/api/assistant/export")
+def get_assistant_export():
+    """Read-only AI handoff. Protected by normal Basic Auth, never public-token auth.
+    It reuses dashboard snapshots and scanner/DIP cache; no eToro refresh is started."""
+    now = datetime.now(timezone.utc)
+    settings = _dash_settings()
+    snapshots = {account: _assistant_snapshot(account) for account in ("1", "2")}
+    positions_by_symbol: dict[str, list[dict]] = {}
+    orders = []
+    summary = {"cash": 0.0, "invested": 0.0, "equity": 0.0, "total_pnl": 0.0, "daily_pnl": 0.0}
+    source_times = {}
+    for account, snapshot in snapshots.items():
+        source_times[f"portfolio_account_{account}"] = _assistant_iso_timestamp(snapshot.get("ts"))
+        for key in summary:
+            summary[key] += float((snapshot.get("summary") or {}).get(key) or 0)
+        for position in snapshot.get("data") or []:
+            symbol = str(position.get("symbol") or "").upper()
+            if symbol:
+                positions_by_symbol.setdefault(symbol, []).append(position)
+        for order in snapshot.get("orders") or []:
+            orders.append({
+                "ticker": str(order.get("symbol") or "").upper(),
+                "kind": order.get("kind"),
+                "side": "buy" if order.get("isBuy", True) else "sell",
+                "limit_price": _assistant_number(order.get("rate")),
+                "invested": _assistant_number(order.get("amount")),
+                "opened_at": order.get("openDateTime") or None,
+            })
+
+    dip_raw = load_dip_scores()
+    dip_meta = dip_raw.get("_meta") if isinstance(dip_raw.get("_meta"), dict) else {}
+    dip_scores = {str(k).upper(): v for k, v in dip_raw.items() if not str(k).startswith("_") and isinstance(v, dict)}
+    raw_scan = load_scanner_cache()
+    scanner_rows = raw_scan.get("results") if isinstance(raw_scan, dict) else []
+    scanner_rows = scanner_rows if isinstance(scanner_rows, list) else []
+    scanner_by_symbol = {str(row.get("ticker") or "").upper(): row for row in scanner_rows if isinstance(row, dict)}
+
+    try:
+        inbox = get_investor_inbox(refresh=0)
+    except Exception:
+        inbox = {"items": [], "generated_at": None}
+    inbox_by_symbol = {str(item.get("ticker") or "").upper(): item for item in (inbox.get("items") or []) if isinstance(item, dict)}
+    try:
+        plan = get_investor_plan(refresh=0)
+    except Exception:
+        plan = {}
+    try:
+        earnings = get_earnings_calendar_view(days=30, refresh=0)
+    except Exception:
+        earnings = {"items": [], "generated_at": None}
+
+    dca_by_symbol = {}
+    for account, snapshot in snapshots.items():
+        equity = float((snapshot.get("summary") or {}).get("equity") or 0)
+        for symbol, lots in positions_by_symbol.items():
+            # Aggregate once below; account-level duplicate work is harmless but avoided.
+            if symbol in dca_by_symbol:
+                continue
+            amount = sum(float(p.get("amount") or 0) for p in lots)
+            pnl = sum(float(p.get("pnl") or 0) for p in lots)
+            pnl_pct = pnl / amount * 100 if amount else 0.0
+            dip = dip_scores.get(symbol) or {}
+            dip_total = _assistant_number(dip.get("total"))
+            if pnl_pct <= -float(settings["dca_loss_pct"]):
+                flag = "dca" if dip_total is not None and dip_total >= settings["dca_dip_min"] else ("value_trap" if dip_total is not None else "no_data")
+                dca_by_symbol[symbol] = {"flag": flag, "pnl_pct": round(pnl_pct, 2), "dip_total": dip_total, "equity_reference": equity}
+
+    total_equity = summary["equity"]
+    portfolio = []
+    for symbol in sorted(positions_by_symbol):
+        row = _assistant_export_position(symbol, positions_by_symbol[symbol], scanner_by_symbol.get(symbol) or {},
+                                         dip_scores.get(symbol) or {}, inbox_by_symbol.get(symbol) or {}, dca_by_symbol.get(symbol) or {})
+        row["position"]["portfolio_weight_pct"] = round(row["position"]["invested"] / total_equity * 100, 2) if total_equity else None
+        portfolio.append(row)
+
+    def dip_export_row(symbol: str, dip: dict) -> dict:
+        scan = scanner_by_symbol.get(symbol) or {}
+        signal = scan.get("recent_signal") or {}
+        return {
+            "rank": _assistant_number(dip.get("rank")), "ticker": symbol,
+            "company": dip.get("company") or scan.get("name"),
+            "in_portfolio": symbol in positions_by_symbol,
+            "dip_score": _assistant_number(dip.get("total")), "fa_score": _assistant_number(dip.get("fa")),
+            "ta_score": _assistant_number(dip.get("ta")), "dip_strength": dip.get("label"),
+            "signal_strength": signal.get("score"), "signal_tier": signal.get("tier"),
+            "last_price": _assistant_number(scan.get("last") or scan.get("price")),
+            "reason": signal.get("reason") or scan.get("reason"),
+            **_assistant_chart_state(scan),
+        }
+
+    ranked_dip = sorted(dip_scores.items(), key=lambda item: (_assistant_number(item[1].get("rank")) or 999999, item[0]))
+    dip_scan = [dip_export_row(symbol, dip) for symbol, dip in ranked_dip[:100]]
+    new_candidates = [row for row in dip_scan if not row["in_portfolio"] and row.get("signal_strength")]
+
+    try:
+        notes = get_scanner_notes()
+    except Exception:
+        notes = {"content": ""}
+    watchlist = _read_watchlist_file()
+    source_times.update({
+        "dip_import": dip_meta.get("updated_at"),
+        "scanner": raw_scan.get("finished_at") or raw_scan.get("generated_at") if isinstance(raw_scan, dict) else None,
+        "investor_inbox": inbox.get("generated_at"),
+        "earnings": earnings.get("generated_at"),
+    })
+    field_definitions = {
+        "dip_score": "Combined imported DIP opportunity score; higher means stronger ranking, not an automatic buy.",
+        "fa_score": "Fundamental-analysis component of the imported DIP score.",
+        "ta_score": "Technical-analysis component of the imported DIP score.",
+        "signal_strength": "Number of fulfilled dashboard setup conditions, typically from 0 to 4.",
+        "daily_state": "Daily chart-health classification from the latest scanner cache.",
+        "weekly_state": "Weekly chart-health classification from the latest scanner cache.",
+        "profit_loss_pct": "Open eToro position P/L divided by invested amount; may differ slightly from eToro UI due to fees and rounding.",
+        "portfolio_weight_pct": "Invested value divided by total dashboard equity, not a target allocation.",
+    }
+    return {
+        "schema_version": ASSISTANT_EXPORT_SCHEMA_VERSION,
+        "generated_at": now.isoformat(),
+        "currency": "USD",
+        "strategy": {
+            "name": "DIP Strategy v2",
+            "dca_trigger_pct": -float(settings["dca_loss_pct"]),
+            "dca_min_dip_score": settings["dca_dip_min"],
+            "holding_horizon": "1-3 years",
+            "buy_only": True,
+            "notes": ["DIP signal is not an automatic buy.", "Verify weekly and daily chart before DCA."],
+        },
+        "field_definitions": field_definitions,
+        "data_quality": {
+            "source_timestamps": source_times,
+            "portfolio_source": "Processed eToro snapshot cache; this export does not force a refresh.",
+            "limitations": [
+                "Daily P/L is a dashboard approximation based on live price and previous market close.",
+                "Scanner and DIP data can be older than the portfolio snapshot; inspect source_timestamps.",
+                "Dashboard recommendations are interpretive aids, not trading instructions.",
+            ],
+        },
+        "portfolio_summary": {
+            "account_value": round(summary["equity"], 2), "invested_value": round(summary["invested"], 2),
+            "cash_available": round(summary["cash"], 2), "profit_loss": round(summary["total_pnl"], 2),
+            "daily_profit_loss": round(summary["daily_pnl"], 2), "positions_count": len(portfolio),
+            "pending_orders_count": len(orders),
+        },
+        "weekly_plan": plan,
+        "investor_inbox": {"generated_at": inbox.get("generated_at"), "items": inbox.get("items") or []},
+        "earnings_next_30_days": earnings,
+        "watchlist": [{"ticker": item.get("symbol"), "name": item.get("name"), "added_at": item.get("addedAt")} for item in watchlist],
+        "portfolio": portfolio,
+        "pending_orders": orders,
+        "dip_import": {"meta": dip_meta, "top_100": dip_scan},
+        "new_candidates": new_candidates[:50],
+        "notes": {"content": notes.get("content") or "", "updated_at": notes.get("updated_at")},
+        "analysis_request": {
+            "task": "Analyze portfolio and DIP scan.",
+            "questions": [
+                "Which existing positions are suitable for DCA?",
+                "Which positions may be value traps or need chart review?",
+                "Which new candidates deserve manual chart review?",
+                "What should be prioritized this week?",
+            ],
+            "response_language": "sk",
+            "desired_style": "direct, skeptical, evidence-based",
+            "requested_output_contract": ["separate facts from interpretation", "flag conflicting signals and missing data", "do not invent unavailable data"],
+        },
+    }
+
+
 @app.get("/api/scanner/notes")
 def get_scanner_notes():
     if SCANNER_NOTES_FILE.exists():

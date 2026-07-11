@@ -213,6 +213,8 @@ Prebehla rozsiahla revízia + performance/UX vylepšenia:
   nezačínať bez vyžiadania.
 # Session handoff — 2026-07-11 audit fixes
 
+- `GET /api/assistant/export` je Basic-Auth-only, read-only a sťahuje sa cez tlačidlo AI export v Scanneri. Vracá verziovaný sanitizovaný JSON z existujúcich snapshotov; žiadne interné eToro ID ani kľúče.
+
 - Watchlist supports server-synced add dates and local A-Z/add-date ordering; the holdings snapshot exposes pending-order symbols for the yellow `X` marker.
 
 - Backtest cache je izolovaná fingerprintom OHLCV; tickery s rovnakým počtom a dátumami sviečok už nemôžu zdieľať cudzí výsledok.

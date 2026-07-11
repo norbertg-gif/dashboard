@@ -94,6 +94,37 @@ function clearScannerClientCache(prefix = '') {
   });
 }
 
+async function downloadAssistantExport() {
+  const button = document.getElementById('assistantExportBtn');
+  if (button?.dataset.loading === '1') return;
+  if (button) {
+    button.dataset.loading = '1';
+    button.disabled = true;
+    button.textContent = 'Pripravujem…';
+  }
+  try {
+    const response = await fetch(`${API}/api/assistant/export`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    const day = String(payload.generated_at || new Date().toISOString()).slice(0, 10);
+    link.href = URL.createObjectURL(blob);
+    link.download = `dashboard-ai-export-${day}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setStatus?.('AI export pripravený na vloženie do konzultácie', 'ok');
+  } catch (error) {
+    setStatus?.(`AI export zlyhal: ${error.message}`, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.dataset.loading = '';
+      button.textContent = 'AI export';
+    }
+  }
+}
+
 function inboxSeverityLabel(severity) {
   return severity === 'buy' ? 'pozitívne'
     : severity === 'counter' ? 'pozor'
@@ -652,6 +683,13 @@ async function renderScannerView() {
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
                 <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
                 <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+              </div>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-group">
+              <span class="tb-label">AI konzultácia</span>
+              <div class="tb-items">
+                <button class="btn" id="assistantExportBtn" onclick="downloadAssistantExport()" title="Stiahne read-only JSON pre manuálne vloženie do ChatGPT alebo inej AI. Nič nikam neodosiela.">AI export</button>
               </div>
             </div>
           </div>
