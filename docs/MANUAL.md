@@ -607,6 +607,11 @@ Inbox, earnings widget, DIP status aj posledné výsledky scanneru sa držia
 približne **24 hodín** na serveri alebo vo frontende. Ak chceš čerstvé dáta,
 použi manuálne prepočítanie plánu, spustenie scanneru alebo nový import DIP.
 
+Pomocné zdroje v hornej časti Scannera sú v zbaliteľnej mriežke **2×2**:
+Týždenný plán, Investor Inbox, Earnings a Watchlist/eToro radar. Každá karta si
+pamätá vlastný stav rozbalenia v prehliadači; pri prvom otvorení sú zbalené,
+aby hlavný DIP scanner zostal hneď viditeľný pod nimi.
+
 ### Earnings kalendár
 
 Karta **Earnings aktuálny + nasledujúci týždeň** zobrazuje reporty pre relevantné

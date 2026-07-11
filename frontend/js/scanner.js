@@ -9,10 +9,16 @@ let investorInboxMode = ['defensive','offensive','all'].includes(localStorage.ge
   : 'defensive';
 
 const INVESTOR_INBOX_COLLAPSED_KEY = 'td_investor_inbox_collapsed';
-function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX_COLLAPSED_KEY) === '1'; }
+function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX_COLLAPSED_KEY) !== '0'; }
 
 const WEEKLY_PLAN_COLLAPSED_KEY = 'td_weekly_plan_collapsed';
-function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) === '1'; }
+function isWeeklyPlanCollapsed() { return localStorage.getItem(WEEKLY_PLAN_COLLAPSED_KEY) !== '0'; }
+
+const EARNINGS_CALENDAR_COLLAPSED_KEY = 'td_earnings_calendar_collapsed';
+function isEarningsCalendarCollapsed() { return localStorage.getItem(EARNINGS_CALENDAR_COLLAPSED_KEY) !== '0'; }
+
+const SCANNER_RADAR_COLLAPSED_KEY = 'td_scanner_radar_collapsed';
+function isScannerRadarCollapsed() { return localStorage.getItem(SCANNER_RADAR_COLLAPSED_KEY) !== '0'; }
 
 const WEEKLY_PLAN_REVIEWED_PREFIX = 'td_weekly_plan_reviewed_';
 let weeklyPlanQueueIndex = 0;
@@ -183,6 +189,18 @@ function toggleInvestorInboxCollapsed() {
   else loadInvestorInbox();
 }
 
+function toggleEarningsCalendarCollapsed() {
+  localStorage.setItem(EARNINGS_CALENDAR_COLLAPSED_KEY, isEarningsCalendarCollapsed() ? '0' : '1');
+  if (window._lastEarningsCalendarPayload) renderEarningsCalendar(window._lastEarningsCalendarPayload);
+  else loadEarningsCalendarWidget();
+}
+
+function toggleScannerRadarCollapsed() {
+  localStorage.setItem(SCANNER_RADAR_COLLAPSED_KEY, isScannerRadarCollapsed() ? '0' : '1');
+  if (_oppLastRows !== null) renderOpportunities(_oppLastRows, _oppLastDays);
+  else refreshOpportunities(false);
+}
+
 function renderInvestorInbox(payload) {
   window._lastInvestorInboxPayload = payload || null;
   const box = document.getElementById('investorWeekBox');
@@ -342,9 +360,17 @@ function earningsCalendarGroupLabel(item) {
 }
 
 function renderEarningsCalendar(payload) {
+  window._lastEarningsCalendarPayload = payload || null;
   const box = document.getElementById('earningsCalendarBox');
   if (!box) return;
   const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (isEarningsCalendarCollapsed()) {
+    const nearest = items[0];
+    box.innerHTML = `<div class="inbox-collapsed-summary">${items.length
+      ? `${items.length} earnings v najbližších 14 dňoch${nearest?.ticker ? ` · najbližšie ${escHtml(nearest.ticker)} ${escHtml(nearest.date || '')}` : ''}`
+      : 'Žiadne earnings v najbližších 14 dňoch'}</div>`;
+    return;
+  }
   if (!items.length) {
     box.innerHTML = '<div class="earncal-empty">V portfóliu, watchliste ani posledných kandidátoch nie sú earnings v najbližších 14 dňoch.</div>';
     return;
@@ -493,6 +519,14 @@ function renderOpportunities(rows, days) {
   const all = clean
     .map(r => ({...r, _score: scoreOpportunity(r), _pos: opportunityPositionInfo(r.ticker)}))
     .sort((a, b) => b._score - a._score || a.ticker.localeCompare(b.ticker));
+  if (isScannerRadarCollapsed()) {
+    const top = all.slice(0, 3).map(row => row.ticker).join(', ');
+    el.className = 'inbox-collapsed-summary';
+    el.textContent = all.length
+      ? `${all.length} sledovaných titulov${top ? ` · top: ${top}` : ''}`
+      : 'Žiadne tickery na vyhodnotenie.';
+    return;
+  }
   const defaultLimit = (typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) ? OPP_BASIC_LIMIT : OPP_DEFAULT_LIMIT;
   const ranked = _oppExpanded ? all : all.slice(0, defaultLimit);
 
@@ -700,7 +734,8 @@ async function renderScannerView() {
           <span id="dipImportStatus">Načítavam DIP stav...</span>
           <span id="scannerPageStatus"></span>
         </div>
-        <section class="investor-week-card weekly-plan-card">
+        <div class="scanner-aux-grid">
+        <section class="investor-week-card weekly-plan-card scanner-aux-card">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
             <div>
@@ -711,7 +746,7 @@ async function renderScannerView() {
           </div>
           <div id="weeklyPlanBox" class="inbox-empty">Skladám syntézu z Inboxu, DCA a scanneru...</div>
         </section>
-        <section class="investor-week-card">
+        <section class="investor-week-card scanner-aux-card">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
             <div>
@@ -722,8 +757,9 @@ async function renderScannerView() {
           </div>
           <div id="investorWeekBox" class="inbox-empty">Načítavam týždenný prehľad...</div>
         </section>
-        <section class="earnings-calendar-card">
+        <section class="earnings-calendar-card scanner-aux-card">
           <div class="scanner-source-head">
+            <button class="btn dca-toggle" onclick="toggleEarningsCalendarCollapsed()" title="${isEarningsCalendarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isEarningsCalendarCollapsed() ? '+' : '−'}</button>
             <div>
               <div class="scanner-section-kicker">Kalendár</div>
               <div class="scanner-source-title">Earnings aktuálny + nasledujúci týždeň</div>
@@ -732,8 +768,9 @@ async function renderScannerView() {
           </div>
           <div id="earningsCalendarBox" class="earncal-empty">Načítavam earnings...</div>
         </section>
-        <section class="scanner-candidate-radar scanner-candidate-radar-inline">
+        <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card">
           <div class="scanner-source-head">
+            <button class="btn dca-toggle" onclick="toggleScannerRadarCollapsed()" title="${isScannerRadarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isScannerRadarCollapsed() ? '+' : '−'}</button>
             <div>
               <div class="scanner-section-kicker">Watchlist / eToro</div>
               <div class="scanner-source-title">Rýchly radar držaných a sledovaných titulov</div>
@@ -742,6 +779,7 @@ async function renderScannerView() {
           </div>
           <div id="opportunitiesInfo" class="opp-empty">Načítavam watchlist/eToro kandidátov...</div>
         </section>
+        </div>
         <div class="scanner-source-head scanner-nasdaq-head">
           <div>
             <div class="scanner-section-kicker">DIP universe</div>

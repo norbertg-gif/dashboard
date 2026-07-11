@@ -2680,13 +2680,11 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   padding: 12px;
 }
 .scanner-candidate-radar-inline {
-  margin: 12px 14px 0;
   padding: 10px;
   background: color-mix(in srgb, var(--bg-card) 75%, var(--bg-input));
 }
 .investor-week-card,
 .earnings-calendar-card {
-  margin: 12px 14px 0;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2694,6 +2692,30 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .investor-week-card {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+.scanner-aux-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+  margin: 12px 14px 0;
+}
+.scanner-aux-card {
+  min-width: 0;
+  margin: 0;
+}
+.scanner-aux-card .scanner-source-head {
+  min-height: 26px;
+  margin-bottom: 6px;
+}
+.scanner-aux-card .scanner-source-head > div { min-width: 0; }
+.scanner-aux-card .scanner-source-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 900px) {
+  .scanner-aux-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .inbox-headline {
   display: flex;
