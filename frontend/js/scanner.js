@@ -7,6 +7,10 @@ const INVESTOR_INBOX_MODE_KEY = 'td_investor_inbox_mode';
 let investorInboxMode = ['defensive','offensive','all'].includes(localStorage.getItem(INVESTOR_INBOX_MODE_KEY))
   ? localStorage.getItem(INVESTOR_INBOX_MODE_KEY)
   : 'defensive';
+const INVESTOR_INBOX_KIND_FILTER_KEY = 'td_investor_inbox_kind_filter';
+let investorInboxKindFilter = ['dca', 'profit', 'earnings', 'broken', 'opportunity'].includes(localStorage.getItem(INVESTOR_INBOX_KIND_FILTER_KEY))
+  ? localStorage.getItem(INVESTOR_INBOX_KIND_FILTER_KEY)
+  : null;
 
 const INVESTOR_INBOX_COLLAPSED_KEY = 'td_investor_inbox_collapsed';
 function isInvestorInboxCollapsed() { return localStorage.getItem(INVESTOR_INBOX_COLLAPSED_KEY) !== '0'; }
@@ -179,6 +183,16 @@ function inboxModeMeta(mode) {
   }[mode] || null;
 }
 
+function investorInboxKindMeta(kind) {
+  return {
+    dca: { label: 'DCA', tooltip: 'Len kandidáti na možné dokúpenie.' },
+    profit: { label: 'Profit', tooltip: 'Len pozície, pri ktorých stojí za kontrolu výber zisku.' },
+    earnings: { label: 'Earnings', tooltip: 'Len tituly s blížiacimi sa výsledkami.' },
+    broken: { label: 'Riziko', tooltip: 'Len tituly s technickým alebo strategickým varovaním.' },
+    opportunity: { label: 'Nové', tooltip: 'Len nové príležitosti mimo portfólia.' },
+  }[kind] || null;
+}
+
 function investorInboxSummaryHtml(counts, total) {
   const stats = [
     ['dca', 'DCA', 'var(--accent)'],
@@ -190,17 +204,27 @@ function investorInboxSummaryHtml(counts, total) {
   return `<div class="inbox-summary">
     <div class="inbox-summary-caption">${total} vecí na kontrolu tento týždeň</div>
     <div class="inbox-stat-grid">${stats.map(([key, label, color]) => `
-      <div class="inbox-stat" title="${label}: ${Number(counts?.[key]) || 0}">
-        <strong style="color:${color}">${Number(counts?.[key]) || 0}</strong>
+      <button type="button" class="inbox-stat ${investorInboxKindFilter === key ? 'active' : ''}" style="--inbox-stat-color:${color}" onclick="setInvestorInboxKindFilter('${key}')" title="${escHtml(investorInboxKindMeta(key).tooltip)}">
+        <strong>${Number(counts?.[key]) || 0}</strong>
         <span>${label}</span>
-      </div>`).join('')}</div>
+      </button>`).join('')}</div>
   </div>`;
 }
 
 function setInvestorInboxMode(mode) {
   if (!inboxModeMeta(mode)) mode = 'defensive';
   investorInboxMode = mode;
+  investorInboxKindFilter = null;
   localStorage.setItem(INVESTOR_INBOX_MODE_KEY, mode);
+  localStorage.removeItem(INVESTOR_INBOX_KIND_FILTER_KEY);
+  if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
+}
+
+function setInvestorInboxKindFilter(kind) {
+  if (!investorInboxKindMeta(kind)) return;
+  investorInboxKindFilter = investorInboxKindFilter === kind ? null : kind;
+  if (investorInboxKindFilter) localStorage.setItem(INVESTOR_INBOX_KIND_FILTER_KEY, investorInboxKindFilter);
+  else localStorage.removeItem(INVESTOR_INBOX_KIND_FILTER_KEY);
   if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
 }
 
@@ -228,7 +252,11 @@ function renderInvestorInbox(payload) {
   if (!box) return;
   const mode = inboxModeMeta(investorInboxMode) || inboxModeMeta('defensive');
   const allItems = Array.isArray(payload?.items) ? payload.items : [];
-  const items = mode.kinds ? allItems.filter(item => {
+  const activeKind = investorInboxKindMeta(investorInboxKindFilter);
+  const items = activeKind ? allItems.filter(item => {
+    const kinds = Array.isArray(item.kinds) && item.kinds.length ? item.kinds : [item.kind];
+    return kinds.includes(investorInboxKindFilter);
+  }) : mode.kinds ? allItems.filter(item => {
     const kinds = Array.isArray(item.kinds) && item.kinds.length ? item.kinds : [item.kind];
     return kinds.some(kind => mode.kinds.has(kind));
   }) : allItems;
@@ -242,11 +270,11 @@ function renderInvestorInbox(payload) {
   ].filter(Boolean).join(' · ');
   const modeButtons = ['defensive','offensive','all'].map(modeKey => {
     const meta = inboxModeMeta(modeKey);
-    return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')" title="${escHtml(meta.tooltip)}">${meta.label}</button>`;
+    return `<button class="${!activeKind && investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')" title="${escHtml(meta.tooltip)}">${meta.label}</button>`;
   }).join('');
   const summary = investorInboxSummaryHtml(counts, allItems.length);
   const modeSwitch = `<div class="inbox-filter-row">
-    <span>${escHtml(mode.label)} režim · ${escHtml(mode.note)}</span>
+    <span>${activeKind ? `Filter: ${activeKind.label} · ${activeKind.tooltip}` : `${escHtml(mode.label)} režim · ${escHtml(mode.note)}`}</span>
     <div class="inbox-mode-switch">${modeButtons}</div>
   </div>`;
   if (isInvestorInboxCollapsed()) {
@@ -255,7 +283,7 @@ function renderInvestorInbox(payload) {
   }
   if (!items.length) {
     box.innerHTML = `${summary}${modeSwitch}<div class="inbox-empty">
-      V režime ${escHtml(mode.label)} tento týždeň nevidím nič urgentné. ${escHtml(mode.note)} sú momentálne bez zásahu.
+      ${activeKind ? `Pre filter ${escHtml(activeKind.label)} tento týždeň nie sú žiadne položky.` : `V režime ${escHtml(mode.label)} tento týždeň nevidím nič urgentné. ${escHtml(mode.note)} sú momentálne bez zásahu.`}
     </div>`;
     return;
   }

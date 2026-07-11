@@ -2801,7 +2801,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-input) 82%, var(--bg-card));
+  color: var(--inbox-stat-color);
+  cursor: pointer;
   text-align: center;
+  transition: var(--transition);
+}
+.inbox-stat:hover,
+.inbox-stat.active {
+  border-color: var(--inbox-stat-color);
+  background: color-mix(in srgb, var(--inbox-stat-color) 12%, var(--bg-input));
+}
+.inbox-stat.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inbox-stat-color) 32%, transparent);
 }
 .inbox-stat strong {
   display: block;
