@@ -2672,6 +2672,9 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   flex: 1 0 auto;
   min-height: 520px;
 }
+.scanner-page .tool-panel.fill {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, var(--bg-input)), var(--bg-card));
+}
 .scanner-candidate-radar {
   flex: 0 0 auto;
   border: 1px solid var(--border);
@@ -2697,23 +2700,76 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 10px;
-  margin: 12px 14px 0;
+  gap: 14px;
+  margin: 16px 14px 0;
 }
 .scanner-aux-card {
   min-width: 0;
   margin: 0;
+  min-height: 72px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, var(--bg-input)), var(--bg-card));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
 }
 .scanner-aux-card .scanner-source-head {
-  min-height: 26px;
-  margin-bottom: 6px;
+  min-height: 34px;
+  margin-bottom: 10px;
+  justify-content: flex-start;
 }
 .scanner-aux-card .scanner-source-head > div { min-width: 0; }
+.scanner-aux-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.scanner-aux-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-input));
+  color: var(--accent);
+  font: 800 13px var(--font-mono);
+}
+.scanner-aux-card .scanner-section-kicker {
+  color: var(--muted2);
+  margin-bottom: 1px;
+}
+.scanner-aux-card .scanner-source-title {
+  font-size: 13px;
+  line-height: 1.2;
+}
 .scanner-aux-card .scanner-source-note {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.scanner-aux-card .dca-toggle {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 17px;
+  line-height: 1;
+}
+.scanner-aux-card > .scanner-source-head > .btn:last-child,
+.scanner-aux-card > .scanner-source-head > .scanner-source-note {
+  flex: 0 0 auto;
+}
+.scanner-aux-plan { border-color: color-mix(in srgb, var(--yellow) 36%, var(--border)); }
+.scanner-aux-plan .scanner-aux-icon { border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); background: var(--yellow-soft); color: var(--yellow); }
+.scanner-aux-inbox { border-color: color-mix(in srgb, #a78bfa 32%, var(--border)); }
+.scanner-aux-inbox .scanner-aux-icon { border-color: color-mix(in srgb, #a78bfa 38%, var(--border)); background: color-mix(in srgb, #a78bfa 14%, var(--bg-input)); color: #bca8ff; }
+.scanner-aux-calendar { border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); }
+.scanner-aux-calendar .scanner-aux-icon { border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); background: var(--yellow-soft); color: var(--yellow); }
+.scanner-aux-radar { border-color: color-mix(in srgb, var(--up) 32%, var(--border)); }
+.scanner-aux-radar .scanner-aux-icon { border-color: color-mix(in srgb, var(--up) 35%, var(--border)); background: var(--up-soft); color: var(--up); }
 @media (max-width: 900px) {
   .scanner-aux-grid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -2955,9 +3011,12 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   white-space: nowrap;
 }
 .scanner-nasdaq-head {
-  margin: 12px 14px 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  margin: 22px 14px 0;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 92%, var(--bg-input)), var(--bg-card));
 }
 #main-scanner .opp-list {
   display: grid;
@@ -3066,8 +3125,15 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .scanner-output {
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 14px 18px 18px;
   flex: 1;
+}
+.scanner-nasdaq-head + .scanner-output {
+  margin: 0 14px 14px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--bg-card);
 }
 .scanner-result-shell {
   display: flex;

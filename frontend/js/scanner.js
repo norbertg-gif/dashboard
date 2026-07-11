@@ -169,10 +169,13 @@ function investorInboxRow(item) {
 function inboxModeMeta(mode) {
   return {
     defensive: { label: 'Defenzívne', kinds: new Set(['dca','profit','earnings','broken']),
-      note: 'držané tituly, riziká, earnings a profit-taking' },
+      note: 'držané tituly, riziká, earnings a profit-taking',
+      tooltip: 'Držané tituly: DCA, výber zisku, blížiace sa earnings a riziká.' },
     offensive: { label: 'Ofenzívne', kinds: new Set(['opportunity']),
-      note: 'nové príležitosti zo scannera' },
-    all: { label: 'Všetko', kinds: null, note: 'všetky výnimky a príležitosti' },
+      note: 'nové príležitosti zo scannera',
+      tooltip: 'Nové príležitosti zo Scanneru, ktoré zatiaľ nie sú v portfóliu.' },
+    all: { label: 'Všetko', kinds: null, note: 'všetky výnimky a príležitosti',
+      tooltip: 'Všetky dôvody naraz: portfólio aj nové príležitosti.' },
   }[mode] || null;
 }
 
@@ -221,7 +224,7 @@ function renderInvestorInbox(payload) {
   ].filter(Boolean).join(' · ');
   const modeButtons = ['defensive','offensive','all'].map(modeKey => {
     const meta = inboxModeMeta(modeKey);
-    return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')">${meta.label}</button>`;
+    return `<button class="${investorInboxMode === modeKey ? 'active' : ''}" onclick="setInvestorInboxMode('${modeKey}')" title="${escHtml(meta.tooltip)}">${meta.label}</button>`;
   }).join('');
   if (isInvestorInboxCollapsed()) {
     box.innerHTML = `<div class="inbox-collapsed-summary">${allItems.length ? `${allItems.length} vecí na kontrolu${countText ? ` · ${escHtml(countText)}` : ''}` : 'Tento týždeň nič urgentné'}</div>`;
@@ -735,45 +738,57 @@ async function renderScannerView() {
           <span id="scannerPageStatus"></span>
         </div>
         <div class="scanner-aux-grid">
-        <section class="investor-week-card weekly-plan-card scanner-aux-card">
+        <section class="investor-week-card weekly-plan-card scanner-aux-card scanner-aux-plan">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
-            <div>
+            <div class="scanner-aux-heading">
+              <span class="scanner-aux-icon" aria-hidden="true">▤</span>
+              <div>
               <div class="scanner-section-kicker">Týždenný plán</div>
               <div class="scanner-source-title" id="weeklyPlanHeadline">Načítavam plán...</div>
+              </div>
             </div>
             <button class="btn" style="font-size:10px;padding:3px 9px;" onclick="loadWeeklyPlan(true)" title="Prepočítať plán">↻</button>
           </div>
           <div id="weeklyPlanBox" class="inbox-empty">Skladám syntézu z Inboxu, DCA a scanneru...</div>
         </section>
-        <section class="investor-week-card scanner-aux-card">
+        <section class="investor-week-card scanner-aux-card scanner-aux-inbox">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
-            <div>
+            <div class="scanner-aux-heading">
+              <span class="scanner-aux-icon" aria-hidden="true">✦</span>
+              <div>
               <div class="scanner-section-kicker">Investor inbox</div>
               <div class="scanner-source-title">Tento týždeň</div>
+              </div>
             </div>
             <span class="scanner-source-note">DCA · profit · earnings · riziká · nové príležitosti</span>
           </div>
           <div id="investorWeekBox" class="inbox-empty">Načítavam týždenný prehľad...</div>
         </section>
-        <section class="earnings-calendar-card scanner-aux-card">
+        <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleEarningsCalendarCollapsed()" title="${isEarningsCalendarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isEarningsCalendarCollapsed() ? '+' : '−'}</button>
-            <div>
+            <div class="scanner-aux-heading">
+              <span class="scanner-aux-icon" aria-hidden="true">◷</span>
+              <div>
               <div class="scanner-section-kicker">Kalendár</div>
               <div class="scanner-source-title">Earnings aktuálny + nasledujúci týždeň</div>
+              </div>
             </div>
             <span class="scanner-source-note">portfólio · watchlist · poslední kandidáti</span>
           </div>
           <div id="earningsCalendarBox" class="earncal-empty">Načítavam earnings...</div>
         </section>
-        <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card">
+        <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card scanner-aux-radar">
           <div class="scanner-source-head">
             <button class="btn dca-toggle" onclick="toggleScannerRadarCollapsed()" title="${isScannerRadarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isScannerRadarCollapsed() ? '+' : '−'}</button>
-            <div>
+            <div class="scanner-aux-heading">
+              <span class="scanner-aux-icon" aria-hidden="true">◎</span>
+              <div>
               <div class="scanner-section-kicker">Watchlist / eToro</div>
               <div class="scanner-source-title">Rýchly radar držaných a sledovaných titulov</div>
+              </div>
             </div>
             <span class="scanner-source-note">Klik otvorí detail v Analytike</span>
           </div>
