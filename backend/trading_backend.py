@@ -7576,7 +7576,7 @@ def _fv_pct(value) -> float | None:
 
 def _fv_dcf_value(fcf_per_share: float, growth_pct: float | None) -> dict | None:
     """Jednoduchý 5r DCF v troch scenároch; len pre kladný FCF na akciu."""
-    if fcf_per_share <= 0:
+    if fcf_per_share is None or fcf_per_share <= 0:
         return None
 
     def calc(growth: float, discount: float) -> float | None:

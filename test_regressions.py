@@ -221,6 +221,15 @@ class FairValueRegressionTests(unittest.TestCase):
         self.assertEqual(payload["models"], {})
         self.assertEqual(payload["summary"]["status"], "unavailable")
 
+    def test_fair_value_allows_missing_free_cash_flow(self):
+        payload = tb._build_fair_value_payload(
+            "NOCF", {"c": 50},
+            {"epsAnnual": 4, "bookValuePerShareAnnual": 10, "epsGrowth5Y": 12}, {},
+        )
+        self.assertIn("graham", payload["models"])
+        self.assertIn("lynch", payload["models"])
+        self.assertNotIn("dcf", payload["models"])
+
 
 class ScannerVisibilityRegressionTests(unittest.TestCase):
     def test_high_dip_title_is_visible_without_recent_signal(self):
