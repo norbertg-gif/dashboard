@@ -227,8 +227,21 @@ class FairValueRegressionTests(unittest.TestCase):
             {"epsAnnual": 4, "bookValuePerShareAnnual": 10, "epsGrowth5Y": 12}, {},
         )
         self.assertIn("graham", payload["models"])
-        self.assertIn("lynch", payload["models"])
+        self.assertNotIn("lynch", payload["models"])
         self.assertNotIn("dcf", payload["models"])
+
+    def test_fair_value_excludes_incompatible_growth_heuristics(self):
+        payload = tb._build_fair_value_payload(
+            "AMD", {"c": 557.99},
+            {"epsAnnual": 0.46, "bookValuePerShareAnnual": 4.8,
+             "epsGrowth5Y": 30, "pegTTM": 3.0},
+            {"targetMean": 504.04},
+        )
+        self.assertIn("analyst_target", payload["models"])
+        self.assertNotIn("graham", payload["models"])
+        self.assertNotIn("lynch", payload["models"])
+        self.assertEqual(payload["summary"]["status"], "insufficient_models")
+        self.assertEqual(payload["summary"]["range_model_count"], 0)
 
 
 class ScannerVisibilityRegressionTests(unittest.TestCase):

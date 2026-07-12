@@ -7611,6 +7611,7 @@ def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target:
     growth = _fv_pct(metric.get("epsGrowth5Y") or metric.get("epsGrowthTTMYoy") or metric.get("epsGrowth3Y"))
     peg = _fv_num(metric.get("pegTTM") or metric.get("pegAnnual"))
     models: dict[str, dict] = {}
+    excluded_models: list[dict] = []
 
     target_mean = _fv_num(price_target.get("targetMean"))
     target_low = _fv_num(price_target.get("targetLow"))
@@ -7623,18 +7624,23 @@ def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target:
             "note": "Priemerný 12-mesačný cieľ analytikov; nie je vlastný model dashboardu.",
         }
 
-    if eps and eps > 0 and book and book > 0:
+    price_to_book = current / book if current and book and book > 0 else None
+    if eps and eps > 0 and book and book > 0 and (price_to_book is None or price_to_book <= 12):
         models["graham"] = {
             "label": "Graham number", "value": round(math.sqrt(22.5 * eps * book), 2),
             "note": "Len pre ziskové firmy s kladnou účtovnou hodnotou; pre rastové firmy môže byť príliš konzervatívne.",
         }
+    elif eps and eps > 0 and book and book > 0 and price_to_book and price_to_book > 12:
+        excluded_models.append({"label": "Graham number", "reason": "Nevhodný pre asset-light rastovú firmu s vysokým P/B."})
 
-    if eps and eps > 0 and growth is not None and 5 <= growth <= 35:
+    if eps and eps > 0 and growth is not None and 5 <= growth <= 35 and peg is not None and 0 < peg <= 2.5:
         models["lynch"] = {
             "label": "Lynch / PEG", "value": round(eps * growth, 2), "peg": round(peg, 2) if peg else None,
             "growth_pct": round(growth, 1),
             "note": "Orientačný Lynchov vzťah P/E ≈ rast EPS; platí len pre stabilne rastúce ziskové firmy.",
         }
+    elif eps and eps > 0 and peg is not None and peg > 2.5:
+        excluded_models.append({"label": "Lynch / PEG", "reason": f"PEG {peg:.2f} je mimo použiteľného rozsahu pre tento zjednodušený model."})
 
     dcf = _fv_dcf_value(fcf_per_share, growth)
     if dcf:
@@ -7644,14 +7650,24 @@ def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target:
             "note": "5-ročný model voľného cash flow na akciu. Scenáre: konzervatívny / stredný / optimistický.",
         }
 
-    comparable = [m["value"] for m in models.values() if _fv_num(m.get("value")) and m["value"] > 0]
+    # Analyst target is external context, not a compatible intrinsic-value model.
+    # Never let it turn a Graham/Lynch outlier into a misleading giant range.
+    intrinsic_values = []
+    intrinsic_model_count = 0
+    for key in ("graham", "lynch"):
+        value = _fv_num((models.get(key) or {}).get("value"))
+        if value and value > 0:
+            intrinsic_values.append(value)
+            intrinsic_model_count += 1
     if dcf:
-        comparable.append(dcf["base"])
-    fair_low = min(comparable) if comparable else None
-    fair_high = max(comparable) if comparable else None
-    midpoint = sorted(comparable)[len(comparable) // 2] if comparable else None
+        intrinsic_values.extend((dcf["low"], dcf["base"], dcf["high"]))
+        intrinsic_model_count += 1
+    range_available = bool(dcf) or intrinsic_model_count >= 2
+    fair_low = min(intrinsic_values) if range_available and intrinsic_values else None
+    fair_high = max(intrinsic_values) if range_available and intrinsic_values else None
+    midpoint = sorted(intrinsic_values)[len(intrinsic_values) // 2] if range_available and intrinsic_values else None
     potential = ((midpoint / current - 1) * 100) if current and midpoint else None
-    status = "unavailable"
+    status = "insufficient_models" if models else "unavailable"
     if current and fair_low and fair_high:
         status = "below_range" if current < fair_low else "above_range" if current > fair_high else "within_range"
     return {
@@ -7665,8 +7681,10 @@ def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target:
             "potential_pct": round(potential, 1) if potential is not None else None,
             "status": status,
             "model_count": len(models),
+            "range_model_count": intrinsic_model_count,
             "note": "Pásmo modelov, nie cieľová cena ani investičné odporúčanie.",
         },
+        "excluded_models": excluded_models,
         "inputs": {
             "eps_annual": round(eps, 4) if eps is not None else None,
             "book_value_per_share": round(book, 4) if book is not None else None,

@@ -2379,6 +2379,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--text);
   font: 700 10px var(--font-mono);
 }
+#predictiveTab .fair-value-excluded-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  color: var(--muted2);
+  font-size: 9px;
+}
+#predictiveTab .fair-value-excluded {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #predictiveTab .stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

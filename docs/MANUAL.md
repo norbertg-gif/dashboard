@@ -862,6 +862,10 @@ Výstup je **pásmo modelov**, nie jedna „správna“ cena. Veľký rozptyl zn
 že modely alebo vstupy si odporujú; pri stratových firmách, ETF či firmách bez
 voľného cash flow môže časť modelov zostať úmyselne nedostupná. Funkcia je
 vizuálna fundamentálna pomôcka a **nemení C1–C4, Scanner ani Verdikt**.
+Externý cieľ analytikov sa zobrazuje samostatne a nevstupuje do pásma. Graham
+sa vynechá pri výrazne asset-light firmách s vysokým P/B, Lynch/PEG pri PEG nad
+2,5; karta radšej povie, že pre pásmo nemá dosť vhodných modelov, než aby
+vytvorila zavádzajúce extrémne číslo.
 
 Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 ani
 do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 90D+ výsledky.

@@ -2105,6 +2105,7 @@ function pc_renderFairValueCard(data) {
     below_range: ['Cena pod pásmom modelov', 'var(--up)'],
     above_range: ['Cena nad pásmom modelov', 'var(--down)'],
     within_range: ['Cena v pásme modelov', 'var(--yellow)'],
+    insufficient_models: ['Pásmo nevypočítané: málo vhodných vlastných modelov', 'var(--muted)'],
   }[summary.status] || ['Nedostatok porovnateľných dát', 'var(--muted)'];
   const rows = [];
   const analyst = data.models?.analyst_target;
@@ -2115,6 +2116,7 @@ function pc_renderFairValueCard(data) {
   if (lynch) rows.push(`<div class="fair-value-row" title="${escHtml(lynch.note)}"><span>${lynch.label}${lynch.peg != null ? ` · PEG ${Number(lynch.peg).toFixed(2)}` : ''}</span><strong>${pc_fairValuePrice(lynch.value)}</strong></div>`);
   const dcf = data.models?.dcf;
   if (dcf) rows.push(`<div class="fair-value-row" title="${escHtml(dcf.note)}"><span>${dcf.label}</span><strong>${pc_fairValuePrice(dcf.low)} – ${pc_fairValuePrice(dcf.high)}</strong></div>`);
+  const excluded = (data.excluded_models || []).map(item => `<div class="fair-value-excluded" title="${escHtml(item.reason || '')}">${escHtml(item.label || 'Model')}: vynechaný</div>`).join('');
   card.innerHTML = `<div class="card-title" title="Pásmo modelov z free dát. Rozdiel medzi modelmi je normálny; nepredstavuje cieľovú cenu ani automatické odporúčanie.">Férová hodnota <span class="fair-value-beta">beta</span></div>
     <div class="fair-value-summary">
       <span>Aktuálna <strong>${pc_fairValuePrice(data.current_price)}</strong></span>
@@ -2122,7 +2124,8 @@ function pc_renderFairValueCard(data) {
     </div>
     <div class="fair-value-status" style="color:${status[1]}">${status[0]}${summary.potential_pct != null ? ` · stred ${summary.potential_pct >= 0 ? '+' : ''}${Number(summary.potential_pct).toFixed(1)} %` : ''}</div>
     <div class="fair-value-rows">${rows.join('') || '<div class="earnings-unavailable-note">Žiadny z modelov nemá vhodné vstupy.</div>'}</div>
-    <div class="fair-value-foot">${summary.model_count || 0} použiteľné modely · ${escHtml(summary.note || '')}</div>`;
+    ${excluded ? `<div class="fair-value-excluded-list">${excluded}</div>` : ''}
+    <div class="fair-value-foot">${summary.range_model_count || 0} modely pre pásmo · ${escHtml(summary.note || '')}</div>`;
   card.style.display = '';
 }
 
