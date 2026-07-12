@@ -7699,9 +7699,24 @@ def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
         base = {"symbol": sym, "token": api_key}
         quote = requests.get("https://finnhub.io/api/v1/quote", params=base, timeout=12)
         metric = requests.get("https://finnhub.io/api/v1/stock/metric", params={**base, "metric": "all"}, timeout=15)
-        target = requests.get("https://finnhub.io/api/v1/stock/price-target", params=base, timeout=12)
-        quote.raise_for_status(); metric.raise_for_status(); target.raise_for_status()
-        payload = _build_fair_value_payload(sym, quote.json() or {}, (metric.json() or {}).get("metric") or {}, target.json() or {})
+        quote.raise_for_status(); metric.raise_for_status()
+        # Finnhub free plans can deny price-target while still allowing quote + metric.
+        # Analyst target is an optional fourth model, never a reason to hide the rest.
+        target_payload = {}
+        try:
+            target = requests.get("https://finnhub.io/api/v1/stock/price-target", params=base, timeout=12)
+            if target.ok:
+                target_payload = target.json() or {}
+            else:
+                fmp_target = _fmp_price_target(sym)
+                if fmp_target:
+                    target_payload = {
+                        "targetMean": fmp_target.get("mean"), "targetLow": fmp_target.get("low"),
+                        "targetHigh": fmp_target.get("high"), "targetMedian": fmp_target.get("median"),
+                    }
+        except Exception:
+            pass
+        payload = _build_fair_value_payload(sym, quote.json() or {}, (metric.json() or {}).get("metric") or {}, target_payload)
         if not payload["models"]:
             payload["error"] = "Pre tento titul nie sú dostupné vhodné vstupy pre modely férovej hodnoty."
         payload["fetched_at"] = datetime.now(timezone.utc).isoformat()
