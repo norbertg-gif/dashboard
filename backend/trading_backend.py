@@ -7552,6 +7552,170 @@ def _fmp_price_target(sym: str) -> dict | None:
     return {"mean": mean, "low": low, "high": high, "median": med, "source": "fmp"}
 
 
+# ── Fair value snapshot (lazy card in Analytics; Finnhub free tier, 24h disk cache) ──
+FAIR_VALUE_DIR = DATA_ROOT / "fair_value"
+FAIR_VALUE_TTL_H = 24
+FAIR_VALUE_SCHEMA_VERSION = 1
+
+
+def _fv_num(value) -> float | None:
+    try:
+        value = float(value)
+        return value if math.isfinite(value) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _fv_pct(value) -> float | None:
+    """Finnhub metriky sa podľa poľa vracajú ako 12.4 alebo 0.124."""
+    value = _fv_num(value)
+    if value is None:
+        return None
+    return value * 100 if abs(value) <= 1 else value
+
+
+def _fv_dcf_value(fcf_per_share: float, growth_pct: float | None) -> dict | None:
+    """Jednoduchý 5r DCF v troch scenároch; len pre kladný FCF na akciu."""
+    if fcf_per_share <= 0:
+        return None
+
+    def calc(growth: float, discount: float) -> float | None:
+        terminal_growth = 0.025
+        if discount <= terminal_growth:
+            return None
+        flow = fcf_per_share
+        present = 0.0
+        for year in range(1, 6):
+            flow *= 1 + growth
+            present += flow / ((1 + discount) ** year)
+        terminal = flow * (1 + terminal_growth) / (discount - terminal_growth)
+        return present + terminal / ((1 + discount) ** 5)
+
+    base_growth = max(0.02, min((growth_pct or 5.0) / 100, 0.10))
+    values = {
+        "low": calc(max(0.01, base_growth - 0.025), 0.11),
+        "base": calc(base_growth, 0.10),
+        "high": calc(min(0.12, base_growth + 0.025), 0.09),
+    }
+    if not all(v is not None and math.isfinite(v) and v > 0 for v in values.values()):
+        return None
+    return {key: round(value, 2) for key, value in values.items()}
+
+
+def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target: dict) -> dict:
+    """Skladá transparentné modely bez automatického investičného odporúčania."""
+    current = _fv_num(quote.get("c"))
+    eps = _fv_num(metric.get("epsAnnual") or metric.get("epsNormalizedAnnual"))
+    book = _fv_num(metric.get("bookValuePerShareAnnual"))
+    fcf_per_share = _fv_num(metric.get("freeCashFlowPerShareAnnual"))
+    growth = _fv_pct(metric.get("epsGrowth5Y") or metric.get("epsGrowthTTMYoy") or metric.get("epsGrowth3Y"))
+    peg = _fv_num(metric.get("pegTTM") or metric.get("pegAnnual"))
+    models: dict[str, dict] = {}
+
+    target_mean = _fv_num(price_target.get("targetMean"))
+    target_low = _fv_num(price_target.get("targetLow"))
+    target_high = _fv_num(price_target.get("targetHigh"))
+    if target_mean and target_mean > 0:
+        models["analyst_target"] = {
+            "label": "Cieľ analytikov", "value": round(target_mean, 2),
+            "low": round(target_low, 2) if target_low and target_low > 0 else None,
+            "high": round(target_high, 2) if target_high and target_high > 0 else None,
+            "note": "Priemerný 12-mesačný cieľ analytikov; nie je vlastný model dashboardu.",
+        }
+
+    if eps and eps > 0 and book and book > 0:
+        models["graham"] = {
+            "label": "Graham number", "value": round(math.sqrt(22.5 * eps * book), 2),
+            "note": "Len pre ziskové firmy s kladnou účtovnou hodnotou; pre rastové firmy môže byť príliš konzervatívne.",
+        }
+
+    if eps and eps > 0 and growth is not None and 5 <= growth <= 35:
+        models["lynch"] = {
+            "label": "Lynch / PEG", "value": round(eps * growth, 2), "peg": round(peg, 2) if peg else None,
+            "growth_pct": round(growth, 1),
+            "note": "Orientačný Lynchov vzťah P/E ≈ rast EPS; platí len pre stabilne rastúce ziskové firmy.",
+        }
+
+    dcf = _fv_dcf_value(fcf_per_share, growth)
+    if dcf:
+        models["dcf"] = {
+            "label": "DCF light", **dcf,
+            "growth_pct": round(growth, 1) if growth is not None else 5.0,
+            "note": "5-ročný model voľného cash flow na akciu. Scenáre: konzervatívny / stredný / optimistický.",
+        }
+
+    comparable = [m["value"] for m in models.values() if _fv_num(m.get("value")) and m["value"] > 0]
+    if dcf:
+        comparable.append(dcf["base"])
+    fair_low = min(comparable) if comparable else None
+    fair_high = max(comparable) if comparable else None
+    midpoint = sorted(comparable)[len(comparable) // 2] if comparable else None
+    potential = ((midpoint / current - 1) * 100) if current and midpoint else None
+    status = "unavailable"
+    if current and fair_low and fair_high:
+        status = "below_range" if current < fair_low else "above_range" if current > fair_high else "within_range"
+    return {
+        "ticker": sym, "schema_version": FAIR_VALUE_SCHEMA_VERSION,
+        "current_price": round(current, 4) if current else None,
+        "models": models,
+        "summary": {
+            "fair_low": round(fair_low, 2) if fair_low else None,
+            "fair_high": round(fair_high, 2) if fair_high else None,
+            "midpoint": round(midpoint, 2) if midpoint else None,
+            "potential_pct": round(potential, 1) if potential is not None else None,
+            "status": status,
+            "model_count": len(models),
+            "note": "Pásmo modelov, nie cieľová cena ani investičné odporúčanie.",
+        },
+        "inputs": {
+            "eps_annual": round(eps, 4) if eps is not None else None,
+            "book_value_per_share": round(book, 4) if book is not None else None,
+            "free_cash_flow_per_share": round(fcf_per_share, 4) if fcf_per_share is not None else None,
+            "eps_growth_pct": round(growth, 1) if growth is not None else None,
+        },
+    }
+
+
+@app.get("/api/ticker/fair-value/{symbol}")
+def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
+    """Lazy free valuation snapshot. Neovplyvňuje scanner, signály ani verdikt."""
+    sym = symbol.upper().strip()
+    if not re.fullmatch(r"[A-Z0-9.\-]{1,20}", sym):
+        raise HTTPException(status_code=400, detail="Neplatný ticker")
+    fpath = FAIR_VALUE_DIR / f"{sym}.json"
+    with _cache_file_lock(fpath):
+        if fpath.exists() and not refresh:
+            try:
+                cached = json.loads(fpath.read_text(encoding="utf-8"))
+                age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
+                if cached.get("schema_version") == FAIR_VALUE_SCHEMA_VERSION and age_h < FAIR_VALUE_TTL_H:
+                    return cached
+            except Exception:
+                pass
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        return {"ticker": sym, "schema_version": FAIR_VALUE_SCHEMA_VERSION, "error": "FINNHUB_API_KEY nie je nastavený"}
+    try:
+        base = {"symbol": sym, "token": api_key}
+        quote = requests.get("https://finnhub.io/api/v1/quote", params=base, timeout=12)
+        metric = requests.get("https://finnhub.io/api/v1/stock/metric", params={**base, "metric": "all"}, timeout=15)
+        target = requests.get("https://finnhub.io/api/v1/stock/price-target", params=base, timeout=12)
+        quote.raise_for_status(); metric.raise_for_status(); target.raise_for_status()
+        payload = _build_fair_value_payload(sym, quote.json() or {}, (metric.json() or {}).get("metric") or {}, target.json() or {})
+        if not payload["models"]:
+            payload["error"] = "Pre tento titul nie sú dostupné vhodné vstupy pre modely férovej hodnoty."
+        payload["fetched_at"] = datetime.now(timezone.utc).isoformat()
+        FAIR_VALUE_DIR.mkdir(parents=True, exist_ok=True)
+        with _cache_file_lock(fpath):
+            tmp = fpath.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, fpath)
+        return payload
+    except Exception as e:
+        return {"ticker": sym, "schema_version": FAIR_VALUE_SCHEMA_VERSION,
+                "error": f"Dáta férovej hodnoty nie sú dostupné: {_scrub_token(e)}"}
+
+
 @app.get("/api/diagnostics/fmp/{symbol}")
 def diag_fmp(symbol: str):
     """Vráti surovú FMP odpoveď pre debugovanie price-target chyby. Kľúč nikdy v odpovedi."""

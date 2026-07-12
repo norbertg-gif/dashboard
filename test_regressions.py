@@ -199,6 +199,29 @@ class AssistantExportRegressionTests(unittest.TestCase):
         self.assertEqual(position["dca_context"]["dca_drawdown_from_last_entry_pct"], -20.0)
 
 
+class FairValueRegressionTests(unittest.TestCase):
+    def test_fair_value_models_require_positive_fundamentals(self):
+        payload = tb._build_fair_value_payload(
+            "AAPL", {"c": 100},
+            {"epsAnnual": 5, "bookValuePerShareAnnual": 20,
+             "freeCashFlowPerShareAnnual": 6, "epsGrowth5Y": 12, "pegTTM": 1.1},
+            {"targetMean": 120, "targetLow": 95, "targetHigh": 140},
+        )
+        self.assertIn("graham", payload["models"])
+        self.assertIn("lynch", payload["models"])
+        self.assertIn("dcf", payload["models"])
+        self.assertEqual(payload["summary"]["status"], "within_range")
+        self.assertGreater(payload["models"]["dcf"]["high"], payload["models"]["dcf"]["low"])
+
+    def test_fair_value_skips_loss_making_models(self):
+        payload = tb._build_fair_value_payload(
+            "LOSS", {"c": 10},
+            {"epsAnnual": -2, "bookValuePerShareAnnual": 5, "freeCashFlowPerShareAnnual": -1}, {},
+        )
+        self.assertEqual(payload["models"], {})
+        self.assertEqual(payload["summary"]["status"], "unavailable")
+
+
 class ScannerVisibilityRegressionTests(unittest.TestCase):
     def test_high_dip_title_is_visible_without_recent_signal(self):
         self.assertTrue(tb._include_scanner_result(

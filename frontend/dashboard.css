@@ -2313,6 +2313,72 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   text-transform: uppercase;
   margin-bottom: 10px;
 }
+#predictiveTab .fair-value-beta {
+  margin-left: 4px;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+#predictiveTab .fair-value-intro,
+#predictiveTab .fair-value-foot {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+#predictiveTab .fair-value-load {
+  width: 100%;
+  margin-top: 9px;
+  font-size: 10px;
+}
+#predictiveTab .fair-value-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+#predictiveTab .fair-value-summary span {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 9px;
+}
+#predictiveTab .fair-value-summary strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text);
+  font: 700 11px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#predictiveTab .fair-value-status {
+  margin-bottom: 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+#predictiveTab .fair-value-rows {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+#predictiveTab .fair-value-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+#predictiveTab .fair-value-row strong {
+  flex: 0 0 auto;
+  color: var(--text);
+  font: 700 10px var(--font-mono);
+}
 #predictiveTab .stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

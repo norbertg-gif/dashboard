@@ -845,6 +845,24 @@ Priemerný analytický cieľ nie je garantovaná budúca cena. Je to konsenzus,
 ktorý môže byť starý alebo sa po výsledkoch prudko zmeniť. Čítaj ho spolu
 s počtom Buy/Hold/Sell, aktuálnou cenou a termínom earnings.
 
+### Férová hodnota (beta)
+
+V Analytike je voliteľná karta **Férová hodnota**. Dáta sa neťahajú pri
+každom otvorení tickera: tlačidlo **Načítať modely** ich vyžiada až na
+vyžiadanie a výsledok sa na serveri drží 24 hodín. Karta používa bezplatné
+fundamentálne dáta z Finnhubu a podľa dostupnosti kombinuje:
+
+- **cieľ analytikov**,
+- **Graham number** pre ziskové firmy s kladnou účtovnou hodnotou,
+- **Lynch / PEG** pre primerane rastúce ziskové firmy,
+- **DCF light** z voľného cash flow na akciu v konzervatívnom, strednom a
+  optimistickom scenári.
+
+Výstup je **pásmo modelov**, nie jedna „správna“ cena. Veľký rozptyl znamená,
+že modely alebo vstupy si odporujú; pri stratových firmách, ETF či firmách bez
+voľného cash flow môže časť modelov zostať úmyselne nedostupná. Funkcia je
+vizuálna fundamentálna pomôcka a **nemení C1–C4, Scanner ani Verdikt**.
+
 Tieto údaje sú zatiaľ iba interpretačný kontext. **Nevstupujú do C1–C4 ani
 do ML predikcie.** Najprv sa bude sledovať, či zlepšujú 90D+ výsledky.
 Vysoký short interest nie je automaticky bullish: môže zosilniť odraz, ale aj

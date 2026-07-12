@@ -1320,6 +1320,7 @@ function pc_renderSidebar(data) {
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
+  pc_prepareFairValueCard(data.ticker);
   pc_loadRS(data.ticker);
 
   // Backtest card
@@ -2062,6 +2063,89 @@ async function pc_loadInsights(ticker) {
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
     card.style.display = '';
   } catch (e) { /* fail-soft */ }
+}
+
+// Free valuation is deliberately lazy: it costs three Finnhub requests, then stays cached 24 h server-side.
+const pc_fairValueCache = new Map();
+let pc_fairValueTicker = null;
+
+function pc_prepareFairValueCard(ticker) {
+  const card = document.getElementById('fairValueCard');
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!card || !sym) return;
+  pc_fairValueTicker = sym;
+  const cached = pc_fairValueCache.get(sym);
+  if (cached) {
+    pc_renderFairValueCard(cached);
+    return;
+  }
+  card.innerHTML = `<div class="card-title" title="Orientačné pásmo z bezplatných fundamentálnych dát. Neovplyvňuje Scanner, signály ani Verdikt.">Férová hodnota <span class="fair-value-beta">beta</span></div>
+    <div class="fair-value-intro">DCF light, Graham, Lynch/PEG a cieľ analytikov. Modely sú iba pomôcka, nie nákupný signál.</div>
+    <button type="button" class="btn fair-value-load" onclick="pc_loadFairValue()">Načítať modely</button>`;
+  card.style.display = '';
+}
+
+function pc_fairValuePrice(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? fmtPrice(n) : '—';
+}
+
+function pc_renderFairValueCard(data) {
+  const card = document.getElementById('fairValueCard');
+  if (!card || !data || data.ticker !== pc_fairValueTicker) return;
+  if (data.error) {
+    card.innerHTML = `<div class="card-title">Férová hodnota <span class="fair-value-beta">beta</span></div>
+      <div class="earnings-unavailable-note">${escHtml(data.error)}</div>
+      <button type="button" class="btn fair-value-load" onclick="pc_loadFairValue(true)">Skúsiť znova</button>`;
+    card.style.display = '';
+    return;
+  }
+  const summary = data.summary || {};
+  const status = {
+    below_range: ['Cena pod pásmom modelov', 'var(--up)'],
+    above_range: ['Cena nad pásmom modelov', 'var(--down)'],
+    within_range: ['Cena v pásme modelov', 'var(--yellow)'],
+  }[summary.status] || ['Nedostatok porovnateľných dát', 'var(--muted)'];
+  const rows = [];
+  const analyst = data.models?.analyst_target;
+  if (analyst) rows.push(`<div class="fair-value-row" title="${escHtml(analyst.note)}"><span>${analyst.label}</span><strong>${pc_fairValuePrice(analyst.value)}</strong></div>`);
+  const graham = data.models?.graham;
+  if (graham) rows.push(`<div class="fair-value-row" title="${escHtml(graham.note)}"><span>${graham.label}</span><strong>${pc_fairValuePrice(graham.value)}</strong></div>`);
+  const lynch = data.models?.lynch;
+  if (lynch) rows.push(`<div class="fair-value-row" title="${escHtml(lynch.note)}"><span>${lynch.label}${lynch.peg != null ? ` · PEG ${Number(lynch.peg).toFixed(2)}` : ''}</span><strong>${pc_fairValuePrice(lynch.value)}</strong></div>`);
+  const dcf = data.models?.dcf;
+  if (dcf) rows.push(`<div class="fair-value-row" title="${escHtml(dcf.note)}"><span>${dcf.label}</span><strong>${pc_fairValuePrice(dcf.low)} – ${pc_fairValuePrice(dcf.high)}</strong></div>`);
+  card.innerHTML = `<div class="card-title" title="Pásmo modelov z free dát. Rozdiel medzi modelmi je normálny; nepredstavuje cieľovú cenu ani automatické odporúčanie.">Férová hodnota <span class="fair-value-beta">beta</span></div>
+    <div class="fair-value-summary">
+      <span>Aktuálna <strong>${pc_fairValuePrice(data.current_price)}</strong></span>
+      <span>Pásmo <strong>${pc_fairValuePrice(summary.fair_low)} – ${pc_fairValuePrice(summary.fair_high)}</strong></span>
+    </div>
+    <div class="fair-value-status" style="color:${status[1]}">${status[0]}${summary.potential_pct != null ? ` · stred ${summary.potential_pct >= 0 ? '+' : ''}${Number(summary.potential_pct).toFixed(1)} %` : ''}</div>
+    <div class="fair-value-rows">${rows.join('') || '<div class="earnings-unavailable-note">Žiadny z modelov nemá vhodné vstupy.</div>'}</div>
+    <div class="fair-value-foot">${summary.model_count || 0} použiteľné modely · ${escHtml(summary.note || '')}</div>`;
+  card.style.display = '';
+}
+
+async function pc_loadFairValue(refresh = false) {
+  const sym = pc_currentTicker();
+  const card = document.getElementById('fairValueCard');
+  if (!sym || !card) return;
+  pc_fairValueTicker = sym;
+  if (!refresh && pc_fairValueCache.has(sym)) {
+    pc_renderFairValueCard(pc_fairValueCache.get(sym));
+    return;
+  }
+  card.innerHTML = `<div class="card-title">Férová hodnota <span class="fair-value-beta">beta</span></div><div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam modely…</div>`;
+  card.style.display = '';
+  try {
+    const r = await fetch(`/api/ticker/fair-value/${encodeURIComponent(sym)}${refresh ? '?refresh=1' : ''}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    pc_fairValueCache.set(sym, data);
+    if (pc_fairValueTicker === sym) pc_renderFairValueCard(data);
+  } catch (e) {
+    if (pc_fairValueTicker === sym) pc_renderFairValueCard({ ticker: sym, error: 'Nepodarilo sa načítať modely férovej hodnoty.' });
+  }
 }
 
 // ── Karta "O firme" — firemný profil (popis biznisu, odvetvie, market cap) ────
