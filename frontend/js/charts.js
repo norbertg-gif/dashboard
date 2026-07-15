@@ -625,6 +625,12 @@ function renderFundBadge(data) {
   return `<span class="p-fund-badge ${tone}" title="${escHtml(details)}">${escHtml(text)}</span>`;
 }
 
+function renderFundErrorBadge(err) {
+  const status = err?.status ? ` ${err.status}` : '';
+  const detail = err?.detail || err?.message || 'Fundamental analysis is unavailable.';
+  return `<span class="p-fund-badge bad" title="${escHtml(detail)}">FUND${status}</span>`;
+}
+
 async function loadFundBadge(id, sym) {
   const el = document.getElementById('fund-' + id);
   if (!el) return;
@@ -634,19 +640,24 @@ async function loadFundBadge(id, sym) {
   }
   if (chartFundCache.has(sym)) {
     const cached = chartFundCache.get(sym);
-    el.innerHTML = cached?.error ? '' : renderFundBadge(cached);
+    el.innerHTML = cached?.error ? renderFundErrorBadge(cached) : renderFundBadge(cached);
     return;
   }
   el.innerHTML = '<span class="p-fund-badge">FUND ...</span>';
   try {
-    const resp = await fetch(`${API}/api/ticker/fund-analysis/${encodeURIComponent(sym)}`);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const resp = await fetch(`${API}/api/ticker/fund-analysis/${encodeURIComponent(sym)}`, { credentials:'same-origin' });
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw { status: resp.status, detail: body.detail || body.error || resp.statusText };
+    }
     const data = await resp.json();
+    if (data?.error) throw { status: 'ERR', detail: data.error };
     chartFundCache.set(sym, data);
     el.innerHTML = renderFundBadge(data);
   } catch(e) {
-    chartFundCache.set(sym, { error: true });
-    el.innerHTML = '';
+    const err = { error: true, status: e.status, detail: e.detail || e.message || String(e) };
+    chartFundCache.set(sym, err);
+    el.innerHTML = renderFundErrorBadge(err);
   }
 }
 
