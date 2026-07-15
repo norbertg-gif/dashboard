@@ -50,7 +50,6 @@ function applyTagToPanel(id, tag) {
 const registry = {};
 let panelSeq = 0, autoTimer = null;
 let activePanelId = null;
-const chartFundCache = new Map();
 
 // ── ACTIVE PANEL ──────────────────────────────────────────────────────────────
 function setActivePanel(id) {
@@ -597,70 +596,6 @@ function getActiveIndicators(pid) {
 }
 
 // ── CHART FACTORY ─────────────────────────────────────────────────────────────
-function fundBadgeTone(score) {
-  if (score >= 70) return 'good';
-  if (score <= 40) return 'bad';
-  return 'warn';
-}
-
-function isFundamentalTicker(sym) {
-  return !!sym && !sym.includes('=') && !sym.includes('-') && !sym.startsWith('^');
-}
-
-function renderFundBadge(data) {
-  const scores = data?.scores || {};
-  const labels = data?.labels || {};
-  const overall = Number(scores.overall);
-  const tone = fundBadgeTone(Number.isFinite(overall) ? overall : 50);
-  const text = Number.isFinite(overall)
-    ? `FUND ${overall} ${labels.overall || ''}`.trim()
-    : 'FUND n/a';
-  const details = [
-    data?.memo,
-    `Fund: ${labels.fundamentals || 'n/a'} (${scores.fundamentals ?? 'n/a'})`,
-    `Val: ${labels.valuation || 'n/a'} (${scores.valuation ?? 'n/a'})`,
-    `Risk: ${labels.risk || 'n/a'} (${scores.risk ?? 'n/a'})`,
-    ...(data?.flags || []).map(f => `Flag: ${f}`),
-  ].filter(Boolean).join('\n');
-  return `<span class="p-fund-badge ${tone}" title="${escHtml(details)}">${escHtml(text)}</span>`;
-}
-
-function renderFundErrorBadge(err) {
-  const status = err?.status ? ` ${err.status}` : '';
-  const detail = err?.detail || err?.message || 'Fundamental analysis is unavailable.';
-  return `<span class="p-fund-badge bad" title="${escHtml(detail)}">FUND${status}</span>`;
-}
-
-async function loadFundBadge(id, sym) {
-  const el = document.getElementById('fund-' + id);
-  if (!el) return;
-  if (!isFundamentalTicker(sym)) {
-    el.innerHTML = '';
-    return;
-  }
-  if (chartFundCache.has(sym)) {
-    const cached = chartFundCache.get(sym);
-    el.innerHTML = cached?.error ? renderFundErrorBadge(cached) : renderFundBadge(cached);
-    return;
-  }
-  el.innerHTML = '<span class="p-fund-badge">FUND ...</span>';
-  try {
-    const resp = await fetch(`${API}/api/ticker/fund-analysis/${encodeURIComponent(sym)}`, { credentials:'same-origin' });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      throw { status: resp.status, detail: body.detail || body.error || resp.statusText };
-    }
-    const data = await resp.json();
-    if (data?.error) throw { status: 'ERR', detail: data.error };
-    chartFundCache.set(sym, data);
-    el.innerHTML = renderFundBadge(data);
-  } catch(e) {
-    const err = { error: true, status: e.status, detail: e.detail || e.message || String(e) };
-    chartFundCache.set(sym, err);
-    el.innerHTML = renderFundErrorBadge(err);
-  }
-}
-
 function getChartTheme() {
   if (isLightMode) return {
     bg:'#f8fafc', text:'#334155', grid:'#e2e8f0',
@@ -1977,12 +1912,6 @@ async function loadChart(id, opts = {}) {
       <span class="p-cnts">${data.length} sviečok</span>
     `;
     // Aktualizuj Trade tlačidlo v panel headeri
-    const fundSlot = document.createElement('span');
-    fundSlot.id = 'fund-' + id;
-    fundSlot.className = 'p-fund-slot';
-    infoEl.insertBefore(fundSlot, infoEl.querySelector('.p-cnts'));
-    loadFundBadge(id, sym);
-
     const tradeBtnEl = document.getElementById('trade-btn-' + id);
     if (tradeBtnEl && sym) {
       tradeBtnEl.href = etoroTradeUrl(sym);

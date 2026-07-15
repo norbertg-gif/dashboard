@@ -1280,34 +1280,6 @@ body.sidebar-collapsed #sb-resizer {
 }
 .p-chg.up   { color: var(--up); background: var(--up-soft); }
 .p-chg.down { color: var(--down); background: var(--down-soft); }
-.p-fund-badge {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .2px;
-  padding: 2px 7px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  color: var(--muted2);
-  background: var(--bg-input);
-  max-width: 100%;
-  white-space: nowrap;
-}
-.p-fund-badge.good {
-  color: var(--up);
-  border-color: color-mix(in srgb, var(--up) 48%, transparent);
-  background: var(--up-soft);
-}
-.p-fund-badge.warn {
-  color: var(--yellow);
-  border-color: color-mix(in srgb, var(--yellow) 48%, transparent);
-  background: var(--yellow-soft);
-}
-.p-fund-badge.bad {
-  color: var(--down);
-  border-color: color-mix(in srgb, var(--down) 48%, transparent);
-  background: var(--down-soft);
-}
 .p-cnts {
   margin-left: auto;
   font-size: 11px;
@@ -2387,6 +2359,98 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-bottom: 7px;
   font-size: 10px;
   font-weight: 700;
+}
+#predictiveTab .fund-analysis-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 9px;
+}
+#predictiveTab .fund-analysis-company {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#predictiveTab .fund-analysis-memo {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+#predictiveTab .fund-analysis-score {
+  min-width: 54px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  text-align: center;
+}
+#predictiveTab .fund-analysis-score strong {
+  display: block;
+  font: 800 18px var(--font-mono);
+  line-height: 1;
+}
+#predictiveTab .fund-analysis-score span {
+  display: block;
+  margin-top: 3px;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+#predictiveTab .fund-analysis-score.good,
+#predictiveTab .fund-analysis-metric.good { color: var(--up); border-color: color-mix(in srgb, var(--up) 42%, var(--border)); background: var(--up-soft); }
+#predictiveTab .fund-analysis-score.warn,
+#predictiveTab .fund-analysis-metric.warn { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 42%, var(--border)); background: var(--yellow-soft); }
+#predictiveTab .fund-analysis-score.bad,
+#predictiveTab .fund-analysis-metric.bad { color: var(--down); border-color: color-mix(in srgb, var(--down) 42%, var(--border)); background: var(--down-soft); }
+#predictiveTab .fund-analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+#predictiveTab .fund-analysis-metric {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+#predictiveTab .fund-analysis-metric span,
+#predictiveTab .fund-analysis-metric small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#predictiveTab .fund-analysis-metric strong {
+  display: block;
+  margin: 2px 0;
+  color: currentColor;
+  font: 800 12px var(--font-mono);
+}
+#predictiveTab .fund-analysis-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+#predictiveTab .fund-analysis-flags span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #predictiveTab .fair-value-rows {
   display: grid;

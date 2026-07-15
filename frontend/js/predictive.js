@@ -1320,6 +1320,7 @@ function pc_renderSidebar(data) {
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
+  pc_prepareFundAnalysisCard(data.ticker);
   pc_prepareFairValueCard(data.ticker);
   pc_loadRS(data.ticker);
 
@@ -2148,6 +2149,111 @@ async function pc_loadFairValue(refresh = false) {
     if (pc_fairValueTicker === sym) pc_renderFairValueCard(data);
   } catch (e) {
     if (pc_fairValueTicker === sym) pc_renderFairValueCard({ ticker: sym, error: 'Nepodarilo sa načítať modely férovej hodnoty.' });
+  }
+}
+
+// ── Fundamentálna kvalita z Alpha Vantage ─────────────────────────────────────
+const pc_fundAnalysisCache = new Map();
+let pc_fundAnalysisTicker = null;
+
+function pc_isFundamentalTicker(sym) {
+  return !!sym && !sym.includes('=') && !sym.includes('-') && !sym.startsWith('^');
+}
+
+function pc_fundTone(score) {
+  if (score >= 70) return 'good';
+  if (score <= 40) return 'bad';
+  return 'warn';
+}
+
+function pc_prepareFundAnalysisCard(ticker) {
+  const card = document.getElementById('fundAnalysisCard');
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!card) return;
+  pc_fundAnalysisTicker = sym;
+  if (!pc_isFundamentalTicker(sym)) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  if (pc_fundAnalysisCache.has(sym)) {
+    pc_renderFundAnalysisCard(pc_fundAnalysisCache.get(sym));
+    return;
+  }
+  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam fundamenty...</div>`;
+  card.style.display = '';
+  pc_loadFundAnalysis();
+}
+
+function pc_renderFundAnalysisCard(data) {
+  const card = document.getElementById('fundAnalysisCard');
+  if (!card || !data || (data.symbol || data.ticker) !== pc_fundAnalysisTicker) return;
+  if (data.error) {
+    const detail = data.detail || data.error || 'Fundamentálna analýza je dočasne nedostupná.';
+    card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+      <div class="earnings-unavailable-note">${escHtml(detail)}</div>
+      <button type="button" class="btn fair-value-load" onclick="pc_loadFundAnalysis(true)">Skúsiť znova</button>`;
+    card.style.display = '';
+    return;
+  }
+  const scores = data.scores || {};
+  const labels = data.labels || {};
+  const overall = Number(scores.overall);
+  const tone = pc_fundTone(Number.isFinite(overall) ? overall : 50);
+  const scoreRows = [
+    ['Fundamenty', scores.fundamentals, labels.fundamentals],
+    ['Valuácia', scores.valuation, labels.valuation],
+    ['Riziko', scores.risk, labels.risk],
+    ['Analytici', scores.analyst, labels.analyst],
+  ].map(([label, score, text]) => {
+    const n = Number(score);
+    const cls = pc_fundTone(Number.isFinite(n) ? n : 50);
+    const value = Number.isFinite(n) ? `${Math.round(n)}/100` : 'n/a';
+    return `<div class="fund-analysis-metric ${cls}"><span>${escHtml(label)}</span><strong>${value}</strong><small>${escHtml(text || '')}</small></div>`;
+  }).join('');
+  const flags = (data.flags || []).map(f => `<span>${escHtml(f)}</span>`).join('');
+  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+    <div class="fund-analysis-head">
+      <div>
+        <div class="fund-analysis-company">${escHtml(data.company || data.symbol || pc_fundAnalysisTicker)}</div>
+        <div class="fund-analysis-memo">${escHtml(data.memo || 'Kvantitatívny fundamentálny prehľad z free dát.')}</div>
+      </div>
+      <div class="fund-analysis-score ${tone}"><strong>${Number.isFinite(overall) ? Math.round(overall) : 'n/a'}</strong><span>${escHtml(labels.overall || '')}</span></div>
+    </div>
+    <div class="fund-analysis-grid">${scoreRows}</div>
+    ${flags ? `<div class="fund-analysis-flags">${flags}</div>` : ''}
+    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'Alpha Vantage')} · cache 24 h</div>`;
+  card.style.display = '';
+}
+
+async function pc_loadFundAnalysis(refresh = false) {
+  const sym = pc_currentTicker();
+  const card = document.getElementById('fundAnalysisCard');
+  if (!sym || !card || !pc_isFundamentalTicker(sym)) return;
+  pc_fundAnalysisTicker = sym;
+  if (!refresh && pc_fundAnalysisCache.has(sym)) {
+    pc_renderFundAnalysisCard(pc_fundAnalysisCache.get(sym));
+    return;
+  }
+  card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam fundamenty...</div>`;
+  card.style.display = '';
+  try {
+    const r = await fetch(`/api/ticker/fund-analysis/${encodeURIComponent(sym)}${refresh ? '?refresh=1' : ''}`, { credentials: 'same-origin' });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw { status: r.status, detail: body.detail || body.error || r.statusText };
+    }
+    const data = await r.json();
+    if (data?.error) throw { status: 'ERR', detail: data.error };
+    pc_fundAnalysisCache.set(sym, data);
+    if (pc_fundAnalysisTicker === sym) pc_renderFundAnalysisCard(data);
+  } catch (e) {
+    const detail = e.detail || e.message || String(e);
+    const data = { symbol: sym, error: `Nepodarilo sa načítať fundamenty${e.status ? ` (${e.status})` : ''}. ${detail}` };
+    pc_fundAnalysisCache.set(sym, data);
+    if (pc_fundAnalysisTicker === sym) pc_renderFundAnalysisCard(data);
   }
 }
 
