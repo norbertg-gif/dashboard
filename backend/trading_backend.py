@@ -2587,6 +2587,189 @@ def get_summary(symbol: str = Query(...)):
         raise HTTPException(502, str(e))
 
 
+FUND_ANALYSIS_DIR = DATA_ROOT / "fund_analysis"
+FUND_ANALYSIS_TTL_H = 24
+FUND_ANALYSIS_SCHEMA_VERSION = 1
+
+def _fund_num(value, default=None):
+    try:
+        if value in (None, "", "None", "N/A", "-"):
+            return default
+        value = float(value)
+        return value if math.isfinite(value) else default
+    except Exception:
+        return default
+
+def _fund_ratio(num, den):
+    if num is None or den in (None, 0):
+        return None
+    return num / den
+
+def _fund_clamp(value):
+    return max(0, min(100, int(round(value))))
+
+def _fund_score_growth(pct, good=0.10, bad=-0.05):
+    if pct is None:
+        return 50
+    if pct >= good:
+        return 85
+    if pct <= bad:
+        return 25
+    return 25 + (pct - bad) / (good - bad) * 60
+
+def _fund_score_low(value, good, bad):
+    if value is None:
+        return 50
+    if value <= good:
+        return 85
+    if value >= bad:
+        return 25
+    return 85 - (value - good) / (bad - good) * 60
+
+def _fund_label(score, good="Strong", mid="Mixed", bad="Weak"):
+    if score >= 70:
+        return good
+    if score <= 40:
+        return bad
+    return mid
+
+def _fund_latest(raw, key):
+    rows = raw.get(key) or []
+    return rows[:4] if isinstance(rows, list) else []
+
+def _fund_get(row, *keys):
+    for key in keys:
+        value = _fund_num((row or {}).get(key))
+        if value is not None:
+            return value
+    return None
+
+def _alpha_vantage(function: str, symbol: str) -> dict:
+    key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="ALPHA_VANTAGE_API_KEY nie je nastaveny")
+    resp = requests.get(
+        "https://www.alphavantage.co/query",
+        params={"function": function, "symbol": symbol, "apikey": key},
+        timeout=14,
+    )
+    resp.raise_for_status()
+    data = resp.json() or {}
+    if data.get("Note") or data.get("Information"):
+        raise HTTPException(status_code=429, detail=data.get("Note") or data.get("Information"))
+    if data.get("Error Message"):
+        raise HTTPException(status_code=404, detail=data.get("Error Message"))
+    return data
+
+def _build_fund_analysis(sym: str, raw: dict) -> dict:
+    overview = raw.get("overview") or {}
+    income = _fund_latest(raw.get("income") or {}, "annualReports")
+    balance = _fund_latest(raw.get("balance") or {}, "annualReports")
+    cashflow = _fund_latest(raw.get("cashflow") or {}, "annualReports")
+    li, pi = (income[0] if income else {}), (income[1] if len(income) > 1 else {})
+    lb = balance[0] if balance else {}
+    lc, pc = (cashflow[0] if cashflow else {}), (cashflow[1] if len(cashflow) > 1 else {})
+
+    revenue = _fund_get(li, "totalRevenue")
+    prev_revenue = _fund_get(pi, "totalRevenue")
+    net_income = _fund_get(li, "netIncome")
+    op_income = _fund_get(li, "operatingIncome")
+    cash = _fund_get(lb, "cashAndCashEquivalentsAtCarryingValue", "cashAndShortTermInvestments")
+    debt = _fund_get(lb, "shortLongTermDebtTotal", "longTermDebt", "shortTermDebt")
+    equity = _fund_get(lb, "totalShareholderEquity")
+    ocf = _fund_get(lc, "operatingCashflow")
+    capex = _fund_get(lc, "capitalExpenditures")
+    prev_ocf = _fund_get(pc, "operatingCashflow")
+    prev_capex = _fund_get(pc, "capitalExpenditures")
+
+    fcf = None if ocf is None or capex is None else ocf - abs(capex)
+    prev_fcf = None if prev_ocf is None or prev_capex is None else prev_ocf - abs(prev_capex)
+    revenue_growth = _fund_ratio(revenue - prev_revenue, abs(prev_revenue)) if revenue is not None and prev_revenue else None
+    fcf_growth = _fund_ratio(fcf - prev_fcf, abs(prev_fcf)) if fcf is not None and prev_fcf else None
+    profit_margin = _fund_num(overview.get("ProfitMargin"))
+    net_margin = _fund_ratio(net_income, revenue)
+    debt_to_equity = _fund_ratio(debt, equity)
+    net_debt = None if debt is None else debt - (cash or 0)
+    pe = _fund_num(overview.get("PERatio"))
+    fpe = _fund_num(overview.get("ForwardPE"))
+    ps = _fund_num(overview.get("PriceToSalesRatioTTM"))
+    ev_ebitda = _fund_num(overview.get("EVToEBITDA"))
+
+    valuation = _fund_clamp(
+        _fund_score_low(pe, 18, 45) * 0.35 +
+        _fund_score_low(fpe, 16, 40) * 0.25 +
+        _fund_score_low(ps, 2.5, 9) * 0.20 +
+        _fund_score_low(ev_ebitda, 10, 25) * 0.20
+    )
+    fundamentals = _fund_clamp(
+        _fund_score_growth(revenue_growth, 0.08, -0.03) * 0.30 +
+        _fund_score_growth(fcf_growth, 0.10, -0.10) * 0.25 +
+        (85 if fcf and fcf > 0 else 35) * 0.20 +
+        (85 if (profit_margin or net_margin or 0) > 0.12 else 60 if (profit_margin or net_margin or 0) > 0.04 else 30) * 0.25
+    )
+    risk = _fund_clamp(
+        _fund_score_low(debt_to_equity, 0.8, 2.5) * 0.55 +
+        (85 if net_debt is not None and net_debt <= 0 else 55 if debt_to_equity is None or debt_to_equity < 1.5 else 30) * 0.25 +
+        (80 if fcf and fcf > 0 else 35) * 0.20
+    )
+    analyst = 55 + (5 if _fund_num(overview.get("AnalystTargetPrice")) else 0)
+    overall = _fund_clamp(fundamentals * 0.38 + valuation * 0.27 + risk * 0.25 + analyst * 0.10)
+    flags = []
+    if valuation < 42:
+        flags.append("valuation demanding")
+    if risk < 45:
+        flags.append("balance-sheet / FCF risk")
+    if fcf is not None and fcf < 0:
+        flags.append("negative recent FCF")
+    if revenue_growth is not None and revenue_growth < -0.03:
+        flags.append("revenue deterioration")
+    if not flags:
+        flags.append("no major quantitative red flag")
+    memo = (
+        f"{sym}: fundamentals {_fund_label(fundamentals).lower()}, "
+        f"valuation {_fund_label(valuation, 'reasonable', 'fair', 'stretched').lower()}, "
+        f"risk {_fund_label(risk, 'low', 'medium', 'high').lower()}."
+    )
+    return {
+        "schema_version": FUND_ANALYSIS_SCHEMA_VERSION,
+        "symbol": sym,
+        "company": overview.get("Name") or sym,
+        "source": "Alpha Vantage",
+        "scores": {"overall": overall, "fundamentals": fundamentals, "valuation": valuation, "risk": risk, "analyst": analyst},
+        "labels": {
+            "overall": _fund_label(overall, "Good", "Mixed", "Weak"),
+            "fundamentals": _fund_label(fundamentals),
+            "valuation": _fund_label(valuation, "Reasonable", "Fair", "Stretched"),
+            "risk": _fund_label(risk, "Low", "Medium", "High"),
+        },
+        "flags": flags[:3],
+        "memo": memo,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+@app.get("/api/ticker/fund-analysis/{symbol}")
+def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
+    sym = _validate_ticker_symbol(symbol)
+    path = FUND_ANALYSIS_DIR / f"{sym}.json"
+    if not refresh:
+        cached = _read_ticker_json_cache(path, FUND_ANALYSIS_SCHEMA_VERSION, FUND_ANALYSIS_TTL_H)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+    raw = {
+        "overview": _alpha_vantage("OVERVIEW", sym),
+        "income": _alpha_vantage("INCOME_STATEMENT", sym),
+        "balance": _alpha_vantage("BALANCE_SHEET", sym),
+        "cashflow": _alpha_vantage("CASH_FLOW", sym),
+    }
+    payload = _build_fund_analysis(sym, raw)
+    payload["cached"] = False
+    try:
+        _write_ticker_json_cache(path, payload)
+    except Exception:
+        pass
+    return payload
+
 # ── BACKGROUND PREFETCH ──────────────────────────────────────────────────────
 _prefetch_running = False
 _prefetch_log: list = []

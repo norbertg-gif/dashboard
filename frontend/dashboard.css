@@ -1280,6 +1280,34 @@ body.sidebar-collapsed #sb-resizer {
 }
 .p-chg.up   { color: var(--up); background: var(--up-soft); }
 .p-chg.down { color: var(--down); background: var(--down-soft); }
+.p-fund-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  background: var(--bg-input);
+  max-width: 100%;
+  white-space: nowrap;
+}
+.p-fund-badge.good {
+  color: var(--up);
+  border-color: color-mix(in srgb, var(--up) 48%, transparent);
+  background: var(--up-soft);
+}
+.p-fund-badge.warn {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 48%, transparent);
+  background: var(--yellow-soft);
+}
+.p-fund-badge.bad {
+  color: var(--down);
+  border-color: color-mix(in srgb, var(--down) 48%, transparent);
+  background: var(--down-soft);
+}
 .p-cnts {
   margin-left: auto;
   font-size: 11px;
