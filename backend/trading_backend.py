@@ -7556,6 +7556,48 @@ def _fmp_price_target(sym: str) -> dict | None:
 FAIR_VALUE_DIR = DATA_ROOT / "fair_value"
 FAIR_VALUE_TTL_H = 24
 FAIR_VALUE_SCHEMA_VERSION = 1
+PEERS_DIR = DATA_ROOT / "peers"
+PEERS_TTL_H = 24
+PEERS_SCHEMA_VERSION = 2
+MEMO_DIR = DATA_ROOT / "ticker_memos"
+MEMO_TTL_H = 24
+MEMO_SCHEMA_VERSION = 2
+
+
+def _validate_ticker_symbol(symbol: str) -> str:
+    sym = str(symbol or "").upper().strip()
+    if not re.fullmatch(r"[A-Z0-9.\-]{1,20}", sym):
+        raise HTTPException(status_code=400, detail="Neplatný ticker")
+    return sym
+
+
+def _read_ticker_json_cache(path: Path, schema_version: int, ttl_h: int) -> dict | None:
+    with _cache_file_lock(path):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            fetched_at = payload.get("fetched_at") or payload.get("generated_at")
+            age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(fetched_at)).total_seconds() / 3600
+            if payload.get("schema_version") == schema_version and age_h < ttl_h:
+                return payload
+        except Exception:
+            pass
+    return None
+
+
+def _write_ticker_json_cache(path: Path, payload: dict) -> None:
+    tmp = path.with_name(
+        f"{path.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _cache_file_lock(path):
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _fv_num(value) -> float | None:
@@ -7694,22 +7736,13 @@ def _build_fair_value_payload(sym: str, quote: dict, metric: dict, price_target:
     }
 
 
-@app.get("/api/ticker/fair-value/{symbol}")
-def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
-    """Lazy free valuation snapshot. Neovplyvňuje scanner, signály ani verdikt."""
-    sym = symbol.upper().strip()
-    if not re.fullmatch(r"[A-Z0-9.\-]{1,20}", sym):
-        raise HTTPException(status_code=400, detail="Neplatný ticker")
+def _get_fair_value_payload(sym: str, refresh: int = 0) -> dict:
+    """Shared cached fair-value loader for the route and investment memo."""
     fpath = FAIR_VALUE_DIR / f"{sym}.json"
-    with _cache_file_lock(fpath):
-        if fpath.exists() and not refresh:
-            try:
-                cached = json.loads(fpath.read_text(encoding="utf-8"))
-                age_h = (datetime.now(timezone.utc) - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
-                if cached.get("schema_version") == FAIR_VALUE_SCHEMA_VERSION and age_h < FAIR_VALUE_TTL_H:
-                    return cached
-            except Exception:
-                pass
+    if not refresh:
+        cached = _read_ticker_json_cache(fpath, FAIR_VALUE_SCHEMA_VERSION, FAIR_VALUE_TTL_H)
+        if cached is not None:
+            return cached
     api_key = os.getenv("FINNHUB_API_KEY", "").strip()
     if not api_key:
         return {"ticker": sym, "schema_version": FAIR_VALUE_SCHEMA_VERSION, "error": "FINNHUB_API_KEY nie je nastavený"}
@@ -7721,6 +7754,7 @@ def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
         # Finnhub free plans can deny price-target while still allowing quote + metric.
         # Analyst target is an optional fourth model, never a reason to hide the rest.
         target_payload = {}
+        fair_value_sources = ["finnhub"]
         try:
             target = requests.get("https://finnhub.io/api/v1/stock/price-target", params=base, timeout=12)
             if target.ok:
@@ -7732,21 +7766,395 @@ def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
                         "targetMean": fmp_target.get("mean"), "targetLow": fmp_target.get("low"),
                         "targetHigh": fmp_target.get("high"), "targetMedian": fmp_target.get("median"),
                     }
+                    fair_value_sources.append("fmp")
         except Exception:
             pass
         payload = _build_fair_value_payload(sym, quote.json() or {}, (metric.json() or {}).get("metric") or {}, target_payload)
         if not payload["models"]:
             payload["error"] = "Pre tento titul nie sú dostupné vhodné vstupy pre modely férovej hodnoty."
+        payload["sources"] = fair_value_sources
         payload["fetched_at"] = datetime.now(timezone.utc).isoformat()
-        FAIR_VALUE_DIR.mkdir(parents=True, exist_ok=True)
-        with _cache_file_lock(fpath):
-            tmp = fpath.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, fpath)
+        try:
+            _write_ticker_json_cache(fpath, payload)
+        except Exception as e:
+            payload.setdefault("warnings", []).append(
+                f"Diskovú cache sa nepodarilo zapísať: {_scrub_token(e)}"
+            )
         return payload
     except Exception as e:
         return {"ticker": sym, "schema_version": FAIR_VALUE_SCHEMA_VERSION,
                 "error": f"Dáta férovej hodnoty nie sú dostupné: {_scrub_token(e)}"}
+
+
+@app.get("/api/ticker/fair-value/{symbol}")
+def get_ticker_fair_value(symbol: str, refresh: int = Query(0)):
+    """Lazy free valuation snapshot. Neovplyvňuje scanner, signály ani verdikt."""
+    return _get_fair_value_payload(_validate_ticker_symbol(symbol), refresh)
+
+
+def _first_number(data: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = _fv_num(data.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _peer_row_template(sym: str) -> dict:
+    return {
+        "ticker": sym, "name": None, "current_price": None, "market_cap": None,
+        "trailing_pe": None, "forward_pe": None, "ev_to_ebitda": None,
+        "price_to_sales": None, "revenue_growth_pct": None,
+        "gross_margin_pct": None, "operating_margin_pct": None,
+        "debt_to_equity": None, "dividend_yield_pct": None,
+        "analyst_target": None, "analyst_upside_pct": None,
+        "sources": [], "insufficient_data": True,
+    }
+
+
+def _peer_row_finnhub(sym: str, api_key: str) -> dict:
+    row = _peer_row_template(sym)
+    base = {"symbol": sym, "token": api_key}
+    profile = requests.get("https://finnhub.io/api/v1/stock/profile2",
+                           params=base, timeout=8)
+    profile.raise_for_status()
+    prof = profile.json() or {}
+    metric_response = requests.get("https://finnhub.io/api/v1/stock/metric",
+                                   params={**base, "metric": "all"}, timeout=8)
+    metric_response.raise_for_status()
+    metric = (metric_response.json() or {}).get("metric") or {}
+    row.update({
+        "name": prof.get("name") or None,
+        "market_cap": (_fv_num(prof.get("marketCapitalization")) * 1e6
+                       if _fv_num(prof.get("marketCapitalization")) is not None else None),
+        "trailing_pe": _first_number(metric, "peTTM", "peBasicExclExtraTTM", "peNormalizedAnnual"),
+        "forward_pe": _first_number(metric, "forwardPE"),
+        "ev_to_ebitda": _first_number(metric, "evEbitdaTTM", "evEbitdaAnnual"),
+        "price_to_sales": _first_number(metric, "psTTM", "psAnnual"),
+        "revenue_growth_pct": _fv_pct(_first_number(metric, "revenueGrowthTTMYoy", "revenueGrowth3Y")),
+        "gross_margin_pct": _fv_pct(_first_number(metric, "grossMarginTTM", "grossMarginAnnual")),
+        "operating_margin_pct": _fv_pct(_first_number(metric, "operatingMarginTTM", "operatingMarginAnnual")),
+        "debt_to_equity": _first_number(metric, "totalDebtToEquityAnnual", "totalDebt/totalEquityAnnual"),
+        # Finnhub reports this field in percentage points, not as a fraction.
+        "dividend_yield_pct": _first_number(metric, "dividendYieldIndicatedAnnual", "dividendYieldTTM"),
+        "analyst_target": _first_number(metric, "priceTargetMean", "targetPrice"),
+        "sources": ["finnhub"],
+    })
+    try:
+        target_response = requests.get("https://finnhub.io/api/v1/stock/price-target",
+                                       params=base, timeout=8)
+        if target_response.ok:
+            target_payload = target_response.json() or {}
+            row["analyst_target"] = _first_number(target_payload, "targetMean", "targetMedian")
+    except Exception:
+        pass
+    target = row["analyst_target"]
+    try:
+        quote = requests.get("https://finnhub.io/api/v1/quote", params=base, timeout=8)
+        quote.raise_for_status()
+        current = _fv_num((quote.json() or {}).get("c"))
+        row["current_price"] = current
+        if target is not None and current and current > 0:
+            row["analyst_upside_pct"] = (target / current - 1) * 100
+    except Exception:
+        pass
+    return row
+
+
+def _peer_row_yahoo(sym: str) -> dict:
+    row = _peer_row_template(sym)
+    qs = _yahoo_quote_summary(
+        sym, "price,summaryDetail,defaultKeyStatistics,financialData,assetProfile"
+    )
+    if not qs:
+        return row
+    price = qs.get("price") or {}
+    summary = qs.get("summaryDetail") or {}
+    stats = qs.get("defaultKeyStatistics") or {}
+    financial = qs.get("financialData") or {}
+    current = _fv_num(_yraw(financial.get("currentPrice"))) or _fv_num(_yraw(price.get("regularMarketPrice")))
+    target = _fv_num(_yraw(financial.get("targetMeanPrice")))
+    row.update({
+        "name": price.get("longName") or price.get("shortName") or None,
+        "current_price": current,
+        "market_cap": _fv_num(_yraw(price.get("marketCap"))) or _fv_num(_yraw(summary.get("marketCap"))),
+        "trailing_pe": _fv_num(_yraw(summary.get("trailingPE"))),
+        "forward_pe": _fv_num(_yraw(stats.get("forwardPE"))) or _fv_num(_yraw(summary.get("forwardPE"))),
+        "ev_to_ebitda": _fv_num(_yraw(stats.get("enterpriseToEbitda"))),
+        "price_to_sales": _fv_num(_yraw(summary.get("priceToSalesTrailing12Months"))),
+        "revenue_growth_pct": _fv_pct(_yraw(financial.get("revenueGrowth"))),
+        "gross_margin_pct": _fv_pct(_yraw(financial.get("grossMargins"))),
+        "operating_margin_pct": _fv_pct(_yraw(financial.get("operatingMargins"))),
+        "debt_to_equity": _fv_num(_yraw(financial.get("debtToEquity"))),
+        "dividend_yield_pct": _fv_pct(_yraw(summary.get("dividendYield"))),
+        "analyst_target": target,
+        "analyst_upside_pct": ((target / current - 1) * 100 if target and current and current > 0 else None),
+        "sources": ["yahoo"],
+    })
+    return row
+
+
+def _peer_row_yfinance(sym: str) -> dict:
+    """Last-resort yfinance snapshot; called lazily and sequentially."""
+    row = _peer_row_template(sym)
+    info = yf.Ticker(sym).get_info() or {}
+    current = _first_number(info, "currentPrice", "regularMarketPrice", "previousClose")
+    target = _first_number(info, "targetMeanPrice")
+    row.update({
+        "name": info.get("longName") or info.get("shortName") or None,
+        "current_price": current,
+        "market_cap": _first_number(info, "marketCap"),
+        "trailing_pe": _first_number(info, "trailingPE"),
+        "forward_pe": _first_number(info, "forwardPE"),
+        "ev_to_ebitda": _first_number(info, "enterpriseToEbitda"),
+        "price_to_sales": _first_number(info, "priceToSalesTrailing12Months"),
+        "revenue_growth_pct": _fv_pct(info.get("revenueGrowth")),
+        "gross_margin_pct": _fv_pct(info.get("grossMargins")),
+        "operating_margin_pct": _fv_pct(info.get("operatingMargins")),
+        "debt_to_equity": _first_number(info, "debtToEquity"),
+        "dividend_yield_pct": _fv_pct(info.get("dividendYield")),
+        "analyst_target": target,
+        "analyst_upside_pct": ((target / current - 1) * 100 if target and current and current > 0 else None),
+        "sources": ["yfinance"] if info else [],
+    })
+    return row
+
+
+def _finalize_peer_row(row: dict) -> dict:
+    numeric_fields = (
+        "current_price", "market_cap", "trailing_pe", "forward_pe", "ev_to_ebitda",
+        "price_to_sales", "revenue_growth_pct", "gross_margin_pct",
+        "operating_margin_pct", "debt_to_equity", "dividend_yield_pct",
+        "analyst_target", "analyst_upside_pct",
+    )
+    for key in numeric_fields:
+        value = _fv_num(row.get(key))
+        row[key] = round(value, 2) if value is not None else None
+    available = sum(row.get(key) is not None for key in numeric_fields)
+    row["insufficient_data"] = available < 4
+    return row
+
+
+def _yfinance_peer_symbols(sym: str, warnings: list[str]) -> list[str]:
+    """Resolve sector context only; Yahoo's screener filters are not stable."""
+    try:
+        info = yf.Ticker(sym).get_info() or {}
+        sector, industry = info.get("sector"), info.get("industry")
+        if not sector and not industry:
+            warnings.append("yfinance nevrátil sektor ani odvetvie pre automatický výber peers.")
+            return []
+        context = " / ".join(value for value in (sector, industry) if value)
+        warnings.append(
+            f"Sektorový kontext yfinance ({context}) je dostupný, ale spoľahlivý automatický "
+            "zoznam peers vyžaduje FINNHUB_API_KEY alebo parameter peers."
+        )
+        return []
+    except Exception as e:
+        warnings.append(f"yfinance sektorový kontext nie je dostupný: {_scrub_token(e)}")
+        return []
+
+
+def _parse_peer_query(raw: str, sym: str, warnings: list[str]) -> list[str]:
+    peers = []
+    invalid = []
+    for item in str(raw or "").split(","):
+        ticker = item.upper().strip()
+        if not ticker:
+            continue
+        if not re.fullmatch(r"[A-Z0-9.\-]{1,20}", ticker):
+            invalid.append(ticker[:20])
+            continue
+        if ticker != sym and ticker not in peers:
+            peers.append(ticker)
+    if invalid:
+        warnings.append("Neplatné tickery v parametri peers boli vynechané.")
+    if len(peers) > 6:
+        warnings.append("Parameter peers bol skrátený na maximálne 6 tickerov.")
+    return peers[:6]
+
+
+def _get_peers_payload(sym: str, peers: str = "", refresh: int = 0) -> dict:
+    warnings: list[str] = []
+    explicit = _parse_peer_query(peers, sym, warnings)
+    identity = ",".join(explicit) if explicit else "auto"
+    suffix = hashlib.blake2b(identity.encode("utf-8"), digest_size=6).hexdigest()
+    fpath = PEERS_DIR / f"{sym}_{suffix}.json"
+    if not refresh:
+        cached = _read_ticker_json_cache(fpath, PEERS_SCHEMA_VERSION, PEERS_TTL_H)
+        if cached is not None:
+            if warnings:
+                cached = {**cached, "warnings": list(dict.fromkeys([
+                    *cached.get("warnings", []), *warnings
+                ]))}
+            return cached
+
+    peer_symbols = explicit
+    resolver = "explicit" if explicit else None
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not peer_symbols and api_key:
+        try:
+            response = requests.get("https://finnhub.io/api/v1/stock/peers",
+                                    params={"symbol": sym, "token": api_key}, timeout=8)
+            response.raise_for_status()
+            values = response.json() or []
+            peer_symbols = [str(x).upper().strip() for x in values
+                            if str(x).upper().strip() != sym and
+                            re.fullmatch(r"[A-Z0-9.\-]{1,20}", str(x).upper().strip())][:6]
+            if peer_symbols:
+                resolver = "finnhub"
+        except Exception as e:
+            warnings.append(f"Finnhub výber peers zlyhal: {_scrub_token(e)}")
+    if not peer_symbols:
+        peer_symbols = _yfinance_peer_symbols(sym, warnings)
+        if peer_symbols:
+            resolver = "yfinance_sector_industry"
+    if not peer_symbols:
+        warnings.append("Automatický zoznam peers nie je dostupný; použite parameter peers.")
+
+    rows = []
+    for ticker in [sym, *peer_symbols]:
+        row = None
+        if api_key:
+            try:
+                row = _finalize_peer_row(_peer_row_finnhub(ticker, api_key))
+            except Exception as e:
+                warnings.append(f"Finnhub dáta pre {ticker} nie sú dostupné: {_scrub_token(e)}")
+        if row is None or row.get("insufficient_data", True):
+            try:
+                yahoo_row = _peer_row_yahoo(ticker)
+                if row is None:
+                    row = yahoo_row
+                else:
+                    for key, value in yahoo_row.items():
+                        if key == "sources":
+                            row[key] = list(dict.fromkeys([*row.get(key, []), *value]))
+                        elif row.get(key) is None and value is not None:
+                            row[key] = value
+            except Exception as e:
+                warnings.append(f"Yahoo dáta pre {ticker} nie sú dostupné: {_scrub_token(e)}")
+        if row is None or not row.get("sources"):
+            try:
+                row = _peer_row_yfinance(ticker)
+            except Exception as e:
+                warnings.append(f"yfinance dáta pre {ticker} nie sú dostupné: {_scrub_token(e)}")
+        rows.append(_finalize_peer_row(row or _peer_row_template(ticker)))
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    sources = list(dict.fromkeys(
+        [resolver] + [source for row in rows for source in row.get("sources", [])]
+    )) if resolver else list(dict.fromkeys(source for row in rows for source in row.get("sources", [])))
+    payload = {
+        "ticker": sym, "schema_version": PEERS_SCHEMA_VERSION,
+        "resolver": resolver, "peers": peer_symbols, "companies": rows,
+        "sources": sources, "generated_at": generated_at, "fetched_at": generated_at,
+        "insufficient_data": not peer_symbols or all(row["insufficient_data"] for row in rows),
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+    try:
+        _write_ticker_json_cache(fpath, payload)
+    except Exception as e:
+        payload["warnings"].append(f"Diskovú cache sa nepodarilo zapísať: {_scrub_token(e)}")
+    return payload
+
+
+@app.get("/api/ticker/peers/{symbol}")
+def get_ticker_peers(symbol: str, refresh: int = Query(0), peers: str = Query("")):
+    """Lazy peer comparison. Purely orientational; never feeds trading signals."""
+    return _get_peers_payload(_validate_ticker_symbol(symbol), peers, refresh)
+
+
+def _memo_cache_path(sym: str, peers: str) -> Path:
+    identity = ",".join(_parse_peer_query(peers, sym, [])) if peers else "auto"
+    suffix = hashlib.blake2b(identity.encode("utf-8"), digest_size=6).hexdigest()
+    return MEMO_DIR / f"{sym}_{suffix}.json"
+
+
+@app.get("/api/ticker/memo/{symbol}")
+def get_ticker_memo(symbol: str, refresh: int = Query(0), peers: str = Query("")):
+    """Aggregated, cached and fail-soft investment context for AI analysis."""
+    sym = _validate_ticker_symbol(symbol)
+    fpath = _memo_cache_path(sym, peers)
+    if not refresh:
+        cached = _read_ticker_json_cache(fpath, MEMO_SCHEMA_VERSION, MEMO_TTL_H)
+        if cached is not None:
+            return cached
+
+    warnings: list[str] = []
+
+    def load_block(label: str, loader, fallback: dict) -> dict:
+        try:
+            value = loader()
+            if not isinstance(value, dict):
+                raise RuntimeError("provider vrátil neplatný formát")
+            if value.get("error"):
+                warnings.append(f"{label}: {value['error']}")
+            return value
+        except Exception as e:
+            warnings.append(f"{label}: {_scrub_token(e)}")
+            return fallback
+
+    profile = load_block("Profil firmy", lambda: get_ticker_profile(sym, refresh), {"ticker": sym})
+    insights = load_block("Analytický konsenzus", lambda: get_ticker_insights(sym, refresh), {"ticker": sym})
+    fair_value = load_block("Férová hodnota", lambda: _get_fair_value_payload(sym, refresh), {"ticker": sym})
+    peers_block = load_block("Peers", lambda: _get_peers_payload(sym, peers, refresh), {"ticker": sym, "companies": []})
+    warnings.extend(peers_block.get("warnings") or [])
+    target_row = next((row for row in peers_block.get("companies", [])
+                       if row.get("ticker") == sym), _peer_row_template(sym))
+    quote = {
+        "ticker": sym, "name": target_row.get("name") or profile.get("name"),
+        "current_price": target_row.get("current_price") or fair_value.get("current_price"),
+        "market_cap": target_row.get("market_cap") or profile.get("market_cap"),
+        "analyst_target": target_row.get("analyst_target") or (insights.get("price_target") or {}).get("mean"),
+        "analyst_upside_pct": target_row.get("analyst_upside_pct"),
+    }
+    if quote["analyst_upside_pct"] is None:
+        current, target = _fv_num(quote["current_price"]), _fv_num(quote["analyst_target"])
+        if current and current > 0 and target is not None:
+            quote["analyst_upside_pct"] = round((target / current - 1) * 100, 2)
+    fundamentals = {key: target_row.get(key) for key in (
+        "trailing_pe", "forward_pe", "ev_to_ebitda", "price_to_sales",
+        "revenue_growth_pct", "gross_margin_pct", "operating_margin_pct",
+        "debt_to_equity", "dividend_yield_pct",
+    )}
+    fundamentals["insufficient_data"] = sum(value is not None for value in fundamentals.values()) < 4
+    generated_at = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "ticker": sym, "schema_version": MEMO_SCHEMA_VERSION,
+        "company": {"profile": profile, "quote": quote},
+        "fundamentals": fundamentals,
+        "analyst": {
+            "consensus": insights.get("analyst_consensus"),
+            "price_target": insights.get("price_target"),
+            "source": insights.get("source"),
+        },
+        "fair_value": fair_value,
+        "peers": peers_block,
+        "field_definitions": {
+            "valuation_multiples": "P/E, EV/EBITDA a P/S sú orientačné násobky ocenenia; nižšie číslo nemusí samo osebe znamenať lacnú akciu.",
+            "growth_and_margins": "Rast tržieb a marže sú percentá za obdobie dostupné u poskytovateľa dát.",
+            "debt_to_equity": "Pomer dlhu k vlastnému kapitálu; medzi odvetviami nie je priamo porovnateľný.",
+            "analyst_upside_pct": "Rozdiel medzi priemerným cieľom analytikov a aktuálnou cenou, ak sú obe hodnoty dostupné.",
+            "fair_value": "Orientačné pásmo modelov, nie cieľová cena ani investičné odporúčanie.",
+        },
+        "analysis_request": (
+            "Údaje sú orientačné. Priprav investično-bankový memo pohľad pre horizont 1–3+ rokov: "
+            "téza, porovnanie peers, ocenenie, katalyzátory a riziká. Chýbajúce údaje výslovne označ; "
+            "nevymýšľaj ich a nevydávaj výstup za pokyn na obchodovanie."
+        ),
+        "sources": list(dict.fromkeys(
+            [source for source in [profile.get("source"), insights.get("source"),
+                                   *fair_value.get("sources", []),
+                                   *peers_block.get("sources", [])] if source]
+        )),
+        "generated_at": generated_at, "fetched_at": generated_at,
+        "insufficient_data": fundamentals["insufficient_data"] or peers_block.get("insufficient_data", False),
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+    try:
+        _write_ticker_json_cache(fpath, payload)
+    except Exception as e:
+        payload["warnings"].append(f"Diskovú cache sa nepodarilo zapísať: {_scrub_token(e)}")
+    return payload
 
 
 @app.get("/api/diagnostics/fmp/{symbol}")
