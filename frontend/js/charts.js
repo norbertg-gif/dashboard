@@ -2065,8 +2065,9 @@ async function loadMovers() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Hľadám…'; }
   try {
     switchMainTab('charts');
-    const minChange = Number(dashSettings?.attention_daily_pct || 0);
-    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}&min_change=${encodeURIComponent(minChange)}`);
+    // Top pohyby je samostatný prehľad najväčších pohybov. Prah Pozornosti
+    // patrí do portfólia; tu nesmie zmenšiť počet grafov pod STĹPCE x 2.
+    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const movers = data.movers || [];
@@ -2086,7 +2087,7 @@ async function loadMovers() {
     saveLayout();
     loadAll();
     const dirTxt = up ? 'rast' : 'pokles';
-    setStatus(`Top ${movers.length} - ${dirTxt} >= ${minChange}% (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
+    setStatus(`Top ${movers.length}/${n} - ${dirTxt} (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
   } catch(e) {
     setStatus(`Top pohyby zlyhali: ${e.message}`, 'err');
   } finally {

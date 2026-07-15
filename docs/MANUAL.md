@@ -1092,7 +1092,7 @@ Pre akcie a ETF sa denný základ v Portfóliu počíta z poslednej uzavretej
 daily close ceny z Massive/Yahoo a aktuálnej eToro ceny. Cieľom je priblížiť
 sa dennému pohybu, nie presne replikovať interný eToro výpočet.
 
-Filter **Pozornosť** a preset **Top pohyby** používajú denný cenový pohyb
+Filter **Pozornosť** používa denný cenový pohyb
 `currentRate vs previousClose`. Pri tituloch obchodovaných na eToro 24/5 môže
 mať eToro UI inú hranicu obchodného dňa alebo session, takže percento nemusí
 sedieť presne. Pri štandardne obchodovaných akciách by sa hodnoty mali správať
