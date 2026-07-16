@@ -3906,9 +3906,14 @@ def get_ohlcv(
     # Mapuj interval
     etoro_interval = YAHOO_TO_ETORO_INTERVAL.get(interval, "OneDay")
 
-    # 4h a 12h resampling
-    use_resample = interval in ("15m", "4h", "12h")
-    fetch_interval = "FiveMinutes" if interval == "15m" else ("OneHour" if use_resample else etoro_interval)
+    # 15m, 4h, 12h a 1mo resampling
+    use_resample = interval in ("15m", "4h", "12h", "1mo")
+    fetch_interval = {
+        "15m": "FiveMinutes",
+        "4h":  "OneHour",
+        "12h": "OneHour",
+        "1mo": "OneDay",
+    }.get(interval, etoro_interval)
 
     # Počet sviečok
     candles_count = AUTO_INTERVAL_TO_COUNT.get(interval, 252) if period == "auto" else YAHOO_PERIOD_TO_COUNT.get((period, interval), 252)
@@ -4014,9 +4019,9 @@ def get_ohlcv(
     df.rename(columns={"Open": "Open", "High": "High", "Low": "Low",
                         "Close": "Close", "Volume": "Volume"}, inplace=True)
 
-    # Resample 4h/12h
+    # Resample 15m/4h/12h/1mo
     if use_resample:
-        rule = {"15m": "15min", "4h": "4h", "12h": "12h"}.get(interval, interval)
+        rule = {"15m": "15min", "4h": "4h", "12h": "12h", "1mo": "MS"}.get(interval, interval)
         df = resample_ohlcv(df, rule)
         if df.empty:
             raise HTTPException(404, "Resample vrátil prázdny DataFrame")
