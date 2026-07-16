@@ -2659,10 +2659,12 @@ def _alpha_vantage(function: str, symbol: str) -> dict:
     )
     resp.raise_for_status()
     data = resp.json() or {}
+    # Upstream text NIKDY neposielať do UI — Alpha Vantage vkladá do Note/
+    # Information plný API kľúč ("We have detected your API key as ...").
     if data.get("Note") or data.get("Information"):
-        raise HTTPException(status_code=429, detail=data.get("Note") or data.get("Information"))
+        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň) — skús neskôr alebo zajtra.")
     if data.get("Error Message"):
-        raise HTTPException(status_code=404, detail=data.get("Error Message"))
+        raise HTTPException(status_code=404, detail=f"Alpha Vantage nepozná symbol {symbol}.")
     return data
 
 def _build_fund_analysis(sym: str, raw: dict) -> dict:
@@ -7387,8 +7389,15 @@ def _scrub_token(msg: str) -> str:
     """requests chyby obsahujú celú URL vrátane ?token=/?apiKey= — maskuj kľúč.
     apiKey pridané 2026-07-09: Massive volania (raise_for_status()) mohli
     dostať MASSIVE_API_KEY do error stringu, ktorý sa ukladal aj do
-    company_profiles/{SYM}.json na disku."""
-    return re.sub(r"(token|apiKey)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
+    company_profiles/{SYM}.json na disku.
+    2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
+    Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
+    msg = re.sub(r"(token|apikey)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
+    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN"):
+        secret = os.getenv(env_name, "").strip()
+        if len(secret) >= 8:
+            msg = msg.replace(secret, "***")
+    return msg
 
 
 def _insights_fetch_finnhub(sym: str) -> dict:
