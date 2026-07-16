@@ -2467,6 +2467,42 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+#predictiveTab .corp-action-label {
+  margin: 8px 0 4px;
+  color: var(--muted2);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+#predictiveTab .corp-action-list {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 7px;
+}
+#predictiveTab .corp-action-row {
+  display: grid;
+  grid-template-columns: 78px 54px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-size: 9px;
+}
+#predictiveTab .corp-action-row span,
+#predictiveTab .corp-action-row strong {
+  font-family: var(--font-mono);
+}
+#predictiveTab .corp-action-row strong { color: var(--text); }
+#predictiveTab .corp-action-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #predictiveTab .fair-value-rows {
   display: grid;
   gap: 3px;

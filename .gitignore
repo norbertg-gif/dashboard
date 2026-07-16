@@ -20,6 +20,7 @@ predictive_weights_log.json
 peers/
 ticker_memos/
 fund_analysis/
+corp_actions/
 earnings_symbol/
 api_call_stats.json
 .claude/

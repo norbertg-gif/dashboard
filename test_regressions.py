@@ -441,6 +441,104 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
         self.assertEqual(payload["company"], "AV Corp")
 
 
+class CorporateActionsRegressionTests(unittest.TestCase):
+    class _Response:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+            self.ok = 200 <= status_code < 300
+
+        def json(self):
+            return self._payload
+
+    def setUp(self):
+        tb._massive_dividends_disabled = False
+        tb._massive_splits_disabled = False
+
+    def tearDown(self):
+        tb._massive_dividends_disabled = False
+        tb._massive_splits_disabled = False
+
+    def test_successful_combined_payload_is_normalized_and_cached(self):
+        dividends = [{
+            "ex_dividend_date": "2026-06-01", "pay_date": "2026-06-20",
+            "cash_amount": "0.25", "frequency": 4, "distribution_type": "CD",
+        }, "poškodený riadok"]
+        splits = [{
+            "execution_date": "2025-01-15", "split_from": 1,
+            "split_to": 2, "adjustment_type": "forward_split",
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                patch.object(tb, "_massive_dividends", return_value=dividends) as dividend_call,
+                patch.object(tb, "_massive_splits", return_value=splits) as split_call,
+            ):
+                payload = tb.get_ticker_corporate_actions("aapl", refresh=1)
+                cached = tb.get_ticker_corporate_actions("AAPL", refresh=0)
+        self.assertEqual(payload["source"], "Massive")
+        self.assertEqual(payload["dividends"][0]["amount"], 0.25)
+        self.assertEqual(payload["splits"][0]["ratio"], "1:2")
+        self.assertEqual(len(payload["dividends"]), 1)
+        self.assertTrue(cached["cached"])
+        dividend_call.assert_called_once_with("AAPL")
+        split_call.assert_called_once_with("AAPL")
+
+    def test_not_authorized_disables_both_endpoints_and_returns_error_payload(self):
+        response = self._Response({"status": "NOT_AUTHORIZED"}, status_code=401)
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+                patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                patch.object(tb.requests, "get", return_value=response) as get_call,
+            ):
+                first = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+                second = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+        self.assertIn("error", first)
+        self.assertIn("autorizovaný", first["error"])
+        self.assertIn("error", second)
+        self.assertTrue(tb._massive_dividends_disabled)
+        self.assertTrue(tb._massive_splits_disabled)
+        self.assertEqual(get_call.call_count, 2)  # prvý pokus raz pre každý endpoint
+
+    def test_missing_api_key_returns_error_without_network_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict("os.environ", {"MASSIVE_API_KEY": ""}),
+                patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                patch.object(tb.requests, "get") as get_call,
+            ):
+                payload = tb.get_ticker_corporate_actions("MSFT", refresh=1)
+        self.assertIn("error", payload)
+        self.assertIn("MASSIVE_API_KEY", payload["error"])
+        get_call.assert_not_called()
+
+    def test_malformed_success_response_is_fail_soft(self):
+        response = self._Response({"results": {"unexpected": "object"}})
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+                patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                patch.object(tb.requests, "get", return_value=response),
+            ):
+                payload = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+        self.assertIn("error", payload)
+        self.assertIn("neočakávaný tvar", payload["error"])
+
+    def test_one_available_endpoint_returns_partial_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                patch.object(tb, "_massive_dividends", return_value=[]),
+                patch.object(tb, "_massive_splits", side_effect=RuntimeError("splits unavailable")),
+            ):
+                payload = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+        self.assertNotIn("error", payload)
+        self.assertEqual(payload["dividends"], [])
+        self.assertEqual(payload["splits"], [])
+        self.assertEqual(payload["warnings"], ["splits unavailable"])
+
+
 class EarningsSymbolCacheRegressionTests(unittest.TestCase):
     def test_positive_and_negative_results_are_cached(self):
         calls = []

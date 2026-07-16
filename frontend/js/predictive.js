@@ -1321,6 +1321,7 @@ function pc_renderSidebar(data) {
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
   pc_prepareFundAnalysisCard(data.ticker);
+  pc_prepareCorpActionsCard(data.ticker);
   pc_prepareFairValueCard(data.ticker);
   pc_loadRS(data.ticker);
 
@@ -2155,6 +2156,8 @@ async function pc_loadFairValue(refresh = false) {
 // ── Fundamentálna kvalita z Alpha Vantage ─────────────────────────────────────
 const pc_fundAnalysisCache = new Map();
 let pc_fundAnalysisTicker = null;
+const pc_corpActionsCache = new Map();
+let pc_corpActionsTicker = null;
 
 function pc_isFundamentalTicker(sym) {
   return !!sym && !sym.includes('=') && !sym.includes('-') && !sym.startsWith('^');
@@ -2257,6 +2260,95 @@ async function pc_loadFundAnalysis(refresh = false) {
     const data = { symbol: sym, error: `Nepodarilo sa načítať fundamenty${e.status ? ` (${e.status})` : ''}. ${detail}` };
     pc_fundAnalysisCache.set(sym, data);
     if (pc_fundAnalysisTicker === sym) pc_renderFundAnalysisCard(data);
+  }
+}
+
+// ── Dividendy a splity z Massive (lazy, 7-dňová cache) ───────────────────────
+function pc_prepareCorpActionsCard(ticker) {
+  const card = document.getElementById('corpActionsCard');
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!card) return;
+  pc_corpActionsTicker = sym;
+  if (!pc_isFundamentalTicker(sym)) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  if (pc_corpActionsCache.has(sym)) {
+    pc_renderCorpActionsCard(pc_corpActionsCache.get(sym));
+    return;
+  }
+  // Žiadny auto-load — corporate actions sa načítajú iba na explicitný klik.
+  card.innerHTML = `<div class="card-title" title="Informačný prehľad dividend a splitov; nemení technické C1-C4 signály.">Dividendy &amp; Splity
+      <button type="button" class="fund-av-btn" onclick="pc_loadCorpActions()" title="Načítaj dividendy a splity z Massive (cache 7 dní)">⬇</button></div>
+    <div class="earnings-unavailable-note">Načíta sa až na vyžiadanie — klikni na ⬇.</div>`;
+  card.style.display = '';
+}
+
+function pc_renderCorpActionsCard(data) {
+  const card = document.getElementById('corpActionsCard');
+  if (!card || !data || (data.symbol || data.ticker) !== pc_corpActionsTicker) return;
+  if (data.error) {
+    card.innerHTML = `<div class="card-title">Dividendy &amp; Splity</div>
+      <div class="earnings-unavailable-note">${escHtml(data.error || 'Corporate actions sú momentálne nedostupné.')}</div>
+      <button type="button" class="btn fair-value-load" onclick="pc_loadCorpActions(true)">Skúsiť znova</button>`;
+    card.style.display = '';
+    return;
+  }
+  const dividends = Array.isArray(data.dividends) ? data.dividends.slice(0, 6) : [];
+  const splits = Array.isArray(data.splits) ? data.splits.slice(0, 5) : [];
+  const dividendRows = dividends.map(item => {
+    const amount = Number(item?.amount);
+    const amountText = Number.isFinite(amount)
+      ? amount.toLocaleString('sk-SK', { maximumFractionDigits: 6 })
+      : '—';
+    const meta = [item?.frequency, item?.distribution_type].filter(Boolean).join(' · ');
+    return `<div class="corp-action-row"><span>${escHtml(item?.ex_date || '—')}</span><strong>${escHtml(amountText)}</strong><small>${escHtml(meta || (item?.pay_date ? `výplata ${item.pay_date}` : 'dividenda'))}</small></div>`;
+  }).join('');
+  const splitRows = splits.map(item => {
+    const meta = item?.adjustment_type || 'split';
+    return `<div class="corp-action-row"><span>${escHtml(item?.date || '—')}</span><strong>${escHtml(item?.ratio || '—')}</strong><small>${escHtml(meta)}</small></div>`;
+  }).join('');
+  const content = dividendRows || splitRows
+    ? `${dividendRows ? `<div class="corp-action-label">Posledné dividendy</div><div class="corp-action-list">${dividendRows}</div>` : ''}
+       ${splitRows ? `<div class="corp-action-label">Splity</div><div class="corp-action-list">${splitRows}</div>` : ''}`
+    : '<div class="earnings-unavailable-note">Pre tento ticker sa nenašli dividendy ani splity.</div>';
+  const partial = Array.isArray(data.warnings) && data.warnings.length
+    ? '<div class="earnings-unavailable-note">Časť dát je momentálne nedostupná.</div>'
+    : '';
+  card.innerHTML = `<div class="card-title" title="Informačný prehľad; nemení technické C1-C4 signály.">Dividendy &amp; Splity
+      <button type="button" class="fund-av-btn" onclick="pc_loadCorpActions(true)" title="Obnov corporate actions (obíde 7-dňovú cache)">⟳</button></div>
+    ${content}${partial}
+    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'Massive')} · cache 7 dní</div>`;
+  card.style.display = '';
+}
+
+async function pc_loadCorpActions(refresh = false) {
+  const sym = pc_currentTicker();
+  const card = document.getElementById('corpActionsCard');
+  if (!sym || !card || !pc_isFundamentalTicker(sym)) return;
+  pc_corpActionsTicker = sym;
+  if (!refresh && pc_corpActionsCache.has(sym)) {
+    pc_renderCorpActionsCard(pc_corpActionsCache.get(sym));
+    return;
+  }
+  card.innerHTML = `<div class="card-title">Dividendy &amp; Splity</div>
+    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam corporate actions...</div>`;
+  card.style.display = '';
+  try {
+    const r = await fetch(`/api/ticker/corporate-actions/${encodeURIComponent(sym)}${refresh ? '?refresh=1' : ''}`, { credentials: 'same-origin' });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw { status: r.status, detail: body.detail || body.error || r.statusText };
+    }
+    const data = await r.json();
+    pc_corpActionsCache.set(sym, data);
+    if (pc_corpActionsTicker === sym) pc_renderCorpActionsCard(data);
+  } catch (e) {
+    const detail = e.detail || e.message || String(e);
+    const data = { symbol: sym, error: `Nepodarilo sa načítať corporate actions${e.status ? ` (${e.status})` : ''}. ${detail}` };
+    pc_corpActionsCache.set(sym, data);
+    if (pc_corpActionsTicker === sym) pc_renderCorpActionsCard(data);
   }
 }
 

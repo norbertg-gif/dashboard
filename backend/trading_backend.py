@@ -2594,6 +2594,13 @@ def get_summary(symbol: str = Query(...)):
 FUND_ANALYSIS_DIR = DATA_ROOT / "fund_analysis"
 FUND_ANALYSIS_TTL_H = 168  # 7 dní — AV sa volá len na explicitný klik, refresh=1 obíde cache
 FUND_ANALYSIS_SCHEMA_VERSION = 1
+CORP_ACTIONS_DIR = DATA_ROOT / "corp_actions"
+CORP_ACTIONS_TTL_H = 168  # 7 dní — Massive sa volá len na explicitný klik
+CORP_ACTIONS_SCHEMA_VERSION = 1
+
+# Corporate actions majú vlastný stav oprávnení; nesúvisia s OHLCV endpointom.
+_massive_dividends_disabled = False
+_massive_splits_disabled = False
 
 def _fund_num(value, default=None):
     try:
@@ -3100,6 +3107,170 @@ def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> 
         "memo": memo,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _massive_corp_actions_raw(ticker: str, action: str) -> dict:
+    """Raw odpoveď Massive corporate-actions endpointu; pri chybe zlyhá čitateľne."""
+    global _massive_dividends_disabled, _massive_splits_disabled
+    if action not in ("dividends", "splits"):
+        raise ValueError("Neznámy Massive corporate-actions endpoint")
+    disabled = _massive_dividends_disabled if action == "dividends" else _massive_splits_disabled
+    if disabled:
+        raise RuntimeError(f"Massive {action}: endpoint nie je pre tento API kľúč autorizovaný")
+    api_key = os.getenv("MASSIVE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("MASSIVE_API_KEY nie je nakonfigurovaný")
+    params = {
+        "ticker": ticker,
+        "apiKey": api_key,
+        "limit": 12 if action == "dividends" else 5,
+        "sort": "ex_dividend_date.desc" if action == "dividends" else "execution_date.desc",
+    }
+    try:
+        response = requests.get(
+            f"https://api.massive.com/stocks/v1/{action}",
+            params=params,
+            timeout=SCANNER_YF_TIMEOUT,
+        )
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"Massive {action}: neplatná JSON odpoveď") from exc
+        status_code = getattr(response, "status_code", 0)
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status == "NOT_AUTHORIZED" or status_code in (401, 403):
+            if action == "dividends":
+                _massive_dividends_disabled = True
+            else:
+                _massive_splits_disabled = True
+            print(f"[massive] {action} nie je pre tento API kľúč autorizovaný — vypínam ďalšie pokusy")
+            raise RuntimeError(f"Massive {action}: endpoint nie je pre tento API kľúč autorizovaný")
+        if not getattr(response, "ok", False):
+            detail = payload.get("error") or payload.get("message") if isinstance(payload, dict) else None
+            suffix = f": {detail}" if isinstance(detail, str) and detail else ""
+            raise RuntimeError(f"Massive {action}: HTTP {status_code}{suffix}")
+        if not isinstance(payload, dict) or not isinstance(payload.get("results", []), list):
+            raise RuntimeError(f"Massive {action}: neočakávaný tvar odpovede")
+        return payload
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Massive {action}: {type(exc).__name__}: {exc}") from exc
+
+
+def _massive_dividends(ticker: str) -> list:
+    return _massive_corp_actions_raw(ticker, "dividends").get("results") or []
+
+
+def _massive_splits(ticker: str) -> list:
+    return _massive_corp_actions_raw(ticker, "splits").get("results") or []
+
+
+def _corp_action_text(value):
+    return str(value).strip() if isinstance(value, (str, int, float)) and str(value).strip() else None
+
+
+def _corp_action_ratio(value):
+    number = _fund_num(value)
+    if number is None:
+        return None
+    return str(int(number)) if number.is_integer() else f"{number:g}"
+
+
+def _build_corporate_actions(symbol: str, dividends, splits: list, warnings=None) -> dict:
+    """Normalizuje iba zobrazované polia; poškodené riadky bezpečne preskočí."""
+    normalized_dividends = []
+    for row in dividends if isinstance(dividends, list) else []:
+        if not isinstance(row, dict):
+            continue
+        ex_date = _corp_action_text(row.get("ex_dividend_date"))
+        amount = _fund_num(row.get("cash_amount"))
+        if not ex_date and amount is None:
+            continue
+        normalized_dividends.append({
+            "ex_date": ex_date,
+            "pay_date": _corp_action_text(row.get("pay_date")),
+            "amount": amount,
+            "frequency": _corp_action_text(row.get("frequency")),
+            "distribution_type": _corp_action_text(row.get("distribution_type")),
+        })
+    normalized_splits = []
+    for row in splits if isinstance(splits, list) else []:
+        if not isinstance(row, dict):
+            continue
+        split_from = _corp_action_ratio(row.get("split_from"))
+        split_to = _corp_action_ratio(row.get("split_to"))
+        date = _corp_action_text(row.get("execution_date"))
+        if not date and not (split_from and split_to):
+            continue
+        normalized_splits.append({
+            "date": date,
+            "ratio": f"{split_from}:{split_to}" if split_from and split_to else None,
+            "adjustment_type": _corp_action_text(row.get("adjustment_type")),
+        })
+    payload = {
+        "schema_version": CORP_ACTIONS_SCHEMA_VERSION,
+        "symbol": symbol,
+        "dividends": normalized_dividends,
+        "splits": normalized_splits,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": "Massive",
+    }
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
+
+
+@app.get("/api/diagnostics/corp-actions/{symbol}")
+def diag_corporate_actions(symbol: str):
+    """Debug: explicitne zopakuje obe Massive volania a vráti raw tvar bez API kľúča."""
+    global _massive_dividends_disabled, _massive_splits_disabled
+    sym = _validate_ticker_symbol(symbol)
+    _massive_dividends_disabled = False
+    _massive_splits_disabled = False
+    raw, errors = {}, {}
+    for action in ("dividends", "splits"):
+        try:
+            raw[action] = _massive_corp_actions_raw(sym, action)
+        except Exception as exc:
+            errors[action] = _scrub_token(str(exc))
+    return {"ticker": sym, "ok": not errors, "raw": raw, "errors": errors}
+
+
+@app.get("/api/ticker/corporate-actions/{symbol}")
+def get_ticker_corporate_actions(symbol: str, refresh: int = Query(0)):
+    sym = _validate_ticker_symbol(symbol)
+    path = CORP_ACTIONS_DIR / f"{sym}.json"
+    if not refresh:
+        cached = _read_ticker_json_cache(path, CORP_ACTIONS_SCHEMA_VERSION, CORP_ACTIONS_TTL_H)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+
+    results, reasons = {}, []
+    for action, fetcher in (("dividends", _massive_dividends), ("splits", _massive_splits)):
+        try:
+            results[action] = fetcher(sym)
+        except Exception as exc:
+            reason = _scrub_token(str(exc))
+            reasons.append(reason)
+            print(f"[corp-actions] Massive {action} failed for {sym}: {reason}")
+    if not results:
+        unique_reasons = list(dict.fromkeys(reasons))
+        return {"symbol": sym, "error": " · ".join(unique_reasons) or "Corporate actions nie sú dostupné."}
+
+    payload = _build_corporate_actions(
+        sym,
+        results.get("dividends", []),
+        results.get("splits", []),
+        warnings=reasons or None,
+    )
+    payload["cached"] = False
+    try:
+        _write_ticker_json_cache(path, payload)
+    except Exception:
+        pass
+    return payload
 
 @app.get("/api/diagnostics/fund-fmp/{symbol}")
 def diag_fund_fmp(symbol: str, source: str = Query("fmp")):
