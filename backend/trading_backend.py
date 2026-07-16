@@ -2592,7 +2592,7 @@ def get_summary(symbol: str = Query(...)):
 
 
 FUND_ANALYSIS_DIR = DATA_ROOT / "fund_analysis"
-FUND_ANALYSIS_TTL_H = 24
+FUND_ANALYSIS_TTL_H = 168  # 7 dní — AV sa volá len na explicitný klik, refresh=1 obíde cache
 FUND_ANALYSIS_SCHEMA_VERSION = 1
 
 def _fund_num(value, default=None):
@@ -2648,10 +2648,25 @@ def _fund_get(row, *keys):
             return value
     return None
 
+# Po prvom 429 nevoláme AV do polnoci UTC (vtedy sa denný limit resetuje) —
+# šetrí márne requesty aj latenciu pri prechádzaní ďalších tickerov.
+_av_limit_exhausted_until = 0.0
+
+def _av_mark_limit_exhausted():
+    global _av_limit_exhausted_until
+    now = datetime.now(timezone.utc)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    _av_limit_exhausted_until = midnight.timestamp()
+
+def _av_limit_active() -> bool:
+    return time.time() < _av_limit_exhausted_until
+
 def _alpha_vantage(function: str, symbol: str) -> dict:
     key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
     if not key:
         raise HTTPException(status_code=503, detail="ALPHA_VANTAGE_API_KEY nie je nastaveny")
+    if _av_limit_active():
+        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný — resetuje sa o polnoci UTC.")
     resp = requests.get(
         "https://www.alphavantage.co/query",
         params={"function": function, "symbol": symbol, "apikey": key},
@@ -2662,7 +2677,8 @@ def _alpha_vantage(function: str, symbol: str) -> dict:
     # Upstream text NIKDY neposielať do UI — Alpha Vantage vkladá do Note/
     # Information plný API kľúč ("We have detected your API key as ...").
     if data.get("Note") or data.get("Information"):
-        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň) — skús neskôr alebo zajtra.")
+        _av_mark_limit_exhausted()
+        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň) — resetuje sa o polnoci UTC.")
     if data.get("Error Message"):
         raise HTTPException(status_code=404, detail=f"Alpha Vantage nepozná symbol {symbol}.")
     return data
@@ -6759,7 +6775,7 @@ def backfill_regime_context(target: str = Query("log"), ticker: str = Query(None
 # a stale fallback pri chybe/limite. Nikdy nesmie zhodiť scanner.
 
 NEWS_CACHE_DIR = DATA_ROOT / "news_cache"
-NEWS_CACHE_TTL_H = 12
+NEWS_CACHE_TTL_H = 168  # 7 dní — AV len na explicitné vyžiadanie, modal má ⟳ refresh
 NEWS_RELEVANCE_MIN = 0.15
 NEWS_MAX_ITEMS = 10
 
@@ -7018,6 +7034,8 @@ def _news_fetch_av(ticker: str) -> list[dict]:
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
     if not api_key:
         raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
+    if _av_limit_active():
+        raise RuntimeError("Alpha Vantage denný limit vyčerpaný — resetuje sa o polnoci UTC.")
     resp = requests.get(
         "https://www.alphavantage.co/query",
         params={"function": "NEWS_SENTIMENT", "tickers": ticker.upper(),
@@ -7025,7 +7043,11 @@ def _news_fetch_av(ticker: str) -> list[dict]:
         timeout=20,
     )
     resp.raise_for_status()
-    return _news_parse_feed(ticker, resp.json())
+    data = resp.json() or {}
+    if data.get("Note") or data.get("Information"):
+        _av_mark_limit_exhausted()
+        raise RuntimeError("Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň).")
+    return _news_parse_feed(ticker, data)
 
 
 def _news_save_cache(ticker: str, items: list[dict]) -> dict:
@@ -7177,23 +7199,10 @@ def get_earnings_calendar(refresh: int = Query(0)):
             pass
     if not refresh and cached and cached.get("dates") and time.time() < _earnings_bulk_failed_at + EARNINGS_BULK_FAIL_BACKOFF:
         return {**cached, "stale": True}
-    # Primárne Finnhub (60 req/min, bez zdieľaného IP limitu), fallback Alpha Vantage
+    # Iba Finnhub — automatický Alpha Vantage fallback odstránený (2026-07-16):
+    # AV sa volá výhradne na explicitnú požiadavku používateľa, nie na pozadí.
     try:
         payload = _earnings_save_cache(_earnings_fetch_finnhub())
-        return {**payload, "stale": False}
-    except Exception as e:
-        print(f"[earnings] finnhub failed, fallback AV: {e}")
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    try:
-        if not api_key:
-            raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
-        resp = requests.get(
-            "https://www.alphavantage.co/query",
-            params={"function": "EARNINGS_CALENDAR", "horizon": "3month", "apikey": api_key},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        payload = _earnings_save_cache(_earnings_parse_csv(resp.text))
         return {**payload, "stale": False}
     except Exception as e:
         _earnings_bulk_failed_at = time.time()

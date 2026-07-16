@@ -752,7 +752,7 @@ sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).
   na udalosť — inak by udalosť pokrytá 5 zdrojmi vážila 5x viac než udalosť
   s jediným článkom. Zoznam článkov sa nekráti, duplicity ostávajú viditeľné
   s označením „duplicita" / „+N zdrojov", takže si vieš dohľadať pôvodné zdroje.
-- **Cache**: výsledky sa držia 12 h na disku — opakované otvorenie toho istého
+- **Cache**: výsledky sa držia 7 dní na disku — opakované otvorenie toho istého
   tickera neminie
   API request. **⟳ Obnoviť** vynúti čerstvé načítanie.
 - **Limity**: free API kľúč má 25 requestov/deň. Server beží na zdieľanej

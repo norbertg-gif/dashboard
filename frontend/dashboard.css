@@ -2332,6 +2332,21 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-top: 9px;
   font-size: 10px;
 }
+#predictiveTab .fund-av-btn {
+  float: right;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+#predictiveTab .fund-av-btn:hover {
+  color: var(--text);
+  border-color: var(--muted2);
+}
 #predictiveTab .fair-value-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;

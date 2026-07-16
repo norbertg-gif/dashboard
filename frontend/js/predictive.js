@@ -2180,10 +2180,12 @@ function pc_prepareFundAnalysisCard(ticker) {
     pc_renderFundAnalysisCard(pc_fundAnalysisCache.get(sym));
     return;
   }
-  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
-    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam fundamenty...</div>`;
+  // Žiadny auto-load — Alpha Vantage (4 req/ticker, free limit 25/deň) sa volá
+  // výhradne na explicitný klik používateľa.
+  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span>
+      <button type="button" class="fund-av-btn" onclick="pc_loadFundAnalysis()" title="Načítaj z Alpha Vantage (4 requesty, free limit 25/deň, cache 7 dní)">⬇</button></div>
+    <div class="earnings-unavailable-note">Načíta sa až na vyžiadanie — klikni na ⬇.</div>`;
   card.style.display = '';
-  pc_loadFundAnalysis();
 }
 
 function pc_renderFundAnalysisCard(data) {
@@ -2213,7 +2215,8 @@ function pc_renderFundAnalysisCard(data) {
     return `<div class="fund-analysis-metric ${cls}"><span>${escHtml(label)}</span><strong>${value}</strong><small>${escHtml(text || '')}</small></div>`;
   }).join('');
   const flags = (data.flags || []).map(f => `<span>${escHtml(f)}</span>`).join('');
-  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+  card.innerHTML = `<div class="card-title" title="Alpha Vantage free fundamenty. Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span>
+      <button type="button" class="fund-av-btn" onclick="pc_loadFundAnalysis(true)" title="Obnov z Alpha Vantage (obíde 7-dňovú cache, 4 requesty)">⟳</button></div>
     <div class="fund-analysis-head">
       <div>
         <div class="fund-analysis-company">${escHtml(data.company || data.symbol || pc_fundAnalysisTicker)}</div>
@@ -2223,7 +2226,7 @@ function pc_renderFundAnalysisCard(data) {
     </div>
     <div class="fund-analysis-grid">${scoreRows}</div>
     ${flags ? `<div class="fund-analysis-flags">${flags}</div>` : ''}
-    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'Alpha Vantage')} · cache 24 h</div>`;
+    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'Alpha Vantage')} · cache 7 dní</div>`;
   card.style.display = '';
 }
 

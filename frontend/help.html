@@ -463,7 +463,7 @@
     <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
     <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
     <li><strong>Klastrovanie duplicít</strong>: viac vydavateľov často prevezme tú istú správu s takmer rovnakým titulkom. Do priemerného sentimentu sa počíta len jeden reprezentant na udalosť; zoznam článkov sa nekráti, duplicity sú len označené ako „duplicita" / „+N zdrojov".</li>
-    <li><strong>Cache</strong>: výsledky sa držia 12 h na disku — opakované otvorenie toho istého tickera neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
+    <li><strong>Cache</strong>: výsledky sa držia 7 dní na disku — opakované otvorenie toho istého tickera neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
     <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
     <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať, až keď ich reálne analyzuješ.</li>
   </ul>
@@ -493,7 +493,7 @@
   <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú earnings indikátory:</p>
   <ul>
     <li><strong>E: dátum</strong> (sivý) — najbližší známy earnings termín. Ak ešte nie je zverejnený alebo zdroj nemá údaje, zobrazí sa <strong>E: n/a</strong>.</li>
-    <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub s fallbackom Alpha Vantage EARNINGS_CALENDAR; cache 24 h. Čísla pred reportom nemusia platiť.</li>
+    <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub (Alpha Vantage fallback bol odstránený — AV sa volá len na explicitné vyžiadanie); cache 24 h. Čísla pred reportom nemusia platiť.</li>
   </ul>
   <p>Karta <strong>Najbližší Earnings</strong> v Analytike zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
 
