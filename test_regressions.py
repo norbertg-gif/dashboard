@@ -95,11 +95,14 @@ class PublicPortfolioRegressionTests(unittest.TestCase):
     def setUp(self):
         tb._public_rate.clear()
 
-    def test_query_token_respects_feature_flag(self):
-        with patch.object(tb, "PUBLIC_ALLOW_QUERY_TOKEN", False):
-            self.assertEqual(tb._public_token_from_headers(None, None, "secret"), "")
-            self.assertEqual(tb._public_token_from_headers(None, "secret", "wrong"), "secret")
-            self.assertEqual(tb._public_token_from_headers("Bearer secret", "wrong", None), "secret")
+    def test_token_is_header_only(self):
+        # Query token bol odstránený úplne — akceptuje sa iba Bearer/X-API-Token hlavička.
+        self.assertEqual(tb._public_token_from_headers(None, None), "")
+        self.assertEqual(tb._public_token_from_headers(None, "secret"), "secret")
+        self.assertEqual(tb._public_token_from_headers("Bearer secret", "wrong"), "secret")
+        import inspect
+        params = inspect.signature(tb.get_public_portfolio).parameters
+        self.assertNotIn("token", params)
 
     def test_public_portfolio_reuses_processed_snapshot(self):
         snapshot = {
@@ -109,29 +112,80 @@ class PublicPortfolioRegressionTests(unittest.TestCase):
         }
         with (
             patch.object(tb, "PUBLIC_API_TOKEN", "secret"),
-            patch.object(tb, "PUBLIC_ALLOW_QUERY_TOKEN", False),
             patch.object(tb, "get_portfolio", return_value=snapshot) as get_portfolio,
         ):
             result = tb.get_public_portfolio(
                 request=self._request(), account="1",
-                authorization="Bearer secret", x_api_token=None, token=None,
+                authorization="Bearer secret", x_api_token=None,
             )
         get_portfolio.assert_called_once_with(account="1", refresh=0)
         self.assertEqual(result["positions"], snapshot["positions"])
         self.assertEqual(result["summary"], snapshot["summary"])
         self.assertEqual(result["source"], "cache")
 
-    def test_disabled_query_token_is_rejected(self):
-        with (
-            patch.object(tb, "PUBLIC_API_TOKEN", "secret"),
-            patch.object(tb, "PUBLIC_ALLOW_QUERY_TOKEN", False),
-        ):
+    def test_missing_token_is_rejected(self):
+        with patch.object(tb, "PUBLIC_API_TOKEN", "secret"):
             with self.assertRaises(HTTPException) as caught:
                 tb.get_public_portfolio(
                     request=self._request(), account="1",
-                    authorization=None, x_api_token=None, token="secret",
+                    authorization=None, x_api_token=None,
                 )
         self.assertEqual(caught.exception.status_code, 403)
+
+    def test_invalid_account_is_rejected(self):
+        with patch.object(tb, "PUBLIC_API_TOKEN", "secret"):
+            with self.assertRaises(HTTPException) as caught:
+                tb.get_public_portfolio(
+                    request=self._request(), account="../evil",
+                    authorization="Bearer secret", x_api_token=None,
+                )
+        self.assertEqual(caught.exception.status_code, 400)
+
+
+class PublicRateLimitRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _request(client_ip="127.0.0.1"):
+        return Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/api/public/portfolio",
+            "headers": [],
+            "query_string": b"",
+            "client": (client_ip, 12345),
+            "server": ("test", 80),
+            "scheme": "http",
+        })
+
+    def setUp(self):
+        tb._public_rate.clear()
+
+    def test_limit_is_enforced_per_client(self):
+        req = self._request()
+        with patch.object(tb, "PUBLIC_RATE_LIMIT_MAX", 3):
+            for _ in range(3):
+                tb._check_public_rate_limit(req)
+            with self.assertRaises(HTTPException) as caught:
+                tb._check_public_rate_limit(req)
+        self.assertEqual(caught.exception.status_code, 429)
+
+    def test_expired_keys_are_pruned_active_kept(self):
+        now = tb._time_module.time()
+        expired = now - tb.PUBLIC_RATE_LIMIT_WINDOW - 10
+        tb._public_rate["stale-client"] = [expired]
+        tb._public_rate["active-client"] = [now]
+        tb._check_public_rate_limit(self._request())
+        self.assertNotIn("stale-client", tb._public_rate)
+        self.assertIn("active-client", tb._public_rate)
+        self.assertIn("127.0.0.1", tb._public_rate)
+
+    def test_key_cap_triggers_overflow_clear(self):
+        now = tb._time_module.time()
+        with patch.object(tb, "_PUBLIC_RATE_MAX_KEYS", 5):
+            for i in range(5):
+                tb._public_rate[f"client-{i}"] = [now]
+            tb._check_public_rate_limit(self._request("new-client"))
+        # Nový kľúč nad stropom vyčistí tabuľku a zaeviduje iba seba.
+        self.assertEqual(set(tb._public_rate), {"new-client"})
 
 
 class AssistantExportRegressionTests(unittest.TestCase):

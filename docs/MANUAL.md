@@ -1169,7 +1169,6 @@ render.yaml            # web service + 1GB disk na /data
 |---|---|
 | `DASH_USER` / `DASH_PASS` | Basic auth (povinné v produkcii). |
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`; posielajte ho v `Authorization: Bearer` alebo `X-API-Token` hlavičke. |
-| `PUBLIC_ALLOW_QUERY_TOKEN` | Voliteľná spätná kompatibilita: `1` povolí token aj v URL parametri. Predvolene je vypnutá, pretože URL sa môže zapisovať do logov a histórie. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
 | `ALPHA_VANTAGE_API_KEY` | News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie). |
 | `FINNHUB_API_KEY` | Earnings, insider, EPS, analytický konsenzus a **mapa ticker→sektor** (profile2) pre sektorovú relatívnu silu. |

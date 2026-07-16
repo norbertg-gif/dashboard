@@ -10,7 +10,7 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 - **eToro proxy:** stdlib HTTPServer on `localhost:8765`, started as background thread from `trading_backend.py` (do NOT run as separate process in prod)
 - **Frontend:** vanilla HTML/CSS/JS, Lightweight Charts 5.2.0, SheetJS for XLSX import — no build step
 - **Storage:** `/data` (Render disk) holds `presets.json`, `predictive_signals_log.json`, `predictive_weights_log.json`, `scanner_notes.json`, `news_cache/`, `cache/{ohlcv,portfolio,instruments}`
-- **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`). Prefer `Authorization: Bearer` or `X-API-Token`; query-string tokens are accepted only when `PUBLIC_ALLOW_QUERY_TOKEN=1`.
+- **Auth:** HTTP Basic via `DASH_USER` / `DASH_PASS` env. `/api/public/*` uses token-based auth (`PUBLIC_API_TOKEN`), header-only: `Authorization: Bearer` or `X-API-Token`. Query-string tokens were removed entirely (they leak into logs/history).
 
 ## Layout
 

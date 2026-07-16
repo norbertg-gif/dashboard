@@ -231,7 +231,7 @@ zámerne); druhý samostatný portfóliový výpočet pre Inbox alebo AI export
 inam ako do env nepatria)
 
 - Auth/prevádzka: `DASH_USER`, `DASH_PASS`, `RENDER`, `PORT`, `DATA_DIR`, `DASH_MEMORY_PROFILE`
-- Public API: `PUBLIC_API_TOKEN`, `PUBLIC_ALLOW_QUERY_TOKEN`, `PUBLIC_RATE_LIMIT_MAX`, `PUBLIC_RATE_LIMIT_WINDOW`
+- Public API: `PUBLIC_API_TOKEN`, `PUBLIC_RATE_LIMIT_MAX`, `PUBLIC_RATE_LIMIT_WINDOW` (query-string token a `PUBLIC_ALLOW_QUERY_TOKEN` boli odstránené — token je header-only)
 - Externé dátové API: `ALPHA_VANTAGE_API_KEY`, `FINNHUB_API_KEY`, `FMP_API_KEY`, `FRED_API_KEY`, `MASSIVE_API_KEY`
 - Scanner tuning: `SCANNER_MAX_WORKERS`, `SCANNER_DIP_UNIVERSE_MAX`, `SCANNER_GC_INTERVAL`, `SCANNER_YF_TIMEOUT`
 - eToro proxy (`backend/etoro_proxy.py`): `ETORO_API_KEY_1`, `ETORO_API_KEY_2`, `ETORO_USER_KEY_1`, `ETORO_USER_KEY_2`, `ETORO_ACCOUNT_NAME_1`, `ETORO_ACCOUNT_NAME_2`
