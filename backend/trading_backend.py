@@ -3034,14 +3034,23 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
         raw = _fmp_fund_raw(sym)
         payload = _build_fund_analysis(sym, raw, source="FMP")
     except Exception as e:
-        print(f"[fund-analysis] FMP failed for {sym}, fallback AV: {_scrub_token(str(e))}")
-        raw = {
-            "overview": _alpha_vantage("OVERVIEW", sym),
-            "income": _alpha_vantage("INCOME_STATEMENT", sym),
-            "balance": _alpha_vantage("BALANCE_SHEET", sym),
-            "cashflow": _alpha_vantage("CASH_FLOW", sym),
-        }
-        payload = _build_fund_analysis(sym, raw, source="Alpha Vantage")
+        fmp_reason = _scrub_token(str(e))
+        print(f"[fund-analysis] FMP failed for {sym}, fallback AV: {fmp_reason}")
+        try:
+            raw = {
+                "overview": _alpha_vantage("OVERVIEW", sym),
+                "income": _alpha_vantage("INCOME_STATEMENT", sym),
+                "balance": _alpha_vantage("BALANCE_SHEET", sym),
+                "cashflow": _alpha_vantage("CASH_FLOW", sym),
+            }
+            payload = _build_fund_analysis(sym, raw, source="Alpha Vantage")
+        except HTTPException as av_exc:
+            # Ukáž skutočnú príčinu: prečo zlyhal primárny FMP aj fallback AV —
+            # samotná AV hláška by zavádzala, že problém je len v AV limite.
+            raise HTTPException(
+                status_code=av_exc.status_code,
+                detail=f"FMP: {fmp_reason} · Alpha Vantage fallback: {av_exc.detail}",
+            )
     payload["cached"] = False
     try:
         _write_ticker_json_cache(path, payload)
