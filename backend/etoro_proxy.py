@@ -10,6 +10,10 @@ import json, uuid
 import threading
 import os
 
+# Voliteľný hook na logovanie odchádzajúcich eToro volaní — nastavuje ho
+# trading_backend (_log_ext_api_call) po importe; standalone beh ostáva bez logu.
+EXT_CALL_LOGGER = None
+
 # === ÚČET 1 ===
 ACCOUNT1 = {
     "name":     os.getenv("ETORO_ACCOUNT_NAME_1", "Account 1"),
@@ -71,6 +75,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _proxy(self, url, method="GET", body=None, extra_headers=None, account=None):
+        if EXT_CALL_LOGGER:
+            try:
+                path = urllib.parse.urlparse(url).path
+                EXT_CALL_LOGGER("etoro", "/".join([p for p in path.split("/") if p][:2]) or "root")
+            except Exception:
+                pass
         hdrs = make_headers(account) if account else {"User-Agent": UA, "Accept": "application/json"}
         if extra_headers:
             hdrs.update(extra_headers)

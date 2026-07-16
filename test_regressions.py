@@ -319,5 +319,120 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
 
 
+class FundAnalysisFmpRegressionTests(unittest.TestCase):
+    _FMP_PROFILE = [{"companyName": "Test Corp"}]
+    _FMP_INCOME = [
+        {"revenue": 1000, "netIncome": 150, "operatingIncome": 200},
+        {"revenue": 900, "netIncome": 120, "operatingIncome": 170},
+    ]
+    _FMP_BALANCE = [{
+        "cashAndCashEquivalents": 300, "totalDebt": 200,
+        "longTermDebt": 150, "totalStockholdersEquity": 800,
+    }]
+    _FMP_CASHFLOW = [
+        {"operatingCashFlow": 250, "capitalExpenditure": -50},
+        {"operatingCashFlow": 200, "capitalExpenditure": -40},
+    ]
+    _FMP_RATIOS = [{"peRatioTTM": 20.0, "priceToSalesRatioTTM": 3.0,
+                    "enterpriseValueMultipleTTM": 12.0, "netProfitMarginTTM": 0.15}]
+
+    def _fake_fmp_get(self, path, sym, extra=None):
+        return {
+            "profile": self._FMP_PROFILE, "income-statement": self._FMP_INCOME,
+            "balance-sheet-statement": self._FMP_BALANCE,
+            "cash-flow-statement": self._FMP_CASHFLOW, "ratios-ttm": self._FMP_RATIOS,
+        }[path]
+
+    def test_fmp_raw_feeds_existing_builder(self):
+        with patch.object(tb, "_fmp_fund_get", self._fake_fmp_get):
+            raw = tb._fmp_fund_raw("TEST")
+        payload = tb._build_fund_analysis("TEST", raw, source="FMP")
+        self.assertEqual(payload["source"], "FMP")
+        self.assertEqual(payload["company"], "Test Corp")
+        # revenue growth (1000 vs 900) a kladné FCF musia dať zmysluplné skóre
+        for key in ("overall", "fundamentals", "valuation", "risk"):
+            self.assertTrue(0 <= payload["scores"][key] <= 100)
+
+    def test_unusable_fmp_rows_raise_for_av_fallback(self):
+        # HTTP 200 s nekompatibilnými fieldmi nesmie prejsť ako FMP dáta
+        def bad_fmp_get(path, sym, extra=None):
+            if path == "income-statement":
+                return [{"unexpectedField": 1}]
+            return self._fake_fmp_get(path, sym, extra)
+        with patch.object(tb, "_fmp_fund_get", bad_fmp_get):
+            with self.assertRaises(RuntimeError):
+                tb._fmp_fund_raw("TEST")
+
+    def test_fmp_get_builds_v3_url_with_symbol_in_path(self):
+        urls = []
+        def fake_get(url, params=None, timeout=None):
+            urls.append(url)
+            class R:
+                status_code = 404
+                def json(self): return {}
+            return R()
+        with (
+            patch.dict("os.environ", {"FMP_API_KEY": "testkey123"}),
+            patch.object(tb, "requests") as mock_requests,
+        ):
+            mock_requests.get = fake_get
+            with self.assertRaises(RuntimeError):
+                tb._fmp_fund_get("income-statement", "AAPL")
+        self.assertEqual(urls, [
+            "https://financialmodelingprep.com/stable/income-statement",
+            "https://financialmodelingprep.com/api/v3/income-statement/AAPL",
+        ])
+
+    def test_endpoint_falls_back_to_alpha_vantage(self):
+        av_payloads = {
+            "OVERVIEW": {"Name": "AV Corp", "PERatio": "20"},
+            "INCOME_STATEMENT": {"annualReports": [{"totalRevenue": "1000", "netIncome": "100"}]},
+            "BALANCE_SHEET": {"annualReports": [{"totalShareholderEquity": "500"}]},
+            "CASH_FLOW": {"annualReports": [{"operatingCashflow": "200", "capitalExpenditures": "50"}]},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "FUND_ANALYSIS_DIR", Path(tmp)),
+                patch.object(tb, "_fmp_fund_raw", side_effect=RuntimeError("FMP down")),
+                patch.object(tb, "_alpha_vantage", side_effect=lambda fn, sym: av_payloads[fn]),
+            ):
+                payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(payload["source"], "Alpha Vantage")
+        self.assertEqual(payload["company"], "AV Corp")
+
+
+class ApiCallStatsRegressionTests(unittest.TestCase):
+    def test_log_and_read_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats_file = Path(tmp) / "api_call_stats.json"
+            with patch.object(tb, "API_CALL_STATS_FILE", stats_file):
+                tb._api_stats_mem.clear()
+                tb._log_ext_api_call("fmp", "income-statement")
+                tb._log_ext_api_call("fmp", "income-statement")
+                tb._log_ext_api_call("alpha_vantage", "OVERVIEW")
+                result = tb.get_api_usage(days=1)
+        self.assertEqual(result["provider_totals"], {"fmp": 2, "alpha_vantage": 1})
+
+    def test_instrumented_get_detects_provider(self):
+        seen = []
+        with (
+            patch.object(tb, "_log_ext_api_call", lambda p, e: seen.append((p, e))),
+            patch.object(tb, "_orig_requests_get", lambda url, *a, **kw: "resp"),
+        ):
+            tb._instrumented_requests_get(
+                "https://www.alphavantage.co/query",
+                params={"function": "OVERVIEW", "apikey": "x"})
+            tb._instrumented_requests_get(
+                "https://api.massive.com/v2/aggs/ticker/AAPL/range/1/day/a/b")
+            tb._instrumented_requests_get("http://localhost:8765/instruments")
+            tb._instrumented_requests_get(
+                "https://financialmodelingprep.com/api/v3/income-statement/AAPL")
+        self.assertEqual(seen, [
+            ("alpha_vantage", "OVERVIEW"),
+            ("massive", "v2/aggs/ticker"),
+            ("fmp", "income-statement"),
+        ])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

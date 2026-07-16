@@ -2648,6 +2648,145 @@ def _fund_get(row, *keys):
             return value
     return None
 
+# ── Logovanie externých API volaní ────────────────────────────────────────────
+# Účel: po čase štatisticky vedieť, koľko volaní na ktorého providera reálne
+# robíme (rozhodnutia o free limitoch/cache). RAM counter + flush na disk max
+# raz za 60 s, aby vysokofrekvenční provideri (massive/yfinance) nemleli disk.
+API_CALL_STATS_FILE = DATA_ROOT / "api_call_stats.json"
+API_CALL_STATS_KEEP_DAYS = 90
+_api_stats_lock = threading.Lock()
+_api_stats_mem: dict = {}
+_api_stats_last_flush = 0.0
+
+def _api_stats_flush_locked():
+    """Zlúči RAM counter do súboru na disku. Volať len pod _api_stats_lock."""
+    global _api_stats_last_flush
+    if not _api_stats_mem:
+        _api_stats_last_flush = time.time()
+        return
+    try:
+        disk = json.loads(API_CALL_STATS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(disk, dict):
+            disk = {}
+    except Exception:
+        disk = {}
+    for day, providers in _api_stats_mem.items():
+        d = disk.setdefault(day, {})
+        for provider, endpoints in providers.items():
+            p = d.setdefault(provider, {})
+            for endpoint, count in endpoints.items():
+                p[endpoint] = int(p.get(endpoint, 0)) + count
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=API_CALL_STATS_KEEP_DAYS)).isoformat()
+    disk = {day: v for day, v in disk.items() if day >= cutoff}
+    try:
+        # atomický zápis — prerušený write_text by nechal skrátený JSON a ďalší
+        # flush by históriu prepísal prázdnou
+        tmp = API_CALL_STATS_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(disk, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, API_CALL_STATS_FILE)
+        _api_stats_mem.clear()
+    except Exception:
+        pass  # disk problém nesmie zhodiť API volanie; counter ostáva v RAM
+    _api_stats_last_flush = time.time()
+
+def _log_ext_api_call(provider: str, endpoint: str):
+    """Zaznamenaj jedno odchádzajúce volanie externého API (provider/endpoint)."""
+    day = datetime.now(timezone.utc).date().isoformat()
+    with _api_stats_lock:
+        prov = _api_stats_mem.setdefault(day, {}).setdefault(provider, {})
+        prov[endpoint] = prov.get(endpoint, 0) + 1
+        if time.time() - _api_stats_last_flush > 60:
+            _api_stats_flush_locked()
+
+# Centrálna inštrumentácia: wrapper nad requests.get rozpozná providera podľa
+# hostname — netreba upravovať ~25 roztrúsených call-sites a pokryje aj budúce.
+# Lokálne volania (eToro proxy na localhost) sa nelogujú.
+_orig_requests_get = requests.get
+_API_HOST_PROVIDERS = (
+    ("alphavantage.co", "alpha_vantage"),
+    ("financialmodelingprep.com", "fmp"),
+    ("finnhub.io", "finnhub"),
+    ("api.massive.com", "massive"),
+    ("finance.yahoo.com", "yahoo"),
+    ("stlouisfed.org", "fred"),
+    ("etoro.com", "etoro"),
+)
+
+def _api_endpoint_label(host: str, path: str, query: str, params) -> str:
+    parts = [p for p in path.split("/") if p]
+    if "alphavantage" in host:
+        # AV má jediný /query endpoint — rozlišuje sa parametrom function
+        # (posiela sa cez params= kwarg, výnimočne priamo v URL)
+        fn = (params or {}).get("function") if isinstance(params, dict) else None
+        if not fn:
+            m = re.search(r"function=([A-Za-z_]+)", query or "")
+            fn = m.group(1) if m else None
+        return str(fn) if fn else "query"
+    if "massive" in host:
+        return "/".join(parts[:3]) or "root"
+    if "yahoo" in host:
+        return "/".join(parts[1:3]) or "/".join(parts) or "root"
+    if "financialmodelingprep" in host:
+        # v3 štýl má symbol v path (/api/v3/income-statement/AAPL) — vráť názov
+        # endpointu, nie ticker, inak by štatistika mala label na každý ticker
+        skip = {"api", "v3", "v4", "stable"}
+        for p in parts:
+            if p.lower() not in skip:
+                return p
+        return "root"
+    return parts[-1] if parts else "root"
+
+def _instrumented_requests_get(url, *args, **kwargs):
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        host = parsed.hostname or ""
+        for fragment, provider in _API_HOST_PROVIDERS:
+            if fragment in host:
+                _log_ext_api_call(provider, _api_endpoint_label(host, parsed.path, parsed.query, kwargs.get("params")))
+                break
+    except Exception:
+        pass
+    return _orig_requests_get(url, *args, **kwargs)
+
+requests.get = _instrumented_requests_get
+
+# Session.get pokrýva knižnice s vlastnou session (yfinance interné Yahoo
+# volania, crumb auth) — modulové requests.get ide cez Session.request, nie
+# Session.get, takže sa nič nepočíta dvakrát.
+_orig_session_get = requests.Session.get
+
+def _instrumented_session_get(self, url, *args, **kwargs):
+    try:
+        parsed = urllib.parse.urlparse(str(url))
+        host = parsed.hostname or ""
+        for fragment, provider in _API_HOST_PROVIDERS:
+            if fragment in host:
+                _log_ext_api_call(provider, _api_endpoint_label(host, parsed.path, parsed.query, kwargs.get("params")))
+                break
+    except Exception:
+        pass
+    return _orig_session_get(self, url, *args, **kwargs)
+
+requests.Session.get = _instrumented_session_get
+
+@app.get("/api/diagnostics/api-usage")
+def get_api_usage(days: int = Query(14)):
+    """Štatistika externých API volaní po dňoch/provideroch (z logu, max 90 dní)."""
+    with _api_stats_lock:
+        _api_stats_flush_locked()
+    try:
+        disk = json.loads(API_CALL_STATS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        disk = {}
+    days = max(1, min(days, API_CALL_STATS_KEEP_DAYS))
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+    filtered = {day: v for day, v in sorted(disk.items()) if day >= cutoff}
+    totals: dict = {}
+    for providers in filtered.values():
+        for provider, endpoints in providers.items():
+            totals[provider] = totals.get(provider, 0) + sum(endpoints.values())
+    return {"days": days, "per_day": filtered, "provider_totals": totals}
+
 # Po prvom 429 nevoláme AV do polnoci UTC (vtedy sa denný limit resetuje) —
 # šetrí márne requesty aj latenciu pri prechádzaní ďalších tickerov.
 _av_limit_exhausted_until = 0.0
@@ -2683,7 +2822,106 @@ def _alpha_vantage(function: str, symbol: str) -> dict:
         raise HTTPException(status_code=404, detail=f"Alpha Vantage nepozná symbol {symbol}.")
     return data
 
-def _build_fund_analysis(sym: str, raw: dict) -> dict:
+# ── FMP ako primárny zdroj fundamentov (free 250 req/deň vs AV 25/deň) ───────
+# Adaptér mapuje FMP odpovede na Alpha Vantage tvar, ktorý _build_fund_analysis
+# už pozná — builder/skóring sa nemení, mení sa len zdroj dát.
+def _fmp_fund_get(path: str, sym: str, extra: dict | None = None):
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("FMP_API_KEY nie je nastavený")
+    last_err = None
+    # stable API: /stable/{path}?symbol=SYM ; v3 API: /api/v3/{path}/SYM
+    attempts = (
+        (f"https://financialmodelingprep.com/stable/{path}", {"symbol": sym}),
+        (f"https://financialmodelingprep.com/api/v3/{path}/{urllib.parse.quote(sym)}", {}),
+    )
+    for url, sym_params in attempts:
+        params = {**sym_params, "apikey": api_key, **(extra or {})}
+        try:
+            r = requests.get(url, params=params, timeout=12)
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}"
+                continue
+            data = r.json()
+            if isinstance(data, dict) and (data.get("Error Message") or data.get("error") or data.get("message")):
+                last_err = "error payload"
+                continue
+            if not data:
+                last_err = "empty"
+                continue
+            return data
+        except Exception as e:
+            last_err = type(e).__name__
+    raise RuntimeError(f"FMP {path}: {last_err}")
+
+def _fmp_row_to_av(row: dict, mapping: dict) -> dict:
+    out = {}
+    for av_key, fmp_keys in mapping.items():
+        for fk in fmp_keys:
+            if row.get(fk) is not None:
+                out[av_key] = row[fk]
+                break
+    return out
+
+_FMP_INCOME_MAP = {
+    "totalRevenue": ("revenue",),
+    "netIncome": ("netIncome",),
+    "operatingIncome": ("operatingIncome",),
+}
+_FMP_BALANCE_MAP = {
+    "cashAndCashEquivalentsAtCarryingValue": ("cashAndCashEquivalents",),
+    "cashAndShortTermInvestments": ("cashAndShortTermInvestments",),
+    "shortLongTermDebtTotal": ("totalDebt",),
+    "longTermDebt": ("longTermDebt",),
+    "shortTermDebt": ("shortTermDebt",),
+    "totalShareholderEquity": ("totalStockholdersEquity", "totalEquity"),
+}
+_FMP_CASHFLOW_MAP = {
+    "operatingCashflow": ("operatingCashFlow", "netCashProvidedByOperatingActivities"),
+    "capitalExpenditures": ("capitalExpenditure",),
+}
+
+def _fmp_fund_raw(sym: str) -> dict:
+    """4 FMP volania → raw dict v AV tvare pre _build_fund_analysis."""
+    profile = _fmp_fund_get("profile", sym)
+    income = _fmp_fund_get("income-statement", sym, {"limit": 2, "period": "annual"})
+    balance = _fmp_fund_get("balance-sheet-statement", sym, {"limit": 1, "period": "annual"})
+    cashflow = _fmp_fund_get("cash-flow-statement", sym, {"limit": 2, "period": "annual"})
+    try:
+        ratios = _fmp_fund_get("ratios-ttm", sym)
+    except Exception:
+        ratios = []  # valuácia bez ratios degraduje fail-soft (skóre z neutral)
+    prof = profile[0] if isinstance(profile, list) and profile else (profile if isinstance(profile, dict) else {})
+    rat = ratios[0] if isinstance(ratios, list) and ratios else (ratios if isinstance(ratios, dict) else {})
+    overview = {
+        "Name": prof.get("companyName") or prof.get("name"),
+        "PERatio": rat.get("peRatioTTM") or rat.get("priceToEarningsRatioTTM") or rat.get("priceEarningsRatioTTM"),
+        "ForwardPE": None,  # FMP free TTM ratios forward P/E nemajú
+        "PriceToSalesRatioTTM": rat.get("priceToSalesRatioTTM") or rat.get("priceSalesRatioTTM"),
+        "EVToEBITDA": rat.get("enterpriseValueMultipleTTM") or rat.get("evToEBITDATTM"),
+        "ProfitMargin": rat.get("netProfitMarginTTM"),
+        "AnalystTargetPrice": None,  # analyst target ide z Finnhubu inde, nemiešať
+    }
+    def _rows(data, mapping):
+        rows = data if isinstance(data, list) else []
+        return [_fmp_row_to_av(r, mapping) for r in rows if isinstance(r, dict)]
+    income_rows = _rows(income, _FMP_INCOME_MAP)
+    balance_rows = _rows(balance, _FMP_BALANCE_MAP)
+    cashflow_rows = _rows(cashflow, _FMP_CASHFLOW_MAP)
+    # HTTP 200 s nekompatibilným tvarom nesmie prejsť ako "FMP dáta" — inak by
+    # sa 7 dní cachovalo neutrálne skóre z prázdnych výkazov namiesto AV fallbacku.
+    if not income_rows or income_rows[0].get("totalRevenue") is None:
+        raise RuntimeError("FMP income-statement: unusable rows")
+    if not balance_rows or not cashflow_rows:
+        raise RuntimeError("FMP balance/cash-flow: unusable rows")
+    return {
+        "overview": overview,
+        "income": {"annualReports": income_rows},
+        "balance": {"annualReports": balance_rows},
+        "cashflow": {"annualReports": cashflow_rows},
+    }
+
+def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> dict:
     overview = raw.get("overview") or {}
     income = _fund_latest(raw.get("income") or {}, "annualReports")
     balance = _fund_latest(raw.get("balance") or {}, "annualReports")
@@ -2756,7 +2994,7 @@ def _build_fund_analysis(sym: str, raw: dict) -> dict:
         "schema_version": FUND_ANALYSIS_SCHEMA_VERSION,
         "symbol": sym,
         "company": overview.get("Name") or sym,
-        "source": "Alpha Vantage",
+        "source": source,
         "scores": {"overall": overall, "fundamentals": fundamentals, "valuation": valuation, "risk": risk, "analyst": analyst},
         "labels": {
             "overall": _fund_label(overall, "Good", "Mixed", "Weak"),
@@ -2769,6 +3007,16 @@ def _build_fund_analysis(sym: str, raw: dict) -> dict:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
+@app.get("/api/diagnostics/fund-fmp/{symbol}")
+def diag_fund_fmp(symbol: str):
+    """Debug: vráti FMP→AV mapovaný raw tvar pre overenie field mappingu. Bez kľúča v odpovedi."""
+    sym = _validate_ticker_symbol(symbol)
+    try:
+        raw = _fmp_fund_raw(sym)
+        return {"ticker": sym, "ok": True, "raw": raw}
+    except Exception as e:
+        return {"ticker": sym, "ok": False, "error": _scrub_token(str(e))}
+
 @app.get("/api/ticker/fund-analysis/{symbol}")
 def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
     sym = _validate_ticker_symbol(symbol)
@@ -2778,13 +3026,21 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
         if cached is not None:
             cached["cached"] = True
             return cached
-    raw = {
-        "overview": _alpha_vantage("OVERVIEW", sym),
-        "income": _alpha_vantage("INCOME_STATEMENT", sym),
-        "balance": _alpha_vantage("BALANCE_SHEET", sym),
-        "cashflow": _alpha_vantage("CASH_FLOW", sym),
-    }
-    payload = _build_fund_analysis(sym, raw)
+    # Primárne FMP (free 250 req/deň, ~5 volaní/ticker), fallback Alpha Vantage
+    # (25 req/deň, 4 volania/ticker). Cache/UX filozofia sa nemení — stále len
+    # explicitný klik, 7-dňová disk cache, refresh=1 obíde cache.
+    try:
+        raw = _fmp_fund_raw(sym)
+        payload = _build_fund_analysis(sym, raw, source="FMP")
+    except Exception as e:
+        print(f"[fund-analysis] FMP failed for {sym}, fallback AV: {_scrub_token(str(e))}")
+        raw = {
+            "overview": _alpha_vantage("OVERVIEW", sym),
+            "income": _alpha_vantage("INCOME_STATEMENT", sym),
+            "balance": _alpha_vantage("BALANCE_SHEET", sym),
+            "cashflow": _alpha_vantage("CASH_FLOW", sym),
+        }
+        payload = _build_fund_analysis(sym, raw, source="Alpha Vantage")
     payload["cached"] = False
     try:
         _write_ticker_json_cache(path, payload)
@@ -5565,6 +5821,7 @@ def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive:
     raw = _massive_daily_bars(ticker, period, interval) if prefer_massive else None
     if raw is None or len(raw) < 2:
         yf_symbol = ticker.replace(".", "-") if munge_dots else ticker
+        _log_ext_api_call("yfinance", "download")
         raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
@@ -9368,6 +9625,7 @@ def export_snapshot(ticker: str = "AAPL", period: str = "2y"):
     from fastapi.responses import HTMLResponse
 
     try:
+        _log_ext_api_call("yfinance", "download")
         raw = yf.download(ticker, period=period, interval="1wk",
                           auto_adjust=True, progress=False)
         if raw.empty:
@@ -9615,6 +9873,7 @@ if __name__ == "__main__":
     # ── eToro proxy ako background thread ─────────────────────────────────────
     try:
         import etoro_proxy as _ep
+        _ep.EXT_CALL_LOGGER = _log_ext_api_call  # eToro volá cez urllib, nie requests
         _ep.start_proxy_thread()
     except Exception as e:
         print(f"  WARN: eToro proxy thread zlyhalo: {e}")
