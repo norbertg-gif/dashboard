@@ -385,6 +385,44 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
             "https://financialmodelingprep.com/api/v3/income-statement/AAPL",
         ])
 
+    _FDN_PAYLOADS = {
+        "company-information": [{"registrant_name": "FDN Corp", "trading_symbol": "TEST"}],
+        "income-statements": [
+            {"revenue": 1000, "net_income": 150, "operating_income": 200},
+            {"revenue": 900, "net_income": 120, "operating_income": 170},
+        ],
+        "balance-sheet-statements": [{
+            "cash_and_cash_equivalents": 300, "short_term_debt": 50,
+            "long_term_debt": 150, "total_shareholders_equity": 800,
+        }],
+        "cash-flow-statements": [
+            {"cash_from_operating_activities": 250, "acquisition_of_property_plant_and_equipment": -50},
+            {"cash_from_operating_activities": 200, "acquisition_of_property_plant_and_equipment": -40},
+        ],
+        "key-metrics": [{"price_to_earnings_ratio": 20.0}],
+    }
+
+    def test_fdn_raw_feeds_existing_builder(self):
+        with patch.object(tb, "_fdn_get", lambda path, sym, extra=None: self._FDN_PAYLOADS[path]):
+            raw = tb._fdn_fund_raw("TEST")
+        payload = tb._build_fund_analysis("TEST", raw, source="FinancialData.net")
+        self.assertEqual(payload["source"], "FinancialData.net")
+        self.assertEqual(payload["company"], "FDN Corp")
+        # total debt = short + long
+        self.assertEqual(raw["balance"]["annualReports"][0]["shortLongTermDebtTotal"], 200)
+        for key in ("overall", "fundamentals", "valuation", "risk"):
+            self.assertTrue(0 <= payload["scores"][key] <= 100)
+
+    def test_endpoint_prefers_fdn_when_fmp_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "FUND_ANALYSIS_DIR", Path(tmp)),
+                patch.object(tb, "_fmp_fund_raw", side_effect=RuntimeError("FMP down")),
+                patch.object(tb, "_fdn_get", lambda path, sym, extra=None: self._FDN_PAYLOADS[path]),
+            ):
+                payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(payload["source"], "FinancialData.net")
+
     def test_endpoint_falls_back_to_alpha_vantage(self):
         av_payloads = {
             "OVERVIEW": {"Name": "AV Corp", "PERatio": "20"},

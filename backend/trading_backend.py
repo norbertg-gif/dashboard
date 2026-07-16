@@ -2705,6 +2705,7 @@ _orig_requests_get = requests.get
 _API_HOST_PROVIDERS = (
     ("alphavantage.co", "alpha_vantage"),
     ("financialmodelingprep.com", "fmp"),
+    ("financialdata.net", "financialdata"),
     ("finnhub.io", "finnhub"),
     ("api.massive.com", "massive"),
     ("finance.yahoo.com", "yahoo"),
@@ -2922,6 +2923,87 @@ def _fmp_fund_raw(sym: str) -> dict:
         "cashflow": {"annualReports": cashflow_rows},
     }
 
+# ── FinancialData.net ako druhý fallback (free 300 req/deň) ──────────────────
+def _fdn_get(path: str, sym: str, extra: dict | None = None):
+    api_key = os.getenv("FINANCIALDATA_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("FINANCIALDATA_API_KEY nie je nastavený")
+    r = requests.get(
+        f"https://financialdata.net/api/v1/{path}",
+        params={"identifier": sym, "key": api_key, **(extra or {})},
+        timeout=12,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"FDN {path}: HTTP {r.status_code}")
+    data = r.json()
+    if not data:
+        raise RuntimeError(f"FDN {path}: empty")
+    if isinstance(data, dict) and (data.get("error") or data.get("message")):
+        raise RuntimeError(f"FDN {path}: error payload")
+    return data
+
+def _fdn_fund_raw(sym: str) -> dict:
+    """5 FDN volaní → raw dict v AV tvare pre _build_fund_analysis."""
+    profile = _fdn_get("company-information", sym)
+    income = _fdn_get("income-statements", sym, {"period": "year"})
+    balance = _fdn_get("balance-sheet-statements", sym, {"period": "year"})
+    cashflow = _fdn_get("cash-flow-statements", sym, {"period": "year"})
+    try:
+        metrics = _fdn_get("key-metrics", sym)
+    except Exception:
+        metrics = []
+    prof = profile[0] if isinstance(profile, list) and profile else (profile if isinstance(profile, dict) else {})
+    met = metrics[0] if isinstance(metrics, list) and metrics else (metrics if isinstance(metrics, dict) else {})
+
+    def _first_rows(data, n=2):
+        rows = data if isinstance(data, list) else []
+        return [r for r in rows if isinstance(r, dict)][:n]
+
+    income_rows = []
+    for r in _first_rows(income):
+        income_rows.append({
+            "totalRevenue": r.get("revenue"),
+            "netIncome": r.get("net_income"),
+            "operatingIncome": r.get("operating_income"),
+        })
+    balance_rows = []
+    for r in _first_rows(balance, 1):
+        st_debt = _fund_num(r.get("short_term_debt"))
+        lt_debt = _fund_num(r.get("long_term_debt"))
+        total_debt = None if st_debt is None and lt_debt is None else (st_debt or 0) + (lt_debt or 0)
+        balance_rows.append({
+            "cashAndCashEquivalentsAtCarryingValue": r.get("cash_and_cash_equivalents"),
+            "shortLongTermDebtTotal": total_debt,
+            "longTermDebt": r.get("long_term_debt"),
+            "shortTermDebt": r.get("short_term_debt"),
+            "totalShareholderEquity": r.get("total_shareholders_equity"),
+        })
+    cashflow_rows = []
+    for r in _first_rows(cashflow):
+        cashflow_rows.append({
+            "operatingCashflow": r.get("cash_from_operating_activities"),
+            "capitalExpenditures": r.get("acquisition_of_property_plant_and_equipment"),
+        })
+    if not income_rows or _fund_num(income_rows[0].get("totalRevenue")) is None:
+        raise RuntimeError("FDN income-statements: unusable rows")
+    if not balance_rows or not cashflow_rows:
+        raise RuntimeError("FDN balance/cash-flow: unusable rows")
+    overview = {
+        "Name": prof.get("registrant_name") or prof.get("trading_symbol"),
+        "PERatio": _fund_num(met.get("price_to_earnings_ratio")),
+        "ForwardPE": None,
+        "PriceToSalesRatioTTM": None,  # FDN key-metrics P/S nemá — skóre degraduje na neutrál
+        "EVToEBITDA": None,
+        "ProfitMargin": None,  # builder si net margin dopočíta z net_income/revenue
+        "AnalystTargetPrice": None,
+    }
+    return {
+        "overview": overview,
+        "income": {"annualReports": income_rows},
+        "balance": {"annualReports": balance_rows},
+        "cashflow": {"annualReports": cashflow_rows},
+    }
+
 def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> dict:
     overview = raw.get("overview") or {}
     income = _fund_latest(raw.get("income") or {}, "annualReports")
@@ -3009,14 +3091,16 @@ def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> 
     }
 
 @app.get("/api/diagnostics/fund-fmp/{symbol}")
-def diag_fund_fmp(symbol: str):
-    """Debug: vráti FMP→AV mapovaný raw tvar pre overenie field mappingu. Bez kľúča v odpovedi."""
+def diag_fund_fmp(symbol: str, source: str = Query("fmp")):
+    """Debug: vráti FMP/FDN→AV mapovaný raw tvar pre overenie field mappingu.
+    ?source=fdn otestuje FinancialData.net. Bez kľúča v odpovedi."""
     sym = _validate_ticker_symbol(symbol)
+    fetcher = _fdn_fund_raw if source.lower() == "fdn" else _fmp_fund_raw
     try:
-        raw = _fmp_fund_raw(sym)
-        return {"ticker": sym, "ok": True, "raw": raw}
+        raw = fetcher(sym)
+        return {"ticker": sym, "source": source.lower(), "ok": True, "raw": raw}
     except Exception as e:
-        return {"ticker": sym, "ok": False, "error": _scrub_token(str(e))}
+        return {"ticker": sym, "source": source.lower(), "ok": False, "error": _scrub_token(str(e))}
 
 @app.get("/api/ticker/fund-analysis/{symbol}")
 def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
@@ -3030,12 +3114,19 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
     # Primárne FMP (free 250 req/deň, ~5 volaní/ticker), fallback Alpha Vantage
     # (25 req/deň, 4 volania/ticker). Cache/UX filozofia sa nemení — stále len
     # explicitný klik, 7-dňová disk cache, refresh=1 obíde cache.
-    try:
-        raw = _fmp_fund_raw(sym)
-        payload = _build_fund_analysis(sym, raw, source="FMP")
-    except Exception as e:
-        fmp_reason = _scrub_token(str(e))
-        print(f"[fund-analysis] FMP failed for {sym}, fallback AV: {fmp_reason}")
+    # Reťaz zdrojov: FMP (250/deň) → FinancialData.net (300/deň) → Alpha Vantage
+    # (25/deň). Chybová hláška vždy nesie dôvody všetkých zlyhaných zdrojov.
+    reasons = []
+    payload = None
+    for source, fetcher in (("FMP", _fmp_fund_raw), ("FinancialData.net", _fdn_fund_raw)):
+        try:
+            raw = fetcher(sym)
+            payload = _build_fund_analysis(sym, raw, source=source)
+            break
+        except Exception as e:
+            reasons.append(f"{source}: {_scrub_token(str(e))}")
+            print(f"[fund-analysis] {source} failed for {sym}: {_scrub_token(str(e))}")
+    if payload is None:
         try:
             raw = {
                 "overview": _alpha_vantage("OVERVIEW", sym),
@@ -3045,12 +3136,8 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
             }
             payload = _build_fund_analysis(sym, raw, source="Alpha Vantage")
         except HTTPException as av_exc:
-            # Ukáž skutočnú príčinu: prečo zlyhal primárny FMP aj fallback AV —
-            # samotná AV hláška by zavádzala, že problém je len v AV limite.
-            raise HTTPException(
-                status_code=av_exc.status_code,
-                detail=f"FMP: {fmp_reason} · Alpha Vantage fallback: {av_exc.detail}",
-            )
+            reasons.append(f"Alpha Vantage: {av_exc.detail}")
+            raise HTTPException(status_code=av_exc.status_code, detail=" · ".join(reasons))
     payload["cached"] = False
     try:
         _write_ticker_json_cache(path, payload)
@@ -7668,8 +7755,8 @@ def _scrub_token(msg: str) -> str:
     company_profiles/{SYM}.json na disku.
     2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
     Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
-    msg = re.sub(r"(token|apikey)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN"):
+    msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
+    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN"):
         secret = os.getenv(env_name, "").strip()
         if len(secret) >= 8:
             msg = msg.replace(secret, "***")
