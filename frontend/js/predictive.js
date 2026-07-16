@@ -2424,19 +2424,21 @@ function pc_renderNewsModalBlock(data) {
 
 // Predictive fallback: keď /api/chart nedodá earnings dátum (Finnhub/AV na serveri
 // zlyhali), dotiahni kalendár vrátane browser-direct AV cesty a doplň kartu.
-async function pc_ensureEarningsDate(ticker) {
+async function pc_ensureEarningsDate(ticker, refresh = false) {
   const card = document.getElementById('earningsCard');
   if (!card || !ticker) return;
-  if (!card.querySelector('.earnings-unavailable')) return;   // dátum už máme
-  await loadEarningsCalendar();
-  if (!card.querySelector('.earnings-unavailable')) return;   // medzitým prekreslené
+  if (!refresh && !card.querySelector('.earnings-unavailable')) return;   // dátum už máme
+  if (!refresh) {
+    await loadEarningsCalendar();
+    if (!card.querySelector('.earnings-unavailable')) return;   // medzitým prekreslené
+  }
   const sym = String(ticker).toUpperCase();
-  let d = _earningsDates && _earningsDates[sym];
+  let d = !refresh && _earningsDates && _earningsDates[sym];
   if (!d) {
     // bulk kalendár symbol nemá (Finnhub free občas vynecháva veľké tituly)
-    // → per-symbol endpoint (Finnhub ?symbol= → yfinance)
+    // → per-symbol endpoint (Finnhub ?symbol= → Yahoo → yfinance), cache 7 dní
     try {
-      const r = await fetch('/api/earnings/' + encodeURIComponent(sym));
+      const r = await fetch(`/api/earnings/${encodeURIComponent(sym)}${refresh ? '?refresh=1' : ''}`);
       if (r.ok) {
         const j = await r.json();
         if (j.date) { d = j.date; if (_earningsDates) _earningsDates[sym] = d; }
@@ -2444,13 +2446,15 @@ async function pc_ensureEarningsDate(ticker) {
     } catch (e) {}
   }
   if (!d) {
-    const note = card.querySelector('.earnings-unavailable-note');
-    if (note) {
-      const n = Object.keys(_earningsDates || {}).length;
-      note.textContent = n
+    const n = Object.keys(_earningsDates || {}).length;
+    card.innerHTML = `
+      <div class="card-title">Najbližší Earnings</div>
+      <div class="earnings-unavailable">Zatiaľ nedostupné</div>
+      <div class="earnings-unavailable-note">${n
         ? `Kalendár (${n} tickerov) ani per-symbol dopyt nemá termín pre ${sym}.`
-        : 'Kalendár nedostupný — všetky zdroje zlyhali.';
-    }
+        : 'Kalendár nedostupný — všetky zdroje zlyhali.'} Cache 7 dní.</div>
+      <button type="button" class="btn fair-value-load" data-sym="${escHtml(sym)}" onclick="pc_ensureEarningsDate(this.dataset.sym, true)">⟳ Skúsiť znova</button>
+    `;
     return;
   }
   const dt = new Date(d + 'T00:00:00');

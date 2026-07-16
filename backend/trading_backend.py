@@ -9009,7 +9009,33 @@ def get_ticker_profile(symbol: str, refresh: int = Query(0)):
     return payload
 
 
-def _earnings_next_date(symbol: str) -> str | None:
+EARNINGS_SYMBOL_DIR = DATA_ROOT / "earnings_symbol"
+EARNINGS_SYMBOL_TTL_H = 168  # 7 dní — earnings dátum sa nemení z hodiny na hodinu
+EARNINGS_SYMBOL_SCHEMA_VERSION = 1
+
+def _earnings_next_date(symbol: str, refresh: int = 0) -> str | None:
+    """Per-symbol 7-dňová disk cache (pozitívna aj negatívna — "nenájdené" sa
+    tiež cachuje) okolo _earnings_next_date_uncached. Predtým každý klik na
+    Predictive tab pre ticker bez bulk dátumu znova zapaľoval celý
+    Finnhub→Yahoo→yfinance reťazec (žiadny backoff na Yahoo/yfinance vetvu)."""
+    sym = _validate_ticker_symbol(symbol)  # symbol ide do názvu súboru — musí byť whitelisted
+    path = EARNINGS_SYMBOL_DIR / f"{sym}.json"
+    if not refresh:
+        cached = _read_ticker_json_cache(path, EARNINGS_SYMBOL_SCHEMA_VERSION, EARNINGS_SYMBOL_TTL_H)
+        if cached is not None:
+            return cached.get("date")
+    d = _earnings_next_date_uncached(sym)
+    try:
+        _write_ticker_json_cache(path, {
+            "schema_version": EARNINGS_SYMBOL_SCHEMA_VERSION,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "date": d,
+        })
+    except Exception:
+        pass
+    return d
+
+def _earnings_next_date_uncached(symbol: str) -> str | None:
     """Najbližší earnings dátum pre symbol: bulk kalendár → Finnhub per-symbol
     (bulk free kalendár veľké tituly občas vynecháva) → yfinance fallback."""
     sym = symbol.upper()
@@ -9070,9 +9096,11 @@ def _earnings_next_date(symbol: str) -> str | None:
 
 
 @app.get("/api/earnings/{symbol}")
-def get_earnings_for_symbol(symbol: str):
-    """Per-ticker earnings dátum pre Predictive kartu (bulk → Finnhub symbol → yf)."""
-    return {"ticker": symbol.upper(), "date": _earnings_next_date(symbol)}
+def get_earnings_for_symbol(symbol: str, refresh: int = Query(0)):
+    """Per-ticker earnings dátum pre Predictive kartu (bulk → Finnhub symbol → yf).
+    7-dňová cache (aj negatívna); refresh=1 ju obíde."""
+    sym = _validate_ticker_symbol(symbol)
+    return {"ticker": sym, "date": _earnings_next_date(sym, refresh=refresh)}
 
 
 # ── Market context (Scanner) — QQQ/SPY trend, VIX, breadth, sektory ──────────

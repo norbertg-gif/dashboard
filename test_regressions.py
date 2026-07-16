@@ -441,6 +441,48 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
         self.assertEqual(payload["company"], "AV Corp")
 
 
+class EarningsSymbolCacheRegressionTests(unittest.TestCase):
+    def test_positive_and_negative_results_are_cached(self):
+        calls = []
+        def fake_uncached(sym):
+            calls.append(sym)
+            return "2026-08-01" if sym == "AAPL" else None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "EARNINGS_SYMBOL_DIR", Path(tmp)),
+                patch.object(tb, "_earnings_next_date_uncached", fake_uncached),
+            ):
+                # pozitívny prípad: druhé volanie musí prísť z cache
+                self.assertEqual(tb._earnings_next_date("AAPL"), "2026-08-01")
+                self.assertEqual(tb._earnings_next_date("AAPL"), "2026-08-01")
+                # negatívny prípad: "nenájdené" sa tiež cachuje, nespúšťa reťazec znova
+                self.assertIsNone(tb._earnings_next_date("ZZZZ"))
+                self.assertIsNone(tb._earnings_next_date("ZZZZ"))
+        self.assertEqual(calls, ["AAPL", "ZZZZ"])
+
+    def test_path_traversal_symbol_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(tb, "EARNINGS_SYMBOL_DIR", Path(tmp)):
+                with self.assertRaises(HTTPException) as caught:
+                    tb._earnings_next_date("../../etc/passwd")
+        self.assertEqual(caught.exception.status_code, 400)
+
+    def test_refresh_bypasses_cache(self):
+        calls = []
+        def fake_uncached(sym):
+            calls.append(sym)
+            return "2026-08-01"
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "EARNINGS_SYMBOL_DIR", Path(tmp)),
+                patch.object(tb, "_earnings_next_date_uncached", fake_uncached),
+            ):
+                tb._earnings_next_date("AAPL")
+                tb._earnings_next_date("AAPL", refresh=1)
+        self.assertEqual(calls, ["AAPL", "AAPL"])
+
+
 class ApiCallStatsRegressionTests(unittest.TestCase):
     def test_log_and_read_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
