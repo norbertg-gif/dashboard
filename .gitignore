@@ -19,3 +19,7 @@ predictive_signals_archive.json
 predictive_weights_log.json
 peers/
 ticker_memos/
+fund_analysis/
+earnings_symbol/
+api_call_stats.json
+.claude/
