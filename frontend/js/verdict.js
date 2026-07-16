@@ -17,7 +17,7 @@ function initVerdictView(preferredTicker = '') {
   if (preferred) input.value = preferred;
   else if (!input.value) input.value = currentContextTicker();
   const sym = input.value.trim().toUpperCase();
-  if (sym && (!verdictLastData || verdictLastTicker !== sym)) loadVerdict();
+  if (sym && (!verdictLastData || verdictLastTicker !== sym)) return loadVerdict();
 }
 
 function openVerdictTicker(ticker, event) {

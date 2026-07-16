@@ -102,6 +102,9 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
           SCANNER_CLIENT_CACHE_MS.scannerResults,
         );
       } catch(e) { /* non-critical */ }
+      // Predhrej aj Históriu a Verdikt, aby sa pri prvom otvorení vykreslili bez čakania.
+      try { await renderHistoryView(); } catch(e) { /* non-critical */ }
+      try { await initVerdictView(); } catch(e) { /* non-critical */ }
     }, 2000);
     refreshWatchlistNames();   // len dopĺňa chýbajúce názvy — netreba naň čakať
     // Subscribe existujúce watchlist tickery na WS
