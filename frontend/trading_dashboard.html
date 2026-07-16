@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260716-175441">
+<link rel="stylesheet" href="/dashboard.css?v=20260716-190429">
 </head>
 <body>
 
@@ -30,11 +30,11 @@
     <div class="main-tab" id="tab-scanner" onclick="switchMainTab('scanner')">Scanner <button class="tab-popout" onclick="openMainTabWindow(event,'scanner')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-verdict" onclick="switchMainTab('verdict')">Verdikt <button class="tab-popout" onclick="openMainTabWindow(event,'verdict')" title="Otvoriť v novej karte">↗</button></div>
   </div>
+  <div id="header-equities" aria-label="Live equity eToro uctov">
+    <div class="header-equity acct1" onclick="switchAccount('1')" style="cursor:pointer;" title="Prepnúť na účet 1"><span class="header-equity-label" id="header-equity-label-1">Ucet 1</span><strong id="header-equity-1">--</strong></div>
+    <div class="header-equity acct2" onclick="switchAccount('2')" style="cursor:pointer;" title="Prepnúť na účet 2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
+  </div>
   <div id="hdr-right">
-    <div id="header-equities" aria-label="Live equity eToro uctov">
-      <div class="header-equity acct1" onclick="switchAccount('1')" style="cursor:pointer;" title="Prepnúť na účet 1"><span class="header-equity-label" id="header-equity-label-1">Ucet 1</span><strong id="header-equity-1">--</strong></div>
-      <div class="header-equity acct2" onclick="switchAccount('2')" style="cursor:pointer;" title="Prepnúť na účet 2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
-    </div>
     <div id="ws-status" title="eToro WebSocket — live ceny" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);"><span id="ws-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block;"></span><span id="ws-status-txt">WS</span></div>
     <button id="settings-btn" onclick="openSettingsModal()" title="Nastavenia prahov (DCA, Pozornosť, earnings)" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">⚙</button>
     <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>

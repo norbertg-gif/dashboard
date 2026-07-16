@@ -942,7 +942,7 @@ body.sidebar-collapsed #sb-resizer {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 0 auto;
+  margin: 0;
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: 12px;
