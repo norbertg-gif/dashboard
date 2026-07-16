@@ -2904,7 +2904,8 @@ def _fmp_fund_raw(sym: str) -> dict:
     }
     def _rows(data, mapping):
         rows = data if isinstance(data, list) else []
-        return [_fmp_row_to_av(r, mapping) for r in rows if isinstance(r, dict)]
+        mapped = [_fmp_row_to_av(r, mapping) for r in rows if isinstance(r, dict)]
+        return [m for m in mapped if m]  # riadok bez jediného známeho fieldu = nepoužiteľný
     income_rows = _rows(income, _FMP_INCOME_MAP)
     balance_rows = _rows(balance, _FMP_BALANCE_MAP)
     cashflow_rows = _rows(cashflow, _FMP_CASHFLOW_MAP)

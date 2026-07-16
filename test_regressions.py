@@ -354,14 +354,16 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
             self.assertTrue(0 <= payload["scores"][key] <= 100)
 
     def test_unusable_fmp_rows_raise_for_av_fallback(self):
-        # HTTP 200 s nekompatibilnými fieldmi nesmie prejsť ako FMP dáta
-        def bad_fmp_get(path, sym, extra=None):
-            if path == "income-statement":
-                return [{"unexpectedField": 1}]
-            return self._fake_fmp_get(path, sym, extra)
-        with patch.object(tb, "_fmp_fund_get", bad_fmp_get):
-            with self.assertRaises(RuntimeError):
-                tb._fmp_fund_raw("TEST")
+        # HTTP 200 s nekompatibilnými fieldmi nesmie prejsť ako FMP dáta —
+        # pre každý z troch výkazov zvlášť
+        for bad_path in ("income-statement", "balance-sheet-statement", "cash-flow-statement"):
+            def bad_fmp_get(path, sym, extra=None, _bad=bad_path):
+                if path == _bad:
+                    return [{"unexpectedField": 1}]
+                return self._fake_fmp_get(path, sym, extra)
+            with patch.object(tb, "_fmp_fund_get", bad_fmp_get):
+                with self.assertRaises(RuntimeError, msg=f"bad {bad_path} must raise"):
+                    tb._fmp_fund_raw("TEST")
 
     def test_fmp_get_builds_v3_url_with_symbol_in_path(self):
         urls = []
