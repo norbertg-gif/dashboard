@@ -2923,16 +2923,27 @@ def _fmp_fund_raw(sym: str) -> dict:
         "cashflow": {"annualReports": cashflow_rows},
     }
 
-# ── FinancialData.net ako druhý fallback (free 300 req/deň) ──────────────────
+# ── FinancialData.net ako druhý fallback ─────────────────────────────────────
+# POZOR (overené 2026-07-16): free plán výkazové endpointy NEMÁ — vracia 401 aj
+# s platným kľúčom (company-information/income-statements sú "Standard" tier).
+# Reťaz ho drží pre prípad upgradu plánu; po prvom 401 sa do reštartu preskakuje.
+_fdn_unauthorized = False
+
 def _fdn_get(path: str, sym: str, extra: dict | None = None):
+    global _fdn_unauthorized
     api_key = os.getenv("FINANCIALDATA_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("FINANCIALDATA_API_KEY nie je nastavený")
+    if _fdn_unauthorized:
+        raise RuntimeError("FDN: free plán nemá výkazové endpointy (401) — preskakujem")
     r = requests.get(
         f"https://financialdata.net/api/v1/{path}",
         params={"identifier": sym, "key": api_key, **(extra or {})},
         timeout=12,
     )
+    if r.status_code == 401:
+        _fdn_unauthorized = True
+        raise RuntimeError(f"FDN {path}: HTTP 401 (plán nemá tento endpoint)")
     if r.status_code != 200:
         raise RuntimeError(f"FDN {path}: HTTP {r.status_code}")
     data = r.json()
@@ -3096,6 +3107,9 @@ def diag_fund_fmp(symbol: str, source: str = Query("fmp")):
     ?source=fdn otestuje FinancialData.net. Bez kľúča v odpovedi."""
     sym = _validate_ticker_symbol(symbol)
     fetcher = _fdn_fund_raw if source.lower() == "fdn" else _fmp_fund_raw
+    if source.lower() == "fdn":
+        global _fdn_unauthorized
+        _fdn_unauthorized = False  # diag = explicitný re-test, napr. po upgrade plánu
     try:
         raw = fetcher(sym)
         return {"ticker": sym, "source": source.lower(), "ok": True, "raw": raw}
