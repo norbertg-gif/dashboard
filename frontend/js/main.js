@@ -83,6 +83,26 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
         loadPortData('main');
       }
     }
+    // Predhrej Scanner sekvenčne cez cache nezávislú od DOM, až po kritickom štarte.
+    setTimeout(async () => {
+      try { await loadDipStatus(); } catch(e) { /* non-critical */ }
+      try { await loadInvestorInbox(); } catch(e) { /* non-critical */ }
+      try { await loadEarningsCalendarWidget(); } catch(e) { /* non-critical */ }
+      try {
+        await scannerCachedJson(
+          'weeklyPlan',
+          `${API}/api/investor/plan`,
+          SCANNER_CLIENT_CACHE_MS.weeklyPlan,
+        );
+      } catch(e) { /* non-critical */ }
+      try {
+        await scannerCachedJson(
+          'scannerResults',
+          '/api/scanner/nasdaq/results',
+          SCANNER_CLIENT_CACHE_MS.scannerResults,
+        );
+      } catch(e) { /* non-critical */ }
+    }, 2000);
     refreshWatchlistNames();   // len dopĺňa chýbajúce názvy — netreba naň čakať
     // Subscribe existujúce watchlist tickery na WS
     for (const item of watchlist) {
