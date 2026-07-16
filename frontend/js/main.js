@@ -66,7 +66,7 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
       await loadEtoroAccounts();
       await loadHeaderPortfolioAccounts();
     })();
-    // Grafy, watchlist ceny, eToro watchlist ID a účty sú navzájom nezávislé —
+    // Týchto 5 úloh je navzájom nezávislých —
     // pôvodný sekvenčný vodopád zdržiaval štart o súčet všetkých latencií.
     await Promise.all([
       loadAll(),
@@ -75,6 +75,14 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
       loadEtoroWatchlistId(),
       etoroInit,
     ]);
+    const mainPortState = getPortState('main');
+    if (!mainPortState.data) {
+      if (portfolioAccountData[mainPortState.account]) {
+        mainPortState.data = portfolioAccountData[mainPortState.account];
+      } else {
+        loadPortData('main');
+      }
+    }
     refreshWatchlistNames();   // len dopĺňa chýbajúce názvy — netreba naň čakať
     // Subscribe existujúce watchlist tickery na WS
     for (const item of watchlist) {
