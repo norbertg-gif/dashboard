@@ -105,6 +105,9 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
       // Predhrej aj Históriu a Verdikt, aby sa pri prvom otvorení vykreslili bez čakania.
       try { await renderHistoryView(); } catch(e) { /* non-critical */ }
       try { await initVerdictView(); } catch(e) { /* non-critical */ }
+      // Analytika: iba dátový fetch (nie initCharts()/renderCharts() — chart séria
+      // vznikne až pri prvom otvorení tabu), loadData() cache pri otvorení nájde sama.
+      try { await pc_prefetchChartData(); } catch(e) { /* non-critical */ }
     }, 2000);
     refreshWatchlistNames();   // len dopĺňa chýbajúce názvy — netreba naň čakať
     // Subscribe existujúce watchlist tickery na WS

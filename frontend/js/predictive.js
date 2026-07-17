@@ -243,6 +243,33 @@ let pc_hideBacktestMisses = localStorage.getItem(PC_HIDE_MISSES_KEY) === '1';
 let pc_lastData = null;
 const PC_LAST_TICKER_KEY = 'td_predictive_ticker';
 
+// Data-only prefetch (bez initCharts()/renderCharts() — chart séria neexistuje,
+// kým sa Analytika prvýkrát neotvorí). loadData() cache skontroluje sama.
+const pc_chartDataCache = new Map();
+
+async function pc_prefetchChartData() {
+  try {
+    // Ak už bol tab reálne otvorený (napr. priamy ?tab=predictive), loadData()
+    // už prebehla naostro — neprepisuj čerstvé dáta/rozrobený ticker starším fetchom.
+    if (window._predChartInitialized) return;
+    // restorePredictiveTicker() sa už zavolala skoro pri štarte (main.js) — tu ju
+    // NEVOLAŤ znova, aby sme o pár sekúnd neprepísali ticker, ktorý si užívateľ
+    // medzičasom rozpísal do poľa.
+    const ticker = document.getElementById('tickerInput')?.value?.trim()?.toUpperCase();
+    const period = document.getElementById('periodSel')?.value || '2y';
+    if (!ticker) return;
+    const detail = isAdvancedUiMode() ? 'advanced' : 'basic';
+    const key = `${ticker}:${period}:${detail}`;
+    const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=false&detail=${detail}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    // Znovu skontroluj: tab mohol byť reálne otvorený (a loadData() dobehnutá)
+    // práve počas tohto fetchu — vtedy by zápis do cache bol už len neaktuálny.
+    if (window._predChartInitialized) return;
+    pc_chartDataCache.set(key, data);
+  } catch (e) { /* non-critical */ }
+}
+
 function restorePredictiveTicker() {
   const input = document.getElementById('tickerInput');
   if (!input) return;
@@ -2585,12 +2612,20 @@ async function loadData(reoptimize = false) {
 
   try {
     const detail = isAdvancedUiMode() ? 'advanced' : 'basic';
-    const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}`);
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || res.statusText);
+    const cacheKey = `${ticker}:${period}:${detail}`;
+    let data;
+    if (!reoptimize && pc_chartDataCache.has(cacheKey)) {
+      // Predhriate na pozadí pri štarte (pc_prefetchChartData) — obíď fetch.
+      data = pc_chartDataCache.get(cacheKey);
+      pc_chartDataCache.delete(cacheKey);
+    } else {
+      const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || res.statusText);
+      }
+      data = await res.json();
     }
-    const data = await res.json();
     pc_lastData = data;
     wsSubscribeSymbol(ticker);
     renderCharts(data);
