@@ -968,6 +968,7 @@ function renderNasdaqScanner(payload) {
       <td>${escHtml(reason)}</td>
     </tr>`;
   }).join('') + `</tbody></table></div>
+    <div id="scanner-notes-resizer" class="scanner-notes-resizer"></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">
         <span class="scanner-notes-title">Poznámky</span>
@@ -1281,6 +1282,7 @@ function saveScannerNotes(content) {
 }
 
 function attachScannerNotesPanel() {
+  if (typeof window.initScannerNotesResize === 'function') window.initScannerNotesResize();
   const box = document.getElementById('scannerNotesBox');
   if (!box || box.dataset.bound) return;
   box.dataset.bound = '1';

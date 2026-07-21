@@ -206,6 +206,47 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   });
 })();
 
+// ── SCANNER NOTES RESIZE ─────────────────────────────────────────────────────
+(function() {
+  const MIN_W = 220, DEFAULT_W = 400;
+  const maxNotesWidth = () => Math.max(MIN_W, Math.floor(window.innerWidth * 0.6));
+
+  window.initScannerNotesResize = function() {
+    const resizer = document.getElementById('scanner-notes-resizer');
+    const panel = document.querySelector('.scanner-notes-panel');
+    if (!resizer || !panel) return;
+
+    const saved = parseInt(localStorage.getItem('td_scanner_notes_width'));
+    const restored = Number.isFinite(saved) ? saved : DEFAULT_W;
+    panel.style.setProperty('--scanner-notes-width', Math.min(maxNotesWidth(), Math.max(MIN_W, restored)) + 'px');
+    if (resizer.dataset.bound) return;
+    resizer.dataset.bound = '1';
+
+    resizer.addEventListener('mousedown', e => {
+      const startX = e.clientX;
+      const startW = panel.offsetWidth;
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(e) {
+        const w = Math.min(maxNotesWidth(), Math.max(MIN_W, startW - (e.clientX - startX)));
+        panel.style.setProperty('--scanner-notes-width', w + 'px');
+      }
+      function onUp() {
+        localStorage.setItem('td_scanner_notes_width', panel.offsetWidth);
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  };
+})();
+
 // ══ Predictive Chart JS ══
 
 // Make pc_ vars accessible cross-script via window

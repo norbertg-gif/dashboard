@@ -1660,6 +1660,8 @@ function renderPortPanel(pid) {
   }
   html += `</div></div></div></div>`;
 
+  html += `<div class="port-main-row"><aside class="port-side-col">`;
+
   // Summary bar
   const liveSummaryPnl = Number(sum._liveTotalPnl ?? sum.total_pnl ?? 0);
   const liveSummaryEquity = Number(sum._liveEquity ?? sum.equity ?? 0);
@@ -1699,6 +1701,8 @@ function renderPortPanel(pid) {
       setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
     }
   }
+
+  html += `</aside><div class="port-content-col">`;
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
@@ -1879,6 +1883,7 @@ function renderPortPanel(pid) {
     }
   }
 
+  html += `</div></div>`;
   html += `</div>`;
   cont.innerHTML = html;
   if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);

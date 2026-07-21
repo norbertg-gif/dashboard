@@ -1422,6 +1422,35 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--up-soft);
 }
 
+.port-main-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.port-side-col {
+  flex: 0 0 320px;
+  width: 320px;
+  min-width: 280px;
+  max-width: 35vw;
+}
+.port-content-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+.port-side-col .port-summary {
+  flex-wrap: wrap;
+  gap: 12px 18px;
+}
+.port-side-col .port-sum-item {
+  flex: 1 1 calc(50% - 9px);
+  min-width: 90px;
+  padding: 0;
+  border-right: 0;
+}
+
 .port-summary {
   display: flex;
   gap: 24px;
@@ -3655,7 +3684,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 
 .scanner-main-row {
   display: flex;
-  gap: 12px;
+  gap: 0;
   align-items: flex-start;
   width: 100%;
 }
@@ -3664,11 +3693,10 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-width: 0;
 }
 .scanner-notes-panel {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 var(--scanner-notes-width, 400px);
+  width: var(--scanner-notes-width, 400px);
   min-width: 220px;
   max-width: 60vw;
-  resize: horizontal;
   overflow: auto;
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -3676,6 +3704,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   display: flex;
   flex-direction: column;
   align-self: stretch;
+}
+.scanner-notes-resizer {
+  flex: 0 0 6px;
+  align-self: stretch;
+  margin: 0 3px;
+  min-height: 300px;
+  cursor: col-resize;
+  background: transparent;
+}
+.scanner-notes-resizer:hover, .scanner-notes-resizer.dragging {
+  background: var(--accent);
+  opacity: 0.5;
 }
 .scanner-notes-head {
   display: flex;
@@ -3734,7 +3774,15 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin: 4px 0;
 }
 @media (max-width: 1100px) {
+  .port-main-row { flex-direction: column; }
+  .port-side-col {
+    width: 100%;
+    max-width: none;
+    flex: 0 0 auto;
+  }
+  .port-content-col { width: 100%; }
   .scanner-main-row { flex-direction: column; }
+  .scanner-notes-resizer { display: none; }
   .scanner-notes-panel {
     width: 100%;
     flex: 0 0 auto;
