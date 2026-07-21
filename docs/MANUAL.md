@@ -173,7 +173,7 @@ SLEDOVANIE · BACKTEST · EXPORT).
 - **DCA kandidáti** (karta v Portfóliu) spája agregovaný P/L pozície s DIP
   rankingom a pomáha rozhodnúť, či má zmysel dokupovať stratový titul. Ukáže len
   pozície v strate **≥ 15 %** a oflaguje ich:
-  - 🟢 **DCA** — strata ≥ 15 %, DIP ≥ 90 a váha pozície pod 10 % equity →
+  - 🟢 **DCA** — strata ≥ 15 %, DIP ≥ 95 a váha pozície pod 10 % equity →
     kvalitný dip, dokúpenie znižuje breakeven bez prílišnej koncentrácie.
   - 🟡 **Veľká váha** — DCA podmienky splnené, ale pozícia je už ≥ 10 % equity →
     dokúpenie by zvýšilo koncentračné riziko.
@@ -182,8 +182,8 @@ SLEDOVANIE · BACKTEST · EXPORT).
   - ⚪ **Mimo dát** — v strate, ale ticker nie je v DIP datasete (napr. európske
     tituly) → DIP filter sa nedá použiť, rozhodni sám.
   - Rozhoduje sa podľa **agregovaného P/L celej pozície** (súčet všetkých tranží),
-    nie podľa jednej tranže. Prahy (15 % / DIP 90 / 10 % váha) sú zladené so
-    zvy?kom appky (?15 % = hlb?ia strata, DIP 90 = p?smo STRONG).
+    nie podľa jednej tranže. Prahy (15 % / DIP 95 / 10 % váha) sú zladené so
+    zvy?kom appky (?15 % = hlb?ia strata, DIP 95 = p?smo STRONG).
   - Karta ukazuje **vek DIP dát** — skóre je z manuálneho Finviz importu, takže
     pri starých dátach ber DCA flag s rezervou (pokles mohol prísť práve preto,
     že sa fundament zmenil po importe).
@@ -688,7 +688,7 @@ obnovuje raz za 7 dní a pri výpadku sa použije posledná cache. Endpoint:
   z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100
   (napr. NYSE). Bez importu scanner použije Nasdaq-100 fallback.
 - V hlavnej tabuľke Scanner zobrazí každý úspešne spracovaný ticker z importu s
-  **TOTAL ≥80**, aj keď nemá čerstvý technický signál. Nižšie DIP skóre sa zobrazí
+  **TOTAL ≥85**, aj keď nemá čerstvý technický signál. Nižšie DIP skóre sa zobrazí
   iba pri aktuálnom signále. Tak zostanú viditeľné kvalitné kandidáty na manuálnu
   kontrolu grafu bez zahltenia celým Excelom.
 - **Spustiť scanner** — spustí paralelný sken importovaných DIP tickerov

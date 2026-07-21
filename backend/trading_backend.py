@@ -2289,7 +2289,7 @@ DASH_SETTINGS_FILE = DATA_ROOT / "dashboard_settings.json"
 _dash_settings_lock = threading.Lock()
 DASH_SETTINGS_DEFAULTS = {
     "dca_loss_pct": 15.0,        # strata pozície ≥ x % → DCA úvaha
-    "dca_dip_min": 90.0,         # DIP skóre ≥ x → kvalitný dip
+    "dca_dip_min": 95.0,         # DIP skóre ≥ x → kvalitný dip (zladené s DIP_STRONG_THRESHOLD, dip_strategy v3)
     "dca_max_weight": 10.0,      # váha pozície < x % equity → bez koncentračného rizika
     "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
@@ -5355,9 +5355,12 @@ SIGNAL_PROXIMITY_TOL = 0.005     # fallback keď ATR nie je k dispozícii
 SIGNAL_RSI_PULLBACK = 45
 SIGNAL_VOLUME_MULT = 1.2
 SIGNAL_ZSCORE_THRESHOLD = -1.5   # 60-period rolling z-score ≤ this = cena je štatisticky lacná
-DIP_STRONG_THRESHOLD = 90
-DIP_VERY_STRONG_THRESHOLD = 100
-DIP_SCANNER_VISIBILITY_THRESHOLD = 80  # show all imported WATCH+ DIP rows even without a fresh technical signal
+DIP_STRONG_THRESHOLD = 95
+DIP_VERY_STRONG_THRESHOLD = 105
+DIP_SCANNER_VISIBILITY_THRESHOLD = 85  # show all imported WATCH+ DIP rows even without a fresh technical signal
+# Thresholds rescaled 2026-07-21 for dip_strategy v3 (FA_SCORE max 80->100, TOTAL max 135->155).
+# Picked via percentile analysis of the new scale (not linear rescale) to preserve prior selectivity:
+# VERY_STRONG ~top 5%, STRONG ~top 20%, WATCH ~top 40% of a 200-ticker Finviz sample.
 SIGNAL_BUY_THRESHOLD = 3   # 3/4+ = plný buy signál, 2/4 = watch
 SIGNAL_OUTCOME_HORIZONS = (30, 60, 90)
 SIGNAL_OUTCOME_MOVE_THRESHOLD = 1.5  # fallback keď ATR nie je k dispozícii
@@ -5825,7 +5828,7 @@ def _dip_label(total):
         return "VERY STRONG"
     if total >= DIP_STRONG_THRESHOLD:
         return "STRONG"
-    if total >= 80:
+    if total >= DIP_SCANNER_VISIBILITY_THRESHOLD:
         return "WATCH"
     return "WEAK DIP"
 
