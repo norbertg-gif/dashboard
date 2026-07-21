@@ -301,10 +301,10 @@ class FairValueRegressionTests(unittest.TestCase):
 class ScannerVisibilityRegressionTests(unittest.TestCase):
     def test_high_dip_title_is_visible_without_recent_signal(self):
         self.assertTrue(tb._include_scanner_result(
-            {"ticker": "CTSH", "recent_signal": None}, {"CTSH": {"total": 80}}
+            {"ticker": "CTSH", "recent_signal": None}, {"CTSH": {"total": 85}}
         ))
         self.assertFalse(tb._include_scanner_result(
-            {"ticker": "LOW", "recent_signal": None}, {"LOW": {"total": 79}}
+            {"ticker": "LOW", "recent_signal": None}, {"LOW": {"total": 84}}
         ))
         self.assertTrue(tb._include_scanner_result(
             {"ticker": "SIG", "recent_signal": {"score": 2}}, {"SIG": {"total": 10}}
