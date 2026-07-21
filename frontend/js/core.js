@@ -215,7 +215,7 @@ function renderErrorBox(el, msg, retryFn) {
 // kým sa nedotiahne /api/settings.
 let dashSettings = {
   dca_loss_pct: 15,
-  dca_dip_min: 90,
+  dca_dip_min: 95,
   dca_max_weight: 10,
   attention_daily_pct: 2,
   earnings_warn_days: 7,

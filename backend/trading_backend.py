@@ -7190,7 +7190,7 @@ def get_assistant_export():
         "generated_at": now.isoformat(),
         "currency": "USD",
         "strategy": {
-            "name": "DIP Strategy v2",
+            "name": "DIP Strategy v3",
             "dca_trigger_pct": -float(settings["dca_loss_pct"]),
             "dca_min_dip_score": settings["dca_dip_min"],
             "holding_horizon": "1-3 years",
