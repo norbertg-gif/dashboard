@@ -1702,7 +1702,7 @@ function renderPortPanel(pid) {
     }
   }
 
-  html += `</aside><div class="port-content-col">`;
+  html += `</aside><div id="port-side-resizer-${pid}" class="port-side-resizer"></div><div class="port-content-col">`;
 
   // Tabuľka pozícií
   if (s.filter !== 'mirrors') {
@@ -1888,6 +1888,7 @@ function renderPortPanel(pid) {
   cont.innerHTML = html;
   if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);
   resolveGfLinks();
+  if (typeof window.initPortSideResize === 'function') window.initPortSideResize(pid);
   if (pid === 'main' && typeof syncChartDockPosition === 'function') {
     syncChartDockPosition();
   }

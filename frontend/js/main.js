@@ -247,6 +247,51 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   };
 })();
 
+// ── PORTFOLIO SIDE COLUMN RESIZE ─────────────────────────────────────────────
+// Na rozdiel od Scanner poznámok je tu vysúvaný panel VĽAVO od resizera —
+// ťahanie doprava teda šírku zväčšuje (opačné znamienko než scanner).
+(function() {
+  const MIN_W = 280, DEFAULT_W = 320;
+  const maxSideWidth = () => Math.max(MIN_W, Math.floor(window.innerWidth * 0.35));
+
+  window.initPortSideResize = function(pid) {
+    const cont = document.getElementById('port-inner-' + pid);
+    if (!cont) return;
+    const resizer = cont.querySelector('.port-side-resizer');
+    const panel = cont.querySelector('.port-side-col');
+    if (!resizer || !panel) return;
+
+    const saved = parseInt(localStorage.getItem('td_port_side_width'));
+    const restored = Number.isFinite(saved) ? saved : DEFAULT_W;
+    panel.style.setProperty('--port-side-width', Math.min(maxSideWidth(), Math.max(MIN_W, restored)) + 'px');
+    if (resizer.dataset.bound) return;
+    resizer.dataset.bound = '1';
+
+    resizer.addEventListener('mousedown', e => {
+      const startX = e.clientX;
+      const startW = panel.offsetWidth;
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(e) {
+        const w = Math.min(maxSideWidth(), Math.max(MIN_W, startW + (e.clientX - startX)));
+        panel.style.setProperty('--port-side-width', w + 'px');
+      }
+      function onUp() {
+        localStorage.setItem('td_port_side_width', panel.offsetWidth);
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  };
+})();
+
 // ══ Predictive Chart JS ══
 
 // Make pc_ vars accessible cross-script via window

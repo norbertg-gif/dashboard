@@ -1424,16 +1424,28 @@ body.sidebar-collapsed #sb-resizer {
 
 .port-main-row {
   display: flex;
-  gap: 12px;
+  gap: 0;
   align-items: flex-start;
   width: 100%;
   min-width: 0;
 }
 .port-side-col {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 var(--port-side-width, 320px);
+  width: var(--port-side-width, 320px);
   min-width: 280px;
   max-width: 35vw;
+}
+.port-side-resizer {
+  flex: 0 0 6px;
+  align-self: stretch;
+  margin: 0 3px;
+  min-height: 200px;
+  cursor: col-resize;
+  background: transparent;
+}
+.port-side-resizer:hover, .port-side-resizer.dragging {
+  background: var(--accent);
+  opacity: 0.5;
 }
 .port-content-col {
   flex: 1 1 auto;
@@ -3775,6 +3787,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 @media (max-width: 1100px) {
   .port-main-row { flex-direction: column; }
+  .port-side-resizer { display: none; }
   .port-side-col {
     width: 100%;
     max-width: none;
