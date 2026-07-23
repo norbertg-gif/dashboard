@@ -340,7 +340,7 @@ select.sel {
   border: 1px solid var(--border);
   color: var(--text);
   padding: 5px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
   outline: none;
   transition: var(--transition);
@@ -582,7 +582,7 @@ select.sel:focus {
   min-width: 92px;
   padding: 4px 7px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-input);
   font-family: var(--font-mono);
 }
@@ -654,7 +654,7 @@ body.sidebar-collapsed #sb-resizer {
   font-weight: 500;
   font-size: 12px;
   padding: 7px 10px 7px 30px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   outline: none;
   transition: var(--transition);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'></circle><line x1='21' y1='21' x2='16.65' y2='16.65'></line></svg>");
@@ -818,7 +818,7 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 12px;
   font-weight: 600;
   padding: 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: var(--transition);
   text-align: center;
@@ -1072,7 +1072,7 @@ body.sidebar-collapsed #sb-resizer {
   border: 1px solid var(--border);
   color: var(--text);
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   width: 90px;
   outline: none;
   text-transform: uppercase;
@@ -1088,7 +1088,7 @@ body.sidebar-collapsed #sb-resizer {
 
 .p-sel {
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--muted);
@@ -1101,7 +1101,7 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 11px;
   font-weight: 700;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
@@ -1118,7 +1118,7 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 10px;
   font-weight: 700;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted2);
@@ -1138,7 +1138,7 @@ body.sidebar-collapsed #sb-resizer {
 .p-btn-an {
   font-size: 12px;
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted2);
@@ -1237,7 +1237,7 @@ body.sidebar-collapsed #sb-resizer {
   min-width: 112px;
   padding: 7px 8px;
   border: 1px solid var(--border-focus);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -1796,7 +1796,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   border: 1px solid var(--border);
   color: var(--text);
   padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   width: 100%;
   outline: none;
   transition: var(--transition);
@@ -1830,7 +1830,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   width: 90px;
   text-align: right;
   outline: none;
@@ -2028,7 +2028,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   font-size: 11px;
   font-weight: 600;
   padding: 4px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
   border: 1px solid var(--border);
   background: var(--bg-input);
@@ -2094,7 +2094,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 13px;
   width: 140px;
   outline: none;
@@ -2108,7 +2108,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 13px;
   outline: none;
 }
@@ -2117,7 +2117,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   color: var(--muted);
   padding: 5px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 12px;
   cursor: pointer;
   transition: var(--transition);
@@ -2190,7 +2190,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-card);
   font-size: 10px;
@@ -2570,7 +2570,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   align-items: center;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-input);
   font-size: 9px;
 }
@@ -2624,7 +2624,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .stat {
   background: var(--bg-card);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   border: 1px solid var(--border);
 }
@@ -2651,7 +2651,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .pc-pattern-item {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: 9px;
   display: flex;
   flex-direction: column;
@@ -2828,7 +2828,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .opp-item {
   border: 1px solid var(--border);
   background: var(--bg-card);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: 12px;
   cursor: pointer;
   transition: var(--transition);
@@ -2917,7 +2917,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-height: 125px;
   resize: vertical;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-input);
   color: var(--text);
   font-family: var(--font-mono);
@@ -2942,7 +2942,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   align-items: center;
   width: 100%;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--muted);
   font-family: var(--font-mono);
@@ -3198,7 +3198,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   align-items: center;
   gap: 8px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-input);
   padding: 9px;
 }
@@ -3397,7 +3397,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #main-scanner .opp-item {
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-input);
   padding: 11px;
   cursor: pointer;
@@ -3754,7 +3754,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   overflow: auto;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   align-self: stretch;
@@ -3853,7 +3853,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg-card);
   font-size: 11.5px;
   margin-bottom: 6px;
@@ -3905,7 +3905,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .signal-outcome-card {
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--bg);
   padding: 7px;
   min-width: 0;
@@ -4007,7 +4007,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .signal-segment-table {
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 #predictiveTab .signal-segment-title {
@@ -4133,7 +4133,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border: 1px solid var(--border);
   color: var(--text);
   padding: 6px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   outline: none;
 }
 #checklistTab .cl-input:focus {
@@ -4445,7 +4445,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   width: 130px;
   text-transform: uppercase;
   height: 34px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 .verdict-content {
   display: grid;
