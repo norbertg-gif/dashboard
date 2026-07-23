@@ -698,7 +698,7 @@ body.sidebar-collapsed #sb-resizer {
 }
 .sb-tab {
   flex: 1;
-  padding: 10px 0;
+  padding: 8px 0;
   text-align: center;
   font-size: 11px;
   font-weight: 700;
@@ -719,17 +719,22 @@ body.sidebar-collapsed #sb-resizer {
 #sb-list {
   flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
 }
 .sb-item {
   display: flex !important;
   flex-direction: column !important;
   align-items: stretch !important;
   height: auto !important;
-  padding: 8px 12px !important;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 10px !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid transparent;
+  border-left: 3px solid transparent;
   cursor: pointer;
   transition: var(--transition);
-  border-left: 3px solid transparent;
   user-select: none;
   gap: 2px;
 }
@@ -737,12 +742,14 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--bg-input);
 }
 .sb-item.in-panel {
-  border-left-color: var(--accent);
-  background: color-mix(in oklch, var(--accent), transparent 94%);
+  background: color-mix(in oklch, var(--accent), transparent 92%);
+  border-color: color-mix(in oklch, var(--accent), transparent 82%);
+  border-left-color: var(--accent) !important;
 }
 .sb-item.active-panel-ticker {
-  border-left-color: var(--up);
-  background: color-mix(in oklch, var(--up), transparent 94%);
+  background: color-mix(in oklch, var(--up), transparent 90%);
+  border-color: color-mix(in oklch, var(--up), transparent 75%);
+  border-left-color: var(--up) !important;
 }
 
 .sb-dot {
