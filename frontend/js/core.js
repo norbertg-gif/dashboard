@@ -66,7 +66,7 @@ async function getInstrumentId(sym) {
 }
 
 // ── MAIN TABS ────────────────────────────────────────────────────────────────
-let activeMainTab = 'charts';
+let activeMainTab = 'home';
 
 function switchMainTab(tab) {
   // História je v Basic móde skrytá — presmeruj všetky vstupné cesty
@@ -123,7 +123,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['charts','portfolio','history','predictive','scanner','verdict'].forEach(name => {
+  ['home','charts','portfolio','history','predictive','scanner','verdict'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -134,7 +134,9 @@ function switchMainTab(tab) {
       el.style.display = 'none';
     }
   });
-  if (tab === 'portfolio') {
+  if (tab === 'home') {
+    if (typeof renderHomeView === 'function') renderHomeView();
+  } else if (tab === 'portfolio') {
     renderPortMainView();
   } else if (tab === 'charts') {
     // Grafy vytvorené so skrytým tabom môžu mať šírku 0 → po zobrazení doraz veľkosti
@@ -149,7 +151,7 @@ function switchMainTab(tab) {
   if (typeof syncChartDockVisibilityForTab === 'function') syncChartDockVisibilityForTab();
   // Názov browser tabu podľa otvorenej záložky — pri viacerých oknách
   // dashboardu je hneď vidno, kde čo je
-  const TAB_TITLES = { charts: 'Grafy', portfolio: 'Portfólio', history: 'História',
+  const TAB_TITLES = { home: 'Home', charts: 'Grafy', portfolio: 'Portfólio', history: 'História',
                        predictive: 'Analytika', scanner: 'Scanner', verdict: 'Verdikt' };
   document.title = `TD · ${TAB_TITLES[tab] || 'Dashboard'}`;
   const url = new URL(window.location.href);

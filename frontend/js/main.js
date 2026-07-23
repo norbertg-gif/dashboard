@@ -54,8 +54,12 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
     switchMainTab('portfolio');
   } else if (requestedTab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
     switchMainTab('portfolio');
-  } else if (['charts','portfolio','history','predictive','scanner','verdict'].includes(requestedTab)) {
+  } else if (['home','charts','portfolio','history','predictive','scanner','verdict'].includes(requestedTab)) {
     switchMainTab(requestedTab);
+  } else {
+    // Bez ?tab= parametra je Home defaultný pristávací tab — treba ho reálne
+    // vyrenderovať (na rozdiel od Grafov nemá vlastný obsah naplnený inde).
+    switchMainTab('home');
   }
 
   loadMemProfileChip();   // fire-and-forget — viditeľnosť vypnutých vrstiev

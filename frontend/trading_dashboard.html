@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260723-192245">
+<link rel="stylesheet" href="/dashboard.css?v=20260723-200823">
 </head>
 <body>
 
@@ -23,7 +23,8 @@
   </div>
   <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()" title="Skryť ľavý panel">☰</button>
   <div id="main-tabs">
-    <div class="main-tab active" id="tab-charts" onclick="switchMainTab('charts')">Grafy <button class="tab-popout" onclick="openMainTabWindow(event,'charts')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab active" id="tab-home" onclick="switchMainTab('home')">Home <button class="tab-popout" onclick="openMainTabWindow(event,'home')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-charts" onclick="switchMainTab('charts')">Grafy <button class="tab-popout" onclick="openMainTabWindow(event,'charts')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">Portfólio <button class="tab-popout" onclick="openMainTabWindow(event,'portfolio')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab advanced-only" id="tab-history" onclick="switchMainTab('history')">História <button class="tab-popout" onclick="openMainTabWindow(event,'history')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-predictive" onclick="switchMainTab('predictive')">Analytika <button class="tab-popout" onclick="openMainTabWindow(event,'predictive')" title="Otvoriť v novej karte">↗</button></div>
@@ -143,8 +144,12 @@
     </div>
     <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
   <!-- Tab bar presunutý do #hdr (riadok 1) -->
+  <!-- Home -->
+  <div id="main-home" style="flex:1;min-height:0;overflow:auto;">
+    <div id="home-view"></div>
+  </div>
   <!-- Grafy -->
-  <div id="main-charts" style="flex:1;min-height:0;overflow:auto;">
+  <div id="main-charts" style="display:none;flex:1;min-height:0;overflow:auto;">
     <div id="grid" onclick="onGridClick(event)"></div>
   </div>
   <!-- Portfólio -->
@@ -542,15 +547,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260723-192245"></script>
-  <script src="/js/live.js?v=20260723-192245"></script>
-  <script src="/js/portfolio.js?v=20260723-192245"></script>
-  <script src="/js/watchlist.js?v=20260723-192245"></script>
-  <script src="/js/scanner.js?v=20260723-192245"></script>
-  <script src="/js/chart_patterns.js?v=20260723-192245"></script>
-  <script src="/js/predictive.js?v=20260723-192245"></script>
-  <script src="/js/verdict.js?v=20260723-192245"></script>
-  <script src="/js/charts.js?v=20260723-192245"></script>
-  <script src="/js/main.js?v=20260723-192245"></script>
+  <script src="/js/core.js?v=20260723-200823"></script>
+  <script src="/js/live.js?v=20260723-200823"></script>
+  <script src="/js/portfolio.js?v=20260723-200823"></script>
+  <script src="/js/watchlist.js?v=20260723-200823"></script>
+  <script src="/js/scanner.js?v=20260723-200823"></script>
+  <script src="/js/chart_patterns.js?v=20260723-200823"></script>
+  <script src="/js/predictive.js?v=20260723-200823"></script>
+  <script src="/js/verdict.js?v=20260723-200823"></script>
+  <script src="/js/home.js?v=20260723-200823"></script>
+  <script src="/js/charts.js?v=20260723-200823"></script>
+  <script src="/js/main.js?v=20260723-200823"></script>
 </body>
 </html>

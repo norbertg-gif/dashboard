@@ -5023,3 +5023,178 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 :where(html[data-variant="glass"] body:not(.light-mode)) .verdict-content > div {
   border-radius: var(--radius-lg);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HOME TAB — landing page (2026-07-23), čistá agregácia existujúcich dát
+   ═══════════════════════════════════════════════════════════════════════════ */
+.home-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 20px;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.home-error {
+  padding: 24px;
+  color: var(--down);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.home-wrap {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.home-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.home-kpi-item {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+}
+.home-kpi-label {
+  color: var(--muted2);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-family: var(--font-ui);
+}
+.home-kpi-val {
+  font-weight: 700;
+  font-size: 22px;
+  font-family: var(--font-mono);
+  margin-top: 6px;
+}
+.home-kpi-item.home-pos {
+  background: var(--up-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--up) 25%, transparent);
+}
+.home-kpi-item.home-pos .home-kpi-val { color: var(--up); }
+.home-kpi-item.home-neg {
+  background: var(--down-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--down) 25%, transparent);
+}
+.home-kpi-item.home-neg .home-kpi-val { color: var(--down); }
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+.home-card {
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.home-card-wide { grid-column: span 2; }
+@media (max-width: 900px) { .home-card-wide { grid-column: span 1; } }
+.home-card-title {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.home-card-subtitle {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.home-empty {
+  color: var(--muted2);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  padding: 6px 0;
+}
+.home-pos { color: var(--up); }
+.home-neg { color: var(--down); }
+
+.home-movers-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.home-movers-col { display: flex; flex-direction: column; min-width: 0; }
+.home-mover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.home-mover-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.home-mover-sym {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-mover-price { font-size: 11px; color: var(--muted); }
+.home-mover-chg { font-size: 11px; font-weight: 700; min-width: 54px; text-align: right; }
+
+.home-plan-headline {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+.home-plan-list, .home-list { display: flex; flex-direction: column; gap: 2px; }
+.home-plan-row, .home-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.home-plan-row:hover, .home-list-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.home-plan-ticker {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+  min-width: 46px;
+}
+.home-plan-summary {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-earn-days {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.home-dip-score {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-left: auto;
+}
