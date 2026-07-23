@@ -433,7 +433,7 @@ function renderEarningsCalendar(payload) {
         const urgent = Number(item.days) <= 1;
         const held = item.in_portfolio ? 'PORT' : 'watch';
         const pnl = Number.isFinite(Number(item.pnl_pct)) ? `${Number(item.pnl_pct) >= 0 ? '+' : ''}${Number(item.pnl_pct).toFixed(1)}%` : '';
-        return `<button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="openVerdictTicker('${escHtml(item.ticker)}', event)" title="Otvoriť ${escHtml(item.ticker)} vo Verdikte">
+        return `<button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="event.stopPropagation();openScannerTicker('${escHtml(item.ticker)}')" title="Otvoriť ${escHtml(item.ticker)} v Analytike">
           <b>${escHtml(item.ticker)}</b>
           <span>${escHtml(held)}</span>
           ${pnl ? `<em class="${Number(item.pnl_pct) >= 0 ? 'pos' : 'neg'}">${escHtml(pnl)}</em>` : ''}
