@@ -126,28 +126,35 @@ html[data-variant="odvazna"] {
   --shadow-glow:   0 0 12px 2px var(--accent-soft);
 }
 
-/* ── Glass Terminal (dark redesign podľa design handoffu, 2026-07) ── */
+/* ── Glass Terminal → Nocturne redesign (2026-07-23) ──
+   Token VALUES remapped to the Nocturne design-system mockup palette;
+   variable NAMES kept unchanged so no JS/HTML markup needs to change.
+   Nocturne's card style is flatter (thin 1px inset borders, no blur/glow)
+   than the previous "glass" look — reflected in --shadow below.
+   Indicator colors (yellow/purple/teal/orange used for EMA/RSI/ADX/MACD
+   chart badges) are intentionally left untouched — the mockup doesn't
+   cover the Grafy indicator UI, so there's no reference to remap them to. */
 html[data-variant="glass"] {
-  --bg:          oklch(13% 0.006 260);
-  --bg-card:     oklch(18% 0.009 260);
-  --bg-input:    oklch(22% 0.011 260);
-  --bg2:         oklch(21% 0.01 260);
-  --border:      oklch(100% 0 0 / 0.07);
-  --border-focus:oklch(68% 0.18 260);
-  --text:        oklch(92% 0.005 260);
-  --muted:       oklch(62% 0.01 260);
-  --muted2:      oklch(55% 0.01 260);
-  --muted3:      oklch(36% 0.012 260);
+  --bg:          #161826;
+  --bg-card:     #232532;
+  --bg-input:    #292b31;
+  --bg2:         #292b31;
+  --border:      color-mix(in srgb, #e9e9ed 16%, transparent);
+  --border-focus:#9184d9;
+  --text:        #e9e9ed;
+  --muted:       color-mix(in srgb, #e9e9ed 55%, transparent);
+  --muted2:      color-mix(in srgb, #e9e9ed 40%, transparent);
+  --muted3:      #3f424d;
 
-  --up:          oklch(72% 0.19 145);      /* klasická zelená (handoff) */
-  --up-soft:     oklch(72% 0.19 145 / 0.15);
-  --down:        oklch(65% 0.22 25);       /* klasická červená (handoff) */
-  --down-soft:   oklch(65% 0.22 25 / 0.15);
-  --accent:      oklch(64% 0.185 260);     /* stred modrého CTA gradientu */
-  --accent-soft: oklch(64% 0.185 260 / 0.15);
+  --up:          #4dbd97;
+  --up-soft:     rgba(77,189,151,.14);
+  --down:        #e08585;
+  --down-soft:   rgba(224,133,133,.14);
+  --accent:      #9184d9;
+  --accent-soft: color-mix(in srgb, #9184d9 15%, transparent);
   --accent-ink:  #ffffff;
 
-  --yellow:      oklch(80% 0.15 90);       /* warning/DCA amber (handoff) */
+  --yellow:      oklch(80% 0.15 90);       /* nezmenené — pozri poznámku vyššie */
   --yellow-soft: oklch(80% 0.15 90 / 0.14);
   --purple:      oklch(72% 0.16 295);
   --purple-soft: oklch(72% 0.16 295 / 0.14);
@@ -160,18 +167,17 @@ html[data-variant="glass"] {
   --radius-md:   12px;
   --radius-lg:   14px;
 
-  --shadow-sm:   0 1px 2px oklch(0% 0 0 / 0.25);
-  --shadow:      inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 8px 24px oklch(0% 0 0 / 0.35);
-  --shadow-lg:   inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 14px 36px oklch(0% 0 0 / 0.45);
-  --shadow-glow: 0 2px 10px oklch(60% 0.2 260 / 0.45);
+  --shadow-sm:   0 1px 2px rgba(0,0,0,.2);
+  --shadow:      inset 0 0 0 1px var(--border);
+  --shadow-lg:   inset 0 0 0 1px var(--border), 0 12px 32px rgba(0,0,0,.35);
+  --shadow-glow: none;
 
-  /* Glossy glass — presné hodnoty z handoff README */
-  --glass-fill:  linear-gradient(180deg, oklch(21% 0.01 260 / 0.9), oklch(17% 0.008 260 / 0.9));
-  --glass-sheen: linear-gradient(120deg, oklch(100% 0 0 / 0.05), transparent 40%);
-  --accent-grad: linear-gradient(180deg, oklch(68% 0.18 260), oklch(58% 0.19 260));
+  --glass-fill:  linear-gradient(180deg, #232532, #232532);
+  --glass-sheen: none;
+  --accent-grad: linear-gradient(180deg, #9184d9, #796cbf);
   --accent-grad-ink: #ffffff;
-  --hover-overlay: oklch(100% 0 0 / 0.035);
-  --page-glow: radial-gradient(1200px 600px at 15% -10%, oklch(28% 0.03 260 / 0.35), transparent);
+  --hover-overlay: color-mix(in srgb, #e9e9ed 4%, transparent);
+  --page-glow: none;
 }
 
 /* ── Jemný Light Mode ── */
@@ -289,9 +295,9 @@ body:not([data-ui-mode="basic"]) .basic-only {
   font-size: 12px;
   font-weight: 600;
   padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition: var(--transition);
@@ -304,7 +310,7 @@ body:not([data-ui-mode="basic"]) .basic-only {
 .btn:hover {
   border-color: var(--accent);
   color: var(--text);
-  background: var(--bg-input);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 .btn.primary {
   border-color: var(--accent);
@@ -313,7 +319,7 @@ body:not([data-ui-mode="basic"]) .basic-only {
 }
 .btn.primary:hover {
   filter: brightness(1.1);
-  box-shadow: var(--shadow-glow);
+  box-shadow: inset 0 0 0 1px var(--border-focus);
 }
 .btn.danger:hover {
   border-color: var(--down);
@@ -964,7 +970,7 @@ body.sidebar-collapsed #sb-resizer {
   font-weight: 600;
   padding: 0 14px;
   height: 32px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   display: inline-flex;
   align-items: center;
   color: var(--muted2);
@@ -981,6 +987,7 @@ body.sidebar-collapsed #sb-resizer {
 .main-tab.active {
   color: var(--accent-grad-ink, #fff);
   background: var(--accent-grad, var(--accent));
+  box-shadow: inset 0 0 0 1px var(--border-focus);
 }
 .tab-popout {
   border: 0;
@@ -1470,18 +1477,24 @@ body.sidebar-collapsed #sb-resizer {
 }
 
 .port-summary {
-  display: flex;
-  gap: 24px;
-  padding: 10px 16px;
-  background: var(--bg-input);
-  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  background: transparent;
+  border-bottom: none;
   font-family: var(--font-mono);
   font-size: 11px;
 }
 .port-sum-item {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+  transition: var(--transition);
 }
 .port-sum-label {
   color: var(--muted2);
@@ -1493,7 +1506,16 @@ body.sidebar-collapsed #sb-resizer {
 }
 .port-sum-val {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 22px;
+  line-height: 1.1;
+}
+.port-sum-item:has(.port-pos) {
+  background: var(--up-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--up) 25%, transparent);
+}
+.port-sum-item:has(.port-neg) {
+  background: var(--down-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--down) 25%, transparent);
 }
 .port-attention-note {
   display: flex;
@@ -1533,16 +1555,15 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--bg-input);
-  color: var(--muted);
-  font-size: 10px;
+  background: var(--bg-card);
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-family: var(--font-ui);
-  padding: 10px 12px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 var(--border);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -1552,14 +1573,14 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   color: var(--text);
 }
 .port-table td, .tool-table td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
   white-space: nowrap;
   vertical-align: middle;
 }
 .port-table tr:hover td, .tool-table tr:hover td {
-  background: color-mix(in oklch, var(--accent), transparent 96%);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 .port-table .r, .tool-table .r { text-align: right; }
 
