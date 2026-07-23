@@ -6696,9 +6696,13 @@ def get_investor_inbox(refresh: int = Query(0)):
         (merge_ticker_items(ticker, list(kind_map.values())) for ticker, kind_map in per_ticker.items()),
         key=lambda x: (x.get("priority", 99), x.get("ticker", "")),
     )[:30]
+    # Počítadlá musia sedieť s tým, čo filter na frontende reálne vie zobraziť —
+    # počítaj z orezaného `ordered`, nie z plného per_ticker. Inak nízko-prioritné
+    # kategórie (napr. "opportunity") ukazujú count > 0, ale po prekliknutí na
+    # filter je zoznam prázdny, lebo tie položky vypadli z top-30 orezania.
     counts = {}
-    for kind_map in per_ticker.values():
-        for kind in kind_map:
+    for it in ordered:
+        for kind in (it.get("kinds") or []):
             counts[kind] = counts.get(kind, 0) + 1
     payload = {"generated_at": now.isoformat(), "counts": counts, "tickers": len(per_ticker), "items": ordered}
     return _investor_cache_set(cache_key, payload)
