@@ -5206,3 +5206,47 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--text);
   margin-left: auto;
 }
+
+/* Home — prepínače účtov nad KPI kartami */
+.home-acct-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.home-acct-label {
+  color: var(--muted2);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-family: var(--font-ui);
+}
+.home-acct-toggle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted2);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.home-acct-toggle:hover { color: var(--text); }
+.home-acct-toggle.active.acct1 {
+  border-color: var(--acct1-color);
+  color: var(--acct1-color);
+  background: var(--acct1-tint);
+}
+.home-acct-toggle.active.acct2 {
+  border-color: var(--acct2-color);
+  color: var(--acct2-color);
+  background: var(--acct2-tint);
+}
+.home-acct-hint {
+  color: var(--muted2);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
