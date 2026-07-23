@@ -1586,9 +1586,21 @@ function pc_renderDecisionBar(data) {
   const wtChip = wt && wt.key
     ? `<span class="pc-decision-chip" title="Donchian 20w ${(wt.donchian_pos*100).toFixed(0)}%${wt.above_sma50 != null ? ` · ${wt.above_sma50 ? 'nad' : 'pod'} SMA50w` : ''}">${wt.icon || ''} <strong>${escHtml(wtShort)}</strong></span>`
     : `<span class="pc-decision-chip">Weekly <strong>${wb.bullish ? 'up' : 'off'}</strong></span>`;
+  const portHold = typeof getPortfolioLiveAggregateForSymbol === 'function'
+    ? getPortfolioLiveAggregateForSymbol(ticker)
+    : null;
+  const portChip = portHold ? (() => {
+    const pnl = Number(portHold.pnl ?? 0);
+    const pct = Number(portHold.pct ?? portHold.pnl_pct ?? 0);
+    const amount = Number(portHold.amount ?? 0);
+    const color = pnl >= 0 ? 'var(--up)' : 'var(--down)';
+    const sign = pnl >= 0 ? '+' : '';
+    return `<span class="pc-decision-chip" title="Agregát cez všetky pozície/účty pre ${escHtml(ticker)}">📊 Portfólio <strong>${portHold.count}×</strong> · $${amount.toFixed(2)} inv. · <strong style="color:${color}">${sign}$${pnl.toFixed(2)} (${sign}${pct.toFixed(1)}%)</strong></span>`;
+  })() : '';
   el.innerHTML = `
     <span class="pc-decision-symbol">${ticker}</span>
     <span class="pc-decision-badge ${meta.cls}">${meta.label}</span>
+    ${portChip}
     <span class="pc-decision-chip">Sila <strong>${rawScore}/4</strong></span>
     <span class="pc-decision-chip">Trend <strong>${details.trend || 'n/a'}</strong></span>
     ${wtChip}
