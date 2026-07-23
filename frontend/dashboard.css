@@ -1389,12 +1389,16 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: var(--bg-input);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition: var(--transition);
+}
+.port-filter-btn:hover, .port-view-btn:hover, .port-cols-btn:hover, .port-export-btn:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
 }
 .port-filter-btn.active {
   border-color: var(--yellow);
@@ -1411,12 +1415,16 @@ body.sidebar-collapsed #sb-resizer {
   font-size: 11px;
   font-weight: 700;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: var(--bg-input);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition: var(--transition);
+}
+.port-attention-toggle:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
 }
 .port-attention-toggle.active {
   border-color: var(--orange);
