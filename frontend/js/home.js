@@ -23,8 +23,11 @@ async function renderHomeView() {
       fetch(`${API}/api/investor/plan`).then(r => r.json()),
       fetch(`${API}/api/earnings/calendar?days=14`).then(r => r.json()),
       fetch(`${API}/api/scanner/nasdaq/results`).then(r => r.json()),
-      fetch(`${API}/api/etoro/portfolio?account=1`).then(r => r.json()),
-      fetch(`${API}/api/etoro/portfolio?account=2`).then(r => r.json()),
+      // Home je jednorazový snapshot pri otvorení tabu (nie priebežne live ako
+      // Portfólio, ktoré cache dorovnáva WebSocket tickami) — refresh=1 obchádza
+      // 24h POSITIONS_CACHE_TTL, aby KPI karty neukazovali starý stav.
+      fetch(`${API}/api/etoro/portfolio?account=1&refresh=1`).then(r => r.json()),
+      fetch(`${API}/api/etoro/portfolio?account=2&refresh=1`).then(r => r.json()),
     ]);
     const [moversUp, moversDown, plan, earnings, scan, port1, port2] =
       results.map(r => (r.status === 'fulfilled' ? r.value : null));
