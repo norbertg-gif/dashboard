@@ -1493,7 +1493,7 @@ body.sidebar-collapsed #sb-resizer {
 
 .port-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   padding: 14px 16px;
   background: transparent;
@@ -1510,6 +1510,7 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--bg-card);
   box-shadow: var(--shadow);
   transition: var(--transition);
+  min-width: 0;
 }
 .port-sum-label {
   color: var(--muted2);
@@ -1521,8 +1522,11 @@ body.sidebar-collapsed #sb-resizer {
 }
 .port-sum-val {
   font-weight: 700;
-  font-size: 22px;
+  font-size: 17px;
   line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .port-sum-item:has(.port-pos) {
   background: var(--up-soft);
@@ -5059,6 +5063,7 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: var(--shadow);
+  min-width: 0;
 }
 .home-kpi-label {
   color: var(--muted2);
@@ -5070,9 +5075,12 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .home-kpi-val {
   font-weight: 700;
-  font-size: 22px;
+  font-size: 17px;
   font-family: var(--font-mono);
   margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .home-kpi-item.home-pos {
   background: var(--up-soft);
