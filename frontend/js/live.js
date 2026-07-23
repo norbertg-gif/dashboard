@@ -236,6 +236,7 @@ function onLivePriceUpdate(instrumentId) {
       recalcPortfolioLiveSummary(data);
     }
     updateHeaderEquities();
+    if (typeof updateHomeKpiLive === 'function') updateHomeKpiLive();
     applyPredictiveLivePrice(sym, livePrice);
   }
 

@@ -73,6 +73,17 @@ async function renderHomeView(force = false) {
       results.map(r => (r.status === 'fulfilled' ? r.value : null));
     _homeLastData = { moversUp, moversDown, plan, earnings, scan, port1, port2 };
     _homeLastFetchMs = Date.now();
+    // Nasej čerstvý snapshot do zdieľaného portfolioAccountData — live.js ho
+    // priebežne dorovnáva WS tickami (recalcPortfolioLiveSummary), takže KPI
+    // karty aj header equity pill z toho ďalej žijú live, nie zo starej cache.
+    for (const [id, port] of [['1', port1], ['2', port2]]) {
+      if (port?.positions && port?.summary && typeof preparePortfolioSnapshot === 'function') {
+        preparePortfolioSnapshot(port);
+        portfolioAccountData[id] = port;
+        if (typeof rememberLiveInstruments === 'function') rememberLiveInstruments(port.positions);
+      }
+    }
+    if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
   } catch (e) {
     el.innerHTML = `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
@@ -87,26 +98,45 @@ function homeFmtUsd(v) {
   return `${sign}$${n.toFixed(2)}`;
 }
 
-function homePortfolioKpiHtml(port1, port2) {
+// Spoločný výpočet KPI hodnôt pre render aj live patch. Preferuje živé summary
+// z portfolioAccountData (dorovnávané WS tickami cez recalcPortfolioLiveSummary);
+// _live* polia s fallbackom na snapshot hodnoty.
+function homeKpiValues(port1, port2) {
   const sel = homeGetAcctSel();
   const summaries = [];
-  if (sel[1]) summaries.push(port1?.summary || {});
-  if (sel[2]) summaries.push(port2?.summary || {});
-  const sum = (key) => summaries.reduce((acc, s) => acc + Number(s[key] || 0), 0);
-  const equity = sum('equity');
-  const invested = sum('invested');
-  const cash = sum('cash');
-  const dailyPnl = sum('daily_pnl');
-  // total_pnl berieme priamo z backendu (equity = cash + invested + total_pnl);
-  // pôvodné odvodenie equity - invested doň omylom zarátavalo aj cash.
-  const totalPnl = sum('total_pnl');
-  const cards = [
-    ['Equity', `$${equity.toFixed(2)}`, null],
-    ['Investované', `$${invested.toFixed(2)}`, null],
-    ['Cash', `$${cash.toFixed(2)}`, null],
-    ['Celkové P/L', homeFmtUsd(totalPnl), totalPnl >= 0 ? 'home-pos' : 'home-neg'],
-    ['Dnes P/L', homeFmtUsd(dailyPnl), dailyPnl >= 0 ? 'home-pos' : 'home-neg'],
+  const pick = (id, fallbackPort) => {
+    const shared = (typeof portfolioAccountData !== 'undefined' && portfolioAccountData?.[id]?.summary)
+      ? portfolioAccountData[id].summary : null;
+    return shared || fallbackPort?.summary || {};
+  };
+  if (sel[1]) summaries.push(pick('1', port1));
+  if (sel[2]) summaries.push(pick('2', port2));
+  const sum = (fn) => summaries.reduce((acc, s) => acc + fn(s), 0);
+  return {
+    sel,
+    equity:   sum(s => Number(s._liveEquity ?? s.equity ?? 0)),
+    invested: sum(s => Number(s.invested || 0)),
+    cash:     sum(s => Number(s.cash || 0)),
+    // total_pnl priamo z backendu (equity = cash + invested + total_pnl);
+    // odvodenie equity - invested by doň omylom zarátavalo aj cash.
+    totalPnl: sum(s => Number(s._liveTotalPnl ?? s.total_pnl ?? 0)),
+    dailyPnl: sum(s => Number(s._liveDailyPnl ?? s.daily_pnl ?? 0)),
+  };
+}
+
+function homeKpiCards(v) {
+  return [
+    ['equity',   'Equity',       `$${v.equity.toFixed(2)}`,   null],
+    ['invested', 'Investované',  `$${v.invested.toFixed(2)}`, null],
+    ['cash',     'Cash',         `$${v.cash.toFixed(2)}`,     null],
+    ['totalPnl', 'Celkové P/L',  homeFmtUsd(v.totalPnl),      v.totalPnl >= 0 ? 'home-pos' : 'home-neg'],
+    ['dailyPnl', 'Dnes P/L',     homeFmtUsd(v.dailyPnl),      v.dailyPnl >= 0 ? 'home-pos' : 'home-neg'],
   ];
+}
+
+function homePortfolioKpiHtml(port1, port2) {
+  const v = homeKpiValues(port1, port2);
+  const sel = v.sel;
   const acctBtn = (acct, label) => `
     <button type="button" class="home-acct-toggle ${sel[acct] ? 'active' : ''} acct${acct}"
       onclick="homeToggleAcct('${acct}')"
@@ -118,12 +148,36 @@ function homePortfolioKpiHtml(port1, port2) {
       ${acctBtn('2', 'Účet 2')}
       <span class="home-acct-hint">${sel[1] && sel[2] ? 'súčet oboch účtov' : `len účet ${sel[1] ? '1' : '2'}`}</span>
     </div>
-    <div class="home-kpi-grid">${cards.map(([label, val, cls]) => `
-      <div class="home-kpi-item${cls ? ' ' + cls : ''}">
+    <div class="home-kpi-grid">${homeKpiCards(v).map(([key, label, val, cls]) => `
+      <div class="home-kpi-item${cls ? ' ' + cls : ''}" data-home-kpi-item="${key}">
         <div class="home-kpi-label">${label}</div>
-        <div class="home-kpi-val">${val}</div>
+        <div class="home-kpi-val" data-home-kpi="${key}">${val}</div>
       </div>`).join('')}</div>
   </div>`;
+}
+
+// Live patch KPI kariet z WS tickov — volané z onLivePriceUpdate (live.js).
+// Throttle: tickov môže byť viac za sekundu, DOM zápis stačí ~2x/s.
+let _homeKpiLastPatchMs = 0;
+function updateHomeKpiLive() {
+  if (typeof activeMainTab === 'undefined' || activeMainTab !== 'home' || !_homeLastData) return;
+  const now = Date.now();
+  if (now - _homeKpiLastPatchMs < 400) return;
+  const block = document.getElementById('home-kpi-block');
+  if (!block) return;
+  _homeKpiLastPatchMs = now;
+  const v = homeKpiValues(_homeLastData.port1, _homeLastData.port2);
+  for (const [key, , val, cls] of homeKpiCards(v)) {
+    const valEl = block.querySelector(`[data-home-kpi="${key}"]`);
+    if (valEl && valEl.textContent !== val) valEl.textContent = val;
+    if (cls !== null) {
+      const item = block.querySelector(`[data-home-kpi-item="${key}"]`);
+      if (item) {
+        item.classList.toggle('home-pos', cls === 'home-pos');
+        item.classList.toggle('home-neg', cls === 'home-neg');
+      }
+    }
+  }
 }
 
 function homeMoversHtml(moversUp, moversDown) {
