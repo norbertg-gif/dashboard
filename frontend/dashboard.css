@@ -4869,137 +4869,73 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .verdict-sizing-empty h3 { color: var(--muted); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   GLASS TERMINAL — component overrides (design handoff 2026-07)
+   GLASS TERMINAL — component overrides (design handoff 2026-07,
+   recolored to Nocturne palette 2026-07-23)
    Všetko scoped pod :where(html[data-variant="glass"] body:not(.light-mode)) — staré varianty a light mode
    ostávajú netknuté; rollback = zmena data-variant atribútu v HTML.
+
+   Frosted-glass mechanics (backdrop-filter blur, depth-tier backgrounds,
+   sheen highlights) sú zámerne zachované — len farby teraz idú cez tokeny
+   namiesto natvrdo zapísaných modrastých oklch hodnôt. Duplicitné pravidlá
+   pre .btn/.main-tab/.port-table/.port-summary boli ODSTRÁNENÉ (nie
+   prefarbené) — tie komponenty už majú čisté token-based pravidlá vyššie
+   v súbore (Nocturne redesign, DeepSeek/Codex/Kimi prechod) a tento blok by
+   ich len prepisoval späť na starý vzhľad s nesprávnym radius/farbou.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Header (top bar) — kontrastná, výrazne tmavšia než workspace lišta aj obsah ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) #hdr {
-  background: oklch(9% 0.005 260 / 0.97);
+  background: color-mix(in srgb, var(--bg) 75%, black);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.08);
-  box-shadow: 0 1px 0 oklch(0% 0 0 / 0.4);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(0,0,0,.4);
 }
 /* Workspace lišta (riadok 2) — medzistupeň medzi headerom a obsahom */
 :where(html[data-variant="glass"] body:not(.light-mode)) #toolbar {
-  background: oklch(17% 0.008 260 / 0.92);
+  background: color-mix(in srgb, var(--bg) 85%, black);
   backdrop-filter: blur(12px) saturate(130%);
   -webkit-backdrop-filter: blur(12px) saturate(130%);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
+  border-bottom: 1px solid var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .tb-label {
-  color: oklch(48% 0.012 260);
+  color: var(--muted2);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .tb-sep {
-  background: oklch(100% 0 0 / 0.08);
+  background: var(--border);
 }
 /* Sub-lišty tabov — rovnaký medzistupeň ako workspace lišta, nech sa vrstvy
-   nelepia na obsah (hierarchia: header 9 % < sub-lišty ~16 % < obsah 13 % bg
-   s kartami 18 %) */
+   nelepia na obsah (hierarchia: header < sub-lišty < obsah < karty) */
 :where(html[data-variant="glass"] body:not(.light-mode)) .tool-toolbar,
 :where(html[data-variant="glass"] body:not(.light-mode)) #predictiveTab .controls,
 :where(html[data-variant="glass"] body:not(.light-mode)) .port-toolbar {
-  background: oklch(16% 0.008 260 / 0.92);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
+  background: color-mix(in srgb, var(--bg) 90%, black);
+  border-bottom: 1px solid var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .logo-icon {
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  box-shadow: 0 4px 10px oklch(55% 0.18 150 / 0.35);
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--up) 40%, transparent);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .logo-text {
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
-/* ── Hlavná navigácia — pill group v hlavnej lište ── */
-:where(html[data-variant="glass"] body:not(.light-mode)) #main-tabs {
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid oklch(100% 0 0 / 0.10);
-  border-radius: 12px;
-  background:
-    linear-gradient(180deg, oklch(100% 0 0 / 0.075), oklch(100% 0 0 / 0.035)),
-    oklch(18% 0.025 260 / 0.92);
-  box-shadow:
-    inset 0 1px 0 oklch(100% 0 0 / 0.10),
-    0 10px 26px oklch(0% 0 0 / 0.24);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .main-tab {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: oklch(70% 0.01 260);
-  transition: all 0.15s ease;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .main-tab:hover {
-  background: oklch(100% 0 0 / 0.08);
-  color: var(--text);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active {
-  background: var(--accent-grad);
-  color: #fff;
-  box-shadow: 0 2px 8px oklch(60% 0.2 260 / 0.5), inset 0 1px 0 oklch(100% 0 0 / 0.25);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active .tab-popout { color: oklch(100% 0 0 / 0.7); }
-:where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active .tab-popout:hover { color: #fff; }
-
-/* ── Tlačidlá a chips ── */
-:where(html[data-variant="glass"] body:not(.light-mode)) .btn {
-  background: oklch(100% 0 0 / 0.04);
-  border-color: oklch(100% 0 0 / 0.08);
-  border-radius: 8px;
-  transition: all 0.15s ease;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .btn:hover {
-  background: oklch(100% 0 0 / 0.08);
-  border-color: oklch(100% 0 0 / 0.14);
-  color: var(--text);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .btn.primary {
-  background: var(--accent-grad);
-  border-color: transparent;
-  color: #fff;
-  box-shadow: 0 2px 8px oklch(60% 0.2 260 / 0.45), inset 0 1px 0 oklch(100% 0 0 / 0.25);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .btn.primary:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 2px 12px oklch(60% 0.2 260 / 0.55), inset 0 1px 0 oklch(100% 0 0 / 0.25);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .btn.danger {
-  color: oklch(70% 0.14 25);
-  border-color: oklch(65% 0.22 25 / 0.25);
-  background: oklch(65% 0.22 25 / 0.08);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) select.sel {
-  background: oklch(100% 0 0 / 0.04);
-  border-color: oklch(100% 0 0 / 0.08);
-  border-radius: 8px;
-}
-
 /* ── Sidebar — najtmavší tier ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) #sidebar {
-  background: oklch(12% 0.006 260);
-  border-right: 1px solid oklch(100% 0 0 / 0.05);
+  background: color-mix(in srgb, var(--bg) 92%, black);
+  border-right: 1px solid var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) #sb-input {
-  background: oklch(100% 0 0 / 0.04);
-  border: 1px solid oklch(100% 0 0 / 0.07);
-  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 /* ── Glass karty: chart panely, dock, modaly ── */
 /* Panely NEMAJÚ backdrop-filter (pri 4-8 chart canvasoch by GPU blur bolel);
    sklo robí gradient fill + inset highlight + sheen ::before. */
-:where(html[data-variant="glass"] body:not(.light-mode)) .panel {
-  background: var(--glass-fill);
-  border: 1px solid oklch(100% 0 0 / 0.07);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 8px 24px oklch(0% 0 0 / 0.35);
-}
 :where(html[data-variant="glass"] body:not(.light-mode)) .panel::before {
   content: "";
   position: absolute;
@@ -5009,58 +4945,19 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   pointer-events: none;
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .panel { position: relative; }
-:where(html[data-variant="glass"] body:not(.light-mode)) .panel:hover {
-  border-color: oklch(100% 0 0 / 0.12);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 14px 36px oklch(0% 0 0 / 0.45);
-}
 :where(html[data-variant="glass"] body:not(.light-mode)) #chart-dock {
-  background: oklch(14% 0.007 260);
-  border-left: 1px solid oklch(100% 0 0 / 0.06);
+  background: color-mix(in srgb, var(--bg) 88%, black);
+  border-left: 1px solid var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) #modal, :where(html[data-variant="glass"] body:not(.light-mode)) #settings-modal {
   background: var(--glass-fill);
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
-  border: 1px solid oklch(100% 0 0 / 0.1);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.08), 0 24px 64px oklch(0% 0 0 / 0.55);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent), 0 24px 64px rgba(0,0,0,.55);
 }
 
-/* ── Portfólio: stats card, tabuľka, DCA, attention ── */
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-summary {
-  background: var(--glass-fill);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
-  gap: 0;
-  padding: 12px 20px;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-sum-item {
-  padding: 0 22px;
-  border-right: 1px solid oklch(100% 0 0 / 0.06);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-sum-item:first-child { padding-left: 0; }
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-sum-item:last-child { border-right: 0; }
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-sum-label {
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  color: oklch(58% 0.01 260);
-  text-transform: uppercase;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-sum-val {
-  font-size: 17px;
-  font-weight: 600;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-table th, :where(html[data-variant="glass"] body:not(.light-mode)) .tool-table th {
-  background: oklch(19% 0.009 260);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.08);
-  box-shadow: 0 1px 0 oklch(100% 0 0 / 0.04);
-  letter-spacing: 0.05em;
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-table td, :where(html[data-variant="glass"] body:not(.light-mode)) .tool-table td {
-  border-bottom: 1px solid oklch(100% 0 0 / 0.045);
-}
-:where(html[data-variant="glass"] body:not(.light-mode)) .port-table tr:hover td,
-:where(html[data-variant="glass"] body:not(.light-mode)) .tool-table tr:hover td {
-  background: var(--hover-overlay);
-}
+/* ── Portfólio: P/L % pill, DCA, attention ── */
 /* P/L % ako pill (len percentá — $ hodnoty ostávajú čistý farebný text) */
 :where(html[data-variant="glass"] body:not(.light-mode)) .port-pct {
   display: inline-block;
@@ -5072,55 +4969,55 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 :where(html[data-variant="glass"] body:not(.light-mode)) .port-pct.port-neg { background: var(--down-soft); }
 :where(html[data-variant="glass"] body:not(.light-mode)) #portfolio-dca {
   background: var(--glass-fill);
-  border-top: 1px solid oklch(100% 0 0 / 0.06);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.06);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .port-attention-note {
-  background: oklch(80% 0.15 90 / 0.07);
-  border-bottom: 1px solid oklch(80% 0.15 90 / 0.15);
+  background: var(--yellow-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow) 15%, transparent);
 }
 
 /* ── Hint lišta + status ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) #active-hint {
-  background: oklch(15% 0.007 260);
-  border-bottom: 1px solid oklch(100% 0 0 / 0.05);
+  background: color-mix(in srgb, var(--bg) 90%, black);
+  border-bottom: 1px solid var(--border);
 }
 
 /* ── Scanner + Predictive + Verdict — glass polish ── */
 :where(html[data-variant="glass"] body:not(.light-mode)) .tool-panel {
   background: var(--glass-fill);
-  border: 1px solid oklch(100% 0 0 / 0.07);
-  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.06), 0 8px 24px oklch(0% 0 0 / 0.35);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .investor-week-card,
 :where(html[data-variant="glass"] body:not(.light-mode)) .earnings-calendar-card {
-  background: oklch(100% 0 0 / 0.03);
-  border-color: oklch(100% 0 0 / 0.08);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border-color: var(--border);
   border-radius: var(--radius-md);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .investor-week-card {
-  border-color: color-mix(in oklch, var(--accent) 30%, oklch(100% 0 0 / 0.08));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .market-ctx-bar {
   background: var(--glass-fill);
-  border: 1px solid oklch(100% 0 0 / 0.07);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 8px 12px;
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .mc-chip {
-  background: oklch(100% 0 0 / 0.04);
-  border-color: oklch(100% 0 0 / 0.08);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-color: var(--border);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) #predictiveTab .card {
-  background: oklch(100% 0 0 / 0.03);
-  border: 1px solid oklch(100% 0 0 / 0.07);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .inbox-mode-switch button.active {
   background: var(--accent-grad);
-  color: #fff;
+  color: var(--accent-grad-ink);
   border-color: transparent;
-  box-shadow: 0 2px 8px oklch(60% 0.2 260 / 0.4);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 :where(html[data-variant="glass"] body:not(.light-mode)) .verdict-shell .tool-panel,
 :where(html[data-variant="glass"] body:not(.light-mode)) .verdict-content > div {
