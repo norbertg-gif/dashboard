@@ -1504,8 +1504,11 @@ body.sidebar-collapsed #sb-resizer {
 .port-sum-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 5px;
+  padding: 12px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: var(--shadow);
@@ -1522,8 +1525,9 @@ body.sidebar-collapsed #sb-resizer {
 }
 .port-sum-val {
   font-weight: 700;
-  font-size: 17px;
+  font-size: 14px;
   line-height: 1.1;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5059,7 +5063,12 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   gap: 12px;
 }
 .home-kpi-item {
-  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 10px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: var(--shadow);
@@ -5075,9 +5084,10 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .home-kpi-val {
   font-weight: 700;
-  font-size: 17px;
+  font-size: 14px;
   font-family: var(--font-mono);
-  margin-top: 6px;
+  margin-top: 5px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
