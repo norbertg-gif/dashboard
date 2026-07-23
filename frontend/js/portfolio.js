@@ -1426,6 +1426,79 @@ function updatePortfolioTotalsDom(pid, state) {
   if (pctEl) pctEl.innerHTML = `<span class="${cls}" style="font-weight:700;">${sign}${pct.toFixed(2)}%</span>`;
 }
 
+// Živé triedenie: po každom price ticku (updatePortfolioTickerRowsDom už napatchol
+// bunky) fyzicky preusporiada <tr> podľa aktuálneho s.sortCol/sortDir bez full
+// re-renderu, s FLIP animáciou (First-Last-Invert-Play) namiesto skoku.
+function reorderPortRowsIfSorted(pid, state) {
+  // Panel môže mať aj orders/mirrors <table class="port-table"> bez data-port-row
+  // riadkov — nájdi konkrétne ten tbody, čo obsahuje hlavné pozičné riadky.
+  const container = document.getElementById(`port-inner-${pid}`);
+  if (!container) return;
+  const anchorRow = container.querySelector('tr[data-port-row]');
+  const tbody = anchorRow?.parentElement;
+  if (!tbody) return;
+
+  const currentRows = Array.from(tbody.querySelectorAll('tr[data-port-row]'));
+  if (currentRows.length < 2) return;
+
+  const sortedRows = getFilteredPositions(state);
+  if (!sortedRows || sortedRows.length !== currentRows.length) return; // filter/data mismatch mid-tick — skip, next full render fixes it
+
+  const prefix = `${pid}-`;
+  const rowMap = new Map();
+  for (const tr of currentRows) {
+    const key = tr.getAttribute('data-port-row').slice(prefix.length);
+    rowMap.set(key, tr);
+  }
+
+  const sortedKeys = sortedRows.map(r => String(r.positionId || r.symbol || ''));
+  let orderChanged = false;
+  for (let i = 0; i < currentRows.length; i++) {
+    if (currentRows[i].getAttribute('data-port-row') !== `${prefix}${sortedKeys[i]}`) { orderChanged = true; break; }
+  }
+  if (!orderChanged) return;
+
+  // Prerušenie: ak ešte beží predchádzajúca animácia, zruš ju čisto pred štartom novej.
+  if (tbody._flipCleanup) { tbody._flipCleanup(); tbody._flipCleanup = null; }
+
+  // FIRST
+  const firstRects = new Map();
+  for (const tr of currentRows) firstRects.set(tr, tr.getBoundingClientRect());
+
+  // LAST — appendChild presúva existujúce uzly, nevytvára nové (žiadny re-render)
+  for (const key of sortedKeys) {
+    const tr = rowMap.get(key);
+    if (tr) tbody.appendChild(tr);
+  }
+
+  // INVERT
+  for (const tr of currentRows) {
+    const first = firstRects.get(tr);
+    const last = tr.getBoundingClientRect();
+    const dy = first.top - last.top;
+    if (Math.abs(dy) < 0.5) continue;
+    tr.style.transition = 'none';
+    tr.style.transform = `translateY(${dy}px)`;
+  }
+  void tbody.offsetHeight; // force reflow, aby sa invert aplikoval pred play
+
+  // PLAY
+  for (const tr of currentRows) {
+    tr.style.transition = 'transform .25s ease';
+    tr.style.transform = '';
+  }
+
+  const cleanup = () => {
+    for (const tr of currentRows) { tr.style.transition = ''; tr.style.transform = ''; }
+    tbody.removeEventListener('transitionend', onEnd);
+    clearTimeout(fallbackTimer);
+  };
+  const onEnd = (ev) => { if (ev.target.parentNode === tbody) cleanup(); };
+  tbody.addEventListener('transitionend', onEnd);
+  const fallbackTimer = setTimeout(cleanup, 400); // istota, keby transitionend nenaskočil (napr. dy bolo 0 pre všetky)
+  tbody._flipCleanup = cleanup;
+}
+
 function getVisibleCols(s) {
   return s.colOrder
     .map(k => PORT_COLS.find(c => c.key === k))
@@ -1555,9 +1628,22 @@ function getFilteredPositions(s) {
   for (const row of rows) {
     row._attentionReasons = attentionBySymbol[normalizePortSymbol(row.symbol)] || [];
   }
-  // Sort
+  // Sort — pnl/pnlPct majú live-aktualizovanú tieňovú hodnotu (_livePnl/_livePnlPct
+  // na zoskupených riadkoch, _livePnl priamo na surových pozíciách); ak by sme
+  // triedili podľa statického r.pnl, live re-order (reorderPortRowsIfSorted) by
+  // pri týchto stĺpcoch nikdy nezachytil zmenu poradia. dailyPnl je už live priamo
+  // (updatePositionRowsWithLive prepisuje pos.dailyPnl), netreba špeciálny prípad.
+  const resolveSortVal = (r) => {
+    if (s.sortCol === 'pnl') return Number(r._livePnl ?? r.pnl ?? 0);
+    if (s.sortCol === 'pnlPct') {
+      if (r._livePnlPct != null) return Number(r._livePnlPct);
+      const livePnl = Number(r._livePnl ?? r.pnl ?? 0);
+      return r.amount ? (livePnl / r.amount * 100) : Number(r.pnlPct ?? 0);
+    }
+    return r[s.sortCol] ?? '';
+  };
   rows.sort((a, b) => {
-    const va = a[s.sortCol] ?? '', vb = b[s.sortCol] ?? '';
+    const va = resolveSortVal(a), vb = resolveSortVal(b);
     if (typeof va === 'number') return (va - vb) * s.sortDir;
     return String(va).localeCompare(String(vb)) * s.sortDir;
   });
@@ -1725,7 +1811,8 @@ function renderPortPanel(pid) {
     for (const row of rows) {
       const sym = row.symbol || '';
       const isTickerView = s.view === 'ticker';
-      html += `<tr onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}" style="cursor:pointer;">`;
+      const rowKey = row.positionId || sym;
+      html += `<tr data-port-row="${pid}-${rowKey}" onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}" style="cursor:pointer;">`;
       for (const col of cols) {
         if (col.key === 'symbol') {
           const count = row._count > 1 ? ` <span style="color:var(--muted);font-size:9px;">(${row._count})</span>` : '';

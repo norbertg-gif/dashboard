@@ -227,6 +227,7 @@ function onLivePriceUpdate(instrumentId) {
       updatePortfolioSummaryDom(pid, state.data);
       updatePortfolioTickerRowsDom(pid, state, sym);
       if (typeof updatePortfolioOrderRowsDom === 'function') updatePortfolioOrderRowsDom(pid, state, sym);
+      if (typeof reorderPortRowsIfSorted === 'function') reorderPortRowsIfSorted(pid, state);
     }
     for (const data of Object.values(portfolioAccountData)) {
       if (!data || Object.values(portState).some(state => state?.data === data)) continue;
