@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 6
+INSIGHTS_SCHEMA_VERSION = 7
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -7992,13 +7992,14 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                            "relation": None, "type": kind, "shares": shares, "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
-    # EPS surprises — posledné 4 nahlásené kvartály. /stock/earnings vracia
+    # EPS surprises — posledné nahlásené kvartály (~2 roky dozadu, chart
+    # markery majú byť pokryté aspoň za posledný rok). /stock/earnings vracia
     # "period" = koniec fiškálneho kvartálu (nie dátum reportu — tie sa líšia
     # o týždne), takže chart markery aj karta sedeli na nesprávny stĺpec.
     # /calendar/earnings má skutočný dátum zverejnenia priamo v "date".
     today = datetime.now(timezone.utc).date()
     r = requests.get("https://finnhub.io/api/v1/calendar/earnings",
-                     params={"symbol": sym, "from": (today - timedelta(days=400)).isoformat(),
+                     params={"symbol": sym, "from": (today - timedelta(days=800)).isoformat(),
                              "to": today.isoformat(), "token": api_key}, timeout=15)
     r.raise_for_status()
     # Free-tier symbol filter na tomto endpointe je nespoľahlivý pri širšom
@@ -8008,7 +8009,7 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                 and str(h.get("symbol") or "").upper() == sym]
     reported.sort(key=lambda h: h["date"])
     eps_hist = []
-    for h in reported[-4:]:
+    for h in reported[-8:]:
         a, e = h.get("epsActual"), h.get("epsEstimate")
         sp = round((a - e) / abs(e) * 100, 1) if (a is not None and e is not None and e != 0) else None
         eps_hist.append({"date": h.get("date"),
