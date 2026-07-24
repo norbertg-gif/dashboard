@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 8
+INSIGHTS_SCHEMA_VERSION = 10
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -7888,9 +7888,10 @@ def _insights_parse(qs: dict) -> dict:
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
     # EPS história — posledné 4 kvartály (beat/miss). Yahoo "quarter" je fiškálny
-    # koniec kvartálu (nie dátum reportu) rovnako ako Finnhub /stock/earnings —
-    # bez presného dátumu zverejnenia aspoň priblížime chart pozíciu naň, inak
-    # by frontend (vyžaduje "date") tieto markery ticho zahodil.
+    # koniec kvartálu (nie presný dátum reportu, ktorý zvykne byť o pár týždňov
+    # neskôr) — použi ho aspoň ako približnú chart pozíciu namiesto úplného
+    # zahodenia markera (Finnhub padá na tento fallback len zriedka, tak nech
+    # aspoň niečo ukáže namiesto ničoho, keď sa tak stane).
     hist = (qs.get("earningsHistory") or {}).get("history") or []
     eps_hist = []
     for h in hist:
@@ -8013,9 +8014,13 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     r.raise_for_status()
     # Free-tier symbol filter na tomto endpointe je nespoľahlivý pri širšom
     # date rangi (vie vrátiť kalendár aj pre iné tickery) — filtruj explicitne.
+    # Riadky bez platného kvartálu sú agregáty/chybné kalendárové záznamy; pri
+    # GOOG sa taký riadok tváril ako report na quarter-end s nezmyselným EPS.
     reported = [h for h in (r.json().get("earningsCalendar") or [])
                 if h.get("date") and h.get("epsActual") is not None
-                and str(h.get("symbol") or "").upper() == sym]
+                and str(h.get("symbol") or "").upper() == sym
+                and str(h.get("quarter")) in {"1", "2", "3", "4"}
+                and h.get("year") is not None]
     reported.sort(key=lambda h: h["date"])
     eps_hist = []
     for h in reported[-8:]:
@@ -9061,6 +9066,19 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                    "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
     else:
+        # Posledná poistka proti zjavne poškodeným/zle priradeným EPS záznamom
+        # (videné na GOOG: actual ~3x estimate, čo pri realite firmy dáva
+        # nezmysel) — nevieme s istotou, či ide o Finnhub dátovú chybu alebo
+        # nesprávne mapovaný riadok, tak radšej zahoď outlier než ho zobraz.
+        eh = core.get("eps_history")
+        if eh:
+            def _plausible(h):
+                a, e = h.get("actual"), h.get("estimate")
+                if a is None or e is None or e == 0:
+                    return True
+                ratio = abs(a / e)
+                return 0.2 <= ratio <= 5
+            core["eps_history"] = [h for h in eh if _plausible(h)]
         payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION, **core,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
         # doplň earnings dátum do zdieľaného kalendára (rovnako ako per-symbol Finnhub)
