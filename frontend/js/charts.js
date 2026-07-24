@@ -1525,10 +1525,14 @@ async function applyEarningsMarkers(id, symbol, r, chartData) {
       const known = h.actual != null && h.estimate != null;
       const col = !known ? CHART_COLORS.neutral : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
       const sp = h.surprise_pct;
+      const fmtEps = v => Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '?';
       r._markerMeta[markerId] = { html:
         `<b>Earnings</b> · ${escHtml(h.quarter || h.date)}` +
-        `<br>EPS ${h.actual ?? '?'} vs odh. ${h.estimate ?? '?'}` +
-        (sp != null ? `<br><span style="color:${col}">${sp >= 0 ? '+' : ''}${sp}% ${h.beat ? 'beat' : 'miss'}</span>` : '') };
+        `<div style="display:flex;gap:10px;margin-top:2px;">` +
+          `<span class="tip-muted">Actual</span><b>${fmtEps(h.actual)}</b>` +
+          `<span class="tip-muted">Odhad</span><b>${fmtEps(h.estimate)}</b>` +
+        `</div>` +
+        (sp != null ? `<div style="color:${col};margin-top:2px;">${sp >= 0 ? '+' : ''}${sp.toFixed(1)}% ${h.beat ? 'beat' : 'miss'}</div>` : '') };
       // Textový marker (písmeno namiesto bodky) — kruh je zmenšený na 0, aby
       // ostal viditeľný len "E"; farba textu kopíruje beat/miss/neznáme.
       return { id: markerId, time, position: 'aboveBar', color: col, shape: 'circle', size: 0, text: 'E' };
