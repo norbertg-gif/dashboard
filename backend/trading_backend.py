@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 7
+INSIGHTS_SCHEMA_VERSION = 8
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -7887,13 +7887,20 @@ def _insights_parse(qs: dict) -> dict:
                            "type": kind, "shares": _yraw(t.get("shares")), "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
-    # EPS história — posledné 4 kvartály (beat/miss)
+    # EPS história — posledné 4 kvartály (beat/miss). Yahoo "quarter" je fiškálny
+    # koniec kvartálu (nie dátum reportu) rovnako ako Finnhub /stock/earnings —
+    # bez presného dátumu zverejnenia aspoň priblížime chart pozíciu naň, inak
+    # by frontend (vyžaduje "date") tieto markery ticho zahodil.
     hist = (qs.get("earningsHistory") or {}).get("history") or []
     eps_hist = []
     for h in hist:
         a, e = _yraw(h.get("epsActual")), _yraw(h.get("epsEstimate"))
         sp = _yraw(h.get("surprisePercent"))
-        eps_hist.append({"quarter": h.get("quarter", {}).get("fmt") if isinstance(h.get("quarter"), dict) else h.get("quarter"),
+        q = h.get("quarter")
+        q_raw = _yraw(q) if isinstance(q, dict) else None
+        q_date = datetime.fromtimestamp(q_raw, timezone.utc).date().isoformat() if q_raw else None
+        eps_hist.append({"date": q_date,
+                         "quarter": q.get("fmt") if isinstance(q, dict) else q,
                          "actual": a, "estimate": e,
                          "surprise_pct": round(sp * 100, 1) if sp is not None else None,
                          "beat": (a is not None and e is not None and a >= e)})
@@ -7992,14 +7999,16 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                            "relation": None, "type": kind, "shares": shares, "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
-    # EPS surprises — posledné nahlásené kvartály (~2 roky dozadu, chart
-    # markery majú byť pokryté aspoň za posledný rok). /stock/earnings vracia
-    # "period" = koniec fiškálneho kvartálu (nie dátum reportu — tie sa líšia
-    # o týždne), takže chart markery aj karta sedeli na nesprávny stĺpec.
-    # /calendar/earnings má skutočný dátum zverejnenia priamo v "date".
+    # EPS surprises — posledné nahlásené kvartály (aspoň posledný rok pokrytia).
+    # /stock/earnings vracia "period" = koniec fiškálneho kvartálu (nie dátum
+    # reportu — tie sa líšia o týždne), takže chart markery aj karta sedeli na
+    # nesprávny stĺpec. /calendar/earnings má skutočný dátum zverejnenia priamo
+    # v "date". POZOR: 400 dní je overene funkčné okno na free tieri — širší
+    # rozsah (skúšané 800) spôsobil zlyhanie requestu a tichý pád na Yahoo
+    # fallback bez EPS dát; neresetovať bez overenia proti reálnemu Finnhub kľúču.
     today = datetime.now(timezone.utc).date()
     r = requests.get("https://finnhub.io/api/v1/calendar/earnings",
-                     params={"symbol": sym, "from": (today - timedelta(days=800)).isoformat(),
+                     params={"symbol": sym, "from": (today - timedelta(days=400)).isoformat(),
                              "to": today.isoformat(), "token": api_key}, timeout=15)
     r.raise_for_status()
     # Free-tier symbol filter na tomto endpointe je nespoľahlivý pri širšom
