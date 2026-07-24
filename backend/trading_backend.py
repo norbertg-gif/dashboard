@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 10
+INSIGHTS_SCHEMA_VERSION = 11
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -7887,25 +7887,15 @@ def _insights_parse(qs: dict) -> dict:
                            "type": kind, "shares": _yraw(t.get("shares")), "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
-    # EPS história — posledné 4 kvartály (beat/miss). Yahoo "quarter" je fiškálny
-    # koniec kvartálu (nie presný dátum reportu, ktorý zvykne byť o pár týždňov
-    # neskôr) — použi ho aspoň ako približnú chart pozíciu namiesto úplného
-    # zahodenia markera (Finnhub padá na tento fallback len zriedka, tak nech
-    # aspoň niečo ukáže namiesto ničoho, keď sa tak stane).
-    hist = (qs.get("earningsHistory") or {}).get("history") or []
-    eps_hist = []
-    for h in hist:
-        a, e = _yraw(h.get("epsActual")), _yraw(h.get("epsEstimate"))
-        sp = _yraw(h.get("surprisePercent"))
-        q = h.get("quarter")
-        q_raw = _yraw(q) if isinstance(q, dict) else None
-        q_date = datetime.fromtimestamp(q_raw, timezone.utc).date().isoformat() if q_raw else None
-        eps_hist.append({"date": q_date,
-                         "quarter": q.get("fmt") if isinstance(q, dict) else q,
-                         "actual": a, "estimate": e,
-                         "surprise_pct": round(sp * 100, 1) if sp is not None else None,
-                         "beat": (a is not None and e is not None and a >= e)})
-    out["eps_history"] = eps_hist
+    # EPS história z Yahoo earningsHistory — VYPNUTÉ. Zistené naživo na GOOG
+    # (2026-07-24): "epsActual" tu vie byť kumulatívne rastúce naprieč
+    # kvartálmi (2.87 → 2.82 → 5.11 → 9.11, akoby TTM súčet) zatiaľ čo
+    # "epsEstimate" ostáva rozumné kvartálne číslo — reálna Yahoo dátová chyba,
+    # nie bug v našom kóde. Finnhub /calendar/earnings (primárny zdroj v
+    # _insights_fetch_finnhub) toto nemá. Radšej žiadna EPS história z Yahoo
+    # fallbacku než vymyslené čísla — insider/analyst/price_target sekcie z
+    # Yahoo naďalej fungujú spoľahlivo, len toto pole nie.
+    out["eps_history"] = []
     # Odhad na aktuálny kvartál + rast
     for tr in (qs.get("earningsTrend") or {}).get("trend") or []:
         if tr.get("period") == "0q":
@@ -9066,10 +9056,14 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                    "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
     else:
-        # Posledná poistka proti zjavne poškodeným/zle priradeným EPS záznamom
-        # (videné na GOOG: actual ~3x estimate, čo pri realite firmy dáva
-        # nezmysel) — nevieme s istotou, či ide o Finnhub dátovú chybu alebo
-        # nesprávne mapovaný riadok, tak radšej zahoď outlier než ho zobraz.
+        # Diagnostika: prečo Finnhub nebežal (ak vôbec) — bez tohto by sme pri
+        # ďalšom "source":"yahoo" prípade opäť len hádali naslepo, prečo.
+        if core.get("source") != "finnhub" and errs:
+            core["finnhub_error"] = " | ".join(errs)
+        # Poistka proti zjavne poškodeným EPS záznamom, nech prídu odkiaľkoľvek
+        # (Finnhub aj Yahoo majú historicky vedeli mať dátové chyby na
+        # konkrétnych tickeroch) — nezmyselný pomer actual/estimate radšej
+        # zahoď ako zobraz.
         eh = core.get("eps_history")
         if eh:
             def _plausible(h):
