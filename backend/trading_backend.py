@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 5
+INSIGHTS_SCHEMA_VERSION = 6
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -8001,8 +8001,11 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                      params={"symbol": sym, "from": (today - timedelta(days=400)).isoformat(),
                              "to": today.isoformat(), "token": api_key}, timeout=15)
     r.raise_for_status()
+    # Free-tier symbol filter na tomto endpointe je nespoľahlivý pri širšom
+    # date rangi (vie vrátiť kalendár aj pre iné tickery) — filtruj explicitne.
     reported = [h for h in (r.json().get("earningsCalendar") or [])
-                if h.get("date") and h.get("epsActual") is not None]
+                if h.get("date") and h.get("epsActual") is not None
+                and str(h.get("symbol") or "").upper() == sym]
     reported.sort(key=lambda h: h["date"])
     eps_hist = []
     for h in reported[-4:]:
