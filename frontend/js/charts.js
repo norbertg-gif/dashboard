@@ -2113,6 +2113,7 @@ async function loadMovers() {
   if (_moversLoading) return;
   const up = document.getElementById('movers-up')?.checked;
   const direction = up ? 'up' : 'down';
+  const portfolioOnly = document.getElementById('movers-portfolio-only')?.checked;
   // Počet grafov = 2 riadky podľa nastavenia STĹPCE (3 stĺpce → 6, 4 → 8)
   const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
   const n = Math.max(2, cols * 2);
@@ -2123,7 +2124,7 @@ async function loadMovers() {
     switchMainTab('charts');
     // Top pohyby je samostatný prehľad najväčších pohybov. Prah Pozornosti
     // patrí do portfólia; tu nesmie zmenšiť počet grafov pod STĹPCE x 2.
-    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}`);
+    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}&portfolio_only=${portfolioOnly?1:0}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     const movers = data.movers || [];

@@ -2449,6 +2449,7 @@ def get_movers(
     n: int = Query(6, ge=1, le=20),
     direction: str = Query("down"),
     min_change: float = Query(0.0, ge=0.0, le=50.0),
+    portfolio_only: bool = Query(False),
 ):
     """Top N titulov podľa denného % pohybu naprieč watchlistom + portfóliom.
     Len stock/ETF (crypto vynechané). Denný % z OHLCV cache (žiadne nové API
@@ -2484,6 +2485,8 @@ def get_movers(
     rows = []
     skipped = 0
     for sym, source in universe.items():
+        if portfolio_only and source == "watchlist":
+            continue
         dc = None
         price_source = "ohlcv_cache"
         live_rate = live_rates.get(sym)
