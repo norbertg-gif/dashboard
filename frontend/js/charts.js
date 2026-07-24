@@ -1512,20 +1512,26 @@ async function applyEarningsMarkers(id, symbol, r, chartData) {
     const resp = await fetch(`${API}/api/ticker/insights/${encodeURIComponent(symbol)}`);
     if (!resp.ok) { r._earningsMarkers = []; return; }
     const data = await resp.json();
-    const hist = (data?.eps_history || []).filter(h => h?.quarter);
+    // h.date je skutočný dátum zverejnenia výsledkov (Finnhub /calendar/earnings);
+    // h.quarter je len popisný label ("Q2 2026") pre tooltip, nie pozícia na grafe —
+    // predtým sa omylom použil quarter/period (koniec fiškálneho kvartálu), čo
+    // sedelo na iný stĺpec než kedy sa výsledky reálne zverejnili.
+    const hist = (data?.eps_history || []).filter(h => h?.date);
     r._markerMeta ||= {};
     r._earningsMarkers = hist.map((h, index) => {
-      const time = resolveMarkerTime({ openDate: h.quarter }, chartData);
+      const time = resolveMarkerTime({ openDate: h.date }, chartData);
       if (!time) return null;
-      const markerId = `earnings:${id}:${index}:${h.quarter}`;
+      const markerId = `earnings:${id}:${index}:${h.date}`;
       const known = h.actual != null && h.estimate != null;
       const col = !known ? CHART_COLORS.neutral : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
       const sp = h.surprise_pct;
       r._markerMeta[markerId] = { html:
-        `<b>Earnings</b> · ${escHtml(h.quarter)}` +
+        `<b>Earnings</b> · ${escHtml(h.quarter || h.date)}` +
         `<br>EPS ${h.actual ?? '?'} vs odh. ${h.estimate ?? '?'}` +
         (sp != null ? `<br><span style="color:${col}">${sp >= 0 ? '+' : ''}${sp}% ${h.beat ? 'beat' : 'miss'}</span>` : '') };
-      return { id: markerId, time, position: 'aboveBar', color: col, shape: 'circle', size: 0.6, text: '' };
+      // Textový marker (písmeno namiesto bodky) — kruh je zmenšený na 0, aby
+      // ostal viditeľný len "E"; farba textu kopíruje beat/miss/neznáme.
+      return { id: markerId, time, position: 'aboveBar', color: col, shape: 'circle', size: 0, text: 'E' };
     }).filter(Boolean);
     setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
   } catch (e) {

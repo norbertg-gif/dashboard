@@ -7857,7 +7857,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 4
+INSIGHTS_SCHEMA_VERSION = 5
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -7992,16 +7992,26 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                            "relation": None, "type": kind, "shares": shares, "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
                       "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
-    # EPS surprises — posledné 4 kvartály (API vracia najnovší prvý → otoč)
-    r = requests.get("https://finnhub.io/api/v1/stock/earnings",
-                     params={"symbol": sym, "token": api_key}, timeout=15)
+    # EPS surprises — posledné 4 nahlásené kvartály. /stock/earnings vracia
+    # "period" = koniec fiškálneho kvartálu (nie dátum reportu — tie sa líšia
+    # o týždne), takže chart markery aj karta sedeli na nesprávny stĺpec.
+    # /calendar/earnings má skutočný dátum zverejnenia priamo v "date".
+    today = datetime.now(timezone.utc).date()
+    r = requests.get("https://finnhub.io/api/v1/calendar/earnings",
+                     params={"symbol": sym, "from": (today - timedelta(days=400)).isoformat(),
+                             "to": today.isoformat(), "token": api_key}, timeout=15)
     r.raise_for_status()
+    reported = [h for h in (r.json().get("earningsCalendar") or [])
+                if h.get("date") and h.get("epsActual") is not None]
+    reported.sort(key=lambda h: h["date"])
     eps_hist = []
-    for h in (r.json() or [])[:4][::-1]:
-        a, e = h.get("actual"), h.get("estimate")
-        sp = h.get("surprisePercent")
-        eps_hist.append({"quarter": h.get("period"), "actual": a, "estimate": e,
-                         "surprise_pct": round(sp, 1) if sp is not None else None,
+    for h in reported[-4:]:
+        a, e = h.get("epsActual"), h.get("epsEstimate")
+        sp = round((a - e) / abs(e) * 100, 1) if (a is not None and e is not None and e != 0) else None
+        eps_hist.append({"date": h.get("date"),
+                         "quarter": f"Q{h.get('quarter')} {h.get('year')}" if h.get("quarter") else h.get("date"),
+                         "actual": a, "estimate": e,
+                         "surprise_pct": sp,
                          "beat": (a is not None and e is not None and a >= e)})
     out["eps_history"] = eps_hist
     try:
