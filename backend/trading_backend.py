@@ -8192,7 +8192,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 11
+INSIGHTS_SCHEMA_VERSION = 12
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -8293,6 +8293,123 @@ def _scrub_token(msg: str) -> str:
     return msg
 
 
+def _fmp_earnings_surprises(sym: str) -> tuple[list[dict], bool, str | None]:
+    """Map FMP earnings surprises to (eps_history, succeeded, error)."""
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        return ([], False, "FMP_API_KEY is not configured")
+    attempts = (
+        ("https://financialmodelingprep.com/stable/earnings-surprises",
+         {"symbol": sym}),
+        (f"https://financialmodelingprep.com/api/v3/earnings-surprises/{urllib.parse.quote(sym)}",
+         {}),
+    )
+    upstream_succeeded = False
+    last_err = None
+    rows: list[dict] = []
+    for url, sym_params in attempts:
+        try:
+            r = requests.get(
+                url, params={**sym_params, "apikey": api_key}, timeout=12
+            )
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}"
+                continue
+            data = r.json()
+            if isinstance(data, dict) and (
+                data.get("Error Message") or data.get("error") or data.get("message")
+            ):
+                last_err = "error payload"
+                continue
+            upstream_succeeded = True
+            if isinstance(data, dict):
+                data = data.get("data") or data.get("earningsSurprises") or []
+            if isinstance(data, list) and data:
+                rows = [row for row in data if isinstance(row, dict)]
+                break
+        except Exception as e:
+            last_err = type(e).__name__
+
+    def _first(row: dict, *keys):
+        return next((row.get(key) for key in keys if row.get(key) is not None), None)
+
+    def _number(value):
+        try:
+            number = float(value)
+            return number if math.isfinite(number) else None
+        except (TypeError, ValueError):
+            return None
+
+    history = []
+    for row in rows:
+        row_symbol = str(row.get("symbol") or "").upper()
+        if row_symbol and row_symbol != sym:
+            continue
+        reported_date = _first(
+            row, "date", "reportedDate", "earningsDate", "fiscalDateEnding"
+        )
+        if not reported_date:
+            continue
+        reported_date = str(reported_date)[:10]
+        actual = _number(_first(
+            row, "actualEarningResult", "actualEarning", "epsActual",
+            "actualEPS", "actual",
+        ))
+        estimate = _number(_first(
+            row, "estimatedEarningResult", "estimatedEarning", "epsEstimate",
+            "estimatedEPS", "estimate",
+        ))
+        if actual is None:
+            continue
+        quarter = _first(row, "quarter", "fiscalQuarter")
+        year = _first(row, "year", "fiscalYear")
+        if quarter is not None:
+            quarter = str(quarter).upper().removeprefix("Q")
+        if quarter not in {"1", "2", "3", "4"} or year is None:
+            fiscal_date = str(_first(row, "fiscalDateEnding") or reported_date)[:10]
+            try:
+                parsed_date = date.fromisoformat(fiscal_date)
+                quarter = str((parsed_date.month - 1) // 3 + 1)
+                year = parsed_date.year
+            except ValueError:
+                quarter = year = None
+        surprise_pct = (
+            round((actual - estimate) / abs(estimate) * 100, 1)
+            if estimate is not None and estimate != 0 else None
+        )
+        history.append({
+            "date": reported_date,
+            "quarter": f"Q{quarter} {year}" if quarter and year else reported_date,
+            "actual": actual,
+            "estimate": estimate,
+            "surprise_pct": surprise_pct,
+            "beat": estimate is not None and actual >= estimate,
+        })
+    history.sort(key=lambda item: item["date"])
+    return (history[-8:], upstream_succeeded, last_err)
+
+
+def _finnhub_earnings_calendar_get(sym: str, api_key: str, today: date):
+    """Finnhub earnings calendar with one narrow retry for HTTP 429."""
+    params = {
+        "symbol": sym,
+        "from": (today - timedelta(days=400)).isoformat(),
+        "to": today.isoformat(),
+        "token": api_key,
+    }
+    for attempt in range(2):
+        r = requests.get(
+            "https://finnhub.io/api/v1/calendar/earnings",
+            params=params,
+            timeout=15,
+        )
+        if r.status_code == 429 and attempt == 0:
+            _time_module.sleep(1.0)
+            continue
+        r.raise_for_status()
+        return r
+
+
 def _insights_fetch_finnhub(sym: str) -> dict:
     """Insider transakcie + EPS surprises z Finnhubu (free tier, funguje z Renderu)."""
     api_key = os.getenv("FINNHUB_API_KEY", "")
@@ -8333,15 +8450,19 @@ def _insights_fetch_finnhub(sym: str) -> dict:
     # rozsah (skúšané 800) spôsobil zlyhanie requestu a tichý pád na Yahoo
     # fallback bez EPS dát; neresetovať bez overenia proti reálnemu Finnhub kľúču.
     today = datetime.now(timezone.utc).date()
-    r = requests.get("https://finnhub.io/api/v1/calendar/earnings",
-                     params={"symbol": sym, "from": (today - timedelta(days=400)).isoformat(),
-                             "to": today.isoformat(), "token": api_key}, timeout=15)
-    r.raise_for_status()
+    calendar_error = None
+    try:
+        r = _finnhub_earnings_calendar_get(sym, api_key, today)
+        calendar_rows = r.json().get("earningsCalendar") or []
+    except Exception as e:
+        calendar_rows = []
+        calendar_error = f"earnings calendar: {_scrub_token(e)}"
+        print(f"[insights] Finnhub earnings calendar {sym} failed: {_scrub_token(e)}")
     # Free-tier symbol filter na tomto endpointe je nespoľahlivý pri širšom
     # date rangi (vie vrátiť kalendár aj pre iné tickery) — filtruj explicitne.
     # Riadky bez platného kvartálu sú agregáty/chybné kalendárové záznamy; pri
     # GOOG sa taký riadok tváril ako report na quarter-end s nezmyselným EPS.
-    reported = [h for h in (r.json().get("earningsCalendar") or [])
+    reported = [h for h in calendar_rows
                 if h.get("date") and h.get("epsActual") is not None
                 and str(h.get("symbol") or "").upper() == sym
                 and str(h.get("quarter")) in {"1", "2", "3", "4"}
@@ -8357,6 +8478,9 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                          "surprise_pct": sp,
                          "beat": (a is not None and e is not None and a >= e)})
     out["eps_history"] = eps_hist
+    out["_eps_history_fetch_failed"] = calendar_error is not None
+    if calendar_error:
+        out["_finnhub_earnings_error"] = calendar_error
     try:
         r = requests.get("https://finnhub.io/api/v1/stock/recommendation",
                          params={"symbol": sym, "token": api_key}, timeout=15)
@@ -9329,16 +9453,26 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             age_h = (datetime.now(timezone.utc)
                      - datetime.fromisoformat(cached["fetched_at"])).total_seconds() / 3600
             schema_ok = cached.get("schema_version") == INSIGHTS_SCHEMA_VERSION
-            if schema_ok and age_h < (1 if cached.get("error") else INSIGHTS_TTL_H) and not refresh:
+            short_ttl = cached.get("error") or cached.get("eps_history_error")
+            if schema_ok and age_h < (1 if short_ttl else INSIGHTS_TTL_H) and not refresh:
                 return cached
         except Exception:
             cached = None
     core = None
     errs = []
+    eps_history_fetch_failed = False
     # Primárne Finnhub (z Renderu funguje), Yahoo quoteSummary ako fallback
     try:
-        core = {**_insights_fetch_finnhub(sym), "source": "finnhub"}
+        finnhub_core = _insights_fetch_finnhub(sym)
+        eps_history_fetch_failed = bool(
+            finnhub_core.pop("_eps_history_fetch_failed", False)
+        )
+        finnhub_earnings_error = finnhub_core.pop("_finnhub_earnings_error", None)
+        core = {**finnhub_core, "source": "finnhub"}
+        if finnhub_earnings_error:
+            core["finnhub_error"] = finnhub_earnings_error
     except Exception as e:
+        eps_history_fetch_failed = True
         errs.append(f"finnhub: {_scrub_token(e)}")
     # Finnhub can return insider/EPS data while omitting analyst targets.
     # Enrich only missing sections from Yahoo instead of discarding good data.
@@ -9384,6 +9518,30 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             core = {**_insights_parse(qs), "source": "yahoo"}
         else:
             errs.append("yahoo unavailable")
+    # Yahoo EPS stays deliberately disabled. FMP is the safe fallback whenever
+    # Finnhub produced no usable historical earnings rows.
+    if core is None or not core.get("eps_history"):
+        fmp_eps, fmp_succeeded, fmp_error = _fmp_earnings_surprises(sym)
+        if fmp_eps:
+            if core is None:
+                core = {"eps_history": fmp_eps, "source": "fmp"}
+            else:
+                core["eps_history"] = fmp_eps
+                sources = core.get("source", "").split("+")
+                if "fmp" not in sources:
+                    core["source"] = core.get("source", "finnhub") + "+fmp"
+        elif eps_history_fetch_failed:
+            # This diagnostic also selects the existing one-hour cache TTL.
+            if core is None:
+                core = {
+                    "eps_history": [],
+                    "source": "fmp" if fmp_succeeded else "none",
+                }
+            core["eps_history_error"] = (
+                "Finnhub earnings unavailable; FMP fallback returned no usable data"
+            )
+            if fmp_error:
+                core["fmp_earnings_error"] = fmp_error
     if core is None:
         if cached and not cached.get("error"):
             return {**cached, "stale": True}

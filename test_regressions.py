@@ -319,6 +319,125 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
 
 
+class TickerInsightsEarningsRegressionTests(unittest.TestCase):
+    class _Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise tb.requests.exceptions.HTTPError(
+                    f"HTTP {self.status_code}", response=self
+                )
+
+    def test_fmp_earnings_surprises_maps_stable_fields(self):
+        response = self._Response(200, [{
+            "date": "2026-04-24",
+            "symbol": "AAPL",
+            "actualEarningResult": "1.65",
+            "estimatedEarningResult": "1.50",
+        }])
+        with (
+            patch.dict("os.environ", {"FMP_API_KEY": "testkey123"}),
+            patch.object(tb.requests, "get", return_value=response),
+        ):
+            history, succeeded, error = tb._fmp_earnings_surprises("AAPL")
+        self.assertTrue(succeeded)
+        self.assertIsNone(error)
+        self.assertEqual(history, [{
+            "date": "2026-04-24",
+            "quarter": "Q2 2026",
+            "actual": 1.65,
+            "estimate": 1.5,
+            "surprise_pct": 10.0,
+            "beat": True,
+        }])
+
+    def test_finnhub_calendar_retries_once_on_429(self):
+        responses = [
+            self._Response(429, {}),
+            self._Response(200, {"earningsCalendar": []}),
+        ]
+        with (
+            patch.object(tb.requests, "get", side_effect=responses) as get,
+            patch.object(tb._time_module, "sleep") as sleep,
+        ):
+            result = tb._finnhub_earnings_calendar_get(
+                "AAPL", "test-token", tb.date(2026, 7, 24)
+            )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+        self.assertEqual(
+            get.call_args_list[0].kwargs["params"]["from"], "2025-06-19"
+        )
+
+    def test_failed_eps_sources_use_short_cache_ttl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            with (
+                patch.object(tb, "YAHOO_INSIGHTS_DIR", cache_dir),
+                patch.object(
+                    tb, "_insights_fetch_finnhub",
+                    side_effect=RuntimeError("calendar unavailable"),
+                ) as finnhub,
+                patch.object(tb, "_yahoo_quote_summary", return_value={}),
+                patch.object(
+                    tb, "_fmp_earnings_surprises",
+                    return_value=([], False, "HTTP 429"),
+                ),
+            ):
+                first = tb.get_ticker_insights("AAPL", refresh=0)
+                self.assertIn("eps_history_error", first)
+                path = cache_dir / "AAPL.json"
+                cached = json.loads(path.read_text(encoding="utf-8"))
+                cached["fetched_at"] = (
+                    tb.datetime.now(tb.timezone.utc) - tb.timedelta(hours=2)
+                ).isoformat()
+                path.write_text(json.dumps(cached), encoding="utf-8")
+                tb.get_ticker_insights("AAPL", refresh=0)
+        self.assertEqual(finnhub.call_count, 2)
+
+    def test_genuinely_empty_eps_uses_full_cache_ttl(self):
+        finnhub_payload = {
+            "insider": {
+                "buys_90d": 0, "sells_90d": 0,
+                "net_value_90d": 0, "recent": [],
+            },
+            "eps_history": [],
+            "_eps_history_fetch_failed": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            with (
+                patch.object(tb, "YAHOO_INSIGHTS_DIR", cache_dir),
+                patch.object(
+                    tb, "_insights_fetch_finnhub",
+                    return_value=finnhub_payload.copy(),
+                ) as finnhub,
+                patch.object(tb, "_yahoo_quote_summary", return_value=None),
+                patch.object(tb, "_fmp_price_target", return_value=None),
+                patch.object(
+                    tb, "_fmp_earnings_surprises",
+                    return_value=([], True, None),
+                ),
+            ):
+                first = tb.get_ticker_insights("AAPL", refresh=0)
+                self.assertNotIn("eps_history_error", first)
+                path = cache_dir / "AAPL.json"
+                cached = json.loads(path.read_text(encoding="utf-8"))
+                cached["fetched_at"] = (
+                    tb.datetime.now(tb.timezone.utc) - tb.timedelta(hours=2)
+                ).isoformat()
+                path.write_text(json.dumps(cached), encoding="utf-8")
+                tb.get_ticker_insights("AAPL", refresh=0)
+        self.assertEqual(finnhub.call_count, 1)
+
+
 class FundAnalysisFmpRegressionTests(unittest.TestCase):
     _FMP_PROFILE = [{"companyName": "Test Corp"}]
     _FMP_INCOME = [
