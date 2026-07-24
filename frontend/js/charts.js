@@ -633,6 +633,17 @@ function setSeriesMarkers(series, markers) {
   _seriesMarkerPrims.set(series, LightweightCharts.createSeriesMarkers(series, markers));
 }
 
+// Zjednotenie všetkých marker zdrojov (eToro pozície, pattern rozpoznania,
+// earnings) — každý zdroj sa napĺňa/refreshuje async nezávisle, tento helper
+// je jediné miesto, čo ich skladá dokopy pred zápisom do série.
+function combinedChartMarkers(r) {
+  return [
+    ...(r._etoroMarkersList || []),
+    ...(r._patternMarkers || []),
+    ...(r._earningsMarkers || []),
+  ].sort((a, b) => a.time < b.time ? -1 : 1);
+}
+
 function attachMarkerTooltip(chart, container, getMarkerMeta) {
   if (!chart || !container) return;
   if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
@@ -1490,6 +1501,38 @@ function resolveMarkerTime(pos, chartData) {
   return sameDay?.time || null;
 }
 
+// ── EARNINGS MARKERS ──────────────────────────────────────────────────────────
+// Rovnaký vzor ako Yahoo Finance chart: bodka na dátume výsledkov, hover ukáže
+// EPS actual/estimate + surprise %. Dáta z /api/ticker/insights (Finnhub, 12h
+// cache) — už existujúci endpoint pre kartu "Insider & EPS" v Analytike,
+// tu len znovupoužitý ako chart overlay.
+async function applyEarningsMarkers(id, symbol, r, chartData) {
+  if (!r.candleSeries || !chartData?.length) return;
+  try {
+    const resp = await fetch(`${API}/api/ticker/insights/${encodeURIComponent(symbol)}`);
+    if (!resp.ok) { r._earningsMarkers = []; return; }
+    const data = await resp.json();
+    const hist = (data?.eps_history || []).filter(h => h?.quarter);
+    r._markerMeta ||= {};
+    r._earningsMarkers = hist.map((h, index) => {
+      const time = resolveMarkerTime({ openDate: h.quarter }, chartData);
+      if (!time) return null;
+      const markerId = `earnings:${id}:${index}:${h.quarter}`;
+      const known = h.actual != null && h.estimate != null;
+      const col = !known ? CHART_COLORS.neutral : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
+      const sp = h.surprise_pct;
+      r._markerMeta[markerId] = { html:
+        `<b>Earnings</b> · ${escHtml(h.quarter)}` +
+        `<br>EPS ${h.actual ?? '?'} vs odh. ${h.estimate ?? '?'}` +
+        (sp != null ? `<br><span style="color:${col}">${sp >= 0 ? '+' : ''}${sp}% ${h.beat ? 'beat' : 'miss'}</span>` : '') };
+      return { id: markerId, time, position: 'aboveBar', color: col, shape: 'circle', size: 0.6, text: '' };
+    }).filter(Boolean);
+    setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+  } catch (e) {
+    console.warn('earnings markers failed:', e);
+  }
+}
+
 // ── PATTERN MARKERS ───────────────────────────────────────────────────────────
 const _PC = {bull: CHART_COLORS.up, bear: CHART_COLORS.down, neut: CHART_COLORS.neutral};
 function applyPatternMarkers(id, r, patterns) {
@@ -1509,9 +1552,7 @@ function applyPatternMarkers(id, r, patterns) {
       color: col, shape: 'circle', size: 0.65, text: '', _p: p,
     };
   });
-  const all = [...(r._etoroMarkersList||[]), ...r._patternMarkers]
-    .sort((a,b) => a.time < b.time ? -1 : 1);
-  try { setSeriesMarkers(r.candleSeries, all); } catch(e) {}
+  try { setSeriesMarkers(r.candleSeries, combinedChartMarkers(r)); } catch(e) {}
 }
 
 async function applyEtoroMarkers(id, symbol, r, chartData) {
@@ -1566,7 +1607,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   }
 
   if (!allPositions.length) {
-    setSeriesMarkers(r.candleSeries, [...(r._patternMarkers || [])]);
+    setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
     r._etoroPositions = [];
     return;
   }
@@ -1635,8 +1676,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   }
   markers.sort((a,b) => a.time < b.time ? -1 : 1);
   r._etoroMarkersList = markers;
-  const all = [...markers, ...(r._patternMarkers||[])].sort((a,b) => a.time < b.time ? -1 : 1);
-  setSeriesMarkers(r.candleSeries, all);
+  setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
 
   // Ulož pozície pre live prepočet a ďalšie panelové funkcie.
   r._etoroPositions = allPositions;
@@ -1934,6 +1974,12 @@ async function loadChart(id, opts = {}) {
       applyEtoroMarkers(id, sym, r, data)
         .then(() => updateChartLiveBadges(id))
         .catch(e => console.warn('eToro markers failed:', e));
+      // Earnings história sa medzi refresh=1 dobehmi toho istého symbolu
+      // nemení (backend má aj tak 12h cache) — fetchni len raz na symbol/panel.
+      if (r._earningsFetchedFor !== sym) {
+        r._earningsFetchedFor = sym;
+        applyEarningsMarkers(id, sym, r, data).catch(e => console.warn('earnings markers failed:', e));
+      }
     }
     if (data.patterns?.length) applyPatternMarkers(id, r, data.patterns);
     if (opts.refresh !== 1 && !opts.noLiveAfter) {
