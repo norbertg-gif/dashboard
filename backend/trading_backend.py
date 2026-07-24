@@ -14,7 +14,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 _executor = ThreadPoolExecutor(max_workers=2)
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Query, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -5768,7 +5768,12 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
+SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
+SCANNER_DAILY_CACHE_MIN_ROWS = 100
+SCANNER_DAILY_INCREMENTAL_DAYS = 10
 _scanner_lock = threading.Lock()
+_scanner_daily_cache_locks_guard = threading.Lock()
+_scanner_daily_cache_locks: dict[str, threading.Lock] = {}
 _scanner_state = {
     "running": False,
     "started_at": None,
@@ -5985,8 +5990,9 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
         raise HTTPException(400, "Chyba importny subor")
     scores = parse_dip_ranking_xlsx(raw, filename=filename)
     save_dip_scores(scores)
+    daily_cache_cold = _prepare_scanner_daily_cache(scores)
     meta = scores.get("_meta", {})
-    return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at")}
+    return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at"), "daily_cache_cold": daily_cache_cold}
 
 
 @app.post("/api/scanner/dip/import-html")
@@ -6195,15 +6201,262 @@ def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive:
     return raw.copy()
 
 
+def _scanner_cache_path(ticker: str) -> Path:
+    """Stable, traversal-safe per-ticker path for scanner-only daily history."""
+    symbol = str(ticker or "").strip().upper()
+    safe = re.sub(r"[^A-Z0-9._-]+", "_", symbol).strip("._-") or "ticker"
+    digest = hashlib.sha256(symbol.encode("utf-8")).hexdigest()[:10]
+    return SCANNER_DAILY_CACHE_DIR / f"{safe}-{digest}.pkl"
+
+
+def _scanner_cache_lock(ticker: str) -> threading.Lock:
+    symbol = str(ticker or "").strip().upper()
+    with _scanner_daily_cache_locks_guard:
+        lock = _scanner_daily_cache_locks.get(symbol)
+        if lock is None:
+            lock = threading.Lock()
+            _scanner_daily_cache_locks[symbol] = lock
+        return lock
+
+
+def _observed_market_holiday(day: date) -> date:
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    first_next = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+    last = first_next - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter_sunday(year: int) -> date:
+    """Gregorian Easter (Anonymous Gregorian algorithm), used for Good Friday."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = (h + l - 7 * m + 114) % 31 + 1
+    return date(year, month, day)
+
+
+def _us_market_holidays(year: int) -> set[date]:
+    holidays = {
+        _observed_market_holiday(date(year, 1, 1)),
+        _nth_weekday(year, 1, 0, 3),   # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),   # Washington's Birthday
+        _easter_sunday(year) - timedelta(days=2),
+        _last_weekday(year, 5, 0),     # Memorial Day
+        _observed_market_holiday(date(year, 7, 4)),
+        _nth_weekday(year, 9, 0, 1),   # Labor Day
+        _nth_weekday(year, 11, 3, 4),  # Thanksgiving
+        _observed_market_holiday(date(year, 12, 25)),
+    }
+    if year >= 2022:
+        holidays.add(_observed_market_holiday(date(year, 6, 19)))
+    return holidays
+
+
+def _most_recent_completed_us_trading_day(now: datetime | None = None) -> date:
+    """Latest completed regular US session, with weekends and standard holidays."""
+    eastern = ZoneInfo("America/New_York")
+    if now is None:
+        local_now = datetime.now(eastern)
+    elif now.tzinfo is None:
+        local_now = now.replace(tzinfo=eastern)
+    else:
+        local_now = now.astimezone(eastern)
+
+    candidate = local_now.date()
+    # A small settlement buffer avoids persisting yfinance's still-forming daily bar.
+    if local_now.hour < 16 or (local_now.hour == 16 and local_now.minute < 15):
+        candidate -= timedelta(days=1)
+    holidays = set()
+    for year in range(candidate.year - 1, candidate.year + 2):
+        holidays.update(_us_market_holidays(year))
+    while candidate.weekday() >= 5 or candidate in holidays:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def _normalize_scanner_daily_bars(raw) -> pd.DataFrame:
+    columns = ["Open", "High", "Low", "Close", "Volume"]
+    if raw is None or not isinstance(raw, pd.DataFrame) or raw.empty:
+        return pd.DataFrame(columns=columns)
+    df = raw.copy()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    if any(column not in df.columns for column in columns):
+        return pd.DataFrame(columns=columns)
+    df = df[columns]
+    idx = pd.to_datetime(df.index, errors="coerce")
+    valid = ~idx.isna()
+    df = df.loc[valid].copy()
+    idx = idx[valid]
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_convert("America/New_York").tz_localize(None)
+    df.index = idx.normalize()
+    df.index.name = "Date"
+    for column in columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    completed = pd.Timestamp(_most_recent_completed_us_trading_day())
+    df = df[df.index <= completed]
+    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+    return df[~df.index.duplicated(keep="last")].sort_index()
+
+
+def _read_scanner_daily_cache(ticker: str) -> pd.DataFrame | None:
+    path = _scanner_cache_path(ticker)
+    if not path.exists():
+        return None
+    try:
+        cached = _normalize_scanner_daily_bars(pd.read_pickle(path))
+        return cached if len(cached) >= SCANNER_DAILY_CACHE_MIN_ROWS else None
+    except Exception as exc:
+        print(f"[scanner-cache] read {ticker}: {type(exc).__name__}")
+        return None
+
+
+def _write_scanner_daily_cache(ticker: str, daily: pd.DataFrame) -> None:
+    path = _scanner_cache_path(ticker)
+    temp_path = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        daily.to_pickle(temp_path)
+        os.replace(temp_path, path)
+    except Exception as exc:
+        print(f"[scanner-cache] write {ticker}: {type(exc).__name__}")
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _prepare_scanner_daily_cache(scores: dict) -> int:
+    """Finviz/DIP import hook: create storage and report first-seen cache misses."""
+    try:
+        SCANNER_DAILY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        print(f"[scanner-cache] prepare: {type(exc).__name__}")
+    tickers = [
+        str(symbol).strip().upper()
+        for symbol in scores
+        if symbol and not str(symbol).startswith("_")
+    ]
+    return sum(1 for ticker in tickers if not _scanner_cache_path(ticker).exists())
+
+
+def _fetch_scanner_daily_increment(ticker: str, completed: date) -> pd.DataFrame:
+    """Fetch only the scanner's recent daily gap, using yfinance then Alpaca."""
+    start = completed - timedelta(days=SCANNER_DAILY_INCREMENTAL_DAYS)
+    end = completed + timedelta(days=1)  # yfinance end is exclusive
+    yf_symbol = ticker.replace(".", "-")
+    _log_ext_api_call("yfinance", "download")
+    try:
+        raw = yf.download(
+            yf_symbol,
+            start=start.isoformat(),
+            end=end.isoformat(),
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            timeout=SCANNER_YF_TIMEOUT,
+        )
+    except Exception as exc:
+        raw = pd.DataFrame()
+        print(f"[yfinance] {ticker} scanner increment: {type(exc).__name__}")
+    raw = _normalize_scanner_daily_bars(raw)
+    if raw.empty:
+        # The existing Alpaca helper accepts periods rather than explicit dates.
+        # Fetch its shortest supported window and trim it back to the same gap.
+        alt = _normalize_scanner_daily_bars(_alpaca_daily_bars(ticker, "1mo", "1d"))
+        raw = alt[alt.index >= pd.Timestamp(start)] if not alt.empty else alt
+    return raw
+
+
+def _scanner_daily_history(ticker: str) -> pd.DataFrame:
+    """Load/update one ticker via scanner's existing yfinance -> Alpaca chain."""
+    with _scanner_cache_lock(ticker):
+        cached = _read_scanner_daily_cache(ticker)
+        completed_day = _most_recent_completed_us_trading_day()
+        completed = pd.Timestamp(completed_day)
+        if cached is not None and cached.index.max() >= completed:
+            return cached.copy()
+
+        if cached is None:
+            fetched = _yf_download_cached(
+                ticker, "1y", "1d", prefer_massive=False, retain_in_memory=False
+            )
+        else:
+            fetched = _fetch_scanner_daily_increment(ticker, completed_day)
+        fetched = _normalize_scanner_daily_bars(fetched)
+        if fetched.empty:
+            return cached.copy() if cached is not None else fetched
+
+        if cached is not None:
+            merged = pd.concat([cached, fetched])
+            merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+        else:
+            merged = fetched
+        if len(merged) >= SCANNER_DAILY_CACHE_MIN_ROWS:
+            _write_scanner_daily_cache(ticker, merged)
+        return merged.copy()
+
+
+def _scanner_weekly_from_daily(daily: pd.DataFrame) -> pd.DataFrame:
+    if daily is None or daily.empty:
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    weekly = daily.resample("W-FRI").agg({
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+    })
+    weekly["Volume"] = daily["Volume"].resample("W-FRI").sum(min_count=1)
+    weekly.index.name = "Date"
+    return weekly.dropna(subset=["Open", "High", "Low", "Close"])
+
+
+def _scanner_download_cached(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    """Scanner-only facade retaining the old per-call DataFrame contract."""
+    daily = _scanner_daily_history(ticker)
+    if interval == "1wk":
+        bars = _scanner_weekly_from_daily(daily)
+        lookback_days = _MASSIVE_PERIOD_DAYS.get(period, 370)
+    elif interval == "1d":
+        bars = daily
+        lookback_days = _MASSIVE_PERIOD_DAYS.get(period, 190)
+    else:
+        return pd.DataFrame()
+    if bars.empty:
+        return bars.copy()
+    cutoff = bars.index.max() - pd.Timedelta(days=lookback_days)
+    return bars[bars.index >= cutoff].copy()
+
+
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
-    raw_d = _yf_download_cached(ticker, "6mo", "1d", prefer_massive=False, retain_in_memory=False)
+    raw_d = _scanner_download_cached(ticker, "6mo", "1d")
     if len(raw_d) < 20:
         return {"ticker": ticker, "error": "Nedostatok dat"}
 
     df_d = add_indicators(raw_d)
     daily_health = chart_health(df_d, "daily")
 
-    raw_w = _yf_download_cached(ticker, "1y", "1wk", prefer_massive=False, retain_in_memory=False)
+    raw_w = _scanner_download_cached(ticker, "1y", "1wk")
     weekly_bullish = None
     weekly_status = "insufficient_history"
     weekly_trend = None
