@@ -3889,18 +3889,28 @@ def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
     Vracia (change_pct, last_close) alebo None keď nie je dosť dát."""
     try:
         raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneDay")
-        if not raw:
-            return None
-        candles = _flatten_ohlcv(raw)
-        if len(candles) < 2:
-            return None
-        last = float(candles[-1].get("close") or candles[-1].get("c") or 0)
-        prev = float(candles[-2].get("close") or candles[-2].get("c") or 0)
-        if not prev or not last:
-            return None
-        return (last - prev) / prev * 100, last
+        if raw:
+            candles = _flatten_ohlcv(raw)
+            if len(candles) >= 2:
+                last = float(candles[-1].get("close") or candles[-1].get("c") or 0)
+                prev = float(candles[-2].get("close") or candles[-2].get("c") or 0)
+                if prev and last:
+                    return (last - prev) / prev * 100, last
     except Exception:
-        return None
+        pass
+
+    # Additive disk-only fallback for names overlapping the DIP scanner universe.
+    # Never refresh here: movers must remain cache-only and make no API calls.
+    try:
+        daily = _read_scanner_daily_cache(sym)
+        if daily is not None and len(daily) >= 2:
+            last = float(daily.iloc[-1]["Close"])
+            prev = float(daily.iloc[-2]["Close"])
+            if prev and last:
+                return (last - prev) / prev * 100, last
+    except Exception:
+        pass
+    return None
 
 
 def _merge_ohlcv_tail(cached: dict, new_data: dict, interval: str, max_candles: int = 1000) -> dict:
@@ -10207,7 +10217,7 @@ def get_ticker_news(ticker: str, refresh: int = Query(0)):
 
 @app.get("/api/checklist")
 def run_checklist(tickers: str = "", days: int = 10):
-    """Scan list of tickers for recent buy signals. Fetches live data for each."""
+    """Scan tickers, reusing fresh scanner history before the normal live fetch."""
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not ticker_list:
         return {"results": []}
@@ -10217,7 +10227,22 @@ def run_checklist(tickers: str = "", days: int = 10):
 
     for ticker in ticker_list:
         try:
-            raw_d = _yf_download_cached(ticker, "6mo", "1d")
+            scanner_daily = _read_scanner_daily_cache(ticker)
+            scanner_cache_fresh = (
+                scanner_daily is not None
+                and not scanner_daily.empty
+                and scanner_daily.index.max()
+                >= pd.Timestamp(_most_recent_completed_us_trading_day())
+            )
+            if scanner_cache_fresh:
+                daily_cutoff = scanner_daily.index.max() - pd.Timedelta(
+                    days=_MASSIVE_PERIOD_DAYS["6mo"]
+                )
+                raw_d = scanner_daily[scanner_daily.index >= daily_cutoff].copy()
+            else:
+                # Keep checklist's Massive -> yfinance -> Alpaca preference and
+                # shared _YF_CACHE behavior on genuine disk-cache misses.
+                raw_d = _yf_download_cached(ticker, "6mo", "1d")
             if len(raw_d) < 20:
                 results.append({"ticker": ticker, "error": "Nedostatok dát"})
                 continue
@@ -10225,7 +10250,14 @@ def run_checklist(tickers: str = "", days: int = 10):
             df_d = add_indicators(raw_d)
 
             # Weekly data for bias (Donchian 20w + SMA50w + EMA10/20)
-            raw_w = _yf_download_cached(ticker, "1y", "1wk")
+            if scanner_cache_fresh:
+                raw_w = _scanner_weekly_from_daily(scanner_daily)
+                weekly_cutoff = raw_w.index.max() - pd.Timedelta(
+                    days=_MASSIVE_PERIOD_DAYS["1y"]
+                )
+                raw_w = raw_w[raw_w.index >= weekly_cutoff].copy()
+            else:
+                raw_w = _yf_download_cached(ticker, "1y", "1wk")
             weekly_bullish = False
             weekly_trend = None
             if len(raw_w) >= 20:
