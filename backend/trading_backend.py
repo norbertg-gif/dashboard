@@ -6097,6 +6097,64 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
         return None
 
 
+_ALPACA_BARS_TIMESPAN = {"1d": "1Day", "1wk": "1Week"}
+_alpaca_bars_disabled = False  # po prvom auth zlyhaní prestaneme skúšať (chýbajúci/zlý kľúč)
+
+
+def _alpaca_daily_bars(ticker: str, period: str, interval: str):
+    """OHLCV DataFrame v yfinance tvare, posledná záchranná sieť keď Massive aj
+    yfinance zlyhajú — NIE preferovaný zdroj (viď _yf_download_cached). Free
+    tier beží na IEX feede: ceny sú OK (na desatiny % od konsolidovanej pásky),
+    ale IEX vidí len zlomok (~pár %) reálneho objemu celého trhu — Volume tu
+    preto nastavujeme na NaN, nech to nikto omylom nepoužije ako reálny objem
+    (napr. Rel Volume kapitulačné signály by boli ticho zlé). Overené naživo
+    2026-07-24 benchmarkom voči yfinance (viď scratchpad alpaca_benchmark)."""
+    global _alpaca_bars_disabled
+    if _alpaca_bars_disabled:
+        return None
+    timespan = _ALPACA_BARS_TIMESPAN.get(interval)
+    if not timespan:
+        return None
+    api_key = os.getenv("ALPACA_API_KEY", "").strip()
+    api_secret = os.getenv("ALPACA_SECRET_KEY", "").strip()
+    if not api_key or not api_secret:
+        return None
+    days = _MASSIVE_PERIOD_DAYS.get(period, 400)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    try:
+        r = requests.get(
+            f"https://data.alpaca.markets/v2/stocks/{urllib.parse.quote(ticker)}/bars",
+            params={"start": start.isoformat(), "end": end.isoformat(),
+                    "timeframe": timespan, "feed": "iex", "limit": 5000},
+            headers={"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret},
+            timeout=SCANNER_YF_TIMEOUT,
+        )
+        if r.status_code in (401, 403):
+            _alpaca_bars_disabled = True
+            print("[alpaca] auth zlyhala — vypínam, ostáva yfinance")
+            return None
+        if not r.ok:
+            return None
+        bars = (r.json() or {}).get("bars") or []
+        if not bars:
+            return None
+        df = pd.DataFrame([
+            {"Open": b.get("o"), "High": b.get("h"), "Low": b.get("l"),
+             "Close": b.get("c"), "Volume": None, "__t": b.get("t")}
+            for b in bars
+        ])
+        if df.empty:
+            return None
+        df.index = pd.to_datetime(df.pop("__t"))
+        df.index.name = "Date"
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        return df if len(df) >= 2 else None
+    except Exception as exc:
+        print(f"[alpaca] bary {ticker} {period}/{interval}: {type(exc).__name__}")
+        return None
+
+
 def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive: bool = True,
                         munge_dots: bool = True, retain_in_memory: bool = True):
     """munge_dots: BRK.B -> BRK-B pre yfinance (US class shares). get_chart volá
@@ -6112,10 +6170,21 @@ def _yf_download_cached(ticker: str, period: str, interval: str, prefer_massive:
     if raw is None or len(raw) < 2:
         yf_symbol = ticker.replace(".", "-") if munge_dots else ticker
         _log_ext_api_call("yfinance", "download")
-        raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
-        if isinstance(raw.columns, pd.MultiIndex):
-            raw.columns = raw.columns.get_level_values(0)
-        raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
+        try:
+            raw = yf.download(yf_symbol, period=period, interval=interval, auto_adjust=True, progress=False, timeout=SCANNER_YF_TIMEOUT)
+            if isinstance(raw.columns, pd.MultiIndex):
+                raw.columns = raw.columns.get_level_values(0)
+            raw = raw.dropna(subset=["Open", "High", "Low", "Close"])
+        except Exception as exc:
+            raw = pd.DataFrame()
+            print(f"[yfinance] {ticker} {period}/{interval}: {type(exc).__name__}")
+        if raw is None or len(raw) < 2:
+            # Posledná záchranná sieť keď aj Massive aj yfinance zlyhali — cena
+            # áno, objem nie (viď _alpaca_daily_bars). Radšej graf s dierou v
+            # objeme než úplne prázdny graf.
+            alt = _alpaca_daily_bars(ticker, period, interval)
+            if alt is not None:
+                raw = alt
     if retain_in_memory:
         with _YF_CACHE_LOCK:
             if len(_YF_CACHE) >= _YF_CACHE_MAX:
