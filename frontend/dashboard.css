@@ -135,23 +135,23 @@ html[data-variant="odvazna"] {
    chart badges) are intentionally left untouched — the mockup doesn't
    cover the Grafy indicator UI, so there's no reference to remap them to. */
 html[data-variant="glass"] {
-  --bg:          #161826;
-  --bg-card:     #232532;
-  --bg-input:    #292b31;
-  --bg2:         #292b31;
-  --border:      color-mix(in srgb, #e9e9ed 16%, transparent);
-  --border-focus:#9184d9;
-  --text:        #e9e9ed;
-  --muted:       color-mix(in srgb, #e9e9ed 55%, transparent);
-  --muted2:      color-mix(in srgb, #e9e9ed 40%, transparent);
-  --muted3:      #3f424d;
+  --bg:          #08111b;
+  --bg-card:     #0d1824;
+  --bg-input:    #132131;
+  --bg2:         #132131;
+  --border:      rgba(148,163,184,.16);
+  --border-focus:#3b82f6;
+  --text:        #eef3f8;
+  --muted:       #94a3b8;
+  --muted2:      #64748b;
+  --muted3:      #334155;
 
-  --up:          #4dbd97;
-  --up-soft:     rgba(77,189,151,.14);
-  --down:        #e08585;
-  --down-soft:   rgba(224,133,133,.14);
-  --accent:      #9184d9;
-  --accent-soft: color-mix(in srgb, #9184d9 15%, transparent);
+  --up:          #77c84a;
+  --up-soft:     rgba(119,200,74,.12);
+  --down:        #ff6b62;
+  --down-soft:   rgba(255,107,98,.12);
+  --accent:      #3b82f6;
+  --accent-soft: rgba(59,130,246,.14);
   --accent-ink:  #ffffff;
 
   --yellow:      oklch(80% 0.15 90);       /* nezmenené — pozri poznámku vyššie */
@@ -172,9 +172,9 @@ html[data-variant="glass"] {
   --shadow-lg:   inset 0 0 0 1px var(--border), 0 12px 32px rgba(0,0,0,.35);
   --shadow-glow: none;
 
-  --glass-fill:  linear-gradient(180deg, #232532, #232532);
+  --glass-fill:  linear-gradient(180deg, #0f1b28, #0d1824);
   --glass-sheen: none;
-  --accent-grad: linear-gradient(180deg, #9184d9, #796cbf);
+  --accent-grad: linear-gradient(180deg, #2563eb, #1d4ed8);
   --accent-grad-ink: #ffffff;
   --hover-overlay: color-mix(in srgb, #e9e9ed 4%, transparent);
   --page-glow: none;
@@ -5436,4 +5436,352 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--muted2);
   font-size: 11px;
   font-family: var(--font-ui);
+}
+
+/* ── INVESTMENT OVERVIEW REDESIGN (2026-07-26) ─────────────────────────────
+   Vizuálna vrstva nad existujúcim DOM. Žiadne ovládanie ani dátové kontrakty
+   sa nemenia; na užších obrazovkách zostáva pôvodná horná navigácia. */
+.home-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.home-hero h1 {
+  margin-top: 5px;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: clamp(22px, 2vw, 30px);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+.home-hero p {
+  margin-top: 8px;
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.home-eyebrow {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+.home-horizon-chip {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-wrap {
+  width: min(100%, 1500px);
+  margin: 0 auto;
+  padding: 26px 30px 34px;
+  gap: 20px;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-acct-row {
+  margin-bottom: 12px;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-grid {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 12px;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item {
+  position: relative;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 108px;
+  padding: 18px 20px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 55%),
+    var(--glass-fill);
+  box-shadow: 0 14px 34px rgba(0,0,0,.16);
+  overflow: hidden;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item.home-pos,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item.home-neg {
+  background: var(--glass-fill);
+  box-shadow: 0 14px 34px rgba(0,0,0,.16);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item.home-pos::after {
+  background: color-mix(in srgb, var(--up) 75%, transparent);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-item.home-neg::after {
+  background: color-mix(in srgb, var(--down) 75%, transparent);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-val {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: clamp(16px, 1.45vw, 22px);
+  letter-spacing: -.04em;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, .8fr);
+  gap: 14px;
+  align-items: stretch;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card-wide {
+  grid-column: auto;
+  min-height: 235px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--glass-fill);
+  box-shadow: 0 16px 38px rgba(0,0,0,.17);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card-title::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card-attention .home-card-title::before {
+  background: var(--yellow);
+  box-shadow: 0 0 0 4px var(--yellow-soft);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-card-dip .home-card-title::before {
+  background: var(--up);
+  box-shadow: 0 0 0 4px var(--up-soft);
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-mover-row,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-plan-row,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-list-row {
+  min-height: 34px;
+  padding: 7px 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  border-radius: 0;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-mover-row:last-child,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-plan-row:last-child,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-list-row:last-child {
+  border-bottom: 0;
+}
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-mover-row:hover,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-plan-row:hover,
+:where(html[data-variant="glass"] body:not(.light-mode)) .home-list-row:hover {
+  background: var(--hover-overlay);
+}
+
+@media (min-width: 1180px) {
+  html[data-variant="glass"] body:not(.light-mode) {
+    display: grid;
+    grid-template-columns: 178px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    width: 178px;
+    height: 100vh;
+    padding: 16px 12px 13px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 13px;
+    background: #07101a;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+    box-shadow: 8px 0 30px rgba(0,0,0,.12);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .logo {
+    gap: 9px;
+    min-height: 34px;
+    padding: 0 3px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .logo-icon {
+    width: 30px;
+    height: 30px;
+    box-shadow: none;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .logo-text {
+    max-width: 108px;
+    font-size: 11.5px;
+    line-height: 1.2;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .sidebar-toggle {
+    position: absolute;
+    top: 18px;
+    right: 10px;
+    width: 27px;
+    height: 27px;
+    opacity: 0;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr:hover .sidebar-toggle,
+  :where(html[data-variant="glass"] body:not(.light-mode)) .sidebar-toggle.active {
+    opacity: 1;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #main-tabs {
+    width: 100%;
+    padding: 8px 0 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab {
+    width: 100%;
+    height: 39px;
+    padding: 0 10px;
+    justify-content: flex-start;
+    gap: 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab::before {
+    width: 18px;
+    color: var(--muted2);
+    font: 700 15px/1 var(--font-ui);
+    text-align: center;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-home::before { content: "⌂"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-charts::before { content: "⌁"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-portfolio::before { content: "◷"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-history::before { content: "↶"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-predictive::before { content: "▥"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-scanner::before { content: "◎"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #tab-verdict::before { content: "◇"; }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab:hover {
+    background: rgba(255,255,255,.035);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active {
+    color: #dbeafe;
+    border-color: rgba(59,130,246,.22);
+    background: linear-gradient(90deg, rgba(37,99,235,.28), rgba(37,99,235,.09));
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab.active::before {
+    color: #60a5fa;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .tab-popout {
+    margin-left: auto;
+    opacity: 0;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .main-tab:hover .tab-popout {
+    opacity: 1;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #header-equities {
+    width: 100%;
+    margin-top: auto;
+    padding-top: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    border-top: 1px solid var(--border);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .header-equity {
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.025);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-right {
+    width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #ws-status {
+    grid-column: 1 / -1;
+    justify-content: center;
+    min-height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255,255,255,.02);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-right > button:not(#ui-mode-btn),
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-right > a {
+    width: 100% !important;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #ui-mode-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #ui-mode-btn::before {
+    content: "Režim";
+    color: var(--muted2);
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #toolbar {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    padding: 7px 16px 9px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode))[data-main-tab="home"] #toolbar {
+    display: none;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #body {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode))[data-main-tab="home"] #active-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .home-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .home-wrap {
+    padding: 18px 16px 28px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .home-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) .home-grid {
+    grid-template-columns: 1fr;
+  }
 }
