@@ -8192,7 +8192,11 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 12
+INSIGHTS_SCHEMA_VERSION = 13
+AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
+AV_EARNINGS_CACHE_TTL_H = 24 * 30
+AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
+_AV_EARNINGS_FETCH_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -8387,6 +8391,197 @@ def _fmp_earnings_surprises(sym: str) -> tuple[list[dict], bool, str | None]:
         })
     history.sort(key=lambda item: item["date"])
     return (history[-8:], upstream_succeeded, last_err)
+
+
+# Nad týmto prekvapením považujeme Yahoo EPS riadok za nepoužiteľný — viď
+# rozbor v _yahoo_earnings_chart() (GAAP actual vs non-GAAP konsenzus).
+YAHOO_EPS_MAX_SURPRISE_PCT = 100.0
+
+
+def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
+    """Posledná (bezplatná, bez kvóty) vrstva EPS histórie z Yahoo.
+
+    POZOR — toto NIE JE ten istý modul ako `earningsHistory`, ktorý je vypnutý
+    v `_insights_parse()`. `earnings.earningsChart.quarterly` je to, z čoho
+    Yahoo kreslí vlastný graf, a na rozdiel od `earningsHistory` obsahuje
+    `reportedDate` (skutočný dátum zverejnenia) — bez neho by markery sedeli na
+    koniec fiškálneho kvartálu, čo bola pôvodná chyba tejto feature.
+
+    Hodnoty sú ale pri niektorých tituloch nepoužiteľné: overené naživo, GOOG
+    hlási actual 5.11 vs odhad 2.63 (+94 %) a 9.11 vs 2.91 (+213 %), pričom oba
+    Yahoo moduly nesú tie isté čísla (čiže je to chyba dát Yahoo, nie nášho
+    parsovania). Vyzerá to na GAAP actual porovnávaný s non-GAAP konsenzom.
+    TMUS má v tom istom okne +0.4/-8.9/+15.1/+14.9 %, teda úplne zdravé.
+    Preto zahadzujeme riadky s absurdným prekvapením — legitímny beat nad 100 %
+    je zriedkavý a stojí nás nanajvýš jeden marker, kým nefiltrovaný nezmysel
+    kazí celý graf.
+    """
+    qs = _yahoo_quote_summary(sym, "earnings")
+    if qs is None:
+        return ([], False, "yahoo quoteSummary unavailable")
+    quarterly = ((qs.get("earnings") or {}).get("earningsChart") or {}).get("quarterly") or []
+    history = []
+    for row in quarterly:
+        if not isinstance(row, dict):
+            continue
+        # `fmt` je rovno YYYY-MM-DD, takže má prednosť; epoch je len záložka a
+        # musí byť kladný — inak by z nuly/nezmyslu vzniklo 1970-01-01 a marker
+        # by sadol na úplný začiatok grafu.
+        raw_reported = row.get("reportedDate")
+        reported = raw_reported.get("fmt") if isinstance(raw_reported, dict) else None
+        if not reported:
+            epoch = _num_or_none(_yraw(raw_reported))
+            if epoch and epoch > 0:
+                reported = datetime.fromtimestamp(epoch, timezone.utc).date().isoformat()
+        if not reported:
+            continue   # bez dátumu reportu nevieme marker umiestniť
+        actual = _num_or_none(_yraw(row.get("actual")))
+        estimate = _num_or_none(_yraw(row.get("estimate")))
+        if actual is None:
+            continue
+        sp = (round((actual - estimate) / abs(estimate) * 100, 1)
+              if estimate not in (None, 0) else None)
+        if sp is not None and abs(sp) > YAHOO_EPS_MAX_SURPRISE_PCT:
+            continue
+        label = str(row.get("fiscalQuarter") or row.get("date") or "")
+        # Yahoo dáva "2Q2026", náš tvar je "Q2 2026"
+        m = re.fullmatch(r"([1-4])Q(\d{4})", label)
+        history.append({
+            "date": str(reported)[:10],
+            "quarter": f"Q{m.group(1)} {m.group(2)}" if m else (label or str(reported)[:10]),
+            "actual": actual,
+            "estimate": estimate,
+            "surprise_pct": sp,
+            "beat": estimate is not None and actual >= estimate,
+        })
+    history.sort(key=lambda item: item["date"])
+    return (history[-8:], True, None)
+
+
+def _av_earnings_history(sym: str) -> tuple[list[dict], bool, str | None]:
+    """Map cached Alpha Vantage EARNINGS rows to (eps_history, succeeded, error)."""
+    sym = _validate_ticker_symbol(sym)
+    path = AV_EARNINGS_CACHE_DIR / f"{sym}.json"
+
+    def _cached_history(payload: dict) -> list[dict] | None:
+        history = payload.get("history")
+        if not isinstance(history, list):
+            return None
+        try:
+            for row in history:
+                if (
+                    not isinstance(row, dict)
+                    or not isinstance(row.get("date"), str)
+                    or not isinstance(row.get("quarter"), str)
+                    or not isinstance(row.get("beat"), bool)
+                    or isinstance(row.get("actual"), bool)
+                    or not isinstance(row.get("actual"), (int, float))
+                    or not math.isfinite(row["actual"])
+                ):
+                    return None
+                date.fromisoformat(row["date"])
+                for key in ("estimate", "surprise_pct"):
+                    value = row.get(key)
+                    if value is not None and (
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value)
+                    ):
+                        return None
+        except (KeyError, TypeError, ValueError):
+            return None
+        return history
+
+    lock_digest = hashlib.blake2b(sym.encode("utf-8"), digest_size=2).digest()
+    fetch_lock = _AV_EARNINGS_FETCH_LOCKS[
+        int.from_bytes(lock_digest, "big") % len(_AV_EARNINGS_FETCH_LOCKS)
+    ]
+    # Keep the lock across a cache miss and fetch so concurrent insights panels
+    # for the same symbol cannot spend multiple scarce AV requests.
+    with fetch_lock:
+        cached = _read_ticker_json_cache(
+            path, AV_EARNINGS_CACHE_SCHEMA_VERSION, AV_EARNINGS_CACHE_TTL_H
+        )
+        cached_history = _cached_history(cached) if cached is not None else None
+        if cached_history is not None:
+            return (cached_history, True, None)
+
+        api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
+        if not api_key:
+            return ([], False, "ALPHA_VANTAGE_API_KEY is not configured")
+        if _av_limit_active():
+            return (
+                [],
+                False,
+                "Alpha Vantage daily limit exhausted; resets at midnight UTC",
+            )
+        try:
+            response = requests.get(
+                "https://www.alphavantage.co/query",
+                params={"function": "EARNINGS", "symbol": sym, "apikey": api_key},
+                timeout=20,
+            )
+            response.raise_for_status()
+            data = response.json() or {}
+            if data.get("Note") or data.get("Information"):
+                _av_mark_limit_exhausted()
+                raise RuntimeError(
+                    "Alpha Vantage daily limit exhausted (free tier 25 requests/day)"
+                )
+            if data.get("Error Message"):
+                return ([], False, f"Alpha Vantage does not recognize symbol {sym}")
+        except Exception as e:
+            return ([], False, _scrub_token(e))
+
+        def _number(value):
+            try:
+                number = float(value)
+                return number if math.isfinite(number) else None
+            except (TypeError, ValueError):
+                return None
+
+        history = []
+        rows = data.get("quarterlyEarnings") or []
+        if not isinstance(rows, list):
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            reported_date = str(row.get("reportedDate") or "").strip()[:10]
+            fiscal_date = str(row.get("fiscalDateEnding") or "").strip()[:10]
+            try:
+                date.fromisoformat(reported_date)
+                fiscal = date.fromisoformat(fiscal_date)
+            except ValueError:
+                continue
+            actual = _number(row.get("reportedEPS"))
+            if actual is None:
+                continue
+            estimate = _number(row.get("estimatedEPS"))
+            surprise_pct = _number(row.get("surprisePercentage"))
+            if surprise_pct is None and estimate is not None and estimate != 0:
+                surprise_pct = (actual - estimate) / abs(estimate) * 100
+            history.append({
+                "date": reported_date,
+                "quarter": f"Q{(fiscal.month - 1) // 3 + 1} {fiscal.year}",
+                "actual": actual,
+                "estimate": estimate,
+                "surprise_pct": (
+                    round(surprise_pct, 1) if surprise_pct is not None else None
+                ),
+                "beat": estimate is not None and actual >= estimate,
+            })
+        history.sort(key=lambda item: item["date"])
+        history = history[-8:]
+        try:
+            _write_ticker_json_cache(path, {
+                "schema_version": AV_EARNINGS_CACHE_SCHEMA_VERSION,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "history": history,
+            })
+        except Exception:
+            pass
+        return (history, True, None)
 
 
 def _finnhub_earnings_calendar_get(sym: str, api_key: str, today: date):
@@ -9518,8 +9713,10 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             core = {**_insights_parse(qs), "source": "yahoo"}
         else:
             errs.append("yahoo unavailable")
-    # Yahoo EPS stays deliberately disabled. FMP is the safe fallback whenever
-    # Finnhub produced no usable historical earnings rows.
+    # Yahoo EPS stays deliberately disabled. FMP then cached Alpha Vantage are
+    # the safe fallbacks whenever Finnhub produced no usable historical rows.
+    fmp_succeeded = False
+    fmp_error = None
     if core is None or not core.get("eps_history"):
         fmp_eps, fmp_succeeded, fmp_error = _fmp_earnings_surprises(sym)
         if fmp_eps:
@@ -9530,18 +9727,49 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 sources = core.get("source", "").split("+")
                 if "fmp" not in sources:
                     core["source"] = core.get("source", "finnhub") + "+fmp"
-        elif eps_history_fetch_failed:
-            # This diagnostic also selects the existing one-hour cache TTL.
+    av_succeeded = False
+    av_error = None
+    if core is None or not core.get("eps_history"):
+        av_eps, av_succeeded, av_error = _av_earnings_history(sym)
+        if av_eps:
             if core is None:
-                core = {
-                    "eps_history": [],
-                    "source": "fmp" if fmp_succeeded else "none",
-                }
-            core["eps_history_error"] = (
-                "Finnhub earnings unavailable; FMP fallback returned no usable data"
+                core = {"eps_history": av_eps, "source": "av"}
+            else:
+                core["eps_history"] = av_eps
+                sources = core.get("source", "").split("+")
+                if "av" not in sources:
+                    core["source"] = core.get("source", "finnhub") + "+av"
+    # Yahoo earningsChart je posledná vrstva zámerne: je zadarmo a bez kvóty,
+    # ale hodnoty sú na časti titulov nepoužiteľné (viď _yahoo_earnings_chart).
+    # Preto sa použije až keď platené/spoľahlivejšie zdroje nič nedali.
+    yahoo_eps_error = None
+    if core is None or not core.get("eps_history"):
+        yahoo_eps, _yahoo_ok, yahoo_eps_error = _yahoo_earnings_chart(sym)
+        if yahoo_eps:
+            if core is None:
+                core = {"eps_history": yahoo_eps, "source": "yahoo-chart"}
+            else:
+                core["eps_history"] = yahoo_eps
+                sources = core.get("source", "").split("+")
+                if "yahoo-chart" not in sources:
+                    core["source"] = core.get("source", "finnhub") + "+yahoo-chart"
+    if (core is None or not core.get("eps_history")) and eps_history_fetch_failed:
+        # This diagnostic also selects the existing one-hour cache TTL.
+        if core is None:
+            empty_source = (
+                "av" if av_succeeded else ("fmp" if fmp_succeeded else "none")
             )
-            if fmp_error:
-                core["fmp_earnings_error"] = fmp_error
+            core = {"eps_history": [], "source": empty_source}
+        core["eps_history_error"] = (
+            "Finnhub earnings unavailable; FMP, Alpha Vantage and Yahoo "
+            "fallbacks returned no usable data"
+        )
+        if fmp_error:
+            core["fmp_earnings_error"] = fmp_error
+        if av_error:
+            core["av_earnings_error"] = av_error
+        if yahoo_eps_error:
+            core["yahoo_earnings_error"] = yahoo_eps_error
     if core is None:
         if cached and not cached.get("error"):
             return {**cached, "stale": True}

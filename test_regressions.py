@@ -357,6 +357,101 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
             "beat": True,
         }])
 
+    def test_av_earnings_history_maps_string_fields_and_report_date(self):
+        response = self._Response(200, {
+            "symbol": "AAPL",
+            "quarterlyEarnings": [
+                {
+                    "fiscalDateEnding": "2026-06-30",
+                    "reportedDate": "2026-07-24",
+                    "reportedEPS": "1.65",
+                    "estimatedEPS": "1.50",
+                    "surprisePercentage": "10.0",
+                },
+                {
+                    "fiscalDateEnding": "2026-03-31",
+                    "reportedDate": "2026-04-25",
+                    "reportedEPS": "1.20",
+                    "estimatedEPS": "None",
+                    "surprisePercentage": "None",
+                },
+                {
+                    "fiscalDateEnding": "2025-12-31",
+                    "reportedDate": "2026-01-30",
+                    "reportedEPS": "None",
+                    "estimatedEPS": "1.10",
+                    "surprisePercentage": "None",
+                },
+            ],
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
+                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
+                patch.object(tb, "_av_limit_active", return_value=False),
+                patch.object(tb.requests, "get", return_value=response),
+            ):
+                history, succeeded, error = tb._av_earnings_history("aapl")
+        self.assertTrue(succeeded)
+        self.assertIsNone(error)
+        self.assertEqual(history, [
+            {
+                "date": "2026-04-25",
+                "quarter": "Q1 2026",
+                "actual": 1.2,
+                "estimate": None,
+                "surprise_pct": None,
+                "beat": False,
+            },
+            {
+                "date": "2026-07-24",
+                "quarter": "Q2 2026",
+                "actual": 1.65,
+                "estimate": 1.5,
+                "surprise_pct": 10.0,
+                "beat": True,
+            },
+        ])
+
+    def test_av_earnings_history_30_day_cache_prevents_second_request(self):
+        response = self._Response(200, {
+            "symbol": "AAPL",
+            "quarterlyEarnings": [],
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
+                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
+                patch.object(tb, "_av_limit_active", return_value=False),
+                patch.object(tb.requests, "get", return_value=response) as get,
+            ):
+                first = tb._av_earnings_history("AAPL")
+                second = tb._av_earnings_history("AAPL")
+        self.assertEqual(first, ([], True, None))
+        self.assertEqual(second, first)
+        self.assertEqual(get.call_count, 1)
+
+    def test_av_earnings_history_limit_short_circuits_without_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
+                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
+                patch.object(tb, "_av_limit_active", return_value=True),
+                patch.object(tb.requests, "get") as get,
+            ):
+                history, succeeded, error = tb._av_earnings_history("AAPL")
+        self.assertEqual(history, [])
+        self.assertFalse(succeeded)
+        self.assertIn("limit exhausted", error)
+        get.assert_not_called()
+
+    def test_av_earnings_history_rejects_path_traversal_symbol(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)):
+                with self.assertRaises(HTTPException) as caught:
+                    tb._av_earnings_history("../../etc/passwd")
+        self.assertEqual(caught.exception.status_code, 400)
+
     def test_finnhub_calendar_retries_once_on_429(self):
         responses = [
             self._Response(429, {}),
@@ -390,9 +485,16 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                     tb, "_fmp_earnings_surprises",
                     return_value=([], False, "HTTP 429"),
                 ),
+                patch.object(
+                    tb, "_av_earnings_history",
+                    return_value=([], False, "daily limit exhausted"),
+                ),
             ):
                 first = tb.get_ticker_insights("AAPL", refresh=0)
                 self.assertIn("eps_history_error", first)
+                self.assertEqual(
+                    first["av_earnings_error"], "daily limit exhausted"
+                )
                 path = cache_dir / "AAPL.json"
                 cached = json.loads(path.read_text(encoding="utf-8"))
                 cached["fetched_at"] = (
@@ -425,6 +527,10 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                     tb, "_fmp_earnings_surprises",
                     return_value=([], True, None),
                 ),
+                patch.object(
+                    tb, "_av_earnings_history",
+                    return_value=([], True, None),
+                ),
             ):
                 first = tb.get_ticker_insights("AAPL", refresh=0)
                 self.assertNotIn("eps_history_error", first)
@@ -436,6 +542,65 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                 path.write_text(json.dumps(cached), encoding="utf-8")
                 tb.get_ticker_insights("AAPL", refresh=0)
         self.assertEqual(finnhub.call_count, 1)
+
+    # ── Yahoo earningsChart (posledná bezplatná vrstva) ──────────────────────
+    @staticmethod
+    def _yahoo_quarter(fq, reported_fmt, actual, estimate):
+        return {
+            "date": fq, "fiscalQuarter": fq,
+            "actual": {"raw": actual}, "estimate": {"raw": estimate},
+            "reportedDate": {"raw": 0, "fmt": reported_fmt},
+        }
+
+    def _yahoo_payload(self, rows):
+        return {"earnings": {"earningsChart": {"quarterly": rows}}}
+
+    def test_yahoo_chart_uses_report_date_not_fiscal_quarter(self):
+        # Jadro pôvodného bugu: marker musí sedieť na dátum zverejnenia,
+        # nie na koniec fiškálneho kvartálu (2026-06-30 vs 2026-07-23).
+        payload = self._yahoo_payload([
+            self._yahoo_quarter("2Q2026", "2026-07-23", 2.99, 2.60324),
+        ])
+        with patch.object(tb, "_yahoo_quote_summary", return_value=payload):
+            history, ok, err = tb._yahoo_earnings_chart("TMUS")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertEqual(history, [{
+            "date": "2026-07-23",
+            "quarter": "Q2 2026",
+            "actual": 2.99,
+            "estimate": 2.60324,
+            "surprise_pct": 14.9,
+            "beat": True,
+        }])
+
+    def test_yahoo_chart_drops_absurd_surprise_rows(self):
+        # GOOG naživo: 9.11 vs 2.91 (+213 %) je GAAP-vs-konsenzus nezmysel,
+        # zdravé riadky musia prejsť.
+        payload = self._yahoo_payload([
+            self._yahoo_quarter("4Q2025", "2026-02-04", 2.82, 2.64089),
+            self._yahoo_quarter("2Q2026", "2026-07-22", 9.11, 2.91149),
+        ])
+        with patch.object(tb, "_yahoo_quote_summary", return_value=payload):
+            history, ok, _ = tb._yahoo_earnings_chart("GOOG")
+        self.assertTrue(ok)
+        self.assertEqual([h["date"] for h in history], ["2026-02-04"])
+
+    def test_yahoo_chart_skips_rows_without_report_date(self):
+        payload = self._yahoo_payload([
+            {"date": "1Q2026", "actual": {"raw": 1.0}, "estimate": {"raw": 1.0}},
+        ])
+        with patch.object(tb, "_yahoo_quote_summary", return_value=payload):
+            history, ok, _ = tb._yahoo_earnings_chart("AAPL")
+        self.assertTrue(ok)
+        self.assertEqual(history, [])
+
+    def test_yahoo_chart_reports_unavailable_quote_summary(self):
+        with patch.object(tb, "_yahoo_quote_summary", return_value=None):
+            history, ok, err = tb._yahoo_earnings_chart("AAPL")
+        self.assertEqual(history, [])
+        self.assertFalse(ok)
+        self.assertIsNotNone(err)
 
 
 class FundAnalysisFmpRegressionTests(unittest.TestCase):
