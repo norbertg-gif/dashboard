@@ -283,7 +283,8 @@ function homeDipHtml(scan) {
 }
 
 function homeCard(title, bodyHtml, opts = {}) {
-  return `<div class="home-card${opts.wide ? ' home-card-wide' : ''}">
+  const extraClass = opts.className ? ` ${opts.className}` : '';
+  return `<div class="home-card${opts.wide ? ' home-card-wide' : ''}${extraClass}">
     <div class="home-card-title">${title}</div>
     ${bodyHtml}
   </div>`;
@@ -292,12 +293,20 @@ function homeCard(title, bodyHtml, opts = {}) {
 function homeContentHtml(data) {
   return `
     <div class="home-wrap">
+      <div class="home-hero">
+        <div>
+          <div class="home-eyebrow">PORTFÓLIO · DLHODOBÝ HORIZONT</div>
+          <h1>Investičný prehľad</h1>
+          <p>Hodnota portfólia, dnešné priority a najbližšie udalosti na jednom mieste.</p>
+        </div>
+        <div class="home-horizon-chip">12+ mesiacov</div>
+      </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
       <div class="home-grid">
-        ${homeCard('📊 Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { wide: true })}
-        ${homeCard('🎯 Čo riešiť dnes', homePlanHtml(data.plan), { wide: true })}
-        ${homeCard('📅 Earnings najbližšie', homeEarningsHtml(data.earnings))}
-        ${homeCard('💎 DIP universe top', homeDipHtml(data.scan))}
+        ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
+        ${homeCard('Pozornosť', homePlanHtml(data.plan), { className: 'home-card-attention' })}
+        ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}
+        ${homeCard('DIP kandidáti', homeDipHtml(data.scan), { className: 'home-card-dip' })}
       </div>
     </div>`;
 }

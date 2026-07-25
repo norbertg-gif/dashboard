@@ -6,24 +6,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TD · Grafy</title>
+<title>Trading Dashboard · Prehľad</title>
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260725-175903">
+<link rel="stylesheet" href="/dashboard.css?v=20260726-investment-overview">
 </head>
-<body>
+<body data-main-tab="home">
 
 <!-- HEADER — riadok 1: kontrastná hlavná lišta (logo · taby · účty/globálne akcie) -->
 <div id="hdr">
   <div class="logo">
     <div class="logo-icon"><img src="/lizard-icon.png?v=20260703-lizard2" alt="" aria-hidden="true"></div>
-    <span class="logo-text">Trading Dashboard</span>
+    <span class="logo-text">Investičný dashboard</span>
   </div>
   <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()" title="Skryť ľavý panel">☰</button>
   <div id="main-tabs">
-    <div class="main-tab active" id="tab-home" onclick="switchMainTab('home')">Home <button class="tab-popout" onclick="openMainTabWindow(event,'home')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab active" id="tab-home" onclick="switchMainTab('home')">Prehľad <button class="tab-popout" onclick="openMainTabWindow(event,'home')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-charts" onclick="switchMainTab('charts')">Grafy <button class="tab-popout" onclick="openMainTabWindow(event,'charts')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">Portfólio <button class="tab-popout" onclick="openMainTabWindow(event,'portfolio')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab advanced-only" id="tab-history" onclick="switchMainTab('history')">História <button class="tab-popout" onclick="openMainTabWindow(event,'history')" title="Otvoriť v novej karte">↗</button></div>
@@ -554,16 +554,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260725-175903"></script>
-  <script src="/js/live.js?v=20260725-175903"></script>
-  <script src="/js/portfolio.js?v=20260725-175903"></script>
-  <script src="/js/watchlist.js?v=20260725-175903"></script>
-  <script src="/js/scanner.js?v=20260725-175903"></script>
-  <script src="/js/chart_patterns.js?v=20260725-175903"></script>
-  <script src="/js/predictive.js?v=20260725-175903"></script>
-  <script src="/js/verdict.js?v=20260725-175903"></script>
-  <script src="/js/home.js?v=20260725-175903"></script>
-  <script src="/js/charts.js?v=20260725-175903"></script>
-  <script src="/js/main.js?v=20260725-175903"></script>
+  <script src="/js/core.js?v=20260726-investment-overview"></script>
+  <script src="/js/live.js?v=20260726-investment-overview"></script>
+  <script src="/js/portfolio.js?v=20260726-investment-overview"></script>
+  <script src="/js/watchlist.js?v=20260726-investment-overview"></script>
+  <script src="/js/scanner.js?v=20260726-investment-overview"></script>
+  <script src="/js/chart_patterns.js?v=20260726-investment-overview"></script>
+  <script src="/js/predictive.js?v=20260726-investment-overview"></script>
+  <script src="/js/verdict.js?v=20260726-investment-overview"></script>
+  <script src="/js/home.js?v=20260726-investment-overview"></script>
+  <script src="/js/charts.js?v=20260726-investment-overview"></script>
+  <script src="/js/main.js?v=20260726-investment-overview"></script>
 </body>
 </html>

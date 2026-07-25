@@ -142,6 +142,7 @@ function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
   const previousContextTicker = currentContextTicker();
   activeMainTab = tab;
+  document.body.dataset.mainTab = tab;
   document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab)?.classList.add('active');
   // Predictive chart — init on first switch, resize on subsequent
