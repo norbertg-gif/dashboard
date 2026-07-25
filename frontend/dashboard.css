@@ -5755,7 +5755,10 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     min-width: 0;
     padding: 7px 16px 9px;
   }
-  :where(html[data-variant="glass"] body:not(.light-mode))[data-main-tab="home"] #toolbar {
+  /* Celý obsah lišty sa viaže na grafy: presety ukladajú rozloženie panelov,
+     Load All aj Vymazať pracujú s panelmi, Top pohyby a Tickery panely otvárajú
+     a Stĺpce nastavujú ich mriežku. Mimo Grafov teda len zaberá výšku. */
+  :where(html[data-variant="glass"] body:not(.light-mode)):not([data-main-tab="charts"]) #toolbar {
     display: none;
   }
   :where(html[data-variant="glass"] body:not(.light-mode)) #body {
@@ -5764,7 +5767,8 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     min-width: 0;
     min-height: 0;
   }
-  :where(html[data-variant="glass"] body:not(.light-mode))[data-main-tab="home"] #active-hint {
+  /* Hláška o aktívnom paneli tiež dáva zmysel len tam, kde panely sú. */
+  :where(html[data-variant="glass"] body:not(.light-mode)):not([data-main-tab="charts"]) #active-hint {
     display: none;
   }
 }
