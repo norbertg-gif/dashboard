@@ -1355,6 +1355,30 @@ body.sidebar-collapsed #sb-resizer {
   border-top-color: var(--accent);
 }
 
+/* Úchyt na zmenu poradia panelov — ťahá sa len za tento prvok, lebo zvyšok
+   hlavičky je plný ovládania a samotný graf spracúva ťahanie myšou sám. */
+.p-drag-handle {
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--muted2);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  transition: var(--transition);
+}
+.p-drag-handle:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.p-drag-handle:active { cursor: grabbing; }
+.panel.panel-dragging {
+  opacity: 0.55;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 /* ── TABUĽKY A DÁTA (PORTFOLIO, RATES) ── */
 .port-panel {
   display: flex;

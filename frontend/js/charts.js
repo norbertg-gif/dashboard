@@ -746,10 +746,13 @@ function createPanel(cfg) {
   const initialChartHeight = Number.isFinite(Number(cfg.chartHeight))
     ? Math.min(600, Math.max(120, Number(cfg.chartHeight)))
     : null;
+  // Dock má vlastný kontajner a jediný panel — preusporiadanie tam nedáva zmysel.
+  const inGrid = !cfg.container || cfg.container === 'grid';
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = id;
   panel.innerHTML = `
     <div class="p-controls" onclick="setActivePanel('${id}')">
+      ${inGrid ? `<span class="p-drag-handle" id="dh-${id}" title="Potiahnite pre zmenu poradia grafov">⠿</span>` : ''}
       <input class="p-sym" value="${cfg.symbol}" placeholder="Hľadaj…"
              oninput="onSymInput(event)"
              onkeydown="onSymKeydown(event,'${id}')"
@@ -937,7 +940,57 @@ function createPanel(cfg) {
     });
   }
 
+  const dhEl = document.getElementById('dh-' + id);
+  if (dhEl) attachPanelDrag(dhEl, panel);
+
   return id;
+}
+
+// ── PANEL REORDER (drag & drop) ──────────────────────────────────────────────
+// Poradie panelov JE poradie v DOM-e — getCurrentConfig() ich číta cez
+// querySelectorAll('.panel'), takže presun uzla stačí doplniť o saveLayout()
+// a poradie sa uloží aj do presetov. Presúva sa `insertBefore`, čo uzol
+// ZACHOVÁ — canvas grafu aj záznam v registry prežijú, žiadny refetch ani
+// prekreslenie. (Prestavba mriežky cez innerHTML by naopak zničila všetky
+// grafy, preto sa tu s DOM-om narába takto opatrne.)
+function attachPanelDrag(handle, panel) {
+  handle.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    const grid = panel.parentElement;
+    if (!grid) return;
+    e.preventDefault(); e.stopPropagation();
+
+    panel.classList.add('panel-dragging');
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+    let moved = false;
+
+    function onMove(ev) {
+      moved = true;
+      // elementFromPoint vracia najvrchnejší prvok — vystúp na jeho panel.
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.panel');
+      // Cieľ musí byť súrodenec v tej istej mriežke; nad vlastným panelom
+      // nerobíme nič, čo zároveň tlmí oscilovanie po presune (po vsunutí
+      // ostáva kurzor typicky nad ťahaným panelom).
+      if (!over || over === panel || over.parentElement !== grid) return;
+      const rect = over.getBoundingClientRect();
+      const before = ev.clientX < rect.left + rect.width / 2;
+      const ref = before ? over : over.nextSibling;
+      if (ref === panel) return;   // už je na tom mieste
+      grid.insertBefore(panel, ref);
+    }
+
+    function onUp() {
+      panel.classList.remove('panel-dragging');
+      document.body.style.cursor = ''; document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (moved) saveLayout();
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 // ── CLOUD CANVAS ─────────────────────────────────────────────────────────────
