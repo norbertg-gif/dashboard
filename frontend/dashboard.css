@@ -3544,6 +3544,11 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   gap: 8px;
   flex-wrap: wrap;
 }
+.scanner-actions .btn:disabled {
+  cursor: wait;
+  opacity: .55;
+  filter: saturate(.65);
+}
 .scanner-file {
   max-width: 280px;
   color: var(--muted);

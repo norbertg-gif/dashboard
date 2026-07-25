@@ -658,7 +658,8 @@ function scannerStatusLine(state, cache) {
     const pct = total ? Math.round(progress / total * 100) : 0;
     const cur = state.current ? ` · <b>${escHtml(state.current)}</b>` : '';
     const bar = total ? `<div class="scanner-progress-bar"><div class="scanner-progress-fill" style="width:${pct}%"></div></div>` : '';
-    return `${bar}Scan beží: ${progress}/${total} (${pct}%)${cur}`;
+    const source = state.trigger === 'automatic' ? 'automaticky' : 'ručne';
+    return `${bar}Scan beží (${source}): ${progress}/${total} (${pct}%)${cur}`;
   }
   if (cache && cache.generated_at) {
     const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
@@ -666,7 +667,8 @@ function scannerStatusLine(state, cache) {
     const errors = cache.errors ? ` · ${cache.errors} chýb` : '';
     const displayed = Number(cache.displayed_rows ?? cache.matches ?? 0);
     const highDip = Number(cache.high_dip_rows || 0);
-    return `Posledný scan: ${dt}${universe} · ${cache.matches || 0}/${cache.total || 0} signálov · ${displayed} zobrazené (DIP ≥85: ${highDip})${errors}`;
+    const source = cache.trigger === 'automatic' ? 'automaticky' : cache.trigger === 'manual' ? 'ručne' : '';
+    return `Posledný scan${source ? ` (${source})` : ''}: ${dt}${universe} · ${cache.matches || 0}/${cache.total || 0} signálov · ${displayed} zobrazené (DIP ≥85: ${highDip})${errors}`;
   }
   return 'Zatiaľ nie je spustený žiadny Nasdaq scan.';
 }
@@ -676,7 +678,8 @@ function scannerBasicStatusLine(state, cache) {
   if (cache && cache.generated_at) {
     const dt = String(cache.generated_at).replace('T', ' ').replace(/\.\d+.*/, '').replace('+00:00', ' UTC');
     const universe = cache.universe_label ? ` · ${escHtml(cache.universe_label)}` : '';
-    return `Posledný scan: ${dt}${universe}`;
+    const source = cache.trigger === 'automatic' ? 'automaticky' : cache.trigger === 'manual' ? 'ručne' : '';
+    return `Posledný scan${source ? ` (${source})` : ''}: ${dt}${universe}`;
   }
   return 'Zatiaľ nie je spustený žiadny scan.';
 }
@@ -763,7 +766,7 @@ async function renderScannerView() {
               <div class="tb-items">
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
                 <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
-                <button class="btn primary" onclick="runNasdaqScanner()">Spustiť scanner</button>
+                <button class="btn primary" id="nasdaqRescanBtn" onclick="runNasdaqScanner()">Rescan teraz</button>
               </div>
             </div>
             <div class="tb-sep"></div>
@@ -870,6 +873,11 @@ function renderNasdaqScanner(payload) {
   const cache = payload?.cache || {};
   const rows = Array.isArray(cache.results) ? cache.results : [];
   const status = scannerStatusLine(state, cache);
+  const rescanBtn = document.getElementById('nasdaqRescanBtn');
+  if (rescanBtn) {
+    rescanBtn.disabled = Boolean(state.running || pc_scannerLoading);
+    rescanBtn.textContent = state.running ? 'Scan beží…' : 'Rescan teraz';
+  }
 
   if (state.error) {
     el.className = 'error-msg';
@@ -1371,6 +1379,11 @@ async function runNasdaqScanner() {
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el || pc_scannerLoading) return;
   pc_scannerLoading = true;
+  const rescanBtn = document.getElementById('nasdaqRescanBtn');
+  if (rescanBtn) {
+    rescanBtn.disabled = true;
+    rescanBtn.textContent = 'Spúšťam…';
+  }
   el.className = 'opp-empty';
   el.innerHTML = '<span class="cl-spinner"></span>Spúšťam DIP universe scanner...';
   try {
@@ -1385,6 +1398,10 @@ async function runNasdaqScanner() {
     scheduleNasdaqScannerPoll();
   } catch(e) {
     renderErrorBox(el, 'Scanner chyba: ' + e.message, 'loadNasdaqScannerResults()');
+    if (rescanBtn) {
+      rescanBtn.disabled = false;
+      rescanBtn.textContent = 'Rescan teraz';
+    }
   } finally {
     pc_scannerLoading = false;
   }

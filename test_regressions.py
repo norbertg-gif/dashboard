@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -317,6 +318,60 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         ]
         ranked = sorted(rows, key=tb._scanner_result_sort_key, reverse=True)
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
+
+
+class ScannerSchedulingRegressionTests(unittest.TestCase):
+    def setUp(self):
+        with tb._scanner_lock:
+            self.original_state = dict(tb._scanner_state)
+            tb._scanner_state.update({
+                "running": False,
+                "progress": 0,
+                "total": 0,
+                "current": None,
+                "error": None,
+                "trigger": None,
+            })
+
+    def tearDown(self):
+        with tb._scanner_lock:
+            tb._scanner_state.clear()
+            tb._scanner_state.update(self.original_state)
+
+    def test_automatic_scan_is_due_only_once_per_trading_day(self):
+        now = datetime(2026, 7, 24, 23, 30, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            marker = Path(tmp_dir) / "scanner_auto_rescan.json"
+            with (
+                patch.object(tb, "SCANNER_AUTO_STATE_FILE", marker),
+                patch.object(tb, "scanner_universe_from_dip", return_value=(["AAPL"], "DIP import", "dip_import")),
+                patch.object(tb.threading, "Thread") as thread_class,
+            ):
+                due = tb._automatic_scanner_trading_day(now)
+                self.assertEqual(due, date(2026, 7, 24))
+                first_status, _ = tb._start_nasdaq_scanner(3, trigger="automatic", auto_trading_day=due)
+                with tb._scanner_lock:
+                    tb._scanner_state["running"] = False
+                second_status, _ = tb._start_nasdaq_scanner(3, trigger="automatic", auto_trading_day=due)
+                self.assertIsNone(tb._automatic_scanner_trading_day(now))
+        self.assertEqual(first_status, "started")
+        self.assertEqual(second_status, "already_done")
+        thread_class.assert_called_once()
+
+    def test_second_scan_does_not_start_while_first_is_running(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with (
+                patch.object(tb, "SCANNER_AUTO_STATE_FILE", Path(tmp_dir) / "scanner_auto_rescan.json"),
+                patch.object(tb, "scanner_universe_from_dip", return_value=(["AAPL"], "DIP import", "dip_import")),
+                patch.object(tb.threading, "Thread") as thread_class,
+            ):
+                first_status, _ = tb._start_nasdaq_scanner(3, trigger="manual")
+                second_status, _ = tb._start_nasdaq_scanner(3, trigger="automatic", auto_trading_day=date(2026, 7, 24))
+
+        self.assertEqual(first_status, "started")
+        self.assertEqual(second_status, "running")
+        thread_class.assert_called_once()
+        thread_class.return_value.start.assert_called_once()
 
 
 class TickerInsightsEarningsRegressionTests(unittest.TestCase):

@@ -4,7 +4,7 @@ import os
 
 import uvicorn
 
-from backend.trading_backend import app  # noqa: F401
+from backend.trading_backend import app, start_scanner_scheduler_thread  # noqa: F401
 
 
 if __name__ == "__main__":
@@ -16,6 +16,8 @@ if __name__ == "__main__":
 
     if os.getenv("RENDER") and (not os.getenv("DASH_USER") or not os.getenv("DASH_PASS")):
         raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
+
+    start_scanner_scheduler_thread()
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"

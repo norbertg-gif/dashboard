@@ -5935,9 +5935,14 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
+SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
 SCANNER_DAILY_INCREMENTAL_DAYS = 10
+SCANNER_AUTO_HOUR_UTC = 23
+SCANNER_AUTO_MINUTE_UTC = 30
 _scanner_lock = threading.Lock()
+_scanner_scheduler_lock = threading.Lock()
+_scanner_scheduler_thread = None
 _scanner_daily_cache_locks_guard = threading.Lock()
 _scanner_daily_cache_locks: dict[str, threading.Lock] = {}
 _scanner_state = {
@@ -5948,6 +5953,7 @@ _scanner_state = {
     "total": 0,
     "current": None,
     "error": None,
+    "trigger": None,
     "memory_start_mb": None,
     "memory_peak_mb": None,
 }
@@ -6708,7 +6714,57 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     }
 
 
-def _run_nasdaq_scanner(days: int):
+def _load_scanner_auto_state() -> dict:
+    if not SCANNER_AUTO_STATE_FILE.exists():
+        return {}
+    try:
+        payload = json.loads(SCANNER_AUTO_STATE_FILE.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_scanner_auto_state(trading_day: date, timestamp: str, status: str = "finished"):
+    payload = {
+        "last_trading_day": trading_day.isoformat(),
+        "status": status,
+        f"{status}_at": timestamp,
+    }
+    temp_path = SCANNER_AUTO_STATE_FILE.with_name(
+        f"{SCANNER_AUTO_STATE_FILE.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp"
+    )
+    try:
+        SCANNER_AUTO_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp_path, SCANNER_AUTO_STATE_FILE)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _automatic_scanner_trading_day(now: datetime | None = None) -> date | None:
+    """Return the closed session due for an automatic scan, if it was not done."""
+    utc_now = now or datetime.now(timezone.utc)
+    if utc_now.tzinfo is None:
+        utc_now = utc_now.replace(tzinfo=timezone.utc)
+    else:
+        utc_now = utc_now.astimezone(timezone.utc)
+    completed = _most_recent_completed_us_trading_day(utc_now)
+    scheduled = utc_now.replace(
+        hour=SCANNER_AUTO_HOUR_UTC,
+        minute=SCANNER_AUTO_MINUTE_UTC,
+        second=0,
+        microsecond=0,
+    )
+    # Today's session waits for the configured post-close settlement time.
+    # A missed earlier session may be caught up immediately after a restart.
+    if completed >= utc_now.date() and utc_now < scheduled:
+        return None
+    if _load_scanner_auto_state().get("last_trading_day") == completed.isoformat():
+        return None
+    return completed
+
+
+def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: date | None = None):
     started = datetime.now(timezone.utc).isoformat()
     results, errors = [], []
     slog_source = load_signals_log()
@@ -6726,6 +6782,7 @@ def _run_nasdaq_scanner(days: int):
             "total": len(tickers),
             "current": None,
             "error": None,
+            "trigger": trigger,
             "memory_start_mb": scanner_memory_start,
             "memory_peak_mb": scanner_memory_start,
         })
@@ -6799,6 +6856,7 @@ def _run_nasdaq_scanner(days: int):
             "universe_label": universe_label,
             "days": days,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "trigger": trigger,
             "total": len(tickers),
             "matches": sum(1 for row in results if row.get("recent_signal")),
             "high_dip_rows": sum(1 for row in results if _num_or_none(row.get("dip_total")) is not None and row.get("dip_total") >= DIP_SCANNER_VISIBILITY_THRESHOLD),
@@ -6814,6 +6872,8 @@ def _run_nasdaq_scanner(days: int):
             "results": results,
         }
         save_scanner_cache(payload)
+        if trigger == "automatic" and auto_trading_day is not None:
+            _save_scanner_auto_state(auto_trading_day, payload["generated_at"])
         with _scanner_lock:
             _scanner_state.update({
                 "running": False,
@@ -6832,16 +6892,89 @@ def _run_nasdaq_scanner(days: int):
             })
 
 
-@app.post("/api/scanner/nasdaq/run")
-def start_nasdaq_scanner(days: int = Query(SCANNER_DEFAULT_DAYS, ge=1, le=10)):
+def _start_nasdaq_scanner(
+    days: int,
+    trigger: str,
+    auto_trading_day: date | None = None,
+) -> tuple[str, dict]:
     with _scanner_lock:
         if _scanner_state.get("running"):
-            return {"status": "running", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
+            if trigger == "automatic" and auto_trading_day is not None:
+                _save_scanner_auto_state(
+                    auto_trading_day,
+                    datetime.now(timezone.utc).isoformat(),
+                    status="skipped_running",
+                )
+            return "running", dict(_scanner_state)
+        if (
+            trigger == "automatic"
+            and auto_trading_day is not None
+            and _load_scanner_auto_state().get("last_trading_day") == auto_trading_day.isoformat()
+        ):
+            return "already_done", dict(_scanner_state)
+        if trigger == "automatic" and auto_trading_day is not None:
+            _save_scanner_auto_state(
+                auto_trading_day,
+                datetime.now(timezone.utc).isoformat(),
+                status="started",
+            )
         tickers, _, _ = scanner_universe_from_dip()
-        _scanner_state.update({"running": True, "progress": 0, "total": len(tickers), "current": None, "error": None})
-    t = threading.Thread(target=_run_nasdaq_scanner, args=(days,), daemon=True)
-    t.start()
-    return {"status": "started", "state": dict(_scanner_state), "cache": enrich_scanner_payload(load_scanner_cache())}
+        _scanner_state.update({
+            "running": True,
+            "progress": 0,
+            "total": len(tickers),
+            "current": None,
+            "error": None,
+            "trigger": trigger,
+        })
+        state = dict(_scanner_state)
+        thread = threading.Thread(
+            target=_run_nasdaq_scanner,
+            args=(days, trigger, auto_trading_day),
+            name=f"scanner-{trigger}",
+            daemon=True,
+        )
+        thread.start()
+    return "started", state
+
+
+def _scanner_scheduler_loop():
+    while True:
+        try:
+            trading_day = _automatic_scanner_trading_day()
+            if trading_day is not None:
+                _start_nasdaq_scanner(
+                    SCANNER_DEFAULT_DAYS,
+                    trigger="automatic",
+                    auto_trading_day=trading_day,
+                )
+        except Exception as exc:
+            print(f"[scanner] automatic rescan check failed: {type(exc).__name__}: {exc}")
+        _time_module.sleep(60)
+
+
+def start_scanner_scheduler_thread():
+    global _scanner_scheduler_thread
+    with _scanner_scheduler_lock:
+        if _scanner_scheduler_thread and _scanner_scheduler_thread.is_alive():
+            return _scanner_scheduler_thread
+        _scanner_scheduler_thread = threading.Thread(
+            target=_scanner_scheduler_loop,
+            name="scanner-daily-scheduler",
+            daemon=True,
+        )
+        _scanner_scheduler_thread.start()
+        return _scanner_scheduler_thread
+
+
+@app.post("/api/scanner/nasdaq/run")
+def start_nasdaq_scanner(days: int = Query(SCANNER_DEFAULT_DAYS, ge=1, le=10)):
+    status, state = _start_nasdaq_scanner(days, trigger="manual")
+    return {
+        "status": status,
+        "state": state,
+        "cache": enrich_scanner_payload(load_scanner_cache()),
+    }
 
 
 @app.get("/api/scanner/nasdaq/results")
@@ -11226,6 +11359,8 @@ if __name__ == "__main__":
 
     if os.getenv("RENDER") and (not os.getenv("DASH_USER") or not os.getenv("DASH_PASS")):
         raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
+
+    start_scanner_scheduler_thread()
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"
