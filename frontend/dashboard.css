@@ -4009,6 +4009,106 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 8px;
   margin-top: 5px;
 }
+#predictiveTab .signal-compare {
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+#predictiveTab .signal-compare-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+#predictiveTab .signal-compare-heading small,
+#predictiveTab .signal-compare-note {
+  color: var(--muted2);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+#predictiveTab .signal-compare-note {
+  margin: 5px 0 7px;
+}
+#predictiveTab .signal-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+#predictiveTab .signal-compare-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+#predictiveTab .signal-compare-card.heikin_ashi {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+#predictiveTab .signal-compare-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 6px;
+  color: var(--muted2);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+#predictiveTab .signal-compare-title strong {
+  color: var(--text);
+  font-size: 10px;
+}
+#predictiveTab .signal-compare-card.heikin_ashi .signal-compare-title strong { color: var(--accent); }
+#predictiveTab .signal-compare-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 6px 6px;
+}
+#predictiveTab .signal-compare-metrics span {
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+#predictiveTab .signal-compare-metrics small {
+  color: var(--muted2);
+  font-size: 7px;
+}
+#predictiveTab .signal-compare-row {
+  display: grid;
+  grid-template-columns: minmax(66px, 1.2fr) minmax(52px, .8fr) minmax(62px, 1fr);
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding: 4px 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+}
+#predictiveTab .signal-compare-row.header {
+  color: var(--muted2);
+  font-size: 7px;
+}
+#predictiveTab .signal-compare-row span:nth-child(n+2) { text-align: right; }
+#predictiveTab .signal-compare-row .win { color: var(--up); }
+#predictiveTab .signal-compare-row .loss { color: var(--down); }
+#predictiveTab .signal-compare-row .flat { color: var(--muted); }
+#predictiveTab .signal-compare-row .pending { color: var(--yellow); }
+#predictiveTab .signal-compare-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+#predictiveTab .signal-compare-empty {
+  border-top: 1px solid var(--border);
+  color: var(--muted2);
+  font-size: 8px;
+  padding: 8px 6px;
+}
 #predictiveTab .signal-segments {
   border-top: 1px solid var(--border);
   padding-top: 8px;

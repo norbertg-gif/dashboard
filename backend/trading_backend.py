@@ -4819,6 +4819,7 @@ def get_chart(
         daily_buy_signals = []
         signal_outcome_summary = {}
         signal_outcome_segments = {}
+        signal_representation_comparison = {}
         weekly_bias       = {}
         today_score       = 0
         today_raw_score   = 0
@@ -4835,6 +4836,7 @@ def get_chart(
 
             if len(raw_d) >= 20:
                 df_d = add_indicators(raw_d)
+                signal_representation_comparison = build_signal_representation_comparison(raw_d)
 
                 # --- Weekly bias check (Donchian 20w + SMA50w + EMA10/20) ---
                 weekly_trend = _weekly_trend(df)
@@ -5046,6 +5048,7 @@ def get_chart(
             "daily_signal":        round(daily_signal, 3),
             "daily_indicators":    daily_indicators,
             "daily_buy_signals":   daily_buy_signals,
+            "signal_representation_comparison": signal_representation_comparison,
             "weekly_bias":         weekly_bias,
             "today_score":         today_score,
             "today_raw_score":     today_raw_score,
@@ -5386,6 +5389,8 @@ SIGNAL_PROXIMITY_MAX = 0.012
 SIGNAL_OUTCOME_ATR_MULT = 1.0        # win/loss prah = 1×ATR%, clamp 1.0–3.0 %
 SIGNAL_OUTCOME_MIN = 1.0
 SIGNAL_OUTCOME_MAX = 3.0
+SIGNAL_REPRESENTATION_HORIZON = 90
+SIGNAL_REPRESENTATION_WARMUP = 60
 
 
 def rolling_zscore(close_series):
@@ -5447,6 +5452,154 @@ def signal_tier(score: int, trend: str = "side") -> str:
     if trend == "down":
         return "counter"
     return "watch"
+
+
+def _signal_episode_rows(signal_frame: pd.DataFrame, warmup: int = SIGNAL_REPRESENTATION_WARMUP) -> list[dict]:
+    """Return first bar of each contiguous score>=2 C1-C4 setup episode."""
+    if signal_frame is None or signal_frame.empty:
+        return []
+    zscores = rolling_zscore(signal_frame["Close"])
+    episodes = []
+    active = False
+    for position in range(len(signal_frame)):
+        if position < warmup:
+            continue
+        row = signal_frame.iloc[position]
+        score, details = score_signal_day(row, float(zscores.iloc[position]))
+        qualifies = score >= 2
+        if qualifies and not active:
+            ts = pd.Timestamp(signal_frame.index[position])
+            if ts.tzinfo is not None:
+                ts = ts.tz_localize(None)
+            episodes.append({
+                "date": str(ts.date()),
+                "score": int(score),
+                "tier": signal_tier(score, details["trend"]),
+                "trend": details["trend"],
+            })
+        active = qualifies
+    return episodes
+
+
+def _price_signal_episodes(
+    episodes: list[dict],
+    pricing_frame: pd.DataFrame,
+    horizon: int = SIGNAL_REPRESENTATION_HORIZON,
+) -> dict:
+    """Evaluate signal dates exclusively against the supplied real-OHLC pricing layer."""
+    if pricing_frame is None or pricing_frame.empty:
+        return {
+            "signal_count": len(episodes), "evaluated": 0, "pending": len(episodes),
+            "wins": 0, "losses": 0, "flats": 0, "win_rate": None,
+            "avg_return_pct": None, "median_return_pct": None, "signals": [],
+        }
+
+    real = add_indicators(pricing_frame)
+    normalized = []
+    for value in real.index:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        normalized.append(str(ts.date()))
+    positions = {date: position for position, date in enumerate(normalized)}
+    rows = []
+
+    for episode in episodes:
+        item = dict(episode)
+        position = positions.get(item["date"])
+        if position is None:
+            item.update({"entry_price": None, "return_pct": None, "status": "unavailable"})
+            rows.append(item)
+            continue
+
+        # Entry, exit and outcome threshold all come from the real-OHLC pricing frame.
+        entry = safe_float(real.iloc[position].get("Close"))
+        item["entry_price"] = round(entry, 4) if entry is not None else None
+        available = len(real) - position - 1
+        if entry is None or entry <= 0:
+            item.update({"return_pct": None, "status": "unavailable"})
+        elif available < horizon:
+            item.update({
+                "return_pct": None,
+                "status": "pending",
+                "days_available": max(0, available),
+            })
+        else:
+            exit_position = position + horizon
+            exit_price = safe_float(real.iloc[exit_position].get("Close"))
+            if exit_price is None:
+                item.update({"return_pct": None, "status": "unavailable"})
+            else:
+                return_pct = (exit_price - entry) / entry * 100
+                move_threshold = SIGNAL_OUTCOME_MOVE_THRESHOLD
+                atr = safe_float(real.iloc[position].get("atr"))
+                if atr and atr > 0:
+                    move_threshold = min(
+                        SIGNAL_OUTCOME_MAX,
+                        max(SIGNAL_OUTCOME_MIN, SIGNAL_OUTCOME_ATR_MULT * atr / entry * 100),
+                    )
+                status = (
+                    "win" if return_pct >= move_threshold
+                    else "loss" if return_pct <= -move_threshold
+                    else "flat"
+                )
+                item.update({
+                    "exit_date": normalized[exit_position],
+                    "exit_price": round(exit_price, 4),
+                    "return_pct": round(return_pct, 2),
+                    "move_threshold_pct": round(move_threshold, 2),
+                    "status": status,
+                    "days_available": horizon,
+                })
+        rows.append(item)
+
+    completed = [row for row in rows if row.get("status") in {"win", "loss", "flat"}]
+    returns = [row["return_pct"] for row in completed]
+    wins = sum(row["status"] == "win" for row in completed)
+    losses = sum(row["status"] == "loss" for row in completed)
+    flats = sum(row["status"] == "flat" for row in completed)
+    return {
+        "signal_count": len(episodes),
+        "evaluated": len(completed),
+        "pending": sum(row.get("status") == "pending" for row in rows),
+        "wins": wins,
+        "losses": losses,
+        "flats": flats,
+        "win_rate": round(wins / len(completed) * 100, 1) if completed else None,
+        "avg_return_pct": round(float(np.mean(returns)), 2) if returns else None,
+        "median_return_pct": round(float(np.median(returns)), 2) if returns else None,
+        "signals": rows,
+    }
+
+
+def build_signal_representation_comparison(real_ohlc: pd.DataFrame) -> dict:
+    """Compare one C1-C4 rule on classic vs HA signals, priced on real OHLC."""
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    if real_ohlc is None or real_ohlc.empty or any(column not in real_ohlc for column in required):
+        return {}
+    real = real_ohlc[required].dropna(subset=required[:4]).copy()
+    today = pd.Timestamp.now("UTC").tz_localize(None).normalize()
+    real = real.loc[[
+        (pd.Timestamp(value).tz_localize(None) if pd.Timestamp(value).tzinfo else pd.Timestamp(value)).normalize() < today
+        for value in real.index
+    ]]
+    if len(real) <= SIGNAL_REPRESENTATION_WARMUP:
+        return {}
+
+    # HA is seeded once from the first available bar. Warm-up is applied only
+    # while extracting episodes, never by slicing before heikin_ashi().
+    classic_signals = add_indicators(real)
+    ha_signals = add_indicators(heikin_ashi(real))
+    classic_episodes = _signal_episode_rows(classic_signals)
+    ha_episodes = _signal_episode_rows(ha_signals)
+    return {
+        "horizon": SIGNAL_REPRESENTATION_HORIZON,
+        "warmup": SIGNAL_REPRESENTATION_WARMUP,
+        "rule": "C1-C4 score >= 2; first day of each contiguous setup episode",
+        "pricing": "real_ohlc_close",
+        "classic": _price_signal_episodes(classic_episodes, real),
+        "heikin_ashi": _price_signal_episodes(ha_episodes, real),
+    }
 
 
 SIGNAL_CONTEXT_VERSION = 1

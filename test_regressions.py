@@ -933,5 +933,87 @@ class ApiCallStatsRegressionTests(unittest.TestCase):
         ])
 
 
+class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _ohlc(rows=140):
+        index = pd.bdate_range("2025-01-02", periods=rows)
+        close = [100 + i * 0.12 + ((i % 11) - 5) * 0.35 for i in range(rows)]
+        return pd.DataFrame({
+            "Open": [value - 0.25 for value in close],
+            "High": [value + 1.0 for value in close],
+            "Low": [value - 1.0 for value in close],
+            "Close": close,
+            "Volume": [1000 + (i % 7) * 30 for i in range(rows)],
+        }, index=index)
+
+    def test_heikin_ashi_is_causal(self):
+        original = self._ohlc(100)
+        changed = original.copy()
+        changed.iloc[70:, changed.columns.get_loc("Close")] *= 1.8
+        changed.iloc[70:, changed.columns.get_loc("High")] *= 1.8
+        changed.iloc[70:, changed.columns.get_loc("Low")] *= 1.8
+        changed.iloc[70:, changed.columns.get_loc("Open")] *= 1.8
+
+        pd.testing.assert_frame_equal(
+            tb.heikin_ashi(original).iloc[:70],
+            tb.heikin_ashi(changed).iloc[:70],
+        )
+
+    def test_pricing_layer_ignores_synthetic_signal_price(self):
+        prices = self._ohlc(3)
+        prices.loc[:, "Close"] = [100.0, 105.0, 120.0]
+        episode = {
+            "date": str(prices.index[0].date()),
+            "score": 3,
+            "tier": "buy",
+            "trend": "up",
+            "close": 9999.0,
+        }
+
+        result = tb._price_signal_episodes([episode], prices, horizon=2)
+
+        self.assertEqual(result["signals"][0]["entry_price"], 100.0)
+        self.assertEqual(result["signals"][0]["exit_price"], 120.0)
+        self.assertEqual(result["signals"][0]["return_pct"], 20.0)
+
+    def test_contiguous_signal_days_are_one_episode(self):
+        index = pd.bdate_range("2026-01-05", periods=6)
+        frame = pd.DataFrame({
+            "Close": [10, 11, 12, 13, 14, 15],
+            "qualifies": [True, True, False, True, True, False],
+        }, index=index)
+
+        def fake_score(row, _zscore):
+            qualifies = bool(row["qualifies"])
+            return (2 if qualifies else 1), {"trend": "up"}
+
+        with patch.object(tb, "score_signal_day", side_effect=fake_score):
+            episodes = tb._signal_episode_rows(frame, warmup=0)
+
+        self.assertEqual([row["date"] for row in episodes], [
+            str(index[0].date()),
+            str(index[3].date()),
+        ])
+
+    def test_classic_branch_matches_shared_scoring_rule(self):
+        classic = tb.add_indicators(self._ohlc())
+        zscores = tb.rolling_zscore(classic["Close"])
+        expected = []
+        active = False
+        for position in range(tb.SIGNAL_REPRESENTATION_WARMUP, len(classic)):
+            score, details = tb.score_signal_day(classic.iloc[position], float(zscores.iloc[position]))
+            qualifies = score >= 2
+            if qualifies and not active:
+                expected.append({
+                    "date": str(classic.index[position].date()),
+                    "score": score,
+                    "tier": tb.signal_tier(score, details["trend"]),
+                    "trend": details["trend"],
+                })
+            active = qualifies
+
+        self.assertEqual(tb._signal_episode_rows(classic), expected)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

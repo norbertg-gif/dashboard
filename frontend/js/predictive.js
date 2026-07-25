@@ -1109,6 +1109,49 @@ function pc_renderDailyExtra(data) {
       <span class="signal-check-value">${active ? 'splnené' : 'chýba'}</span>
     </div>`;
   }).join('');
+  const representation = data.signal_representation_comparison || {};
+  const comparisonVariant = (key, label) => {
+    const row = representation[key] || {};
+    const rate = row.win_rate != null ? `${Number(row.win_rate).toFixed(0)}%` : '—';
+    const signalRows = (row.signals || []).map(signal => {
+      const status = signal.status || 'unavailable';
+      const result = signal.return_pct != null ? fmtSigned(signal.return_pct)
+        : status === 'pending' ? `čaká ${Number(signal.days_available) || 0}/${Number(representation.horizon) || 90}D`
+        : 'n/a';
+      return `<div class="signal-compare-row">
+        <span>${escHtml(signal.date || '—')}</span>
+        <span>${signal.entry_price != null ? Number(signal.entry_price).toFixed(2) : '—'}</span>
+        <span class="${status}">${result}</span>
+      </div>`;
+    }).join('') || '<div class="signal-compare-empty">Žiadna epizóda po warm-upe</div>';
+    return `<div class="signal-compare-card ${key}">
+      <div class="signal-compare-title">
+        <strong>${label}</strong>
+        <span>${Number(row.signal_count) || 0} epizód</span>
+      </div>
+      <div class="signal-compare-metrics">
+        <span><small>vyhodnotené</small>${Number(row.evaluated) || 0}</span>
+        <span><small>úspešnosť</small>${rate}</span>
+        <span><small>priemer</small>${fmtMetric(row.avg_return_pct)}</span>
+        <span><small>medián</small>${fmtMetric(row.median_return_pct)}</span>
+      </div>
+      <div class="signal-compare-row header"><span>dátum</span><span>reálny vstup</span><span>90D výsledok</span></div>
+      <div class="signal-compare-list">${signalRows}</div>
+    </div>`;
+  };
+  const representationComparison = representation.classic || representation.heikin_ashi
+    ? `<div class="signal-compare">
+        <div class="signal-compare-heading">
+          <span>KLASICKÉ SVIEČKY VS HEIKIN ASHI</span>
+          <small>Rovnaké C1–C4 pravidlo (score ≥ 2), prvý deň epizódy · výsledok po ${Number(representation.horizon) || 90} obchodných dňoch</small>
+        </div>
+        <div class="signal-compare-note">Ide o všetky technické setupy vrátane watch/counter, nie iba buy tier. HA určuje iba deň signálu; vstup, výstup aj výnos sú vždy z reálneho OHLC.</div>
+        <div class="signal-compare-grid">
+          ${comparisonVariant('classic', 'Klasické')}
+          ${comparisonVariant('heikin_ashi', 'Heikin Ashi')}
+        </div>
+      </div>`
+    : '';
 
   el.innerHTML = `
     <div style="padding:10px 12px;border-top:1px solid var(--border);height:100%;
@@ -1143,6 +1186,9 @@ function pc_renderDailyExtra(data) {
           <span style="color:#94a3b8">●${flat} neutrálne</span>
           ${pending > 0 ? `<span style="color:#f59e0b">●${pending} čaká</span>` : ''}
         </div>
+        <div class="signal-outcome-note" style="margin:0 0 6px;">
+          Všetky C1–C4 dni so score ≥ 2 (buy, watch aj counter); po 10 dňoch sa priebežne merajú voči aktuálnej cene.
+        </div>
 
         <div style="position:relative;height:14px;background:var(--bg);
                     border-radius:7px;border:1px solid var(--border);">
@@ -1159,6 +1205,8 @@ function pc_renderDailyExtra(data) {
           ${detailRows}
         </div>
       </div>
+
+      ${representationComparison}
 
       <div class="advanced-only">
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
