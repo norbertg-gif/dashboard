@@ -1809,6 +1809,12 @@ async function loadChart(id, opts = {}) {
     r.moverChangePct = null;
     r.moverLastPrice = null;
     r.moverPriceSource = null;
+    // Earnings marker times sú vyriešené voči konkrétnym sviečkam — po zmene
+    // symbolu ALEBO intervalu už neplatia (1d časy neexistujú v 1wk sérii).
+    // Memo je len na symbole, takže bez tohto resetu by sa pri zmene intervalu
+    // vôbec nerefetchlo a ostali by staré, nesediace pozície.
+    r._earningsMarkers = [];
+    r._earningsFetchedFor = null;
   }
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
@@ -1984,12 +1990,16 @@ async function loadChart(id, opts = {}) {
       applyEtoroMarkers(id, sym, r, data)
         .then(() => updateChartLiveBadges(id))
         .catch(e => console.warn('eToro markers failed:', e));
-      // Earnings história sa medzi refresh=1 dobehmi toho istého symbolu
-      // nemení (backend má aj tak 12h cache) — fetchni len raz na symbol/panel.
-      if (r._earningsFetchedFor !== sym) {
-        r._earningsFetchedFor = sym;
-        applyEarningsMarkers(id, sym, r, data).catch(e => console.warn('earnings markers failed:', e));
-      }
+    }
+    // Earnings NIE JE viazané na skipEtoro — ide z /api/ticker/insights, nie
+    // z eToro proxy. Kým to tu bolo spolu, loadAll() (skipEtoro:true, potom
+    // liveTailOnly vetva s early returnom) markery nikdy nevykreslil a "E" sa
+    // objavilo len pri manuálnom reloade jedného panelu.
+    // História sa medzi refresh=1 dobehmi toho istého symbolu nemení (backend
+    // má aj tak 12h cache) — fetchni len raz na symbol/panel.
+    if (!r.indicators.ha && r._earningsFetchedFor !== sym) {
+      r._earningsFetchedFor = sym;
+      applyEarningsMarkers(id, sym, r, data).catch(e => console.warn('earnings markers failed:', e));
     }
     if (data.patterns?.length) applyPatternMarkers(id, r, data.patterns);
     if (opts.refresh !== 1 && !opts.noLiveAfter) {
