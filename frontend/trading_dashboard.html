@@ -11,7 +11,7 @@
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260725-143258">
+<link rel="stylesheet" href="/dashboard.css?v=20260725-144625">
 </head>
 <body>
 
@@ -280,6 +280,10 @@
           <div id="dailyMarkerModeControls" class="daily-marker-mode" style="display:none;">
             <button class="toggle-btn active" id="btnDailyMarkerStrength" onclick="setDailyMarkerMode('strength')">Sila</button>
             <button class="toggle-btn" id="btnDailyMarkerReturn" onclick="setDailyMarkerMode('return')">Vynos %</button>
+          </div>
+          <div id="dailyHaControls" class="daily-ha-controls" style="display:none;">
+            <button class="toggle-btn" id="btnDailyHa" type="button" onclick="toggleDailyHa()" aria-pressed="false" title="Prepnúť denný graf na Heikin Ashi">HA</button>
+            <span class="daily-ha-note">HA: len sviečky · signály + indikátory: klasika</span>
           </div>
           <button class="toggle-btn active" id="btnWeekly" onclick="switchView('weekly')" style="padding:3px 10px;font-size:11px;">Weekly</button>
           <button class="toggle-btn" id="btnDaily" onclick="switchView('daily')" style="padding:3px 10px;font-size:11px;">Daily</button>
@@ -550,16 +554,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260725-143258"></script>
-  <script src="/js/live.js?v=20260725-143258"></script>
-  <script src="/js/portfolio.js?v=20260725-143258"></script>
-  <script src="/js/watchlist.js?v=20260725-143258"></script>
-  <script src="/js/scanner.js?v=20260725-143258"></script>
-  <script src="/js/chart_patterns.js?v=20260725-143258"></script>
-  <script src="/js/predictive.js?v=20260725-143258"></script>
-  <script src="/js/verdict.js?v=20260725-143258"></script>
-  <script src="/js/home.js?v=20260725-143258"></script>
-  <script src="/js/charts.js?v=20260725-143258"></script>
-  <script src="/js/main.js?v=20260725-143258"></script>
+  <script src="/js/core.js?v=20260725-144625"></script>
+  <script src="/js/live.js?v=20260725-144625"></script>
+  <script src="/js/portfolio.js?v=20260725-144625"></script>
+  <script src="/js/watchlist.js?v=20260725-144625"></script>
+  <script src="/js/scanner.js?v=20260725-144625"></script>
+  <script src="/js/chart_patterns.js?v=20260725-144625"></script>
+  <script src="/js/predictive.js?v=20260725-144625"></script>
+  <script src="/js/verdict.js?v=20260725-144625"></script>
+  <script src="/js/home.js?v=20260725-144625"></script>
+  <script src="/js/charts.js?v=20260725-144625"></script>
+  <script src="/js/main.js?v=20260725-144625"></script>
 </body>
 </html>

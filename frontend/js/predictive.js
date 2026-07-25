@@ -290,6 +290,7 @@ let pc_dailySeries = null;
 let pc_dailyMainInst = null;
 let pc_dailyMainRO = null;   // ResizeObserver — disconnect pred recreate, inak sa hromadia (renderDailyMain beží pri kazdom loade/view switchi)
 let pc_dailyMainSeries = null;
+let pc_dailyMainTicker = null;
 let pc_currentView = 'weekly';
 let pc_scannerPollTimer = null;
 let pc_scannerLoading = false;
@@ -1923,6 +1924,8 @@ function switchView(view) {
   document.getElementById('btnDaily').classList.toggle('active',  view === 'daily');
   const markerControls = document.getElementById('dailyMarkerModeControls');
   if (markerControls) markerControls.style.display = view === 'daily' ? 'flex' : 'none';
+  const haControls = document.getElementById('dailyHaControls');
+  if (haControls) haControls.style.display = view === 'daily' ? 'flex' : 'none';
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
   pc_applyOverlays();
@@ -1930,6 +1933,8 @@ function switchView(view) {
 }
 
 let pc_dailyMarkerMode = localStorage.getItem('pc_daily_marker_mode') === 'return' ? 'return' : 'strength';
+const PC_DAILY_HA_KEY = 'td_predictive_daily_ha';
+let pc_dailyHaEnabled = localStorage.getItem(PC_DAILY_HA_KEY) === '1';
 
 function setDailyMarkerMode(mode) {
   pc_dailyMarkerMode = mode === 'return' ? 'return' : 'strength';
@@ -1941,6 +1946,44 @@ function setDailyMarkerMode(mode) {
 function setDailyMarkerModeButtons() {
   document.getElementById('btnDailyMarkerStrength')?.classList.toggle('active', pc_dailyMarkerMode === 'strength');
   document.getElementById('btnDailyMarkerReturn')?.classList.toggle('active', pc_dailyMarkerMode === 'return');
+}
+
+function setDailyHaButton() {
+  const btn = document.getElementById('btnDailyHa');
+  if (!btn) return;
+  btn.classList.toggle('active', pc_dailyHaEnabled);
+  btn.setAttribute('aria-pressed', pc_dailyHaEnabled ? 'true' : 'false');
+  btn.title = 'Heikin Ashi mení iba sviečky; signály aj indikátory zostávajú z klasických dát';
+}
+
+function toggleDailyHa() {
+  pc_dailyHaEnabled = !pc_dailyHaEnabled;
+  localStorage.setItem(PC_DAILY_HA_KEY, pc_dailyHaEnabled ? '1' : '0');
+  setDailyHaButton();
+  if (pc_currentView === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
+}
+
+function pcHeikinAshiCandles(candles) {
+  let previousOpen = null;
+  let previousClose = null;
+  return (candles || []).map((bar, index) => {
+    const open = Number(bar.open);
+    const high = Number(bar.high);
+    const low = Number(bar.low);
+    const close = Number(bar.close);
+    const haClose = (open + high + low + close) / 4;
+    const haOpen = index === 0 ? (open + close) / 2 : (previousOpen + previousClose) / 2;
+    const haBar = {
+      ...bar,
+      open: haOpen,
+      high: Math.max(high, haOpen, haClose),
+      low: Math.min(low, haOpen, haClose),
+      close: haClose,
+    };
+    previousOpen = haOpen;
+    previousClose = haClose;
+    return haBar;
+  });
 }
 
 function dailySignalReturnMarker(signal, candles) {
@@ -1963,12 +2006,18 @@ function dailySignalReturnMarker(signal, candles) {
 
 function renderDailyMain(data) {
   if (!data.daily_candles || !data.daily_candles.length) return;
+  const ticker = String(data.ticker || '').trim().toUpperCase();
+  const chartCandles = pc_dailyHaEnabled ? pcHeikinAshiCandles(data.daily_candles) : data.daily_candles;
   const el = document.getElementById('dailyMainChart');
+  const previousRange = pc_dailyMainInst && pc_dailyMainTicker === ticker
+    ? pc_dailyMainInst.timeScale().getVisibleLogicalRange()
+    : null;
   if (pc_dailyMainRO) { try { pc_dailyMainRO.disconnect(); } catch(e) {} pc_dailyMainRO = null; }
   if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; pc_dailyMainSeries = null; }
   pc_dailyMainInst = LightweightCharts.createChart(el, {
     ...getPcChartOpts(), width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight),
   });
+  pc_dailyMainTicker = ticker;
   pc_dailyMainRO = new ResizeObserver(() => {
     if (pc_dailyMainInst) pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
   });
@@ -1980,7 +2029,7 @@ function renderDailyMain(data) {
     wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
   });
   pc_dailyMainSeries = cs;
-  cs.setData(data.daily_candles);
+  cs.setData(chartCandles);
 
   // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
   // Celý chart/séria sa tu vytvára nanovo pri každom volaní, takže staré
@@ -2029,14 +2078,17 @@ function renderDailyMain(data) {
     setSeriesMarkers(cs, markers);
   }
 
-  pc_dailyMainInst.timeScale().fitContent();
+  if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
+  else pc_dailyMainInst.timeScale().fitContent();
   if (pc_currentView === 'daily') pc_applyChartPatterns();
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
     pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
-    pc_dailyMainInst.timeScale().fitContent();
+    if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
+    else pc_dailyMainInst.timeScale().fitContent();
   });
   setDailyMarkerModeButtons();
+  setDailyHaButton();
 }
 
 // Relatívna sila voči QQQ/SPY (1M/3M) — interpretačná karta, neovplyvňuje skóre

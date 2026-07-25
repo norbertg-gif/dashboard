@@ -2293,6 +2293,25 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   padding: 3px 8px;
   font-size: 10px;
 }
+#predictiveTab .daily-ha-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 5px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+#predictiveTab .daily-ha-controls .toggle-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+#predictiveTab .daily-ha-note {
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
 
 #predictiveTab .charts-col {
   display: flex;
