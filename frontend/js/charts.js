@@ -1522,8 +1522,11 @@ async function applyEarningsMarkers(id, symbol, r, chartData) {
       const time = resolveMarkerTime({ openDate: h.date }, chartData);
       if (!time) return null;
       const markerId = `earnings:${id}:${index}:${h.date}`;
-      const known = h.actual != null && h.estimate != null;
-      const col = !known ? CHART_COLORS.neutral : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
+      // beat === null znamená "nevieme posúdiť" (backend zneplatnil porovnanie,
+      // typicky GAAP actual vs non-GAAP konsenzus) — vtedy neutrálna farba,
+      // nie červená, lebo o miss nejde.
+      const col = h.beat == null ? CHART_COLORS.neutral
+                : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
       const sp = h.surprise_pct;
       const fmtEps = v => Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '?';
       r._markerMeta[markerId] = { html:
@@ -1532,7 +1535,11 @@ async function applyEarningsMarkers(id, symbol, r, chartData) {
           `<span class="tip-muted">Actual</span><b>${fmtEps(h.actual)}</b>` +
           `<span class="tip-muted">Odhad</span><b>${fmtEps(h.estimate)}</b>` +
         `</div>` +
-        (sp != null ? `<div style="color:${col};margin-top:2px;">${sp >= 0 ? '+' : ''}${sp.toFixed(1)}% ${h.beat ? 'beat' : 'miss'}</div>` : '') };
+        (sp != null
+          ? `<div style="color:${col};margin-top:2px;">${sp >= 0 ? '+' : ''}${sp.toFixed(1)}% ${h.beat ? 'beat' : 'miss'}</div>`
+          : (h.comparison_untrusted
+             ? `<div class="tip-muted" style="margin-top:2px;">porovnanie neporovnateľné (GAAP vs konsenzus)</div>`
+             : '')) };
       // Textový marker (písmeno namiesto bodky) — kruh je zmenšený na 0, aby
       // ostal viditeľný len "E"; farba textu kopíruje beat/miss/neznáme.
       return { id: markerId, time, position: 'aboveBar', color: col, shape: 'circle', size: 0, text: 'E' };

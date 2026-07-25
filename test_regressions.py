@@ -574,9 +574,8 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
             "beat": True,
         }])
 
-    def test_yahoo_chart_drops_absurd_surprise_rows(self):
-        # GOOG naživo: 9.11 vs 2.91 (+213 %) je GAAP-vs-konsenzus nezmysel,
-        # zdravé riadky musia prejsť.
+    def test_yahoo_chart_keeps_all_rows_filtering_is_central(self):
+        # Zdroj nefiltruje — dôveryhodnosť porovnania rieši get_ticker_insights.
         payload = self._yahoo_payload([
             self._yahoo_quarter("4Q2025", "2026-02-04", 2.82, 2.64089),
             self._yahoo_quarter("2Q2026", "2026-07-22", 9.11, 2.91149),
@@ -584,7 +583,43 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
         with patch.object(tb, "_yahoo_quote_summary", return_value=payload):
             history, ok, _ = tb._yahoo_earnings_chart("GOOG")
         self.assertTrue(ok)
-        self.assertEqual([h["date"] for h in history], ["2026-02-04"])
+        self.assertEqual([h["date"] for h in history],
+                         ["2026-02-04", "2026-07-22"])
+
+    def test_untrusted_comparison_keeps_event_but_voids_verdict(self):
+        # GOOG Q2 2026: AV aj Yahoo nezávisle hlásia 9.11 vs ~2.9 (+213 %), teda
+        # reálne GAAP EPS proti non-GAAP konsenzu. Marker musí ZOSTAŤ (výsledky
+        # sa naozaj konali), ale beat/surprise sa nesmie tvrdiť.
+        finnhub_payload = {
+            "insider": {"buys_90d": 0, "sells_90d": 0,
+                        "net_value_90d": 0, "recent": []},
+            "eps_history": [
+                {"date": "2026-02-04", "quarter": "Q4 2025", "actual": 2.82,
+                 "estimate": 2.64, "surprise_pct": 6.8, "beat": True},
+                {"date": "2026-07-22", "quarter": "Q2 2026", "actual": 9.11,
+                 "estimate": 2.91, "surprise_pct": 213.1, "beat": True},
+            ],
+            "_eps_history_fetch_failed": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "YAHOO_INSIGHTS_DIR", Path(tmp)),
+                patch.object(tb, "_insights_fetch_finnhub",
+                             return_value=finnhub_payload),
+                patch.object(tb, "_yahoo_quote_summary", return_value=None),
+                patch.object(tb, "_fmp_price_target", return_value=None),
+            ):
+                result = tb.get_ticker_insights("GOOG", refresh=0)
+        history = result["eps_history"]
+        self.assertEqual([h["date"] for h in history],
+                         ["2026-02-04", "2026-07-22"])
+        self.assertEqual(history[0]["surprise_pct"], 6.8)
+        self.assertTrue(history[0]["beat"])
+        self.assertNotIn("comparison_untrusted", history[0])
+        self.assertIsNone(history[1]["surprise_pct"])
+        self.assertIsNone(history[1]["beat"])
+        self.assertTrue(history[1]["comparison_untrusted"])
+        self.assertEqual(history[1]["actual"], 9.11)
 
     def test_yahoo_chart_skips_rows_without_report_date(self):
         payload = self._yahoo_payload([

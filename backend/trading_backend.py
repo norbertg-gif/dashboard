@@ -8393,9 +8393,10 @@ def _fmp_earnings_surprises(sym: str) -> tuple[list[dict], bool, str | None]:
     return (history[-8:], upstream_succeeded, last_err)
 
 
-# Nad týmto prekvapením považujeme Yahoo EPS riadok za nepoužiteľný — viď
-# rozbor v _yahoo_earnings_chart() (GAAP actual vs non-GAAP konsenzus).
-YAHOO_EPS_MAX_SURPRISE_PCT = 100.0
+# Nad týmto prekvapením prestávame veriť POROVNANIU actual vs estimate (nie
+# samotnej hodnote) — typicky ide o GAAP actual proti non-GAAP konsenzu.
+# Uplatňuje sa centrálne v get_ticker_insights() na všetky zdroje rovnako.
+EPS_MAX_TRUSTED_SURPRISE_PCT = 100.0
 
 
 def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
@@ -8407,14 +8408,12 @@ def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
     `reportedDate` (skutočný dátum zverejnenia) — bez neho by markery sedeli na
     koniec fiškálneho kvartálu, čo bola pôvodná chyba tejto feature.
 
-    Hodnoty sú ale pri niektorých tituloch nepoužiteľné: overené naživo, GOOG
-    hlási actual 5.11 vs odhad 2.63 (+94 %) a 9.11 vs 2.91 (+213 %), pričom oba
-    Yahoo moduly nesú tie isté čísla (čiže je to chyba dát Yahoo, nie nášho
-    parsovania). Vyzerá to na GAAP actual porovnávaný s non-GAAP konsenzom.
-    TMUS má v tom istom okne +0.4/-8.9/+15.1/+14.9 %, teda úplne zdravé.
-    Preto zahadzujeme riadky s absurdným prekvapením — legitímny beat nad 100 %
-    je zriedkavý a stojí nás nanajvýš jeden marker, kým nefiltrovaný nezmysel
-    kazí celý graf.
+    Pozor na výklad extrémnych prekvapení: GOOG Q2 2026 tu vyjde 9.11 vs odhad
+    2.91 (+213 %), ale Alpha Vantage nezávisle hlási to isté (9.11 vs 2.88).
+    Dva nezávislé zdroje s tou istou hodnotou => je to reálne vykázané GAAP EPS
+    a nesedí len POROVNANIE s non-GAAP konsenzom. Nefiltruje sa to tu — rieši to
+    centrálne `get_ticker_insights()` cez `EPS_MAX_TRUSTED_SURPRISE_PCT` tak, že
+    riadok ponechá a zneplatní iba `surprise_pct`/`beat`.
     """
     qs = _yahoo_quote_summary(sym, "earnings")
     if qs is None:
@@ -8441,8 +8440,6 @@ def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
             continue
         sp = (round((actual - estimate) / abs(estimate) * 100, 1)
               if estimate not in (None, 0) else None)
-        if sp is not None and abs(sp) > YAHOO_EPS_MAX_SURPRISE_PCT:
-            continue
         label = str(row.get("fiscalQuarter") or row.get("date") or "")
         # Yahoo dáva "2Q2026", náš tvar je "Q2 2026"
         m = re.fullmatch(r"([1-4])Q(\d{4})", label)
@@ -9781,19 +9778,30 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         # ďalšom "source":"yahoo" prípade opäť len hádali naslepo, prečo.
         if core.get("source") != "finnhub" and errs:
             core["finnhub_error"] = " | ".join(errs)
-        # Poistka proti zjavne poškodeným EPS záznamom, nech prídu odkiaľkoľvek
-        # (Finnhub aj Yahoo majú historicky vedeli mať dátové chyby na
-        # konkrétnych tickeroch) — nezmyselný pomer actual/estimate radšej
-        # zahoď ako zobraz.
+        # Nedôveryhodné porovnanie NEZAHADZUJ — zneplatni len samotné porovnanie.
+        # Overené 2026-07-25 na GOOG Q2 2026: Alpha Vantage aj Yahoo nezávisle
+        # hlásia actual 9.11 proti odhadu ~2.88 (+216 %). Dva nezávislé zdroje
+        # s tým istým číslom => 9.11 je reálne vykázané (GAAP) EPS, nie dátová
+        # chyba; konsenzus je len na inej báze (non-GAAP), takže nesedí
+        # porovnanie, nie hodnota. Zahodenie riadku by skrylo skutočný earnings
+        # event — a marker má v prvom rade hovoriť "tu boli výsledky".
+        # `beat: None` znamená "nevieme posúdiť" (frontend to farbí neutrálne).
         eh = core.get("eps_history")
         if eh:
-            def _plausible(h):
+            def _trusted_comparison(h):
                 a, e = h.get("actual"), h.get("estimate")
                 if a is None or e is None or e == 0:
-                    return True
-                ratio = abs(a / e)
-                return 0.2 <= ratio <= 5
-            core["eps_history"] = [h for h in eh if _plausible(h)]
+                    return False
+                sp = h.get("surprise_pct")
+                if sp is None:
+                    sp = (a - e) / abs(e) * 100
+                return abs(sp) <= EPS_MAX_TRUSTED_SURPRISE_PCT
+            core["eps_history"] = [
+                h if _trusted_comparison(h)
+                else {**h, "surprise_pct": None, "beat": None,
+                      "comparison_untrusted": True}
+                for h in eh
+            ]
         payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION, **core,
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
         # doplň earnings dátum do zdieľaného kalendára (rovnako ako per-symbol Finnhub)
