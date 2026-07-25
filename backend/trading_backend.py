@@ -10831,6 +10831,91 @@ def _previous_weekday_utc() -> str:
     return day.isoformat()
 
 
+@app.get("/api/diagnostics/earnings/{symbol}")
+def earnings_source_diagnostics(symbol: str):
+    """Prečo `eps_history` vyzerá tak, ako vyzerá — zdroj po zdroji.
+
+    Bežná odpoveď `/api/ticker/insights` ukáže chybu zdroja len vtedy, keď
+    zlyhá CELÁ reťaz; keď neskoršia vrstva uspeje, chyby tých skorších sa
+    stratia. Tento endpoint preto skúša každý zdroj zvlášť a vypíše výsledok
+    aj vtedy, keď iný zdroj medzitým uspel.
+
+    Alpha Vantage sa testuje ŽIVÝM volaním, teda zámerne obchádza 30-dňovú
+    cache — inak by potvrdilo len to, že cache existuje, nie že kľúč funguje.
+    Stojí to 1 z 25 denných AV requestov, preto to nevolaj v slučke.
+    Kľúče sa nikdy nevypisujú, len či sú nastavené.
+    """
+    sym = _validate_ticker_symbol(symbol)
+    out: dict = {
+        "symbol": sym,
+        "keys_configured": {
+            name: bool(os.getenv(name, "").strip())
+            for name in ("FINNHUB_API_KEY", "FMP_API_KEY", "ALPHA_VANTAGE_API_KEY")
+        },
+        "sources": {},
+    }
+
+    # ── Alpha Vantage: živý probe mimo cache ──
+    av: dict = {"key_configured": out["keys_configured"]["ALPHA_VANTAGE_API_KEY"],
+                "daily_limit_backoff_active": _av_limit_active()}
+    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
+    if not api_key:
+        av["ok"] = False
+        av["error"] = "ALPHA_VANTAGE_API_KEY nie je nastavený"
+    elif _av_limit_active():
+        av["ok"] = False
+        av["error"] = "AV denný limit vyčerpaný — resetuje sa o polnoci UTC"
+    else:
+        try:
+            resp = requests.get(
+                "https://www.alphavantage.co/query",
+                params={"function": "EARNINGS", "symbol": sym, "apikey": api_key},
+                timeout=20,
+            )
+            av["http_status"] = resp.status_code
+            data = resp.json() if resp.status_code == 200 else {}
+            # AV vracia HTTP 200 aj pri chybe — skutočný dôvod je v tele.
+            # Tieto hlášky vie AV vrátiť aj s echom kľúča, preto _scrub_token.
+            for field in ("Note", "Information", "Error Message"):
+                if data.get(field):
+                    av["av_message"] = _scrub_token(str(data[field]))[:300]
+            quarterly = data.get("quarterlyEarnings") or []
+            av["quarterly_count"] = len(quarterly)
+            av["ok"] = bool(quarterly)
+            if quarterly:
+                av["newest"] = quarterly[0]
+            elif "av_message" not in av:
+                av["error"] = "AV nevrátila quarterlyEarnings (neznámy symbol?)"
+        except Exception as e:
+            av["ok"] = False
+            av["error"] = f"{type(e).__name__}: {_scrub_token(e)}"
+    out["sources"]["alpha_vantage"] = av
+
+    # ── Ostatné vrstvy: použi rovnaké funkcie ako produkčná cesta ──
+    for name, fn in (("finnhub", _insights_fetch_finnhub),
+                     ("fmp", _fmp_earnings_surprises),
+                     ("yahoo_chart", _yahoo_earnings_chart)):
+        try:
+            if name == "finnhub":
+                core = fn(sym)
+                rows = core.get("eps_history") or []
+                entry = {"ok": bool(rows), "rows": len(rows)}
+                if core.get("_finnhub_earnings_error"):
+                    entry["error"] = core["_finnhub_earnings_error"]
+            else:
+                rows, ok, err = fn(sym)
+                entry = {"ok": bool(rows), "rows": len(rows), "upstream_ok": ok}
+                if err:
+                    entry["error"] = err
+            if rows:
+                entry["newest"] = rows[-1]
+        except Exception as e:
+            entry = {"ok": False, "error": f"{type(e).__name__}: {_scrub_token(e)}"}
+        out["sources"][name] = entry
+
+    return out
+
+
 @app.get("/api/diagnostics/massive")
 def massive_diagnostics(
     symbol: str = Query("AAPL", min_length=1, max_length=12),
