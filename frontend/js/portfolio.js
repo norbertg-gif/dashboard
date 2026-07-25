@@ -1896,7 +1896,7 @@ function renderPortPanel(pid) {
   // Čakajúce objednávky (limitky + market orders čakajúce na exekúciu)
   const orders = s.data.orders || [];
   if (!s.attentionOnly && orders.length) {
-    const open = s.ordersOpen !== false;   // default rozbalené
+    const open = s.ordersOpen === true;   // default zbalené — počet je v hlavičke
     html += `<div class="port-mirrors-hdr" onclick="portToggleOrders('${pid}')">
       ${open ? '▾' : '▸'} Čakajúce objednávky (${orders.length})
     </div>`;
@@ -2022,7 +2022,7 @@ function portToggleMirrors(pid) {
   renderPortPanel(pid);
 }
 function portToggleOrders(pid) {
-  const s = getPortState(pid); s.ordersOpen = s.ordersOpen === false ? true : false;
+  const s = getPortState(pid); s.ordersOpen = s.ordersOpen !== true;
   renderPortPanel(pid);
 }
 async function portSaveCols(pid) {

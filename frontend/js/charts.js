@@ -879,6 +879,9 @@ function createPanel(cfg) {
     syncFrom, overlaySeries:{}, indicators:{...inds}, ro,
     viewRange: initialViewRange,
     suppressViewSave: false,
+    // Prepne sa až na skutočný vstup používateľa (koliesko/ťah v grafe) —
+    // dovtedy sa zmeny rozsahu z knižnice do layoutu neukladajú.
+    userAdjustedView: false,
     viewSaveTimer: null,
     lastWizardData: null, avgPriceLine: null, entryPriceLines: [], orderPriceLines: [], etoroPct: null,
     abortController: null, loadSeq: 0,
@@ -890,14 +893,27 @@ function createPanel(cfg) {
   };
   attachMarkerTooltip(mainChart, mainCont, objectId => registry[id]?._markerMeta?.[objectId]);
 
+  // Zoom/posun sa ukladá LEN keď ho vyvolal používateľ. Knižnica emituje zmenu
+  // viditeľného rozsahu aj pri setData a pri dosadení šírky kontajnera — a ten
+  // "default" pohľad (odvodený od šírky a barSpacing) predtým prepísal uložené
+  // priblíženie a saveLayout ho o 350 ms zvečnil. Prejavovalo sa to tak, že po
+  // reloade mali všetky panely ten istý rozsah namiesto vlastného zoomu.
+  ['wheel', 'mousedown', 'touchstart'].forEach(ev =>
+    mainCont.addEventListener(ev, () => {
+      const reg = registry[id];
+      if (reg) reg.userAdjustedView = true;
+    }, { passive: true }));
+
   mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     const reg = registry[id];
     if (!reg || reg.suppressViewSave || !range) return;
     const from = Number(range.from), to = Number(range.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    reg.viewRange = { from, to };
-    clearTimeout(reg.viewSaveTimer);
-    reg.viewSaveTimer = setTimeout(saveLayout, 350);
+    if (reg.userAdjustedView) {
+      reg.viewRange = { from, to };
+      clearTimeout(reg.viewSaveTimer);
+      reg.viewSaveTimer = setTimeout(saveLayout, 350);
+    }
     if (from < 20 && reg.hasMoreHistory && !reg.historyLoading) {
       loadOlderChartData(id);
     }
