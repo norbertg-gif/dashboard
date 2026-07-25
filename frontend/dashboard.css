@@ -1373,6 +1373,20 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--accent-soft);
 }
 .p-drag-handle:active { cursor: grabbing; }
+/* Zastaraný (ale okamžite viditeľný) stav grafu — stlmenie je bezpečnostná
+   poistka, nie estetika: neoznačená stará cena zvádza k zlému rozhodnutiu. */
+/* Bez prechodu zámerne — signál "toto je staré" musí byť viditeľný okamžite,
+   nie sa postupne vyfarbovať. */
+.panel.panel-stale .p-chart { opacity: 0.6; }
+.p-stale {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted2);
+  border: 1px dashed var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  white-space: nowrap;
+}
 .panel.panel-dragging {
   opacity: 0.55;
   outline: 1px solid var(--accent);

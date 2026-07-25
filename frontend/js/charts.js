@@ -1777,6 +1777,44 @@ function applyPanelSeriesData(r, data) {
   r.volSeries.setData(volumeData);
 }
 
+// Okamžité vykreslenie posledného známeho stavu grafu, kým beží načítanie.
+// Vracia true, keď sa niečo vykreslilo. Zámerne NEnastavuje r._rawChartData —
+// ten ostáva prázdny, takže normálne načítanie prebehne nedotknuté a zároveň
+// slúži ako podmienka "panel ešte nič nezobrazuje".
+function paintPanelSnapshot(id) {
+  const r = registry[id];
+  const panel = document.getElementById(id);
+  if (!r?.candleSeries || !panel) return false;
+  if (r._rawChartData?.length) return false;
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  const interval = panel.querySelector('.interval-sel')?.value;
+  if (!sym || !interval) return false;
+  const snap = ohlcvCacheRead(sym, interval, r.indicators?.ha);
+  if (!snap) return false;
+  try {
+    applyPanelSeriesData(r, snap.d);
+    r.mainChart.timeScale().fitContent();
+    document.getElementById('ov-' + id)?.classList.add('hidden');
+    panel.classList.remove('loading-state');
+    panel.classList.add('panel-stale');
+    const infoEl = document.getElementById('info-' + id);
+    if (infoEl) {
+      const ts = new Date(snap.t);
+      const hhmm = String(ts.getHours()).padStart(2, '0') + ':' +
+                   String(ts.getMinutes()).padStart(2, '0');
+      const nm = snap.n && snap.n !== sym ? snap.n : '';
+      infoEl.innerHTML =
+        (nm ? `<span class="p-name">${escHtml(nm)}</span>` : '') +
+        `<span class="p-stale" title="Posledný známy stav z pamäte prehliadača — čerstvé dáta sa načítavajú">` +
+        `z ${hhmm} · aktualizujem…</span>`;
+    }
+    return true;
+  } catch (e) {
+    console.warn('snapshot paint failed:', sym, e);
+    return false;
+  }
+}
+
 function applyMoverLiveClose(r, data, interval) {
   const livePrice = Number(r?.moverLastPrice);
   if (!Array.isArray(data) || !data.length || interval !== '1d' || !Number.isFinite(livePrice) || livePrice <= 0) {
@@ -1885,6 +1923,8 @@ async function loadChart(id, opts = {}) {
     btn.disabled = true;
     ovEl.textContent = 'Načítava sa…'; ovEl.classList.remove('hidden');
     infoEl.innerHTML = '<span class="p-name">Načítava sa…</span>';
+    // ...a hneď to prepíš posledným známym stavom, ak nejaký máme.
+    paintPanelSnapshot(id);
   }
 
   try {
@@ -1963,8 +2003,11 @@ async function loadChart(id, opts = {}) {
       return;
     }
 
+    // Ulož ešte pred mover live-patchom, nech je v cache čistý trhový stav.
+    ohlcvCacheWrite(sym, interval, haParam, name, data);
     data = applyMoverLiveClose(r, data, interval);
     r._rawChartData = data;
+    panel.classList.remove('panel-stale');
     applyPanelSeriesData(r, data);
     const restoredView = r.viewRange && Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
       ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
@@ -2232,6 +2275,10 @@ async function loadAll() {
     .filter(p => p.querySelector('.p-sym')?.value?.trim());
 
   if (!panels.length) return;
+  // Vykresli posledný známy stav VŠETKÝCH panelov ešte pred batch fetchom —
+  // inak by sa čakalo na sieť s prázdnymi panelmi (to je tá stena
+  // "Načítava sa…" pri štarte). Panely, ktoré už dáta majú, sa nedotknú.
+  panels.forEach(p => paintPanelSnapshot(p.id));
   setStatus(`Načítava ${panels.length} grafov…`, '');
 
   const acct = activeAccount || '1';

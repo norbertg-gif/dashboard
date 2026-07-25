@@ -19,6 +19,71 @@ const CHART_COLORS = {
   neutral: '#94a3b8', pending: '#f59e0b', pendingDim: '#f59e0b66',
 };
 
+// ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
+// Prázdny panel s "Načítava sa…" je horší než mierne staré sviečky zobrazené
+// okamžite. Posledný známy stav grafu preto prežíva v localStorage a vykreslí
+// sa hneď, kým na pozadí beží normálne načítanie. Zastaraný stav MUSÍ byť
+// viditeľne označený (viď .panel-stale / .p-stale) — neoznačená stará cena je
+// presne to, na základe čoho sa dá spraviť zlé rozhodnutie.
+const OHLCV_CACHE_PREFIX = 'td_ohlcv:';
+const OHLCV_CACHE_MAX_ENTRIES = 24;   // ~24 grafov; localStorage má ~5 MB
+const OHLCV_CACHE_MAX_BARS = 320;
+let _ohlcvCacheSeq = 0;
+
+function ohlcvCacheKey(sym, interval, ha) {
+  return `${OHLCV_CACHE_PREFIX}${sym}|${interval}|${ha ? 1 : 0}`;
+}
+
+function ohlcvCacheRead(sym, interval, ha) {
+  try {
+    const raw = localStorage.getItem(ohlcvCacheKey(sym, interval, ha));
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    return (Array.isArray(entry?.d) && entry.d.length) ? entry : null;
+  } catch (e) { return null; }
+}
+
+function ohlcvCacheWrite(sym, interval, ha, name, data) {
+  if (!Array.isArray(data) || !data.length) return;
+  // Ukladá sa len jadro sviečky — indikátory aj tak prídu so živým dobehom
+  // a v localStorage je miesta málo.
+  const slim = data.slice(-OHLCV_CACHE_MAX_BARS).map(d => ({
+    time: d.time, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume,
+  }));
+  // `s` je rozhodovač pri zhode času: loadAll() zapisuje všetky panely v tej
+  // istej milisekunde, takže bez neho by sa pri plnej cache mohol vyhodiť
+  // práve zapísaný záznam namiesto skutočne najstaršieho.
+  const payload = JSON.stringify({ n: name || sym, t: Date.now(), s: ++_ohlcvCacheSeq, d: slim });
+  const key = ohlcvCacheKey(sym, interval, ha);
+  try {
+    localStorage.setItem(key, payload);
+  } catch (e) {
+    // Kvóta plná — uvoľni agresívnejšie a skús ešte raz; ak ani to nevyjde,
+    // cache je len bonus, nesmie zhodiť načítanie grafu.
+    ohlcvCachePrune(true);
+    try { localStorage.setItem(key, payload); } catch (e2) { return; }
+  }
+  ohlcvCachePrune(false);
+}
+
+function ohlcvCachePrune(aggressive) {
+  try {
+    const entries = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(OHLCV_CACHE_PREFIX)) continue;
+      let t = 0, s = 0;
+      try { const e = JSON.parse(localStorage.getItem(k)); t = e?.t || 0; s = e?.s || 0; } catch (e) {}
+      entries.push({ k, t, s });
+    }
+    const keep = aggressive ? Math.floor(OHLCV_CACHE_MAX_ENTRIES / 2) : OHLCV_CACHE_MAX_ENTRIES;
+    if (entries.length <= keep) return;
+    // Zbieram najprv, mažem až potom — mazanie počas iterácie posúva indexy.
+    entries.sort((a, b) => (a.t - b.t) || (a.s - b.s));
+    entries.slice(0, entries.length - keep).forEach(e => localStorage.removeItem(e.k));
+  } catch (e) {}
+}
+
 // instrumentId cache: symbol -> id (immutable)
 const instrumentIdCache = {};
 function cacheInstrumentId(sym, instrumentId) {
