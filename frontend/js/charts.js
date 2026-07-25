@@ -743,9 +743,13 @@ function createPanel(cfg) {
   const initialViewRange = cfg.view && Number.isFinite(Number(cfg.view.from)) && Number.isFinite(Number(cfg.view.to))
     ? { from: Number(cfg.view.from), to: Number(cfg.view.to) }
     : null;
+  // Bez uloženej výšky prevezmi tú, ktorú má mriežka teraz — inak by novo
+  // otvorený graf (Top pohyby, klik z watchlistu) vytŕčal z ostatných.
+  const gridHeight = parseInt(
+    document.querySelector('#grid .panel .p-chart')?.style.flexBasis) || null;
   const initialChartHeight = Number.isFinite(Number(cfg.chartHeight))
     ? Math.min(600, Math.max(120, Number(cfg.chartHeight)))
-    : null;
+    : (gridHeight ? Math.min(600, Math.max(120, gridHeight)) : null);
   // Dock má vlastný kontajner a jediný panel — preusporiadanie tam nedáva zmysel.
   const inGrid = !cfg.container || cfg.container === 'grid';
   const panel = document.createElement('div');
@@ -940,13 +944,18 @@ function createPanel(cfg) {
       document.body.style.userSelect = 'none';
       function onMove(e) {
         const newH = Math.min(MAX_H, Math.max(MIN_H, _startH + e.clientY - _startY));
-        const el = document.getElementById('chart-' + id);
-        if (el) {
-          el.style.flexBasis = newH + 'px';
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            registry[id]?.cloudCanvasRender?.();
-          }));
-        }
+        // Výška sa nastavuje VŠETKÝM grafom v mriežke naraz — mriežka s rôzne
+        // vysokými panelmi pôsobí rozbito a používateľ ju aj tak zakaždým
+        // dorovnával ručne.
+        const panels = [...document.querySelectorAll('#grid .panel')]
+          .filter(p => !p.id.startsWith('port-panel-'));
+        panels.forEach(p => {
+          const el = p.querySelector('.p-chart');
+          if (el) el.style.flexBasis = newH + 'px';
+        });
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          panels.forEach(p => registry[p.id]?.cloudCanvasRender?.());
+        }));
       }
       function onUp() {
         document.body.style.cursor = ''; document.body.style.userSelect = '';
@@ -1805,7 +1814,20 @@ function restorePanelView(id, r) {
     Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
     ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
     : null;
-  if (!saved) { r.mainChart.timeScale().fitContent(); return; }
+  const bars = r._chartData?.length || 0;
+  if (!saved || !bars) { r.mainChart.timeScale().fitContent(); return; }
+  // Rozsah je INDEXOVÝ, takže ho treba prispôsobiť počtu práve načítaných
+  // sviečok. Keď sa počas posúvania dotiahla história (600 sviečok) a po
+  // reloade ich je zase 300, pôvodný rozsah mieri za koniec dát — graf potom
+  // vyzerá prázdny a sviečky sú odtlačené vľavo. Zachovaj úroveň priblíženia
+  // (šírku okna) a prilep ho na koniec dostupných dát.
+  const lastIdx = bars - 1;
+  const span = Math.max(1, saved.to - saved.from);
+  if (saved.to > lastIdx) {
+    saved.to = lastIdx;
+    saved.from = lastIdx - span;
+  }
+  if (saved.from < 0) saved.from = 0;
   try {
     r.suppressViewSave = true;
     r.mainChart.timeScale().setVisibleLogicalRange(saved);
