@@ -898,11 +898,15 @@ function createPanel(cfg) {
   // "default" pohľad (odvodený od šírky a barSpacing) predtým prepísal uložené
   // priblíženie a saveLayout ho o 350 ms zvečnil. Prejavovalo sa to tak, že po
   // reloade mali všetky panely ten istý rozsah namiesto vlastného zoomu.
+  // Capture fáza je nutná: knižnica spracuje gesto na canvase a zmenu rozsahu
+  // vyšle synchrónne EŠTE PREDTÝM, než by udalosť prebublala sem — v bubble
+  // fáze by sa príznak nastavil až po tom evente a prvé priblíženie by sa
+  // neuložilo (uložilo by sa až to druhé).
   ['wheel', 'mousedown', 'touchstart'].forEach(ev =>
     mainCont.addEventListener(ev, () => {
       const reg = registry[id];
       if (reg) reg.userAdjustedView = true;
-    }, { passive: true }));
+    }, { passive: true, capture: true }));
 
   mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     const reg = registry[id];
