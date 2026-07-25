@@ -8192,7 +8192,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 13
+INSIGHTS_SCHEMA_VERSION = 14
 AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
 AV_EARNINGS_CACHE_TTL_H = 24 * 30
 AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
