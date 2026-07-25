@@ -5083,6 +5083,21 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-family: var(--font-ui);
   font-size: 13px;
 }
+/* Uložený prehľad sa zobrazuje okamžite — tento pás je jediné, čo hovorí, že
+   čísla nemusia byť aktuálne. Preto viditeľný, nie decentný. */
+.home-stale-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border2);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
 .home-error {
   padding: 24px;
   color: var(--down);

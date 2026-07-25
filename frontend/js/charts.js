@@ -1777,6 +1777,25 @@ function applyPanelSeriesData(r, data) {
   r.volSeries.setData(volumeData);
 }
 
+// Obnov uložený zoom/posun panelu (logický rozsah je indexový, takže sedí aj na
+// snapshot s iným počtom sviečok). Bez tohto by graf skočil na fitContent —
+// teda "odzoomovaný" pohľad, ktorý si používateľ nenastavil.
+function restorePanelView(id, r) {
+  const saved = r.viewRange &&
+    Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
+    ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
+    : null;
+  if (!saved) { r.mainChart.timeScale().fitContent(); return; }
+  try {
+    r.suppressViewSave = true;
+    r.mainChart.timeScale().setVisibleLogicalRange(saved);
+  } catch (e) {
+    r.mainChart.timeScale().fitContent();
+  } finally {
+    setTimeout(() => { if (registry[id]) registry[id].suppressViewSave = false; }, 0);
+  }
+}
+
 // Okamžité vykreslenie posledného známeho stavu grafu, kým beží načítanie.
 // Vracia true, keď sa niečo vykreslilo. Zámerne NEnastavuje r._rawChartData —
 // ten ostáva prázdny, takže normálne načítanie prebehne nedotknuté a zároveň
@@ -1793,7 +1812,7 @@ function paintPanelSnapshot(id) {
   if (!snap) return false;
   try {
     applyPanelSeriesData(r, snap.d);
-    r.mainChart.timeScale().fitContent();
+    restorePanelView(id, r);
     document.getElementById('ov-' + id)?.classList.add('hidden');
     panel.classList.remove('loading-state');
     panel.classList.add('panel-stale');
@@ -2009,21 +2028,7 @@ async function loadChart(id, opts = {}) {
     r._rawChartData = data;
     panel.classList.remove('panel-stale');
     applyPanelSeriesData(r, data);
-    const restoredView = r.viewRange && Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
-      ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
-      : null;
-    if (restoredView) {
-      try {
-        r.suppressViewSave = true;
-        r.mainChart.timeScale().setVisibleLogicalRange(restoredView);
-      } catch(e) {
-        r.mainChart.timeScale().fitContent();
-      } finally {
-        setTimeout(() => { if (registry[id]) registry[id].suppressViewSave = false; }, 0);
-      }
-    } else {
-      r.mainChart.timeScale().fitContent();
-    }
+    restorePanelView(id, r);
     r.loadedChartKey = chartKey;
     applyOverlays(id, data, r);
     r.etoroPct = null;

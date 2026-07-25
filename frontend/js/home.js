@@ -42,6 +42,37 @@ function homeOpenTicker(sym) {
   setTimeout(() => pc_selectTicker(sym), 120);
 }
 
+// ── SNAPSHOT PREHĽADU (stale-while-revalidate) ───────────────────────────────
+// Home je landing page, takže sa na ňu čaká najčastejšie. Posledný prehľad
+// prežíva v localStorage a vykreslí sa okamžite namiesto skeletonu.
+const HOME_CACHE_KEY = 'td_home_snapshot';
+const HOME_CACHE_MAX_BYTES = 500 * 1024;   // cache je bonus, nesmie zožrať kvótu
+
+function homeCacheRead() {
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    return (entry?.d && entry?.t) ? entry : null;
+  } catch (e) { return null; }
+}
+
+function homeCacheWrite(data) {
+  try {
+    const payload = JSON.stringify({ t: Date.now(), d: data });
+    if (payload.length > HOME_CACHE_MAX_BYTES) return;
+    localStorage.setItem(HOME_CACHE_KEY, payload);
+  } catch (e) {}
+}
+
+function homeStaleBarHtml(ts) {
+  const d = new Date(ts);
+  const hhmm = String(d.getHours()).padStart(2, '0') + ':' +
+               String(d.getMinutes()).padStart(2, '0');
+  return `<div class="home-stale-bar" title="Posledný uložený prehľad — čerstvé dáta sa načítavajú">` +
+         `<span class="spinner"></span>Stav z ${hhmm} · aktualizujem…</div>`;
+}
+
 async function renderHomeView(force = false) {
   const el = document.getElementById('home-view');
   if (!el || _homeLoading) return;
@@ -54,7 +85,13 @@ async function renderHomeView(force = false) {
   }
 
   _homeLoading = true;
-  el.innerHTML = homeSkeletonHtml();
+  // Posledný uložený prehľad namiesto skeletonu. Zámerne sa NEnasieva do
+  // portfolioAccountData — staré pozície (napr. medzitým zatvorené) by sa
+  // rozliezli do Portfólia a header pills; to nech naplní až živý fetch nižšie.
+  const snap = homeCacheRead();
+  el.innerHTML = snap
+    ? homeStaleBarHtml(snap.t) + homeContentHtml(snap.d)
+    : homeSkeletonHtml();
   try {
     const acct = (typeof activeAccount !== 'undefined' && activeAccount) || '1';
     const results = await Promise.allSettled([
@@ -73,6 +110,7 @@ async function renderHomeView(force = false) {
       results.map(r => (r.status === 'fulfilled' ? r.value : null));
     _homeLastData = { moversUp, moversDown, plan, earnings, scan, port1, port2 };
     _homeLastFetchMs = Date.now();
+    homeCacheWrite(_homeLastData);
     // Nasej čerstvý snapshot do zdieľaného portfolioAccountData — live.js ho
     // priebežne dorovnáva WS tickami (recalcPortfolioLiveSummary), takže KPI
     // karty aj header equity pill z toho ďalej žijú live, nie zo starej cache.
@@ -86,7 +124,12 @@ async function renderHomeView(force = false) {
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
   } catch (e) {
-    el.innerHTML = `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+    // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
+    // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
+    el.innerHTML = snap
+      ? `<div class="home-error">Aktualizácia zlyhala: ${escHtml(e.message)} — nižšie je uložený stav.</div>` +
+        homeContentHtml(snap.d)
+      : `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
   } finally {
     _homeLoading = false;
   }
