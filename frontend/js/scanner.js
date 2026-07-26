@@ -949,16 +949,30 @@ function renderNasdaqScanner(payload) {
     const roicHtml = Number.isFinite(roicValue)
       ? `<span title="ROIC z roic.ai · ${escHtml(fiscalYear)}">${roicValue.toFixed(1)}%<small> ${escHtml(fiscalYear)}</small></span>`
       : '<span class="muted">n/a</span>';
+    // Jednotky sa medzi metrikami LÍŠIA: D/E aj D/A vracia roic.ai v procentách
+    // (GOOG 14.28 = 14,28 %, nie 14×), zvyšok je pomer. Bez znaku to zvádza
+    // prečítať D/E ako 14-násobok.
     const debtOptions = [
-      ['D/E', fundamentals.debt_to_equity],
-      ['ND/EBITDA', fundamentals.net_debt_to_ebitda],
-      ['IC', fundamentals.interest_coverage],
-      ['D/A', fundamentals.debt_to_assets],
+      ['D/E', fundamentals.debt_to_equity, '%'],
+      ['ND/EBITDA', fundamentals.net_debt_to_ebitda, '×'],
+      ['IC', fundamentals.interest_coverage, '×'],
+      ['D/A', fundamentals.debt_to_assets, '%'],
     ];
     const debtMetric = debtOptions.find(([, value]) => value != null && value !== '' && Number.isFinite(Number(value)));
-    const debtHtml = debtMetric
-      ? `<span title="Zadlženie z roic.ai · ${escHtml(fiscalYear)}">${debtMetric[0]} ${Number(debtMetric[1]).toFixed(2)}<small> ${escHtml(fiscalYear)}</small></span>`
-      : '<span class="muted">n/a</span>';
+    let debtHtml = '<span class="muted">n/a</span>';
+    if (debtMetric) {
+      const [name, raw, unit] = debtMetric;
+      const num = Number(raw);
+      // Negatívne D/E neznamená „bez dlhu" — znamená NEGATÍVNE vlastné imanie
+      // (napr. BKNG po rokoch odkupov: −345 %). Číslo samo o sebe zvádza
+      // presne k opačnému čítaniu, tak ho nahradíme slovom.
+      const negEquity = name === 'D/E' && num < 0;
+      const text = negEquity ? 'záporné VI' : `${name} ${num.toFixed(2)}${unit}`;
+      const tip = negEquity
+        ? `Záporné vlastné imanie (D/E ${num.toFixed(0)} %) — typicky po rozsiahlych odkupoch akcií, nie znak nízkeho dlhu. Zdroj roic.ai · ${fiscalYear}`
+        : `Zadlženie z roic.ai · ${fiscalYear}`;
+      debtHtml = `<span title="${escHtml(tip)}">${text}<small> ${escHtml(fiscalYear)}</small></span>`;
+    }
     const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
     const label = r.dip_label || 'TECH ONLY';
     const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';

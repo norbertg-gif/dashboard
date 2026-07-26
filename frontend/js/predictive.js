@@ -2208,14 +2208,23 @@ async function pc_loadInsights(ticker) {
     const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';
     const roicNumber = fundamentals.roic == null || fundamentals.roic === '' ? NaN : Number(fundamentals.roic);
     const roicText = Number.isFinite(roicNumber) ? `${roicNumber.toFixed(1)} %` : 'n/a';
+    // D/E a debt/assets sú v PROCENTÁCH, ostatné v pomere — viď scanner.js.
     const debtChoices = [
-      ['D/E', fundamentals.debt_to_equity],
-      ['net debt/EBITDA', fundamentals.net_debt_to_ebitda],
-      ['interest coverage', fundamentals.interest_coverage],
-      ['debt/assets', fundamentals.debt_to_assets],
+      ['D/E', fundamentals.debt_to_equity, '%'],
+      ['net debt/EBITDA', fundamentals.net_debt_to_ebitda, '×'],
+      ['interest coverage', fundamentals.interest_coverage, '×'],
+      ['debt/assets', fundamentals.debt_to_assets, '%'],
     ];
     const debtMetric = debtChoices.find(([, value]) => value != null && value !== '' && Number.isFinite(Number(value)));
-    const debtText = debtMetric ? `${debtMetric[0]} ${Number(debtMetric[1]).toFixed(2)}` : 'n/a';
+    let debtText = 'n/a';
+    if (debtMetric) {
+      const [name, raw, unit] = debtMetric;
+      const num = Number(raw);
+      // Záporné D/E = záporné vlastné imanie, nie nízke zadlženie.
+      debtText = (name === 'D/E' && num < 0)
+        ? `záporné vlastné imanie (D/E ${num.toFixed(0)} %)`
+        : `${name} ${num.toFixed(2)}${unit}`;
+    }
     const fundamentalsRow = `<div class="pred-row" title="roic.ai annual ratios; iba informačný kontext, bez vplyvu na skórovanie.">
       <span class="key">ROIC &amp; dlh</span><span class="val">${roicText} · ${escHtml(debtText)} · <span style="color:var(--muted)">${escHtml(fiscalYear)}</span></span></div>`;
     if (d.error) {
