@@ -4,7 +4,12 @@ import os
 
 import uvicorn
 
-from backend.trading_backend import app, start_scanner_scheduler_thread  # noqa: F401
+from backend.trading_backend import (  # noqa: F401
+    app,
+    load_dip_scores,
+    start_roic_fundamentals_enrichment,
+    start_scanner_scheduler_thread,
+)
 
 
 if __name__ == "__main__":
@@ -18,6 +23,7 @@ if __name__ == "__main__":
         raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
 
     start_scanner_scheduler_thread()
+    start_roic_fundamentals_enrichment(load_dip_scores())
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"

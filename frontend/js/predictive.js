@@ -2204,13 +2204,28 @@ async function pc_loadInsights(ticker) {
     if (!r.ok || _insightsForTicker !== sym) return;
     const d = await r.json();
     if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
+    const fundamentals = d.roic_fundamentals || {};
+    const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';
+    const roicNumber = fundamentals.roic == null || fundamentals.roic === '' ? NaN : Number(fundamentals.roic);
+    const roicText = Number.isFinite(roicNumber) ? `${roicNumber.toFixed(1)} %` : 'n/a';
+    const debtChoices = [
+      ['D/E', fundamentals.debt_to_equity],
+      ['net debt/EBITDA', fundamentals.net_debt_to_ebitda],
+      ['interest coverage', fundamentals.interest_coverage],
+      ['debt/assets', fundamentals.debt_to_assets],
+    ];
+    const debtMetric = debtChoices.find(([, value]) => value != null && value !== '' && Number.isFinite(Number(value)));
+    const debtText = debtMetric ? `${debtMetric[0]} ${Number(debtMetric[1]).toFixed(2)}` : 'n/a';
+    const fundamentalsRow = `<div class="pred-row" title="roic.ai annual ratios; iba informačný kontext, bez vplyvu na skórovanie.">
+      <span class="key">ROIC &amp; dlh</span><span class="val">${roicText} · ${escHtml(debtText)} · <span style="color:var(--muted)">${escHtml(fiscalYear)}</span></span></div>`;
     if (d.error) {
       card.innerHTML = `<div class="card-title">Firma &amp; očakávania</div>
+        ${fundamentalsRow}
         <div class="earnings-unavailable-note">Zdroj nedostupný (${escHtml(String(d.error))})</div>`;
       card.style.display = '';
       return;
     }
-    const rows = [];
+    const rows = [fundamentalsRow];
     const ins = d.insider;
     if (ins && (ins.buys_90d || ins.sells_90d)) {
       const net = ins.net_value_90d || 0;

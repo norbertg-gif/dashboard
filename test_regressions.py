@@ -320,6 +320,102 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
 
 
+class RoicFundamentalsRegressionTests(unittest.TestCase):
+    class _Response:
+        def __init__(self, status_code, payload=None, headers=None):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = headers or {}
+
+        def json(self):
+            return self._payload
+
+    def setUp(self):
+        self.original_next_request_at = tb._roic_next_request_at
+        tb._roic_next_request_at = 0.0
+
+    def tearDown(self):
+        tb._roic_next_request_at = self.original_next_request_at
+
+    def test_rate_limit_headers_override_floor_and_wait_until_reset(self):
+        with patch.object(tb._time_module, "time", return_value=1000.0):
+            tb._roic_apply_rate_headers({
+                "x-ratelimit-limit": "5",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "1040",
+            })
+            self.assertEqual(tb._roic_next_request_at, 1040.25)
+            with patch.object(tb._time_module, "sleep") as sleep:
+                self.assertTrue(tb._roic_wait_for_slot())
+        sleep.assert_called_once_with(40.25)
+
+    def test_http_400_and_429_are_fail_soft_and_429_waits_for_reset(self):
+        for status in (400, 429):
+            tb._roic_next_request_at = 0.0
+            headers = {
+                "x-ratelimit-remaining": "0" if status == 429 else "4",
+                "x-ratelimit-reset": "1060",
+            }
+            response = self._Response(status, {"error": "nope"}, headers)
+            with (
+                patch.object(tb, "_roic_api_key", return_value="secret"),
+                patch.object(tb.requests, "get", return_value=response),
+                patch.object(tb._time_module, "time", return_value=1000.0),
+                patch.object(tb._time_module, "sleep") as sleep,
+            ):
+                self.assertIsNone(tb._roic_get_json("/test"))
+            if status == 429:
+                sleep.assert_called_once_with(60.25)
+
+    def test_fresh_family_cache_skips_network_for_full_ttl(self):
+        now = datetime.now(timezone.utc)
+        fresh = {
+            family: {"fetched_at": now.isoformat(), "fiscal_year": 2025}
+            for family in tb.ROIC_RATIO_PATHS
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with (
+                patch.object(tb, "ROIC_FUNDAMENTALS_DIR", Path(tmp_dir)),
+                patch.object(tb, "_roic_get_json") as get_json,
+            ):
+                tb._roic_atomic_json_write(
+                    tb._roic_cache_path("CTSH"), {"symbol": "CTSH", **fresh}
+                )
+                self.assertTrue(tb._roic_enrich_symbol("CTSH"))
+        get_json.assert_not_called()
+        self.assertTrue(tb._roic_family_is_fresh(
+            fresh, "profitability", now=now.timestamp() + 29 * 24 * 60 * 60
+        ))
+        self.assertFalse(tb._roic_family_is_fresh(
+            fresh, "profitability", now=now.timestamp() + 31 * 24 * 60 * 60
+        ))
+
+    def test_ticker_id_map_is_persistent_and_reused_without_search(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "roic_ticker_ids.json"
+            with patch.object(tb, "ROIC_TICKER_IDS_FILE", path):
+                self.assertTrue(tb._roic_save_ticker_id("CTSH", 12345))
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"CTSH": 12345})
+                with patch.object(tb, "_roic_get_json") as get_json:
+                    self.assertEqual(tb._roic_resolve_ticker_id("ctsh"), 12345)
+                get_json.assert_not_called()
+
+    def test_only_dip_100_and_above_is_enriched(self):
+        scores = {
+            "LOW": {"total": 99.99},
+            "EDGE": {"total": 100},
+            "HIGH": {"total": 121},
+            "_meta": {"count": 3},
+        }
+        self.assertEqual(tb._roic_top_dip_symbols(scores), ["EDGE", "HIGH"])
+        with patch.object(tb, "load_roic_fundamentals") as load:
+            low = tb.enrich_with_dip({"ticker": "LOW"}, scores)
+            edge = tb.enrich_with_dip({"ticker": "EDGE"}, scores)
+        self.assertIsNone(low["roic_fundamentals"])
+        self.assertIs(edge["roic_fundamentals"], load.return_value)
+        load.assert_called_once_with("EDGE")
+
+
 class ScannerSchedulingRegressionTests(unittest.TestCase):
     def setUp(self):
         with tb._scanner_lock:

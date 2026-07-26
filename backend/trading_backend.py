@@ -5934,6 +5934,11 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
+ROIC_FUNDAMENTALS_DIR = DATA_ROOT / "roic_fundamentals"
+ROIC_TICKER_IDS_FILE = DATA_ROOT / "roic_ticker_ids.json"
+ROIC_FUNDAMENTALS_TTL_SECONDS = 30 * 24 * 60 * 60
+ROIC_DIP_MIN = 100
+ROIC_MIN_REQUEST_INTERVAL_SECONDS = 13.0
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
 SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
@@ -5945,6 +5950,13 @@ _scanner_scheduler_lock = threading.Lock()
 _scanner_scheduler_thread = None
 _scanner_daily_cache_locks_guard = threading.Lock()
 _scanner_daily_cache_locks: dict[str, threading.Lock] = {}
+_roic_enrichment_lock = threading.Lock()
+_roic_worker_guard = threading.Lock()
+_roic_worker_thread = None
+_roic_worker_stop = None
+_roic_rate_lock = threading.Lock()
+_roic_next_request_at = 0.0
+_roic_ticker_ids_lock = threading.Lock()
 _scanner_state = {
     "running": False,
     "started_at": None,
@@ -6024,6 +6036,13 @@ def enrich_with_dip(row: dict, dip_scores: dict) -> dict:
         out["dip_total"] = None
         out["dip_rank"] = None
         out["dip_label"] = "TECH ONLY"
+    # Pure display enrichment. It is intentionally not copied into DIP/FA/TA,
+    # C1-C4, scanner selection or verdict inputs.
+    out["roic_fundamentals"] = (
+        load_roic_fundamentals(ticker)
+        if (_num_or_none(out.get("dip_total")) or -math.inf) >= ROIC_DIP_MIN
+        else None
+    )
     return out
 
 
@@ -6163,6 +6182,7 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
     scores = parse_dip_ranking_xlsx(raw, filename=filename)
     save_dip_scores(scores)
     daily_cache_cold = _prepare_scanner_daily_cache(scores)
+    start_roic_fundamentals_enrichment(scores)
     meta = scores.get("_meta", {})
     return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at"), "daily_cache_cold": daily_cache_cold}
 
@@ -10078,7 +10098,7 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             schema_ok = cached.get("schema_version") == INSIGHTS_SCHEMA_VERSION
             short_ttl = cached.get("error") or cached.get("eps_history_error")
             if schema_ok and age_h < (1 if short_ttl else INSIGHTS_TTL_H) and not refresh:
-                return cached
+                return _with_roic_fundamentals(cached, sym)
         except Exception:
             cached = None
     core = None
@@ -10213,7 +10233,7 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 (cached.get("insider") or {}).get("transactions_2y") or []
             )
             _mark_likely_scheduled_insider_transactions(cached_transactions)
-            return {**cached, "stale": True}
+            return _with_roic_fundamentals({**cached, "stale": True}, sym)
         payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION,
                    "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
@@ -10262,7 +10282,7 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         fpath.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
         pass
-    return payload
+    return _with_roic_fundamentals(payload, sym)
 
 # ── Company profile — karta "O firme" v Analytike ────────────────────────────
 COMPANY_PROFILE_DIR = DATA_ROOT / "company_profiles"
@@ -11291,6 +11311,345 @@ def _roic_api_key() -> str:
     return (os.getenv("ROIC", "") or os.getenv("ROIC_API_KEY", "")).strip()
 
 
+ROIC_TICKER_SEARCH_PATH = "/tickers/search"
+ROIC_RATIO_PATHS = {
+    "profitability": "/fundamental/ratios/profitability/{identifier}",
+    "credit_debt": "/fundamental/ratios/credit/{identifier}",
+}
+
+
+def _roic_atomic_json_write(path: Path, payload: dict) -> bool:
+    temp_path = path.with_name(
+        f"{path.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temp_path, path)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _roic_cache_path(symbol: str) -> Path:
+    safe = re.sub(r"[^A-Z0-9._-]", "_", str(symbol or "").upper())
+    return ROIC_FUNDAMENTALS_DIR / f"{safe}.json"
+
+
+def _roic_read_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _roic_parse_timestamp(value) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _roic_family_is_fresh(cache: dict, family: str, now: float | None = None) -> bool:
+    section = cache.get(family) if isinstance(cache, dict) else None
+    fetched = _roic_parse_timestamp((section or {}).get("fetched_at"))
+    current = _time_module.time() if now is None else now
+    return fetched is not None and current - fetched < ROIC_FUNDAMENTALS_TTL_SECONDS
+
+
+def _roic_rows(payload) -> list[dict]:
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = payload.get("data") or payload.get("results") or []
+        if isinstance(rows, dict):
+            rows = rows.get("data") or rows.get("results") or []
+    else:
+        rows = []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _roic_newest_row(payload) -> dict | None:
+    rows = _roic_rows(payload)
+    if not rows:
+        return None
+    return max(
+        rows,
+        key=lambda row: (
+            str(row.get("fiscal_year") or ""),
+            str(row.get("period_end_date") or ""),
+            str(row.get("period_label") or ""),
+        ),
+    )
+
+
+def _roic_pick_number(row: dict, *keys):
+    for key in keys:
+        value = _num_or_none(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _roic_section(family: str, row: dict) -> dict:
+    common = {
+        "fiscal_year": row.get("fiscal_year"),
+        "period_end_date": row.get("period_end_date"),
+        "period_label": row.get("period_label"),
+        "currency": row.get("currency"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if family == "profitability":
+        return {
+            **common,
+            "roic": _roic_pick_number(row, "return_on_inv_capital"),
+            "roe": _roic_pick_number(row, "return_com_eqy"),
+            "roa": _roic_pick_number(row, "return_on_asset"),
+        }
+    return {
+        **common,
+        # Prvé meno v každom zozname je OVERENÉ z dokumentácie roic.ai
+        # (/api/docs/financial-ratios/credit) — ostatné sú len poistka, keby
+        # zmenili pomenovanie. Pozor, `debt_to_equity` ani `interest_coverage`
+        # v API NEEXISTUJÚ, hoci sa tak intuitívne volajú.
+        "debt_to_equity": _roic_pick_number(
+            row, "tot_debt_to_tot_eqy", "debt_to_equity",
+            "tot_debt_to_tot_equity", "total_debt_to_equity"
+        ),
+        "net_debt_to_ebitda": _roic_pick_number(
+            row, "net_debt_to_ebitda", "net_debt_ebitda"
+        ),
+        "interest_coverage": _roic_pick_number(
+            row, "ebitda_to_interest_expn", "oper_inc_to_int_exp",
+            "interest_coverage", "interest_coverage_ratio",
+            "ebit_to_interest_expn"
+        ),
+        "debt_to_assets": _roic_pick_number(
+            row, "tot_debt_to_tot_asset", "debt_to_assets",
+            "tot_debt_to_tot_assets", "total_debt_to_assets"
+        ),
+        "available_fields": sorted(row.keys()),
+    }
+
+
+def _roic_wait_for_slot(stop_event: threading.Event | None = None) -> bool:
+    """Serialize free-tier requests and remain cancellable while waiting."""
+    global _roic_next_request_at
+    with _roic_rate_lock:
+        delay = max(0.0, _roic_next_request_at - _time_module.time())
+        if delay:
+            if stop_event is not None:
+                if stop_event.wait(delay):
+                    return False
+            else:
+                _time_module.sleep(delay)
+        _roic_next_request_at = max(
+            _roic_next_request_at, _time_module.time()
+        ) + ROIC_MIN_REQUEST_INTERVAL_SECONDS
+    return not (stop_event is not None and stop_event.is_set())
+
+
+def _roic_apply_rate_headers(headers) -> None:
+    """Use server reset as authority, with 13 seconds as a safety floor."""
+    global _roic_next_request_at
+    try:
+        remaining = int(headers.get("x-ratelimit-remaining", ""))
+    except (TypeError, ValueError, AttributeError):
+        remaining = None
+    try:
+        reset = float(headers.get("x-ratelimit-reset", ""))
+    except (TypeError, ValueError, AttributeError):
+        reset = None
+    with _roic_rate_lock:
+        floor = _time_module.time() + ROIC_MIN_REQUEST_INTERVAL_SECONDS
+        _roic_next_request_at = max(_roic_next_request_at, floor)
+        if remaining == 0 and reset is not None:
+            _roic_next_request_at = max(_roic_next_request_at, reset + 0.25)
+
+
+def _roic_get_json(
+    path: str,
+    *,
+    params: dict | None = None,
+    stop_event: threading.Event | None = None,
+):
+    key = _roic_api_key()
+    if not key or not _roic_wait_for_slot(stop_event):
+        return None
+    try:
+        response = requests.get(
+            f"{ROIC_API_BASE}{path}",
+            headers={"Authorization": f"Bearer {key}"},
+            params=params or {},
+            timeout=20,
+        )
+        _roic_apply_rate_headers(response.headers)
+        if response.status_code == 429:
+            _roic_wait_for_slot(stop_event)
+            return None
+        if response.status_code != 200:
+            return None
+        return response.json()
+    except Exception:
+        return None
+
+
+def _roic_load_ticker_ids() -> dict:
+    with _roic_ticker_ids_lock:
+        return _roic_read_json(ROIC_TICKER_IDS_FILE)
+
+
+def _roic_save_ticker_id(symbol: str, ticker_id) -> bool:
+    if ticker_id is None or ticker_id == "":
+        return False
+    with _roic_ticker_ids_lock:
+        mapping = _roic_read_json(ROIC_TICKER_IDS_FILE)
+        mapping[str(symbol).upper()] = ticker_id
+        return _roic_atomic_json_write(ROIC_TICKER_IDS_FILE, mapping)
+
+
+def _roic_resolve_ticker_id(
+    symbol: str, stop_event: threading.Event | None = None
+):
+    sym = str(symbol or "").upper()
+    cached = _roic_load_ticker_ids().get(sym)
+    if cached is not None and cached != "":
+        return cached
+    payload = _roic_get_json(
+        ROIC_TICKER_SEARCH_PATH, params={"query": sym}, stop_event=stop_event
+    )
+    rows = _roic_rows(payload)
+    exact = [
+        row for row in rows
+        if str(row.get("symbol") or row.get("ticker") or "").upper() == sym
+    ]
+    candidates = exact or (rows if len(rows) == 1 else [])
+    ticker_id = candidates[0].get("id") if candidates else None
+    if ticker_id is not None and ticker_id != "":
+        _roic_save_ticker_id(sym, ticker_id)
+    return ticker_id
+
+
+def _roic_top_dip_symbols(scores: dict) -> list[str]:
+    if not isinstance(scores, dict):
+        return []
+    return [
+        str(symbol).upper()
+        for symbol, dip in scores.items()
+        if not str(symbol).startswith("_")
+        and isinstance(dip, dict)
+        and (_num_or_none(dip.get("total")) or -math.inf) >= ROIC_DIP_MIN
+    ]
+
+
+def _roic_enrich_symbol(
+    symbol: str, stop_event: threading.Event | None = None
+) -> bool:
+    path = _roic_cache_path(symbol)
+    cache = _roic_read_json(path)
+    missing = [
+        family for family in ROIC_RATIO_PATHS
+        if not _roic_family_is_fresh(cache, family)
+    ]
+    if not missing or (stop_event is not None and stop_event.is_set()):
+        return True
+    ticker_id = _roic_resolve_ticker_id(symbol, stop_event)
+    if ticker_id is None:
+        return False
+    changed = False
+    for family in missing:
+        if stop_event is not None and stop_event.is_set():
+            break
+        payload = _roic_get_json(
+            ROIC_RATIO_PATHS[family].format(
+                identifier=urllib.parse.quote(str(ticker_id), safe="")
+            ),
+            params={"period_type": "annual"},
+            stop_event=stop_event,
+        )
+        newest = _roic_newest_row(payload)
+        if newest:
+            cache[family] = _roic_section(family, newest)
+            cache["symbol"] = str(symbol).upper()
+            cache["ticker_id"] = ticker_id
+            _roic_atomic_json_write(path, cache)
+            changed = True
+    return changed
+
+
+def _run_roic_fundamentals_enrichment(
+    scores: dict, stop_event: threading.Event
+) -> None:
+    if not _roic_api_key():
+        return
+    with _roic_enrichment_lock:
+        for symbol in _roic_top_dip_symbols(scores):
+            if stop_event.is_set():
+                break
+            _roic_enrich_symbol(symbol, stop_event)
+
+
+def start_roic_fundamentals_enrichment(scores: dict | None = None):
+    """Start/replace the resumable post-import worker without scanner locking."""
+    global _roic_worker_thread, _roic_worker_stop
+    scores = scores if isinstance(scores, dict) else load_dip_scores()
+    if not _roic_api_key() or not _roic_top_dip_symbols(scores):
+        return None
+    with _roic_worker_guard:
+        if _roic_worker_stop is not None:
+            _roic_worker_stop.set()
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=_run_roic_fundamentals_enrichment,
+            args=(scores, stop_event),
+            name="roic-fundamentals",
+            daemon=True,
+        )
+        _roic_worker_stop = stop_event
+        _roic_worker_thread = thread
+        thread.start()
+        return thread
+
+
+def load_roic_fundamentals(symbol: str) -> dict | None:
+    """Read-only display payload; never performs an HTTP request."""
+    cache = _roic_read_json(_roic_cache_path(symbol))
+    profitability = cache.get("profitability") or {}
+    credit = cache.get("credit_debt") or {}
+    if not profitability and not credit:
+        return None
+    return {
+        "roic": profitability.get("roic"),
+        "fiscal_year": profitability.get("fiscal_year") or credit.get("fiscal_year"),
+        "period_end_date": (
+            profitability.get("period_end_date") or credit.get("period_end_date")
+        ),
+        "debt_to_equity": credit.get("debt_to_equity"),
+        "net_debt_to_ebitda": credit.get("net_debt_to_ebitda"),
+        "interest_coverage": credit.get("interest_coverage"),
+        "debt_to_assets": credit.get("debt_to_assets"),
+    }
+
+
+def _with_roic_fundamentals(payload: dict, symbol: str) -> dict:
+    dip = load_dip_scores().get(str(symbol or "").upper()) or {}
+    eligible = (_num_or_none(dip.get("total")) or -math.inf) >= ROIC_DIP_MIN
+    return {
+        **payload,
+        "roic_fundamentals": (
+            load_roic_fundamentals(symbol) if eligible else None
+        ),
+    }
+
+
 @app.get("/api/diagnostics/roic/{symbol}")
 def roic_diagnostics(symbol: str):
     """Ohmatá roic.ai skôr, než na ňom začneme čokoľvek stavať.
@@ -11308,11 +11667,11 @@ def roic_diagnostics(symbol: str):
         out["error"] = "Premenná ROIC nie je nastavená"
         return out
 
-    def probe(identifier: str) -> dict:
-        info: dict = {"identifier": identifier}
+    def probe(identifier: str, family: str = "profitability") -> dict:
+        info: dict = {"identifier": identifier, "family": family}
         try:
             resp = requests.get(
-                f"{ROIC_API_BASE}/fundamental/ratios/profitability/{identifier}",
+                f"{ROIC_API_BASE}/fundamental/ratios/{family}/{identifier}",
                 headers={"Authorization": f"Bearer {key}"},
                 params={"period_type": "annual"},
                 timeout=20,
@@ -11343,12 +11702,18 @@ def roic_diagnostics(symbol: str):
 
     # Holý symbol vs prefix burzy — treba vedieť, či stačí to prvé.
     out["probes"] = [probe(sym)]
-    if out["probes"][0].get("http_status") != 200:
+    resolved = sym if out["probes"][0].get("http_status") == 200 else None
+    if resolved is None:
         for prefix in ("NASDAQ", "NYSE"):
             attempt = probe(f"{prefix}:{sym}")
             out["probes"].append(attempt)
             if attempt.get("http_status") == 200:
+                resolved = f"{prefix}:{sym}"
                 break
+    # Druhá rodina, ktorú reálne používame — nech sa dá overiť tá istá cesta,
+    # akú beží obohacovanie, nie len profitability.
+    if resolved:
+        out["credit_probe"] = probe(resolved, family="credit")
     return out
 
 
@@ -11588,6 +11953,7 @@ if __name__ == "__main__":
         raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
 
     start_scanner_scheduler_thread()
+    start_roic_fundamentals_enrichment(load_dip_scores())
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"

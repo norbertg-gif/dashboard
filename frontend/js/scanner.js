@@ -935,7 +935,7 @@ function renderNasdaqScanner(payload) {
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th class="advanced-only">FA</th><th class="advanced-only">TA</th><th class="advanced-only">Rank</th><th class="advanced-only">Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
+          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th class="advanced-only">FA</th><th class="advanced-only">ROIC</th><th class="advanced-only">Dlh</th><th class="advanced-only">TA</th><th class="advanced-only">Rank</th><th class="advanced-only">Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
         </tr></thead>
         <tbody>` + ranked.map(r => {
     const sig = r.recent_signal || {};
@@ -943,6 +943,22 @@ function renderNasdaqScanner(payload) {
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
     const reason = (r.positive_factors || []).find(f => !/signal \d\/4/.test(f)) || (r.positive_factors || [])[0] || (r.risk_flags || [])[0] || '';
     const dip = r.dip || {};
+    const fundamentals = r.roic_fundamentals || {};
+    const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';
+    const roicValue = fundamentals.roic == null || fundamentals.roic === '' ? NaN : Number(fundamentals.roic);
+    const roicHtml = Number.isFinite(roicValue)
+      ? `<span title="ROIC z roic.ai · ${escHtml(fiscalYear)}">${roicValue.toFixed(1)}%<small> ${escHtml(fiscalYear)}</small></span>`
+      : '<span class="muted">n/a</span>';
+    const debtOptions = [
+      ['D/E', fundamentals.debt_to_equity],
+      ['ND/EBITDA', fundamentals.net_debt_to_ebitda],
+      ['IC', fundamentals.interest_coverage],
+      ['D/A', fundamentals.debt_to_assets],
+    ];
+    const debtMetric = debtOptions.find(([, value]) => value != null && value !== '' && Number.isFinite(Number(value)));
+    const debtHtml = debtMetric
+      ? `<span title="Zadlženie z roic.ai · ${escHtml(fiscalYear)}">${debtMetric[0]} ${Number(debtMetric[1]).toFixed(2)}<small> ${escHtml(fiscalYear)}</small></span>`
+      : '<span class="muted">n/a</span>';
     const dipTotal = Number.isFinite(Number(r.dip_total)) ? Number(r.dip_total) : null;
     const label = r.dip_label || 'TECH ONLY';
     const labelCls = label.includes('STRONG') ? 'strong' : label === 'WATCH' ? 'watch' : label === 'WEAK DIP' ? 'weak' : 'tech';
@@ -967,6 +983,8 @@ function renderNasdaqScanner(payload) {
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
       <td class="r advanced-only">${dip.fa ?? '-'}</td>
+      <td class="r advanced-only">${roicHtml}</td>
+      <td class="r advanced-only">${debtHtml}</td>
       <td class="r advanced-only">${dip.ta ?? '-'}</td>
       <td class="r advanced-only">${r.dip_rank ?? '-'}</td>
       <td class="advanced-only"><span class="scanner-label ${labelCls}">${escHtml(label)}</span></td>
