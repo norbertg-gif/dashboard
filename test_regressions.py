@@ -71,6 +71,23 @@ class SignalScoringRegressionTests(unittest.TestCase):
         self.assertFalse(details["zscore_dip"])
         self.assertEqual(score, 2)
 
+    def test_c1_c3_without_oversold_is_not_a_signal(self):
+        # Jediná kombinácia so skóre 2 bez akejkoľvek prepredanosti: cena pri
+        # EMA20 + zelená sviečka s objemom. V pravidle na nákup prepadu to nie
+        # je dip, ale naháňanie momenta — zmerané n=97, win 45.4 %, medián −1.69 %.
+        details = {"ema_kijun_touch": True, "rsi_pullback": False,
+                   "bull_volume": True, "zscore_dip": False, "trend": "up"}
+        self.assertFalse(tb.signal_qualifies(2, details))
+
+    def test_score_two_with_oversold_still_qualifies(self):
+        for flag in ("rsi_pullback", "zscore_dip"):
+            details = {"ema_kijun_touch": True, "bull_volume": True,
+                       "rsi_pullback": False, "zscore_dip": False, "trend": "up"}
+            details[flag] = True
+            self.assertTrue(tb.signal_qualifies(2, details), flag)
+        # prah ostáva v platnosti
+        self.assertFalse(tb.signal_qualifies(1, {"zscore_dip": True}))
+
 
 class CacheRegressionTests(unittest.TestCase):
     def setUp(self):
@@ -1310,7 +1327,11 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
 
         def fake_score(row, _zscore):
             qualifies = bool(row["qualifies"])
-            return (2 if qualifies else 1), {"trend": "up"}
+            # signal_qualifies() od 2026-07-26 žiada aj podmienku prepredanosti
+            # (C2 alebo C4) — test overuje deduplikáciu epizód, nie kvalifikáciu.
+            return (2 if qualifies else 1), {
+                "trend": "up", "zscore_dip": qualifies, "rsi_pullback": False,
+            }
 
         with patch.object(tb, "score_signal_day", side_effect=fake_score):
             episodes = tb._signal_episode_rows(frame, warmup=0)

@@ -4887,7 +4887,7 @@ def get_chart(
                     date_key = str(row_date.date())
                     zscore   = float(zscore_slice[i]) if i < len(zscore_slice) else 0.0
                     sc, details = score_signal_day(row, zscore)
-                    if sc >= 2:
+                    if signal_qualifies(sc, details):
                         ts = int(pd.Timestamp(row.iloc[0]).timestamp())
                         tier = signal_tier(sc, details["trend"])
                         # Save to log if not already there
@@ -5455,6 +5455,36 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     return sc, details
 
 
+def signal_qualifies(score: int, details: dict) -> bool:
+    """Vznikne zo skóre a podmienok skutočný signál?
+
+    Okrem prahu `score >= 2` sa vyžaduje aspoň jedna podmienka PREPREDANOSTI
+    (C2 RSI pullback alebo C4 z-score dip). Dôvod je štrukturálny: celé pravidlo
+    je nákup prepadu, takže vstup bez jedinej prepredanej podmienky nie je dip,
+    ale naháňanie momenta. Prakticky to vylučuje presne jednu kombináciu —
+    C1+C3 (cena blízko EMA20/Kijun + zelená sviečka s objemom, ale bez akejkoľvek
+    prepredanosti). Žiadna iná kombinácia so skóre 2 nie je bez C2 aj C4.
+
+    Zmerané 2026-07-26 (23 titulov, 2 roky, 90D, reálne ceny; kontrola náhodným
+    vstupom n=3060 dala win 46.1 %, medián −1.93 %):
+      C1+C3 samotné:  n=97   win 45.4 %  medián −1.69 %   ← stratová podskupina
+      pred zmenami:   n=478  win 52.9 %  medián +1.60 %
+      po oboch:       n=279  win 58.8 %  medián +4.95 %
+    Cena: ~42 % menej signálov.
+
+    VÝHRADA: C1+C3 bolo najprv identifikované z dát a až potom sa k tomu našiel
+    štrukturálny argument — to poradie je náchylné na sebaospravedlnenie.
+    Argument „dip-buy musí mať dip" však obstojí aj samostatne. Ber to ako
+    suggestívne, nie potvrdené na inom období.
+
+    POZOR: chvost strát sa touto zmenou NEMENÍ (5. percentil ostáva ~−40 %).
+    Na ten je potrebná exit logika, nie úprava vstupu.
+    """
+    if score < 2:
+        return False
+    return bool(details.get("rsi_pullback") or details.get("zscore_dip"))
+
+
 def signal_tier(score: int, trend: str = "side") -> str:
     """Trend-primárny tier. O farbe rozhoduje kontext trendu, nie hrubé skóre:
     uptrend = 'buy' (zelená, aj pri 2/4), downtrend = 'counter' (červená,
@@ -5478,7 +5508,7 @@ def _signal_episode_rows(signal_frame: pd.DataFrame, warmup: int = SIGNAL_REPRES
             continue
         row = signal_frame.iloc[position]
         score, details = score_signal_day(row, float(zscores.iloc[position]))
-        qualifies = score >= 2
+        qualifies = signal_qualifies(score, details)
         if qualifies and not active:
             ts = pd.Timestamp(signal_frame.index[position])
             if ts.tzinfo is not None:
@@ -6707,7 +6737,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
         sc, details = score_signal_day(row, zscore)
 
-        if sc >= 2:
+        if signal_qualifies(sc, details):
             tier = signal_tier(sc, details["trend"])
             if date_key not in ticker_slog:
                 entry = {
@@ -11165,7 +11195,7 @@ def run_checklist(tickers: str = "", days: int = 10):
                 zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
                 sc, details = score_signal_day(row, zscore)
 
-                if sc >= 2:
+                if signal_qualifies(sc, details):
                     tier = signal_tier(sc, details["trend"])
                     if date_key not in ticker_slog:
                         entry = {
