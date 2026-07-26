@@ -8478,40 +8478,103 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 14
+INSIGHTS_SCHEMA_VERSION = 15
 AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
 AV_EARNINGS_CACHE_TTL_H = 24 * 30
 AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
 _AV_EARNINGS_FETCH_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
+def _insider_transaction_price(transaction_text: str) -> float | None:
+    """Extract a single per-share price; Yahoo sale ranges use their midpoint."""
+    match = re.search(
+        r"\bat\s+price\s+\$?([\d,]+(?:\.\d+)?)"
+        r"(?:\s*-\s*\$?([\d,]+(?:\.\d+)?))?\s+per\s+share\b",
+        str(transaction_text or ""),
+        flags=re.I,
+    )
+    if not match:
+        return None
+    low = float(match.group(1).replace(",", ""))
+    high = float(match.group(2).replace(",", "")) if match.group(2) else low
+    return round((low + high) / 2, 4)
+
+
+def _insider_transaction_kind(transaction_text: str) -> str | None:
+    """Classify only cash purchases and sales, excluding non-cash acquisitions."""
+    text = str(transaction_text or "").lower()
+    if "sale" in text:
+        return "sell"
+    excluded_purchase = ("award", "grant", "exercise", "option", "conversion", "convert")
+    if not any(word in text for word in excluded_purchase) and (
+        "purchase" in text or re.search(r"\bbuy\b", text)
+    ):
+        return "buy"
+    return None
+
+
 def _insights_parse(qs: dict) -> dict:
     out: dict = {}
-    # Insider transakcie za 90 dní
+    # Pôvodné 90-dňové agregáty a recent[] zachovávajú doterajšiu sémantiku.
     txs = (qs.get("insiderTransactions") or {}).get("transactions") or []
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    cutoff_2y = (datetime.now(timezone.utc) - timedelta(days=730)).timestamp()
     buys = sells = 0
     buy_val = sell_val = 0.0
     recent = []
+    transactions_2y = []
+    weighted_buy_price = weighted_buy_value = 0.0
     for t in txs:
         ts = _yraw(t.get("startDate"))
-        if not ts or ts < cutoff:
+        if not ts:
             continue
         text = (t.get("transactionText") or "").lower()
-        kind = "buy" if ("purchase" in text or "buy" in text) else ("sell" if "sale" in text else None)
-        if not kind:
-            continue   # awards/grants/exercise bez kontextu nezapočítavaj
+        old_kind = "buy" if ("purchase" in text or "buy" in text) else ("sell" if "sale" in text else None)
         val = float(_yraw(t.get("value")) or 0)
-        if kind == "buy":
-            buys += 1; buy_val += val
-        else:
-            sells += 1; sell_val += val
-        if len(recent) < 6:
-            recent.append({"date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
-                           "name": t.get("filerName"), "relation": t.get("filerRelation"),
-                           "type": kind, "shares": _yraw(t.get("shares")), "value": val or None})
+        if ts >= cutoff and old_kind:
+            if old_kind == "buy":
+                buys += 1; buy_val += val
+            else:
+                sells += 1; sell_val += val
+            if len(recent) < 6:
+                recent.append({"date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+                               "name": t.get("filerName"), "relation": t.get("filerRelation"),
+                               "type": old_kind, "shares": _yraw(t.get("shares")), "value": val or None})
+
+        kind = _insider_transaction_kind(text)
+        if ts < cutoff_2y or not kind:
+            continue
+        price = _insider_transaction_price(text)
+        shares = _yraw(t.get("shares"))
+        transactions_2y.append({
+            "date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+            "name": t.get("filerName"),
+            "relation": t.get("filerRelation"),
+            "type": kind,
+            "shares": shares,
+            "price": price,
+            "value": val or None,
+        })
+        if kind == "buy" and price is not None:
+            weight = val
+            if weight <= 0:
+                try:
+                    weight = abs(float(shares or 0)) * price
+                except (TypeError, ValueError):
+                    weight = 0
+            if weight > 0:
+                weighted_buy_price += price * weight
+                weighted_buy_value += weight
+    transactions_2y.sort(key=lambda t: t["date"], reverse=True)
+    avg_buy_price_2y = (
+        round(weighted_buy_price / weighted_buy_value, 4)
+        if weighted_buy_value > 0 else None
+    )
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
-                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
+                      "transactions_2y": transactions_2y,
+                      "avg_buy_price_2y": avg_buy_price_2y,
+                      "current_vs_avg_buy_pct": None}
     # EPS história z Yahoo earningsHistory — VYPNUTÉ. Zistené naživo na GOOG
     # (2026-07-24): "epsActual" tu vie byť kumulatívne rastúce naprieč
     # kvartálmi (2.87 → 2.82 → 5.11 → 9.11, akoby TTM súčet) zatiaľ čo
@@ -8556,6 +8619,14 @@ def _insights_parse(qs: dict) -> dict:
             "median": _yraw(fd.get("targetMedianPrice")),
             "current": _yraw(fd.get("currentPrice")),
         }
+    current_price = _yraw(fd.get("currentPrice"))
+    if avg_buy_price_2y and current_price is not None:
+        try:
+            out["insider"]["current_vs_avg_buy_pct"] = round(
+                (float(current_price) - avg_buy_price_2y) / avg_buy_price_2y * 100, 2
+            )
+        except (TypeError, ValueError):
+            pass
     ks = qs.get("defaultKeyStatistics") or {}
     short_float = _yraw(ks.get("shortPercentOfFloat"))
     if short_float is not None:
@@ -8919,7 +8990,9 @@ def _insights_fetch_finnhub(sym: str) -> dict:
             recent.append({"date": t.get("transactionDate"), "name": t.get("name"),
                            "relation": None, "type": kind, "shares": shares, "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
-                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
+                      "transactions_2y": [], "avg_buy_price_2y": None,
+                      "current_vs_avg_buy_pct": None}
     # EPS surprises — posledné nahlásené kvartály (aspoň posledný rok pokrytia).
     # /stock/earnings vracia "period" = koniec fiškálneho kvartálu (nie dátum
     # reportu — tie sa líšia o týždne), takže chart markery aj karta sedeli na
@@ -9959,10 +10032,14 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         core_target_valid = float(core_target.get("mean")) > 0
     except (TypeError, ValueError):
         core_target_valid = False
+    core_insider = (core or {}).get("insider") or {}
     if core is not None and (
         not core.get("analyst_consensus") or not core_target_valid
+        or not core_insider.get("transactions_2y")
     ):
-        qs = _yahoo_quote_summary(sym, "recommendationTrend,financialData")
+        qs = _yahoo_quote_summary(
+            sym, "insiderTransactions,recommendationTrend,financialData"
+        )
         if qs is not None:
             yahoo_extra = _insights_parse(qs)
             enriched = False
@@ -9976,6 +10053,11 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 yahoo_target_valid = False
             if not core_target_valid and yahoo_target_valid:
                 core["price_target"] = yahoo_target
+                enriched = True
+            yahoo_insider = yahoo_extra.get("insider") or {}
+            if (not core_insider.get("transactions_2y")
+                    and yahoo_insider.get("transactions_2y")):
+                core["insider"] = yahoo_insider
                 enriched = True
             if enriched:
                 core["source"] = "finnhub+yahoo"

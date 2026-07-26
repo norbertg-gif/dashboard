@@ -2151,12 +2151,50 @@ async function pc_loadInsights(ticker) {
       const net = ins.net_value_90d || 0;
       const netTxt = Math.abs(net) >= 1e6 ? `${(net / 1e6).toFixed(1)} M$` : `${(net / 1e3).toFixed(0)} k$`;
       const cls = net > 0 ? 'var(--up)' : net < 0 ? 'var(--down)' : 'var(--muted)';
-      const tip = (ins.recent || []).map(t =>
-        `${t.date} ${t.type === 'buy' ? 'NÁKUP' : 'PREDAJ'} ${t.name || ''}${t.value ? ` (${(t.value / 1e3).toFixed(0)} k$)` : ''}`).join('\n');
-      rows.push(`<div class="pred-row" title="${escHtml(tip)}"><span class="key">Insideri 90 d</span>
+      rows.push(`<div class="pred-row"><span class="key">Insideri 90 d</span>
         <span class="val">${ins.buys_90d}× nákup / ${ins.sells_90d}× predaj · <span style="color:${cls}">${net >= 0 ? '+' : ''}${netTxt}</span></span></div>`);
     } else if (ins) {
       rows.push(`<div class="pred-row"><span class="key">Insideri 90 d</span><span class="val" style="color:var(--muted)">žiadne obchody</span></div>`);
+    }
+    const insiderTrades = Array.isArray(ins?.transactions_2y) ? ins.transactions_2y : [];
+    const avgBuyPrice = ins?.avg_buy_price_2y == null ? NaN : Number(ins.avg_buy_price_2y);
+    const avgGap = ins?.current_vs_avg_buy_pct == null ? NaN : Number(ins.current_vs_avg_buy_pct);
+    if (Number.isFinite(avgBuyPrice) && avgBuyPrice > 0) {
+      const gapHtml = Number.isFinite(avgGap)
+        ? ` · aktuálna cena <span style="color:${avgGap >= 0 ? 'var(--up)' : 'var(--down)'}">${avgGap >= 0 ? '+' : ''}${avgGap.toFixed(1)} %</span>`
+        : '';
+      rows.push(`<div class="pred-row insider-average-row" title="Hodnotou vážený priemer iba skutočných nákupov za približne 2 roky; granty, opcie a konverzie sú vylúčené.">
+        <span class="key">Priemer nákupov</span><span class="val">$${fmtPrice(avgBuyPrice)}${gapHtml}</span></div>`);
+    }
+    if (insiderTrades.length) {
+      const txHtml = t => {
+        const shares = t.shares == null ? NaN : Number(t.shares);
+        const price = t.price == null ? NaN : Number(t.price);
+        const value = t.value == null ? NaN : Number(t.value);
+        const shareTxt = Number.isFinite(shares)
+          ? Math.abs(shares).toLocaleString('sk-SK', { maximumFractionDigits: 2 })
+          : '—';
+        const priceTxt = Number.isFinite(price) ? `$${fmtPrice(price)}` : 'cena n/a';
+        const valueTxt = Number.isFinite(value) && value > 0
+          ? `$${Math.abs(value).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
+          : 'hodnota n/a';
+        const kind = t.type === 'buy' ? 'Nákup' : 'Predaj';
+        return `<div class="insider-trade ${t.type === 'buy' ? 'buy' : 'sell'}">
+          <div class="insider-trade-head"><time>${escHtml(t.date || '—')}</time><strong>${kind}</strong></div>
+          <div class="insider-trade-person">${escHtml(t.name || 'Neznámy insider')}</div>
+          <div class="insider-trade-role">${escHtml(t.relation || 'Rola neuvedená')}</div>
+          <div class="insider-trade-numbers"><span>${shareTxt} ks</span><span>@ ${priceTxt}</span><span>${valueTxt}</span></div>
+        </div>`;
+      };
+      const visibleTrades = insiderTrades.slice(0, 5).map(txHtml).join('');
+      const hiddenTrades = insiderTrades.slice(5).map(txHtml).join('');
+      const more = hiddenTrades
+        ? `<details class="insider-trades-more"><summary>Ďalších ${insiderTrades.length - 5} obchodov</summary>${hiddenTrades}</details>`
+        : '';
+      rows.push(`<div class="insider-trades-block">
+        <div class="insider-trades-title">Insider obchody · približne 2 roky</div>
+        <div class="insider-trades-list">${visibleTrades}${more}</div>
+      </div>`);
     }
     const eh = (d.eps_history || []).filter(h => h.actual != null);
     if (eh.length) {

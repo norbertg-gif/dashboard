@@ -389,6 +389,49 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                     f"HTTP {self.status_code}", response=self
                 )
 
+    def test_yahoo_insider_prices_include_sale_range_and_exclude_grant(self):
+        now = int(datetime.now(timezone.utc).timestamp())
+        qs = {
+            "insiderTransactions": {
+                "transactions": [
+                    {
+                        "filerName": "Jane Buyer",
+                        "filerRelation": "Chief Executive Officer",
+                        "shares": {"raw": 100},
+                        "value": {"raw": 17223},
+                        "startDate": {"raw": now - 86400},
+                        "transactionText": "Purchase at price 172.23 per share.",
+                    },
+                    {
+                        "filerName": "John Seller",
+                        "filerRelation": "Director",
+                        "shares": {"raw": 200},
+                        "value": {"raw": 29141},
+                        "startDate": {"raw": now - 172800},
+                        "transactionText": "Sale at price 144.45 - 146.96 per share.",
+                    },
+                    {
+                        "filerName": "Grant Recipient",
+                        "filerRelation": "Officer",
+                        "shares": {"raw": 500},
+                        "value": {"raw": 0},
+                        "startDate": {"raw": now - 259200},
+                        "transactionText": "Stock Award(Grant) at price 0.00 per share.",
+                    },
+                ],
+            },
+            "financialData": {"currentPrice": {"raw": 200}},
+        }
+
+        insider = tb._insights_parse(qs)["insider"]
+
+        self.assertEqual([t["type"] for t in insider["transactions_2y"]], ["buy", "sell"])
+        self.assertEqual(insider["transactions_2y"][0]["price"], 172.23)
+        self.assertEqual(insider["transactions_2y"][1]["price"], 145.705)
+        self.assertNotIn("Grant Recipient", [t["name"] for t in insider["transactions_2y"]])
+        self.assertEqual(insider["avg_buy_price_2y"], 172.23)
+        self.assertAlmostEqual(insider["current_vs_avg_buy_pct"], 16.12)
+
     def test_fmp_earnings_surprises_maps_stable_fields(self):
         response = self._Response(200, [{
             "date": "2026-04-24",

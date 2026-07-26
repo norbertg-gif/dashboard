@@ -2472,6 +2472,92 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .pc-collapsible.collapsed .pc-collapse-body {
   display: none;
 }
+#predictiveTab .insider-average-row {
+  margin-top: 5px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+#predictiveTab .insider-trades-block {
+  margin-top: 8px;
+}
+#predictiveTab .insider-trades-title {
+  margin-bottom: 5px;
+  color: var(--muted2);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+#predictiveTab .insider-trades-list {
+  display: grid;
+  gap: 5px;
+}
+#predictiveTab .insider-trade {
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--muted);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+#predictiveTab .insider-trade.buy {
+  border-left-color: var(--up);
+}
+#predictiveTab .insider-trade.sell {
+  border-left-color: var(--down);
+}
+#predictiveTab .insider-trade-head,
+#predictiveTab .insider-trade-numbers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+#predictiveTab .insider-trade-head {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+#predictiveTab .insider-trade.buy .insider-trade-head strong {
+  color: var(--up);
+}
+#predictiveTab .insider-trade.sell .insider-trade-head strong {
+  color: var(--down);
+}
+#predictiveTab .insider-trade-person {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#predictiveTab .insider-trade-role {
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#predictiveTab .insider-trade-numbers {
+  margin-top: 4px;
+  color: var(--muted2);
+  font-size: 9px;
+}
+#predictiveTab .insider-trades-more summary {
+  padding: 5px 2px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#predictiveTab .insider-trades-more[open] summary {
+  margin-bottom: 5px;
+}
+#predictiveTab .insider-trades-more .insider-trade + .insider-trade {
+  margin-top: 5px;
+}
 #predictiveTab .card-title {
   font-size: 10px;
   font-weight: 700;
