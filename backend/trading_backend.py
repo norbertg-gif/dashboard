@@ -8478,7 +8478,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 15
+INSIGHTS_SCHEMA_VERSION = 16
 AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
 AV_EARNINGS_CACHE_TTL_H = 24 * 30
 AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
@@ -8511,6 +8511,77 @@ def _insider_transaction_kind(transaction_text: str) -> str | None:
     ):
         return "buy"
     return None
+
+
+def _mark_likely_scheduled_insider_transactions(transactions: list[dict]) -> None:
+    """Annotate repeated sale patterns without removing or reordering trades."""
+    groups: dict[tuple, list[dict]] = {}
+    for transaction in transactions:
+        transaction["scheduled_likely"] = False
+        transaction["scheduled_reason"] = None
+        key = (transaction.get("name"), transaction.get("type"))
+        groups.setdefault(key, []).append(transaction)
+
+    for (_, transaction_type), group in groups.items():
+        if transaction_type != "sell" or len(group) < 3:
+            continue
+
+        share_counts: dict[float, int] = {}
+        for transaction in group:
+            try:
+                shares = abs(float(transaction.get("shares")))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(shares):
+                share_counts[shares] = share_counts.get(shares, 0) + 1
+        same_size_count = max(share_counts.values(), default=0)
+        same_size = same_size_count >= 3
+
+        dates = []
+        for transaction in group:
+            try:
+                dates.append(date.fromisoformat(str(transaction.get("date"))))
+            except (TypeError, ValueError):
+                continue
+        dates.sort()
+        intervals = [
+            (current - previous).days
+            for previous, current in zip(dates, dates[1:])
+            if (current - previous).days > 0
+        ]
+        cadence = False
+        median_days = None
+        if len(intervals) >= 3:
+            ordered = sorted(intervals)
+            midpoint = len(ordered) // 2
+            median_days = (
+                ordered[midpoint]
+                if len(ordered) % 2
+                else (ordered[midpoint - 1] + ordered[midpoint]) / 2
+            )
+            if median_days >= 7:
+                in_band = sum(
+                    1 for interval in intervals
+                    if median_days * 0.75 <= interval <= median_days * 1.25
+                )
+                cadence = in_band * 5 >= len(intervals) * 3
+
+        if not (same_size or cadence):
+            continue
+        reason_parts = []
+        if same_size:
+            reason_parts.append(f"{same_size_count}× rovnaký objem")
+        if cadence:
+            cadence_days = (
+                str(int(median_days))
+                if float(median_days).is_integer()
+                else f"{median_days:.1f}"
+            )
+            reason_parts.append(f"~{cadence_days} dní")
+        reason = ", ".join(reason_parts)
+        for transaction in group:
+            transaction["scheduled_likely"] = True
+            transaction["scheduled_reason"] = reason
 
 
 def _insights_parse(qs: dict) -> dict:
@@ -8566,6 +8637,7 @@ def _insights_parse(qs: dict) -> dict:
                 weighted_buy_price += price * weight
                 weighted_buy_value += weight
     transactions_2y.sort(key=lambda t: t["date"], reverse=True)
+    _mark_likely_scheduled_insider_transactions(transactions_2y)
     avg_buy_price_2y = (
         round(weighted_buy_price / weighted_buy_value, 4)
         if weighted_buy_value > 0 else None
@@ -10137,6 +10209,10 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             core["yahoo_earnings_error"] = yahoo_eps_error
     if core is None:
         if cached and not cached.get("error"):
+            cached_transactions = (
+                (cached.get("insider") or {}).get("transactions_2y") or []
+            )
+            _mark_likely_scheduled_insider_transactions(cached_transactions)
             return {**cached, "stale": True}
         payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION,
                    "error": " | ".join(errs),

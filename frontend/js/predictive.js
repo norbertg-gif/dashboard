@@ -2127,7 +2127,72 @@ async function pc_loadRS(ticker) {
 }
 
 // Insider transakcie + EPS beat/miss karta (Yahoo quoteSummary, 12h server cache)
+const PC_HIDE_SCHEDULED_INSIDER_KEY = 'td_hide_scheduled_insider_sales';
+let pc_hideScheduledInsider = localStorage.getItem(PC_HIDE_SCHEDULED_INSIDER_KEY) === '1';
+let pc_insiderTradesForRender = [];
 let _insightsForTicker = null;
+
+function pc_insiderTradesBlockHtml(trades) {
+  const scheduledCount = trades.filter(t => t.scheduled_likely).length;
+  const renderedTrades = pc_hideScheduledInsider
+    ? trades.filter(t => !t.scheduled_likely)
+    : trades;
+  const txHtml = t => {
+    const shares = t.shares == null ? NaN : Number(t.shares);
+    const price = t.price == null ? NaN : Number(t.price);
+    const value = t.value == null ? NaN : Number(t.value);
+    const shareTxt = Number.isFinite(shares)
+      ? Math.abs(shares).toLocaleString('sk-SK', { maximumFractionDigits: 2 })
+      : '—';
+    const priceTxt = Number.isFinite(price) ? `$${fmtPrice(price)}` : 'cena n/a';
+    const valueTxt = Number.isFinite(value) && value > 0
+      ? `$${Math.abs(value).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
+      : 'hodnota n/a';
+    const kind = t.type === 'buy' ? 'Nákup' : 'Predaj';
+    const scheduled = !!t.scheduled_likely;
+    const reason = t.scheduled_reason || 'opakujúci sa vzorec';
+    const tooltip = scheduled
+      ? `Pravdepodobne plánované podľa vzorca: ${reason}. Je to odhad, nie potvrdenie z Form 4.`
+      : '';
+    const badge = scheduled
+      ? '<span class="insider-scheduled-badge">pravdepodobne plánované</span>'
+      : '';
+    return `<div class="insider-trade ${t.type === 'buy' ? 'buy' : 'sell'}${scheduled ? ' scheduled-likely' : ''}"${tooltip ? ` title="${escHtml(tooltip)}"` : ''}>
+      <div class="insider-trade-head"><time>${escHtml(t.date || '—')}</time><strong>${kind}</strong></div>
+      <div class="insider-trade-person">${escHtml(t.name || 'Neznámy insider')}</div>
+      <div class="insider-trade-role">${escHtml(t.relation || 'Rola neuvedená')}</div>
+      <div class="insider-trade-numbers"><span>${shareTxt} ks</span><span>@ ${priceTxt}</span><span>${valueTxt}</span></div>
+      ${badge}
+    </div>`;
+  };
+  const visibleTrades = renderedTrades.slice(0, 5).map(txHtml).join('');
+  const hiddenTrades = renderedTrades.slice(5).map(txHtml).join('');
+  const more = hiddenTrades
+    ? `<details class="insider-trades-more"><summary>Ďalších ${renderedTrades.length - 5} obchodov</summary>${hiddenTrades}</details>`
+    : '';
+  const empty = !renderedTrades.length
+    ? '<div class="insider-filter-empty">Po skrytí pravdepodobne plánovaných predajov nezostali žiadne obchody.</div>'
+    : '';
+  const filter = scheduledCount
+    ? `<label class="insider-scheduled-filter" title="Odhad podľa opakujúceho sa objemu alebo kadencie; nejde o potvrdený údaj z Form 4.">
+        <input type="checkbox" ${pc_hideScheduledInsider ? 'checked' : ''} onchange="pc_setHideScheduledInsider(this.checked)">
+        <span>Skryť pravdepodobne plánované predaje (${scheduledCount})</span>
+      </label>`
+    : '';
+  return `<div class="insider-trades-block" id="pcInsiderTradesBlock">
+    <div class="insider-trades-title">Insider obchody · približne 2 roky</div>
+    ${filter}
+    <div class="insider-trades-list">${visibleTrades}${more}${empty}</div>
+  </div>`;
+}
+
+function pc_setHideScheduledInsider(hidden) {
+  pc_hideScheduledInsider = !!hidden;
+  try { localStorage.setItem(PC_HIDE_SCHEDULED_INSIDER_KEY, hidden ? '1' : '0'); } catch(e) {}
+  const block = document.getElementById('pcInsiderTradesBlock');
+  if (block) block.outerHTML = pc_insiderTradesBlockHtml(pc_insiderTradesForRender);
+}
+
 async function pc_loadInsights(ticker) {
   const card = document.getElementById('insightsCard');
   if (!card || !ticker) return;
@@ -2167,34 +2232,8 @@ async function pc_loadInsights(ticker) {
         <span class="key">Priemer nákupov</span><span class="val">$${fmtPrice(avgBuyPrice)}${gapHtml}</span></div>`);
     }
     if (insiderTrades.length) {
-      const txHtml = t => {
-        const shares = t.shares == null ? NaN : Number(t.shares);
-        const price = t.price == null ? NaN : Number(t.price);
-        const value = t.value == null ? NaN : Number(t.value);
-        const shareTxt = Number.isFinite(shares)
-          ? Math.abs(shares).toLocaleString('sk-SK', { maximumFractionDigits: 2 })
-          : '—';
-        const priceTxt = Number.isFinite(price) ? `$${fmtPrice(price)}` : 'cena n/a';
-        const valueTxt = Number.isFinite(value) && value > 0
-          ? `$${Math.abs(value).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
-          : 'hodnota n/a';
-        const kind = t.type === 'buy' ? 'Nákup' : 'Predaj';
-        return `<div class="insider-trade ${t.type === 'buy' ? 'buy' : 'sell'}">
-          <div class="insider-trade-head"><time>${escHtml(t.date || '—')}</time><strong>${kind}</strong></div>
-          <div class="insider-trade-person">${escHtml(t.name || 'Neznámy insider')}</div>
-          <div class="insider-trade-role">${escHtml(t.relation || 'Rola neuvedená')}</div>
-          <div class="insider-trade-numbers"><span>${shareTxt} ks</span><span>@ ${priceTxt}</span><span>${valueTxt}</span></div>
-        </div>`;
-      };
-      const visibleTrades = insiderTrades.slice(0, 5).map(txHtml).join('');
-      const hiddenTrades = insiderTrades.slice(5).map(txHtml).join('');
-      const more = hiddenTrades
-        ? `<details class="insider-trades-more"><summary>Ďalších ${insiderTrades.length - 5} obchodov</summary>${hiddenTrades}</details>`
-        : '';
-      rows.push(`<div class="insider-trades-block">
-        <div class="insider-trades-title">Insider obchody · približne 2 roky</div>
-        <div class="insider-trades-list">${visibleTrades}${more}</div>
-      </div>`);
+      pc_insiderTradesForRender = insiderTrades;
+      rows.push(pc_insiderTradesBlockHtml(insiderTrades));
     }
     const eh = (d.eps_history || []).filter(h => h.actual != null);
     if (eh.length) {

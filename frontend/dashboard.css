@@ -2488,6 +2488,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   letter-spacing: .04em;
   text-transform: uppercase;
 }
+#predictiveTab .insider-scheduled-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--muted2);
+  font-size: 9px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+#predictiveTab .insider-scheduled-filter input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 #predictiveTab .insider-trades-list {
   display: grid;
   gap: 5px;
@@ -2504,6 +2520,12 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 #predictiveTab .insider-trade.sell {
   border-left-color: var(--down);
+}
+#predictiveTab .insider-trade.scheduled-likely {
+  border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  border-left-color: var(--muted);
+  background: color-mix(in srgb, var(--bg-card) 75%, var(--bg) 25%);
+  opacity: .58;
 }
 #predictiveTab .insider-trade-head,
 #predictiveTab .insider-trade-numbers {
@@ -2544,6 +2566,25 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-top: 4px;
   color: var(--muted2);
   font-size: 9px;
+}
+#predictiveTab .insider-scheduled-badge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 4px;
+  border: 1px dashed var(--muted);
+  border-radius: 3px;
+  color: var(--muted2);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+#predictiveTab .insider-filter-empty {
+  padding: 7px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
 }
 #predictiveTab .insider-trades-more summary {
   padding: 5px 2px;

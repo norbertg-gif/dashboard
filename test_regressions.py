@@ -432,6 +432,49 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
         self.assertEqual(insider["avg_buy_price_2y"], 172.23)
         self.assertAlmostEqual(insider["current_vs_avg_buy_pct"], 16.12)
 
+    def test_insider_schedule_marks_repeated_share_count(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Same Size", "type": "sell", "shares": 32500},
+            {"date": "2026-01-03", "name": "Same Size", "type": "sell", "shares": 32500},
+            {"date": "2026-04-20", "name": "Same Size", "type": "sell", "shares": 32500},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(t["scheduled_likely"] for t in transactions))
+        self.assertEqual(
+            {t["scheduled_reason"] for t in transactions},
+            {"3× rovnaký objem"},
+        )
+
+    def test_insider_schedule_marks_regular_cadence_with_changing_sizes(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Monthly Seller", "type": "sell", "shares": 101},
+            {"date": "2026-01-01", "name": "Monthly Seller", "type": "sell", "shares": 202},
+            {"date": "2026-01-31", "name": "Monthly Seller", "type": "sell", "shares": 303},
+            {"date": "2026-03-02", "name": "Monthly Seller", "type": "sell", "shares": 404},
+            {"date": "2026-04-01", "name": "Monthly Seller", "type": "sell", "shares": 505},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(t["scheduled_likely"] for t in transactions))
+        self.assertEqual(
+            {t["scheduled_reason"] for t in transactions},
+            {"~30 dní"},
+        )
+
+    def test_insider_schedule_does_not_mark_two_transactions(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Too Few", "type": "sell", "shares": 100},
+            {"date": "2026-02-01", "name": "Too Few", "type": "sell", "shares": 100},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(not t["scheduled_likely"] for t in transactions))
+        self.assertTrue(all(t["scheduled_reason"] is None for t in transactions))
+
     def test_fmp_earnings_surprises_maps_stable_fields(self):
         response = self._Response(200, [{
             "date": "2026-04-24",
