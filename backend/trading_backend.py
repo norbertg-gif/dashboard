@@ -11500,6 +11500,8 @@ def _roic_get_json(
     *,
     params: dict | None = None,
     stop_event: threading.Event | None = None,
+    timeout: int = 20,
+    retries: int = 0,
 ):
     key = _roic_api_key()
     if not key:
@@ -11513,7 +11515,7 @@ def _roic_get_json(
             f"{ROIC_API_BASE}{path}",
             headers={"Authorization": f"Bearer {key}"},
             params=params or {},
-            timeout=20,
+            timeout=timeout,
         )
         _roic_apply_rate_headers(response.headers)
         _roic_note(
@@ -11534,6 +11536,18 @@ def _roic_get_json(
                              f"{_scrub_token(response.text[:120])}")
             return None
         return response.json()
+    except requests.Timeout as e:
+        # /tickers/search vie byť pomalé a vypršať; ticker ID sa pritom cachuje
+        # natrvalo, takže jedno zopakovanie s dlhším čakaním je lacné a ušetrí
+        # trvalo nevyriešený titul.
+        _roic_note(error=f"{path}: timeout {timeout}s"
+                         f"{' — skúšam znova' if retries > 0 else ''}")
+        if retries > 0 and not (stop_event and stop_event.is_set()):
+            return _roic_get_json(
+                path, params=params, stop_event=stop_event,
+                timeout=timeout * 2, retries=retries - 1,
+            )
+        return None
     except Exception as e:
         _roic_note(error=f"{path}: {type(e).__name__}: {_scrub_token(e)}")
         return None
@@ -11583,6 +11597,9 @@ def _roic_resolve_ticker_id(
         # `limit` má default 500 — bez orezania sa tahá zbytočne veľká odpoveď.
         params={"query": sym.split(".", 1)[0], "search_by": "symbol", "limit": 25},
         stop_event=stop_event,
+        # Meraný stav ukázal, že práve tento endpoint vie vypršať na 20 s
+        # (5 z 13 titulov). Dlhšie čakanie + jedno zopakovanie.
+        timeout=45, retries=1,
     )
     rows = _roic_rows(payload)
     exact = [
