@@ -11283,6 +11283,75 @@ def _previous_weekday_utc() -> str:
     return day.isoformat()
 
 
+ROIC_API_BASE = "https://api.roic.ai/v3.0.0"
+
+
+def _roic_api_key() -> str:
+    """Kľúč je na Renderi pod menom ROIC; ROIC_API_KEY beriem ako alternatívu."""
+    return (os.getenv("ROIC", "") or os.getenv("ROIC_API_KEY", "")).strip()
+
+
+@app.get("/api/diagnostics/roic/{symbol}")
+def roic_diagnostics(symbol: str):
+    """Ohmatá roic.ai skôr, než na ňom začneme čokoľvek stavať.
+
+    Zisťuje tri veci, ktoré sa z dokumentácie vyčítať nedajú: či kľúč funguje,
+    či endpoint zje HOLÝ symbol (dokumentácia žiada ticker ID, `NASDAQ:AAPL`
+    alebo FIGI — naše univerzum má pritom len holé symboly), a ktoré pole
+    reálne nesie ROIC. Kľúč ide v Bearer hlavičke, nie v query parametri —
+    tie končia v serverových logoch. Samotný kľúč sa nikdy nevypisuje.
+    """
+    sym = _validate_ticker_symbol(symbol)
+    key = _roic_api_key()
+    out: dict = {"symbol": sym, "key_configured": bool(key)}
+    if not key:
+        out["error"] = "Premenná ROIC nie je nastavená"
+        return out
+
+    def probe(identifier: str) -> dict:
+        info: dict = {"identifier": identifier}
+        try:
+            resp = requests.get(
+                f"{ROIC_API_BASE}/fundamental/ratios/profitability/{identifier}",
+                headers={"Authorization": f"Bearer {key}"},
+                params={"period_type": "annual"},
+                timeout=20,
+            )
+            info["http_status"] = resp.status_code
+            # Pri Free tieri (5/min) sú limity podstatné — vytiahni, čo posielajú.
+            info["rate_limit_headers"] = {
+                k: v for k, v in resp.headers.items() if "ratelimit" in k.lower()
+            }
+            if resp.status_code != 200:
+                info["body"] = _scrub_token(resp.text[:200])
+                return info
+            data = resp.json()
+            rows = data if isinstance(data, list) else (data.get("data") or [])
+            info["period_count"] = len(rows) if isinstance(rows, list) else None
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                newest = rows[0]
+                info["fields"] = sorted(newest.keys())[:40]
+                # Ktoré pole vyzerá na return on invested capital
+                info["roic_like"] = {
+                    k: v for k, v in newest.items()
+                    if "invest" in k.lower() or k.lower() in ("roic", "returnoninvestedcapital")
+                }
+                info["newest_sample"] = {k: newest.get(k) for k in list(newest)[:12]}
+        except Exception as e:
+            info["error"] = f"{type(e).__name__}: {_scrub_token(e)}"
+        return info
+
+    # Holý symbol vs prefix burzy — treba vedieť, či stačí to prvé.
+    out["probes"] = [probe(sym)]
+    if out["probes"][0].get("http_status") != 200:
+        for prefix in ("NASDAQ", "NYSE"):
+            attempt = probe(f"{prefix}:{sym}")
+            out["probes"].append(attempt)
+            if attempt.get("http_status") == 200:
+                break
+    return out
+
+
 @app.get("/api/diagnostics/earnings/{symbol}")
 def earnings_source_diagnostics(symbol: str):
     """Prečo `eps_history` vyzerá tak, ako vyzerá — zdroj po zdroji.
