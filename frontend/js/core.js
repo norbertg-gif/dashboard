@@ -424,6 +424,11 @@ function toggleUiMode() {
   if (typeof renderOpportunities === 'function' && typeof _oppLastRows !== 'undefined' && _oppLastRows !== null) {
     renderOpportunities(_oppLastRows, _oppLastDays);
   }
+  if (typeof renderNasdaqScanner === 'function'
+      && typeof _scannerLastPayload !== 'undefined'
+      && _scannerLastPayload) {
+    renderNasdaqScanner(_scannerLastPayload);
+  }
 }
 
 // ── ETORO TRADE LINK ─────────────────────────────────────────────────────────

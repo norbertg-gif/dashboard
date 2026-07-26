@@ -4,6 +4,7 @@
 import tempfile
 import unittest
 import json
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -14,6 +15,32 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import trading_backend as tb
+
+
+class ScannerTableSortRegressionTests(unittest.TestCase):
+    def test_missing_values_are_last_in_both_directions(self):
+        module_path = Path(__file__).parent / "frontend" / "js" / "scanner-table-sort.js"
+        script = """
+const sort = require(process.argv[1]);
+const rows = [
+  {id: 'missing-null', value: null},
+  {id: 'high', value: 20},
+  {id: 'missing-label', value: 'n/a'},
+  {id: 'low', value: 5},
+];
+const asc = sort.sortRows(rows, row => row.value, 'number', 'asc').map(row => row.id);
+const desc = sort.sortRows(rows, row => row.value, 'number', 'desc').map(row => row.id);
+process.stdout.write(JSON.stringify({asc, desc}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", script, str(module_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["asc"], ["low", "high", "missing-null", "missing-label"])
+        self.assertEqual(result["desc"], ["high", "low", "missing-null", "missing-label"])
 
 
 class CacheRegressionTests(unittest.TestCase):

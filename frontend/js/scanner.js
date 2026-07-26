@@ -24,6 +24,147 @@ function isEarningsCalendarCollapsed() { return localStorage.getItem(EARNINGS_CA
 const SCANNER_RADAR_COLLAPSED_KEY = 'td_scanner_radar_collapsed';
 function isScannerRadarCollapsed() { return localStorage.getItem(SCANNER_RADAR_COLLAPSED_KEY) !== '0'; }
 
+const SCANNER_TABLE_STATE_KEY = 'td_scanner_table_state';
+const SCANNER_DEFAULT_TABLE_STATE = {
+  sort: { key: 'dip', direction: 'desc' },
+  filters: { ticker: '', dipMin: '', roicMin: '', freshSignalOnly: false },
+};
+const SCANNER_SORT_COLUMNS = {
+  ticker: { type: 'text', value: row => row.ticker },
+  decision: { type: 'text', value: row => row.recent_signal?.date ? sigTierLabel(row.recent_signal.tier, row.recent_signal.score) : 'Bez signálu' },
+  strength: { type: 'number', value: row => row.recent_signal?.score },
+  dip: { type: 'number', value: row => row.dip_total },
+  fa: { type: 'number', advanced: true, value: row => row.dip?.fa },
+  roic: { type: 'number', advanced: true, value: row => row.roic_fundamentals?.roic },
+  ta: { type: 'number', advanced: true, value: row => row.dip?.ta },
+  rank: { type: 'number', advanced: true, value: row => row.dip_rank },
+  crossover: { type: 'text', advanced: true, value: row => row.dip_label || 'TECH ONLY' },
+  date: { type: 'text', value: row => row.recent_signal?.date },
+  last: { type: 'number', value: row => row.last_close },
+  market: { type: 'number', value: row => row.market_day?.change_pct },
+  reason: {
+    type: 'text',
+    value: row => (row.positive_factors || []).find(f => !/signal \d\/4/.test(f))
+      || (row.positive_factors || [])[0]
+      || (row.risk_flags || [])[0],
+  },
+};
+let _scannerLastPayload = null;
+let _scannerTickerFilterTimer = null;
+
+function scannerTableState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCANNER_TABLE_STATE_KEY) || '{}');
+    const sort = saved.sort && SCANNER_SORT_COLUMNS[saved.sort.key]
+      ? {
+          key: saved.sort.key,
+          direction: ['asc', 'desc'].includes(saved.sort.direction)
+            ? saved.sort.direction
+            : SCANNER_DEFAULT_TABLE_STATE.sort.direction,
+        }
+      : { ...SCANNER_DEFAULT_TABLE_STATE.sort };
+    return {
+      sort,
+      filters: {
+        ...SCANNER_DEFAULT_TABLE_STATE.filters,
+        ...(saved.filters || {}),
+        freshSignalOnly: Boolean(saved.filters?.freshSignalOnly),
+      },
+    };
+  } catch (_) {
+    return {
+      sort: { ...SCANNER_DEFAULT_TABLE_STATE.sort },
+      filters: { ...SCANNER_DEFAULT_TABLE_STATE.filters },
+    };
+  }
+}
+
+function saveScannerTableState(state) {
+  localStorage.setItem(SCANNER_TABLE_STATE_KEY, JSON.stringify(state));
+}
+
+function scannerEffectiveSort(state) {
+  const column = SCANNER_SORT_COLUMNS[state.sort.key];
+  if (column?.advanced && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
+    return { ...SCANNER_DEFAULT_TABLE_STATE.sort };
+  }
+  return state.sort;
+}
+
+function scannerFilteredSortedRows(rows, state) {
+  const ticker = String(state.filters.ticker || '').trim().toUpperCase();
+  const dipMin = state.filters.dipMin === '' ? null : Number(state.filters.dipMin);
+  const roicMin = state.filters.roicMin === '' ? null : Number(state.filters.roicMin);
+  const filtered = rows.filter(row => {
+    const dip = row.dip_total == null || row.dip_total === '' ? NaN : Number(row.dip_total);
+    const roicRaw = row.roic_fundamentals?.roic;
+    const roic = roicRaw == null || roicRaw === '' ? NaN : Number(roicRaw);
+    if (ticker && !String(row.ticker || '').toUpperCase().includes(ticker)) return false;
+    if (Number.isFinite(dipMin) && (!Number.isFinite(dip) || dip < dipMin)) return false;
+    if (Number.isFinite(roicMin) && (!Number.isFinite(roic) || roic < roicMin)) return false;
+    if (state.filters.freshSignalOnly && !row.recent_signal) return false;
+    return true;
+  });
+  const sort = scannerEffectiveSort(state);
+  const column = SCANNER_SORT_COLUMNS[sort.key] || SCANNER_SORT_COLUMNS.dip;
+  return ScannerTableSort.sortRows(filtered, column.value, column.type, sort.direction);
+}
+
+function scannerRerender(focusTicker = false, caret = null) {
+  const notes = document.getElementById('scannerNotesBox');
+  if (notes) _scannerNotesContent = notes.innerHTML;
+  if (_scannerLastPayload) renderNasdaqScanner(_scannerLastPayload);
+  if (focusTicker) {
+    const input = document.getElementById('scannerTickerFilter');
+    input?.focus();
+    if (input && caret != null) input.setSelectionRange(caret, caret);
+  }
+}
+
+function setScannerSort(key) {
+  const column = SCANNER_SORT_COLUMNS[key];
+  if (!column) return;
+  const state = scannerTableState();
+  if (state.sort.key === key) {
+    state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sort = { key, direction: column.type === 'number' ? 'desc' : 'asc' };
+  }
+  saveScannerTableState(state);
+  scannerRerender();
+}
+
+function setScannerFilter(key, value) {
+  const state = scannerTableState();
+  state.filters[key] = value;
+  saveScannerTableState(state);
+  scannerRerender();
+}
+
+function scheduleScannerTickerFilter(value, caret) {
+  const state = scannerTableState();
+  state.filters.ticker = value;
+  saveScannerTableState(state);
+  clearTimeout(_scannerTickerFilterTimer);
+  _scannerTickerFilterTimer = setTimeout(() => scannerRerender(true, caret), 160);
+}
+
+function resetScannerFilters() {
+  const state = scannerTableState();
+  state.filters = { ...SCANNER_DEFAULT_TABLE_STATE.filters };
+  saveScannerTableState(state);
+  scannerRerender();
+}
+
+function scannerSortHeader(label, key, className = '') {
+  const state = scannerTableState();
+  const sort = scannerEffectiveSort(state);
+  const active = sort.key === key;
+  const arrow = active ? (sort.direction === 'asc' ? '▲' : '▼') : '';
+  const ariaSort = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+  return `<th class="${className}" aria-sort="${ariaSort}"><button type="button" class="scanner-sort-btn${active ? ' active' : ''}" onclick="setScannerSort('${key}')" title="Zoradiť podľa ${escHtml(label)}">${escHtml(label)}<span class="scanner-sort-indicator">${arrow}</span></button></th>`;
+}
+
 const WEEKLY_PLAN_REVIEWED_PREFIX = 'td_weekly_plan_reviewed_';
 let weeklyPlanQueueIndex = 0;
 
@@ -869,6 +1010,7 @@ async function renderScannerView() {
 function renderNasdaqScanner(payload) {
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el) return;
+  _scannerLastPayload = payload;
   const state = payload?.state || {};
   const cache = payload?.cache || {};
   const rows = Array.isArray(cache.results) ? cache.results : [];
@@ -897,12 +1039,10 @@ function renderNasdaqScanner(payload) {
     return;
   }
 
-  const ranked = rows.slice().sort((a, b) =>
-    Number(b.dip_total ?? -1) - Number(a.dip_total ?? -1) ||
-    Number(b.setup_score || 0) - Number(a.setup_score || 0)
-  );
+  const tableState = scannerTableState();
+  const ranked = scannerFilteredSortedRows(rows, tableState);
   const kpis = {
-    total: ranked.length,
+    total: rows.length,
     crossover: Number(cache.crossover_matches || 0),
     strong: ranked.filter(r => String(r.dip_label || '').includes('STRONG')).length,
     techOnly: ranked.filter(r => (r.dip_label || 'TECH ONLY') === 'TECH ONLY').length,
@@ -928,16 +1068,33 @@ function renderNasdaqScanner(payload) {
   el.className = 'scanner-output';
   el.innerHTML = `<div class="scanner-result-shell">
     <div class="scanner-status-line">${state.running ? '<span class="cl-spinner"></span>' : ''}<span class="advanced-only">${status}</span><span class="basic-only">${scannerBasicStatusLine(state, cache)}</span>
-      <span class="scanner-compact-kpis advanced-only">Zobrazené ${kpis.total} · Signály ${Number(cache.matches || 0)} · DIP ≥85 ${Number(cache.high_dip_rows || 0)} · Crossover ${kpis.crossover}</span>
+      <span class="scanner-compact-kpis advanced-only">Zobrazené ${ranked.length} · Signály ${Number(cache.matches || 0)} · DIP ≥85 ${Number(cache.high_dip_rows || 0)} · Crossover ${kpis.crossover}</span>
     </div>
     ${errorDetails}
+    <div class="scanner-table-controls">
+      <label class="scanner-table-filter">Ticker
+        <input id="scannerTickerFilter" type="text" value="${escHtml(tableState.filters.ticker || '')}" placeholder="napr. AAPL" oninput="scheduleScannerTickerFilter(this.value, this.selectionStart)">
+      </label>
+      <label class="scanner-table-filter">DIP ≥
+        <input type="number" step="any" value="${escHtml(tableState.filters.dipMin ?? '')}" placeholder="napr. 100" onchange="setScannerFilter('dipMin', this.value)">
+      </label>
+      <label class="scanner-table-filter">ROIC ≥
+        <input type="number" step="any" value="${escHtml(tableState.filters.roicMin ?? '')}" placeholder="napr. 15" onchange="setScannerFilter('roicMin', this.value)">
+      </label>
+      <label class="scanner-table-signal-filter">
+        <input type="checkbox" ${tableState.filters.freshSignalOnly ? 'checked' : ''} onchange="setScannerFilter('freshSignalOnly', this.checked)">
+        len s čerstvým signálom
+      </label>
+      <span class="scanner-filter-count">${ranked.length} z ${rows.length} riadkov</span>
+      <button type="button" class="btn scanner-filter-reset" onclick="resetScannerFilters()">Zrušiť filtre</button>
+    </div>
     <div class="scanner-main-row">
     <div class="scanner-table-wrap">
       <table class="tool-table scanner-table">
         <thead><tr>
-          <th>Ticker</th><th>Rozhodnutie</th><th>Graf</th><th>Sila</th><th>DIP</th><th class="advanced-only">FA</th><th class="advanced-only">ROIC</th><th class="advanced-only">Dlh</th><th class="advanced-only">TA</th><th class="advanced-only">Rank</th><th class="advanced-only">Crossover</th><th>Date</th><th>Last</th><th>Trh</th><th>Reason</th>
+          ${scannerSortHeader('Ticker', 'ticker')}${scannerSortHeader('Rozhodnutie', 'decision')}<th>Graf</th>${scannerSortHeader('Sila', 'strength')}${scannerSortHeader('DIP', 'dip')}${scannerSortHeader('FA', 'fa', 'advanced-only')}${scannerSortHeader('ROIC', 'roic', 'advanced-only')}<th class="advanced-only">Dlh</th>${scannerSortHeader('TA', 'ta', 'advanced-only')}${scannerSortHeader('Rank', 'rank', 'advanced-only')}${scannerSortHeader('Crossover', 'crossover', 'advanced-only')}${scannerSortHeader('Date', 'date')}${scannerSortHeader('Last', 'last')}${scannerSortHeader('Trh', 'market')}${scannerSortHeader('Reason', 'reason')}
         </tr></thead>
-        <tbody>` + ranked.map(r => {
+        <tbody>` + (ranked.length ? ranked.map(r => {
     const sig = r.recent_signal || {};
     const score = Number(r.setup_score || 0);
     const price = Number.isFinite(Number(r.last_close)) ? Number(r.last_close).toFixed(2) : '-';
@@ -1007,7 +1164,7 @@ function renderNasdaqScanner(payload) {
       <td>${marketHtml}</td>
       <td>${escHtml(reason)}</td>
     </tr>`;
-  }).join('') + `</tbody></table></div>
+  }).join('') : '<tr><td colspan="15" class="muted">Žiadne riadky nezodpovedajú aktívnym filtrom.</td></tr>') + `</tbody></table></div>
     <div id="scanner-notes-resizer" class="scanner-notes-resizer"></div>
     <aside class="scanner-notes-panel">
       <div class="scanner-notes-head">

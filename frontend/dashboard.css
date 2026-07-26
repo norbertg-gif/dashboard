@@ -3739,6 +3739,59 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-left: 10px;
   color: var(--muted2);
 }
+.scanner-table-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+.scanner-table-filter {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font: 800 9px var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.scanner-table-filter input[type="text"],
+.scanner-table-filter input[type="number"] {
+  width: 118px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--bg-card);
+  color: var(--text);
+  font: 11px var(--font-mono);
+}
+.scanner-table-filter input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.scanner-table-signal-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 3px;
+  color: var(--text);
+  font: 700 10px var(--font-ui);
+  cursor: pointer;
+}
+.scanner-filter-count {
+  margin-left: auto;
+  color: var(--muted);
+  font: 11px var(--font-mono);
+  white-space: nowrap;
+}
+.scanner-filter-reset {
+  min-height: 30px;
+}
 .scanner-error-details {
   border: 1px solid color-mix(in srgb, var(--yellow) 35%, var(--border));
   border-radius: var(--radius-md);
@@ -3807,6 +3860,28 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   top: 0;
   z-index: 1;
   background: var(--bg-input);
+}
+.scanner-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.scanner-sort-btn:hover,
+.scanner-sort-btn.active {
+  color: var(--accent);
+}
+.scanner-sort-indicator {
+  min-width: 9px;
+  color: var(--accent);
 }
 .chart-health-cell {
   display: inline-flex;

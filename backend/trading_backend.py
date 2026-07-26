@@ -12040,6 +12040,10 @@ def help_screenshot(fname: str):
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
     "chart_patterns.js", "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
+    # Nový modul MUSÍ pribudnúť aj sem — inak endpoint vráti 404 a v produkcii
+    # padne všetko, čo ten súbor potrebuje (lokálne to nevidno, ak sa testuje
+    # bez tohto endpointu).
+    "scanner-table-sort.js",
 }
 
 @app.get("/js/{fname}")
