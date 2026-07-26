@@ -5422,7 +5422,19 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     c2 = rsi < SIGNAL_RSI_PULLBACK
     c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
     c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
-    sc = int(sum([c1, c2, c3, c4]))
+    # C2 sa do skóre počíta LEN keď nepáli C4. Zmerané 2026-07-26 na 23 tituloch
+    # za 2 roky: z 1559 dní s C4 malo 1559 aj C2 — prekryv 100 %, deterministicky.
+    # RSI14 je pod 45 vždy, keď je cena 1.5σ pod 60-dňovým priemerom. Bez tejto
+    # opravy dostal každý C4 deň druhý bod zdarma, prekročil prah "score >= 2"
+    # a stal sa signálom — najčastejší typ signálu (C2+C4, 43 % všetkých) bola
+    # v skutočnosti JEDNA podmienka v dvoch kabátoch.
+    # Meraný dopad (90D, reálne ceny, proti náhodnému vstupu n=3060):
+    #   pôvodne  n=478  win 52.9 %  medián +1.60 %
+    #   po tomto n=413  win 55.4 %  medián +2.87 %
+    # POZOR: C2 sa NEODSTRAŇUJE. Varianty "RSI<35" a "bez C2" boli obe HORŠIE
+    # než pôvodný stav — C2 nesie informáciu, keď C4 nepáli. Chybou bolo len
+    # dvojité počítanie. `details` nižšie hlási c2 pravdivo, mení sa iba skóre.
+    sc = int(c1) + int(c2 and not c4) + int(c3) + int(c4)
     # Trend-primárna klasifikácia (per-bar) podľa štruktúry EMA:
     #   up   = ema10 > ema20            → dip v uptrende = buyovateľný (DIP stratégia)
     #   down = ema10 < ema20 a cena < ema20 → proti-trendový dip (falling-knife)

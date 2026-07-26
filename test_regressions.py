@@ -43,6 +43,35 @@ process.stdout.write(JSON.stringify({asc, desc}));
         self.assertEqual(result["desc"], ["high", "low", "missing-null", "missing-label"])
 
 
+class SignalScoringRegressionTests(unittest.TestCase):
+    """C2 (RSI<45) prekrýva C4 (z<=-1.5) na 100 % — zmerané na 1559 z 1559 dní.
+    Bez tejto poistky by sa dvojité počítanie mohlo ticho vrátiť."""
+
+    @staticmethod
+    def _row(close, ema20, kijun, rsi, ema10, open_):
+        return pd.Series({
+            "Close": close, "Open": open_, "ema20": ema20, "ichi_kijun": kijun,
+            "rsi": rsi, "Volume": 1.0, "vol_ma": 1.0, "ema10": ema10, "atr": 1.0,
+        })
+
+    def test_c2_not_counted_when_c4_fires(self):
+        score, details = tb.score_signal_day(
+            self._row(100, 130, 130, 30, 131, 101), -2.0)
+        # C4 páli, RSI je nízke — ale skóre musí byť 1, nie 2
+        self.assertTrue(details["zscore_dip"])
+        self.assertTrue(details["rsi_pullback"], "c2 sa má hlásiť pravdivo")
+        self.assertEqual(score, 1)
+
+    def test_c2_still_counts_without_c4(self):
+        # Odstrániť C2 úplne bolo MERANE horšie — smie sa len prestať dublovať.
+        score, details = tb.score_signal_day(
+            self._row(100, 100, 100, 30, 101, 101), 0.0)
+        self.assertTrue(details["ema_kijun_touch"])
+        self.assertTrue(details["rsi_pullback"])
+        self.assertFalse(details["zscore_dip"])
+        self.assertEqual(score, 2)
+
+
 class CacheRegressionTests(unittest.TestCase):
     def setUp(self):
         tb._BACKTEST_CACHE.clear()
