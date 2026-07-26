@@ -349,8 +349,8 @@ class RoicFundamentalsRegressionTests(unittest.TestCase):
     def test_ticker_search_sends_bare_base_symbol_and_bounded_limit(self):
         captured = {}
 
-        def fake_get(path, params=None, stop_event=None):
-            captured.update({"path": path, "params": params or {}})
+        def fake_get(path, params=None, stop_event=None, **kwargs):
+            captured.update({"path": path, "params": params or {}, **kwargs})
             return {"data": [{"symbol": "EPA:TEP", "id": "tkr_x"}]}
 
         with (
@@ -362,6 +362,9 @@ class RoicFundamentalsRegressionTests(unittest.TestCase):
         # Yahoo prípona sa do dotazu neposiela a limit nesmie ostať na 500.
         self.assertEqual(captured["params"].get("query"), "TEP")
         self.assertEqual(captured["params"].get("limit"), 25)
+        # Search vie vypršať na 20 s — musí mať dlhší timeout a jedno opakovanie.
+        self.assertGreaterEqual(captured.get("timeout") or 0, 45)
+        self.assertGreaterEqual(captured.get("retries") or 0, 1)
 
     def tearDown(self):
         tb._roic_next_request_at = self.original_next_request_at
