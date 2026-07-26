@@ -944,11 +944,17 @@ function createPanel(cfg) {
       document.body.style.userSelect = 'none';
       function onMove(e) {
         const newH = Math.min(MAX_H, Math.max(MIN_H, _startH + e.clientY - _startY));
-        // Výška sa nastavuje VŠETKÝM grafom v mriežke naraz — mriežka s rôzne
+        // V mriežke sa výška nastavuje VŠETKÝM grafom naraz — mriežka s rôzne
         // vysokými panelmi pôsobí rozbito a používateľ ju aj tak zakaždým
-        // dorovnával ručne.
-        const panels = [...document.querySelectorAll('#grid .panel')]
-          .filter(p => !p.id.startsWith('port-panel-'));
+        // dorovnával ručne. Mimo mriežky (dock pri Portfóliu, `#dock-grid`) je
+        // panel sám, takže sa mení len on; zacielenie musí ísť cez jeho vlastný
+        // kontajner, inak sa dock nezväčší vôbec.
+        const self = document.getElementById(id);
+        const parent = self?.parentElement;
+        const panels = parent?.id === 'grid'
+          ? [...parent.querySelectorAll(':scope > .panel')]
+              .filter(p => !p.id.startsWith('port-panel-'))
+          : (self ? [self] : []);
         panels.forEach(p => {
           const el = p.querySelector('.p-chart');
           if (el) el.style.flexBasis = newH + 'px';
