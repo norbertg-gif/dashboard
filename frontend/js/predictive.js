@@ -1105,9 +1105,17 @@ function pc_renderDailyExtra(data) {
   }).join('');
   const setupChecks = PC_SETUP_CHECKS.map(item => {
     const active = !!details[item.key];
-    return `<div class="signal-check ${active ? 'active' : 'inactive'}" title="${escHtml(item.tip)}">
+    // C2 sa do skóre nepočíta, keď páli aj C4 — prekryv je 100 % (zmerané na
+    // 1559 z 1559 dní). Bez tejto poznámky by panel ukazoval dve splnené
+    // podmienky a pritom silu 1/4, čo vyzerá ako chyba.
+    const notCounted = item.key === 'rsi_pullback' && active && !!details.zscore_dip;
+    const value = notCounted ? 'splnené · nezapočítané' : (active ? 'splnené' : 'chýba');
+    const tip = notCounted
+      ? item.tip + ' — pri splnenom C4 sa do sily nezapočítava: RSI je pod prahom vždy, keď je cena 1.5σ pod priemerom, takže by šlo o tú istú informáciu dvakrát.'
+      : item.tip;
+    return `<div class="signal-check ${active ? 'active' : 'inactive'}${notCounted ? ' not-counted' : ''}" title="${escHtml(tip)}">
       <span class="signal-check-label">${item.label}</span>
-      <span class="signal-check-value">${active ? 'splnené' : 'chýba'}</span>
+      <span class="signal-check-value">${value}</span>
     </div>`;
   }).join('');
   const representation = data.signal_representation_comparison || {};

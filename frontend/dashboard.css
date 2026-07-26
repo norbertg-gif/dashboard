@@ -2991,6 +2991,17 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .signal-check.inactive {
   opacity: 0.82;
 }
+/* Splnená podmienka, ktorá sa do sily nezapočítava (C2 pri splnenom C4).
+   Nesmie vyzerať ako plne aktívna — inak panel ukazuje dve splnené podmienky
+   a pritom silu 1/4, čo pôsobí ako chyba. */
+#predictiveTab .signal-check.not-counted {
+  border-color: var(--border2);
+  background: transparent;
+  border-style: dashed;
+}
+#predictiveTab .signal-check.not-counted .signal-check-value {
+  color: var(--muted2);
+}
 #predictiveTab .signal-check-label {
   font-size: 10px;
   color: var(--muted2);
