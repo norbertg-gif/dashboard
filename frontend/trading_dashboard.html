@@ -9,9 +9,8 @@
 <title>Trading Dashboard · Prehľad</title>
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
-<!-- SheetJS (~900 KB) sa načítava lazy až pri prvom XLSX importe — viď ensureXLSX() -->
 
-<link rel="stylesheet" href="/dashboard.css?v=20260726-015019">
+<link rel="stylesheet" href="/dashboard.css?v=20260726-020604">
 </head>
 <body data-main-tab="home">
 
@@ -34,6 +33,10 @@
   <div id="header-equities" aria-label="Live equity eToro uctov">
     <div class="header-equity acct1" onclick="switchAccount('1')" style="cursor:pointer;" title="Prepnúť na účet 1"><span class="header-equity-label" id="header-equity-label-1">Ucet 1</span><strong id="header-equity-1">--</strong></div>
     <div class="header-equity acct2" onclick="switchAccount('2')" style="cursor:pointer;" title="Prepnúť na účet 2"><span class="header-equity-label" id="header-equity-label-2">Ucet 2</span><strong id="header-equity-2">--</strong></div>
+  </div>
+  <div id="rail-statuses">
+    <span id="mem-profile-chip" class="advanced-only" style="display:none;"></span>
+    <div id="hdr-status">—</div>
   </div>
   <div id="hdr-right">
     <div id="ws-status" title="eToro WebSocket — live ceny" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);"><span id="ws-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block;"></span><span id="ws-status-txt">WS</span></div>
@@ -88,10 +91,6 @@
       </select>
     </div>
   </div>
-  <div class="tb-right">
-    <span id="mem-profile-chip" class="advanced-only" style="display:none;font-size:9px;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;padding:1px 5px;cursor:help;"></span>
-    <div id="hdr-status">—</div>
-  </div>
 </div>
 
 <!-- BODY -->
@@ -122,18 +121,6 @@
       <div style="display:flex;gap:5px;">
         <button id="sb-add-btn" onclick="document.getElementById('sb-input').focus()" style="flex:1;">+ pridaj ticker</button>
         <button onclick="clearWatchlist()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--font-ui);font-size:11px;font-weight:600;padding:5px 8px;border-radius:4px;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'" title="Vymaž celý watchlist">🗑</button>
-      </div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        <label id="sb-xlsx-btn" title="Import tickerov z XLSX (sheet Ranking, TOTAL ≥ prah)">
-          📊 import xlsx
-          <input type="file" id="sb-xlsx-input" accept=".xlsx" style="display:none;" onchange="importXlsx(event)">
-        </label>
-        <div style="display:flex;align-items:center;gap:3px;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 6px;flex-shrink:0;">
-          <span style="font-size:10px;color:var(--muted);white-space:nowrap;">min</span>
-          <input id="xlsx-threshold" type="number" min="0" max="999" value="100"
-            style="width:38px;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--font-mono);font-size:11px;font-weight:700;text-align:center;"
-            title="Minimálne skóre TOTAL pre import">
-        </div>
       </div>
     </div>
     <div id="sb-resizer"></div>
@@ -554,16 +541,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260726-015019"></script>
-  <script src="/js/live.js?v=20260726-015019"></script>
-  <script src="/js/portfolio.js?v=20260726-015019"></script>
-  <script src="/js/watchlist.js?v=20260726-015019"></script>
-  <script src="/js/scanner.js?v=20260726-015019"></script>
-  <script src="/js/chart_patterns.js?v=20260726-015019"></script>
-  <script src="/js/predictive.js?v=20260726-015019"></script>
-  <script src="/js/verdict.js?v=20260726-015019"></script>
-  <script src="/js/home.js?v=20260726-015019"></script>
-  <script src="/js/charts.js?v=20260726-015019"></script>
-  <script src="/js/main.js?v=20260726-015019"></script>
+  <script src="/js/core.js?v=20260726-020604"></script>
+  <script src="/js/live.js?v=20260726-020604"></script>
+  <script src="/js/portfolio.js?v=20260726-020604"></script>
+  <script src="/js/watchlist.js?v=20260726-020604"></script>
+  <script src="/js/scanner.js?v=20260726-020604"></script>
+  <script src="/js/chart_patterns.js?v=20260726-020604"></script>
+  <script src="/js/predictive.js?v=20260726-020604"></script>
+  <script src="/js/verdict.js?v=20260726-020604"></script>
+  <script src="/js/home.js?v=20260726-020604"></script>
+  <script src="/js/charts.js?v=20260726-020604"></script>
+  <script src="/js/main.js?v=20260726-020604"></script>
 </body>
 </html>

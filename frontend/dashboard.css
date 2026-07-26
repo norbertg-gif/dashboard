@@ -529,8 +529,31 @@ select.sel:focus {
   min-width: 140px;
 }
 
+#rail-statuses {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  flex-shrink: 0;
+}
+#mem-profile-chip {
+  max-width: 150px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-md);
+  color: var(--muted2);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
 #hdr-status {
-  margin-left: auto;
+  max-width: 150px;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 4px 10px;
@@ -541,6 +564,8 @@ select.sel:focus {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: var(--transition);
 }
 #hdr-status::before {
@@ -809,7 +834,7 @@ body.sidebar-collapsed #sb-resizer {
   gap: 8px;
   background: var(--bg-card);
 }
-#sb-add-btn, #sb-xlsx-btn {
+#sb-add-btn {
   width: 100%;
   background: transparent;
   border: 1px dashed var(--border);
@@ -828,12 +853,6 @@ body.sidebar-collapsed #sb-resizer {
   color: var(--accent);
   background: var(--accent-soft);
 }
-#sb-xlsx-btn:hover {
-  border-color: var(--yellow);
-  color: var(--yellow);
-  background: var(--yellow-soft);
-}
-
 #sb-resizer {
   position: absolute;
   right: -3px;
@@ -5715,6 +5734,24 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     padding: 7px 8px;
     border-radius: 8px;
     background: rgba(255,255,255,.025);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #rail-statuses {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #mem-profile-chip,
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-status {
+    width: 100%;
+    max-width: none;
+    min-height: 28px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.025);
+  }
+  :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-status {
+    justify-content: flex-start;
   }
   :where(html[data-variant="glass"] body:not(.light-mode)) #hdr-right {
     width: 100%;
