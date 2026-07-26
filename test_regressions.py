@@ -334,6 +334,35 @@ class RoicFundamentalsRegressionTests(unittest.TestCase):
         self.original_next_request_at = tb._roic_next_request_at
         tb._roic_next_request_at = 0.0
 
+    def test_qualified_symbol_matches_bare_universe_symbol(self):
+        # roic.ai vracia "NASDAQ:CTSH", naše univerzum má "CTSH". Naivné
+        # porovnanie celého reťazca nesedelo nikdy a resolúcia ticho vracala
+        # None — obohacovanie potom neurobilo nič a fail-soft to skryl.
+        for raw, sym in (
+            ("NASDAQ:CTSH", "CTSH"), ("CTSH", "CTSH"), ("NYSE:BKNG", "BKNG"),
+            ("EPA:TEP", "TEP.PA"), ("XETR:VVSM", "VVSM.DE"),
+        ):
+            self.assertTrue(tb._roic_symbol_matches(raw, sym), f"{raw} vs {sym}")
+        for raw, sym in (("NASDAQ:AAPL", "CTSH"), ("", "CTSH"), (None, "CTSH")):
+            self.assertFalse(tb._roic_symbol_matches(raw, sym), f"{raw} vs {sym}")
+
+    def test_ticker_search_sends_bare_base_symbol_and_bounded_limit(self):
+        captured = {}
+
+        def fake_get(path, params=None, stop_event=None):
+            captured.update({"path": path, "params": params or {}})
+            return {"data": [{"symbol": "EPA:TEP", "id": "tkr_x"}]}
+
+        with (
+            patch.object(tb, "_roic_get_json", side_effect=fake_get),
+            patch.object(tb, "_roic_load_ticker_ids", return_value={}),
+            patch.object(tb, "_roic_save_ticker_id"),
+        ):
+            self.assertEqual(tb._roic_resolve_ticker_id("TEP.PA"), "tkr_x")
+        # Yahoo prípona sa do dotazu neposiela a limit nesmie ostať na 500.
+        self.assertEqual(captured["params"].get("query"), "TEP")
+        self.assertEqual(captured["params"].get("limit"), 25)
+
     def tearDown(self):
         tb._roic_next_request_at = self.original_next_request_at
 

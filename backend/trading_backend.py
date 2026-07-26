@@ -11516,6 +11516,24 @@ def _roic_save_ticker_id(symbol: str, ticker_id) -> bool:
         return _roic_atomic_json_write(ROIC_TICKER_IDS_FILE, mapping)
 
 
+def _roic_symbol_matches(row_symbol, sym: str) -> bool:
+    """Zhoda symbolu z roic.ai s naším holým symbolom.
+
+    API vracia KVALIFIKOVANÝ symbol — „NASDAQ:CTSH", nie „CTSH" (dokumentované
+    v /api/docs/tickers/search). Naivné porovnanie celého reťazca preto nikdy
+    nesedelo a resolúcia ticho vracala None, čo fail-soft úplne pohltil.
+    Zároveň naše univerzum nesie Yahoo prípony (TEP.PA, VVSM.DE), ktoré
+    roic.ai nepozná — porovnáva sa teda časť za dvojbodkou aj základ symbolu
+    bez prípony burzy.
+    """
+    raw = str(row_symbol or "").upper()
+    if not raw:
+        return False
+    right = raw.rsplit(":", 1)[-1]
+    base = sym.split(".", 1)[0]
+    return sym in (raw, right) or base in (raw, right)
+
+
 def _roic_resolve_ticker_id(
     symbol: str, stop_event: threading.Event | None = None
 ):
@@ -11524,12 +11542,15 @@ def _roic_resolve_ticker_id(
     if cached is not None and cached != "":
         return cached
     payload = _roic_get_json(
-        ROIC_TICKER_SEARCH_PATH, params={"query": sym}, stop_event=stop_event
+        ROIC_TICKER_SEARCH_PATH,
+        # `limit` má default 500 — bez orezania sa tahá zbytočne veľká odpoveď.
+        params={"query": sym.split(".", 1)[0], "search_by": "symbol", "limit": 25},
+        stop_event=stop_event,
     )
     rows = _roic_rows(payload)
     exact = [
         row for row in rows
-        if str(row.get("symbol") or row.get("ticker") or "").upper() == sym
+        if _roic_symbol_matches(row.get("symbol") or row.get("ticker"), sym)
     ]
     candidates = exact or (rows if len(rows) == 1 else [])
     ticker_id = candidates[0].get("id") if candidates else None
