@@ -5957,6 +5957,14 @@ _roic_worker_stop = None
 _roic_rate_lock = threading.Lock()
 _roic_next_request_at = 0.0
 _roic_ticker_ids_lock = threading.Lock()
+_roic_status_lock = threading.Lock()
+_roic_status: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "total": 0, "done": 0, "current": None,
+    "enriched": 0, "unresolved": 0, "requests_made": 0,
+    "last_http_status": None, "last_path": None,
+    "rate_limit": {}, "errors": [],
+}
 _scanner_state = {
     "running": False,
     "started_at": None,
@@ -11475,6 +11483,18 @@ def _roic_apply_rate_headers(headers) -> None:
             _roic_next_request_at = max(_roic_next_request_at, reset + 0.25)
 
 
+def _roic_note(**fields) -> None:
+    """Zapíš stav workera. Bez tohto sa nedá rozlíšiť „beží a nedobehol" od
+    „spadol" a od „nikdy sa nespustil" — a fail-soft všetko ostatné skryje.
+    Presne to stálo jedno kolo slepého hádania, kým sa našla chyba v resolúcii
+    symbolov. Chyby držím ako krátky rolujúci zoznam, nech to nerastie."""
+    with _roic_status_lock:
+        err = fields.pop("error", None)
+        _roic_status.update(fields)
+        if err:
+            _roic_status["errors"] = ([err] + list(_roic_status.get("errors") or []))[:8]
+
+
 def _roic_get_json(
     path: str,
     *,
@@ -11482,7 +11502,11 @@ def _roic_get_json(
     stop_event: threading.Event | None = None,
 ):
     key = _roic_api_key()
-    if not key or not _roic_wait_for_slot(stop_event):
+    if not key:
+        _roic_note(error="chýba API kľúč (env ROIC)")
+        return None
+    if not _roic_wait_for_slot(stop_event):
+        _roic_note(error=f"prerušené pri čakaní na limit: {path}")
         return None
     try:
         response = requests.get(
@@ -11492,13 +11516,26 @@ def _roic_get_json(
             timeout=20,
         )
         _roic_apply_rate_headers(response.headers)
+        _roic_note(
+            last_http_status=response.status_code,
+            last_path=path,
+            requests_made=int(_roic_status.get("requests_made") or 0) + 1,
+            rate_limit={
+                k.lower(): v for k, v in response.headers.items()
+                if "ratelimit" in k.lower() or k.lower() == "retry-after"
+            },
+        )
         if response.status_code == 429:
+            _roic_note(error=f"429 na {path} — čakám do resetu")
             _roic_wait_for_slot(stop_event)
             return None
         if response.status_code != 200:
+            _roic_note(error=f"HTTP {response.status_code} na {path}: "
+                             f"{_scrub_token(response.text[:120])}")
             return None
         return response.json()
-    except Exception:
+    except Exception as e:
+        _roic_note(error=f"{path}: {type(e).__name__}: {_scrub_token(e)}")
         return None
 
 
@@ -11610,12 +11647,46 @@ def _run_roic_fundamentals_enrichment(
     scores: dict, stop_event: threading.Event
 ) -> None:
     if not _roic_api_key():
+        _roic_note(running=False, error="worker nespustený — chýba env ROIC")
         return
-    with _roic_enrichment_lock:
-        for symbol in _roic_top_dip_symbols(scores):
-            if stop_event.is_set():
-                break
-            _roic_enrich_symbol(symbol, stop_event)
+    symbols = _roic_top_dip_symbols(scores)
+    _roic_note(
+        running=True, total=len(symbols), done=0, current=None,
+        started_at=datetime.now(timezone.utc).isoformat(), finished_at=None,
+        enriched=0, unresolved=0, requests_made=0, errors=[],
+    )
+    try:
+        with _roic_enrichment_lock:
+            for index, symbol in enumerate(symbols, start=1):
+                if stop_event.is_set():
+                    _roic_note(error=f"zastavené pri {symbol} ({index}/{len(symbols)})")
+                    break
+                _roic_note(current=symbol, done=index - 1)
+                try:
+                    ok = _roic_enrich_symbol(symbol, stop_event)
+                except Exception as e:
+                    ok = False
+                    _roic_note(error=f"{symbol}: {type(e).__name__}: {_scrub_token(e)}")
+                with _roic_status_lock:
+                    field = "enriched" if ok else "unresolved"
+                    _roic_status[field] = int(_roic_status.get(field) or 0) + 1
+                _roic_note(done=index)
+    finally:
+        _roic_note(
+            running=False, current=None,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@app.get("/api/diagnostics/roic-status")
+def roic_enrichment_status():
+    """Stav obohacovania — beží / kde je / čo padlo / koľko zostáva z limitu."""
+    with _roic_status_lock:
+        status = dict(_roic_status)
+    status["key_configured"] = bool(_roic_api_key())
+    status["dip_min"] = ROIC_DIP_MIN
+    status["ticker_ids_cached"] = len(_roic_load_ticker_ids())
+    return status
 
 
 def start_roic_fundamentals_enrichment(scores: dict | None = None):
