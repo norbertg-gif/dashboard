@@ -624,29 +624,28 @@ function initCharts() {
 
   // Daily mini chart
   // Sync scroll/zoom — len real ↔ pred, daily je nezávislý
-  // Synchronizuje sa ČASOM, nie logickým rozsahom. Logický rozsah sú indexy
-  // sviečok a tie sedia len pri rovnakom počte barov — modelový graf ich má
-  // ale iný: pridáva výplň aj predikčné sviečky, a pri zapnutom „Skryť omyly"
-  // sa z prekryvu vyfiltrujú bary uprostred série. Index 50 potom na každom
-  // grafe znamená iný dátum a osi sa rozídu.
+  // Synchronizuje sa LOGICKÝM rozsahom (indexy sviečok), pretože je synchrónny
+  // — nastavenie hneď vráti riadenie a poistka `pc_syncing` stihne zabrániť
+  // spätnému volaniu. Časová synchronizácia sa tu skúšala a bola HORŠIA:
+  // `setVisibleRange` vyvolá callback až asynchrónne, po vypnutí poistky, takže
+  // si grafy rozsah donekonečna prehadzovali a zamrzli na celom datasete —
+  // prejavilo sa to tak, že sa nedali priblížiť ani posunúť.
+  // Podmienkou správnosti je ROVNAKÝ POČET BAROV v oboch sériách; o to sa stará
+  // whitespace výplň pri skrytých omyloch nižšie (hľadaj `pc_hideBacktestMisses`).
   let pc_syncing = false;
-  const pc_syncTime = (src, dst) => {
-    if (pc_syncing) return;
-    let range = null;
-    try { range = src.timeScale().getVisibleRange(); } catch (e) {}
-    if (!range) return;
+  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (pc_syncing || !range) return;
     pc_syncing = true;
-    // Cieľový graf nemusí mať dáta na celom rozsahu (predikcia siaha do
-    // budúcnosti) — LWC si to oreže samo, výnimku len prehltneme.
-    try { dst.timeScale().setVisibleRange(range); } catch (e) {}
+    pc_predChartInst.timeScale().setVisibleLogicalRange(range);
     pc_syncing = false;
     pc_refreshVolumeProfile();
-  };
-  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (range) pc_syncTime(pc_realChartInst, pc_predChartInst);
   });
   pc_predChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (range) pc_syncTime(pc_predChartInst, pc_realChartInst);
+    if (pc_syncing || !range) return;
+    pc_syncing = true;
+    pc_realChartInst.timeScale().setVisibleLogicalRange(range);
+    pc_syncing = false;
+    pc_refreshVolumeProfile();
   });
 
   // Sync crosshair bidirectionally using logical index via time
@@ -855,14 +854,16 @@ function renderCharts(data) {
     .map(c => ({ time: c.time, open: c.close, high: c.close, low: c.close, close: c.close }));
 
   if (pc_showBacktest && overlay.length) {
-    // Use real predicted OHLC from backend
-    const predCandles = visibleOverlay.map(r => ({
-      time:  r.time,
-      open:  r.pred_open,
-      high:  r.pred_high,
-      low:   r.pred_low,
-      close: r.pred_close,
-    }));
+    // Skryté omyly sa NEVYHADZUJÚ zo série — nahradí ich whitespace ({time} bez
+    // cien). LWC ho nevykreslí, ale index si podrží. Keby bar vypadol, posunuli
+    // by sa všetky nasledujúce indexy a logická synchronizácia s hlavným grafom
+    // by od toho miesta ukazovala iný dátum — presne to rozhadzovalo osi.
+    const predCandles = overlay.map(r => (
+      (pc_hideBacktestMisses && r.correct === false)
+        ? { time: r.time }
+        : { time:  r.time, open:  r.pred_open, high:  r.pred_high,
+            low:   r.pred_low, close: r.pred_close }
+    ));
     pc_predCandleSeries.setData([...padCandles, ...predCandles]);
 
     // hit/miss markers on pred candles
