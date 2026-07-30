@@ -231,6 +231,10 @@ function togglePredictiveModelChart() {
 let pc_realChartInst = null, pc_predChartInst = null;
 let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testing)
 let pc_orderPriceLines = [];   // čakajúce objednávky na hlavnom weekly grafe — treba čistiť medzi reloadmi (pc_realSeries pretrváva)
+let pc_weeklyBaseMarkers = [];
+let pc_dailyMainBaseMarkers = [];
+let pc_earningsHistory = [];
+let pc_earningsTicker = null;
 
 let pc_realSeries = null, pc_predSeries = null;
 let pc_realVolSeries = null;
@@ -339,6 +343,74 @@ function pc_makeChart(containerId) {
 function pc_attachMarkerTooltip(chart, containerId) {
   const cont = document.getElementById(containerId);
   attachMarkerTooltip(chart, cont, objectId => pc_markerMeta[String(objectId)]);
+}
+
+function pc_clearEarningsMarkerMeta() {
+  for (const markerId of Object.keys(pc_markerMeta)) {
+    if (markerId.startsWith('earnings:predictive:')) delete pc_markerMeta[markerId];
+  }
+}
+
+function pc_buildEarningsMarkers(view, candles) {
+  if (!candles?.length || !pc_earningsHistory.length) return [];
+  return pc_earningsHistory.map((h, index) => {
+    if (!h?.date) return null;
+    const time = resolveMarkerTime({ openDate: h.date }, candles);
+    if (!time) return null;
+    const markerId = `earnings:predictive:${view}:${index}:${h.date}`;
+    const color = h.beat == null ? CHART_COLORS.neutral
+      : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
+    const actual = Number(h.actual);
+    const estimate = Number(h.estimate);
+    const surprise = h.surprise_pct == null ? NaN : Number(h.surprise_pct);
+    const fmtEps = value => Number.isFinite(value) ? value.toFixed(2) : '?';
+    pc_markerMeta[markerId] = { html:
+      `<b>Earnings</b> · ${escHtml(h.quarter || h.date)}` +
+      `<div style="display:flex;gap:10px;margin-top:2px;">` +
+        `<span class="tip-muted">Actual</span><b>${fmtEps(actual)}</b>` +
+        `<span class="tip-muted">Odhad</span><b>${fmtEps(estimate)}</b>` +
+      `</div>` +
+      (h.beat == null
+        ? `<div class="tip-muted" style="margin-top:2px;">porovnanie nie je porovnateľné</div>`
+        : (Number.isFinite(surprise)
+          ? `<div style="color:${color};margin-top:2px;">${surprise >= 0 ? '+' : ''}${surprise.toFixed(1)}% ${h.beat ? 'beat' : 'miss'}</div>`
+          : '')) };
+    return { id: markerId, time, position: 'aboveBar', color, shape: 'circle', size: 0, text: 'E' };
+  }).filter(Boolean);
+}
+
+function pc_applyMainChartMarkers() {
+  pc_clearEarningsMarkerMeta();
+  const ticker = String(pc_lastData?.ticker || '').trim().toUpperCase();
+  const hasCurrentEarnings = ticker && pc_earningsTicker === ticker;
+  if (pc_realSeries) {
+    const earnings = hasCurrentEarnings
+      ? pc_buildEarningsMarkers('weekly', pc_lastData?.candles || [])
+      : [];
+    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+  }
+  if (pc_dailyMainSeries && pc_dailyMainTicker === ticker) {
+    const earnings = hasCurrentEarnings
+      ? pc_buildEarningsMarkers('daily', pc_lastData?.daily_candles || [])
+      : [];
+    setSeriesMarkers(pc_dailyMainSeries, [...pc_dailyMainBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+  }
+}
+
+function pc_resetEarningsMarkers(ticker) {
+  pc_earningsTicker = String(ticker || '').trim().toUpperCase() || null;
+  pc_earningsHistory = [];
+  pc_clearEarningsMarkerMeta();
+  if (pc_realSeries) setSeriesMarkers(pc_realSeries, pc_weeklyBaseMarkers);
+  if (pc_dailyMainSeries) setSeriesMarkers(pc_dailyMainSeries, pc_dailyMainBaseMarkers);
+}
+
+function pc_setEarningsHistory(ticker, history) {
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!sym || String(pc_lastData?.ticker || '').trim().toUpperCase() !== sym) return;
+  pc_earningsTicker = sym;
+  pc_earningsHistory = Array.isArray(history) ? history.filter(h => h?.date) : [];
+  pc_applyMainChartMarkers();
 }
 
 // ── Volume Profile (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) ──
@@ -734,7 +806,8 @@ function renderCharts(data) {
       markers.push({ id: posId, time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
     });
   }
-  setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
+  pc_weeklyBaseMarkers = markers.sort((a, b) => a.time - b.time);
+  pc_applyMainChartMarkers();
 
   // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
   // pc_realSeries pretrváva medzi reloadmi (initCharts beží raz), takže staré
@@ -1936,6 +2009,7 @@ function switchView(view) {
   if (haControls) haControls.style.display = view === 'daily' ? 'flex' : 'none';
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
+  else pc_applyMainChartMarkers();
   pc_applyOverlays();
   pc_applyChartPatterns();
 }
@@ -2038,6 +2112,7 @@ function renderDailyMain(data) {
   });
   pc_dailyMainSeries = cs;
   cs.setData(chartCandles);
+  pc_attachMarkerTooltip(pc_dailyMainInst, 'dailyMainChart');
 
   // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
   // Celý chart/séria sa tu vytvára nanovo pri každom volaní, takže staré
@@ -2069,8 +2144,9 @@ function renderDailyMain(data) {
     kj.setData(ind.ichi_kijun);
   }
 
+  pc_dailyMainBaseMarkers = [];
   if (data.daily_buy_signals && data.daily_buy_signals.length) {
-    const markers = data.daily_buy_signals.map(s => {
+    pc_dailyMainBaseMarkers = data.daily_buy_signals.map(s => {
       const display = pc_dailyMarkerMode === 'return'
         ? dailySignalReturnMarker(s, data.daily_candles)
         : { color: sigTierColor(s.tier, s.score), shape: 'arrowUp', text: s.score + '/4' };
@@ -2083,8 +2159,8 @@ function renderDailyMain(data) {
         size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1),
       };
     });
-    setSeriesMarkers(cs, markers);
   }
+  pc_applyMainChartMarkers();
 
   if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
   else pc_dailyMainInst.timeScale().fitContent();
@@ -2209,9 +2285,13 @@ async function pc_loadInsights(ticker) {
   card.style.display = 'none';
   try {
     const r = await fetch('/api/ticker/insights/' + encodeURIComponent(sym));
-    if (!r.ok || _insightsForTicker !== sym) return;
+    if (!r.ok || _insightsForTicker !== sym) {
+      if (_insightsForTicker === sym) pc_setEarningsHistory(sym, []);
+      return;
+    }
     const d = await r.json();
     if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
+    pc_setEarningsHistory(sym, d.eps_history);
     const fundamentals = d.roic_fundamentals || {};
     const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';
     const roicNumber = fundamentals.roic == null || fundamentals.roic === '' ? NaN : Number(fundamentals.roic);
@@ -2312,7 +2392,9 @@ async function pc_loadInsights(ticker) {
     if (!rows.length) return;
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
     card.style.display = '';
-  } catch (e) { /* fail-soft */ }
+  } catch (e) {
+    if (_insightsForTicker === sym) pc_setEarningsHistory(sym, []);
+  }
 }
 
 // Free valuation is deliberately lazy: it costs three Finnhub requests, then stays cached 24 h server-side.
@@ -2813,6 +2895,8 @@ async function loadData(reoptimize = false) {
   const period = document.getElementById('periodSel').value;
   if (!ticker) return;
   rememberPredictiveTicker(ticker);
+  _insightsForTicker = ticker;
+  pc_resetEarningsMarkers(ticker);
 
   const btn = document.getElementById('loadBtn');
   const status = document.getElementById('statusMsg');
