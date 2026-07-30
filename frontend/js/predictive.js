@@ -624,20 +624,29 @@ function initCharts() {
 
   // Daily mini chart
   // Sync scroll/zoom — len real ↔ pred, daily je nezávislý
+  // Synchronizuje sa ČASOM, nie logickým rozsahom. Logický rozsah sú indexy
+  // sviečok a tie sedia len pri rovnakom počte barov — modelový graf ich má
+  // ale iný: pridáva výplň aj predikčné sviečky, a pri zapnutom „Skryť omyly"
+  // sa z prekryvu vyfiltrujú bary uprostred série. Index 50 potom na každom
+  // grafe znamená iný dátum a osi sa rozídu.
   let pc_syncing = false;
-  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (pc_syncing || !range) return;
+  const pc_syncTime = (src, dst) => {
+    if (pc_syncing) return;
+    let range = null;
+    try { range = src.timeScale().getVisibleRange(); } catch (e) {}
+    if (!range) return;
     pc_syncing = true;
-    pc_predChartInst.timeScale().setVisibleLogicalRange(range);
+    // Cieľový graf nemusí mať dáta na celom rozsahu (predikcia siaha do
+    // budúcnosti) — LWC si to oreže samo, výnimku len prehltneme.
+    try { dst.timeScale().setVisibleRange(range); } catch (e) {}
     pc_syncing = false;
     pc_refreshVolumeProfile();
+  };
+  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (range) pc_syncTime(pc_realChartInst, pc_predChartInst);
   });
   pc_predChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (pc_syncing || !range) return;
-    pc_syncing = true;
-    pc_realChartInst.timeScale().setVisibleLogicalRange(range);
-    pc_syncing = false;
-    pc_refreshVolumeProfile();
+    if (range) pc_syncTime(pc_predChartInst, pc_realChartInst);
   });
 
   // Sync crosshair bidirectionally using logical index via time
