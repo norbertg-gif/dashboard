@@ -873,50 +873,48 @@ function renderCharts(data) {
     .filter(c => c.time < overlayStart)
     .map(c => ({ time: c.time, open: c.close, high: c.close, low: c.close, close: c.close }));
 
-  if (pc_showBacktest && overlay.length) {
-    // Skryté omyly sa nevyhadzujú zo série — vykreslia sa úplne priehľadné.
-    // Zachovajú si SKUTOČNÉ ceny (nie nulové či jednotkové), inak by stiahli
-    // cenovú os. Priehľadná sviečka je spoľahlivejšia než whitespace bod, ktorý
-    // v candlestick sérii nemusí index rezervovať.
-    const INVISIBLE = 'rgba(0,0,0,0)';
-    const predCandles = overlay.map(r => {
-      const bar = { time:  r.time, open: r.pred_open, high: r.pred_high,
-                    low:   r.pred_low, close: r.pred_close };
-      if (pc_hideBacktestMisses && r.correct === false) {
-        bar.color = INVISIBLE; bar.borderColor = INVISIBLE; bar.wickColor = INVISIBLE;
-      }
-      return bar;
-    });
-    pc_predCandleSeries.setData([...padCandles, ...predCandles]);
+  // Skryté omyly sa nevyhadzujú zo série — vykreslia sa úplne priehľadné.
+  // Zachovajú si SKUTOČNÉ ceny (nie nulové či jednotkové), inak by stiahli
+  // cenovú os. Priehľadná sviečka je spoľahlivejšia než whitespace bod, ktorý
+  // v candlestick sérii nemusí index rezervovať.
+  const INVISIBLE = 'rgba(0,0,0,0)';
+  const predCandles = overlay.map(r => {
+    const bar = { time:  r.time, open: r.pred_open, high: r.pred_high,
+                  low:   r.pred_low, close: r.pred_close };
+    if (pc_hideBacktestMisses && r.correct === false) {
+      bar.color = INVISIBLE; bar.borderColor = INVISIBLE; bar.wickColor = INVISIBLE;
+    }
+    return bar;
+  });
 
-    // hit/miss markers on pred candles
-    const markers = visibleOverlay.map(r => ({
-      time:     r.time,
-      position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
-      color:    r.correct === null ? '#94a3b8' : r.correct ? CHART_COLORS.up : CHART_COLORS.down,
-      shape:    'circle',
-      size:     r.correct === null ? 0.7 : 0.5,
-    }));
-    setSeriesMarkers(pc_predCandleSeries, markers);
-  } else {
-    pc_predCandleSeries.setData(padCandles);
-    setSeriesMarkers(pc_predCandleSeries, []);
-  }
+  // Séria sa skladá NA JEDNOM mieste, nech sa nedá rozísť s tou vyššie.
+  const showOverlay = pc_showBacktest && overlay.length;
+  const series = showOverlay ? [...padCandles, ...predCandles] : [...padCandles];
 
-  // Future prediction candle (next week)
-  pc_futureCandleSeries.setData([pred]);
-
-  // Current open week: add prediction candle at current week's timestamp
+  // Predikcia práve otvoreného týždňa patrí na ČAS POSLEDNEJ SVIEČKY. Chodí
+  // s rovnakým denným posunom ako prekryv (sviečka nedeľa, predikcia pondelok),
+  // takže bez prilepenia by si vyrobila vlastný stĺpec a modelový graf by bol
+  // popredu o DVE sviečky namiesto jednej — o tú svoju a o budúcu.
   if (data.current_week_open && data.pred_current_candle) {
-    // Append to pc_predCandleSeries after backtest candles
-    const existing = pc_showBacktest && overlay.length
-      ? [...padCandles, ...visibleOverlay.map(r => ({
-          time: r.time, open: r.pred_open, high: r.pred_high,
-          low: r.pred_low, close: r.pred_close,
-        }))]
-      : padCandles;
-    pc_predCandleSeries.setData([...existing, data.pred_current_candle]);
+    const cur = { ...data.pred_current_candle, time: snapToCandle(data.pred_current_candle.time) };
+    const at = series.findIndex(b => b.time === cur.time);
+    if (at >= 0) series[at] = cur; else series.push(cur);
   }
+  pc_predCandleSeries.setData(series);
+
+  setSeriesMarkers(pc_predCandleSeries, showOverlay
+    ? visibleOverlay.map(r => ({
+        time:     r.time,
+        position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
+        color:    r.correct === null ? '#94a3b8' : r.correct ? CHART_COLORS.up : CHART_COLORS.down,
+        shape:    'circle',
+        size:     r.correct === null ? 0.7 : 0.5,
+      }))
+    : []);
+
+  // Budúca predikcia (ďalší týždeň) — jediná, ktorá smie prečnievať vpravo,
+  // lebo pre ňu reálna sviečka ešte neexistuje.
+  pc_futureCandleSeries.setData([pred]);
 
   // Daily mini chart
   if (pc_dailyChartInst && data.daily_candles && data.daily_candles.length) {
