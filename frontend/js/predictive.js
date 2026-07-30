@@ -846,7 +846,27 @@ function renderCharts(data) {
   // Pad pc_predCandleSeries with invisible points at start so logical indices align with real chart
   // Use NaN-valued candles — lightweight-charts skips them visually but keeps the index
   const firstCandle = candles[0];
-  const overlay = Array.isArray(bt.overlay) ? bt.overlay : [];
+  const rawOverlay = Array.isArray(bt.overlay) ? bt.overlay : [];
+
+  // Backtest prekryv chodí s časmi posunutými o deň oproti sviečkam — sviečky
+  // sú datované na nedeľu (2026-07-26), prekryv na pondelok (2026-07-27), a
+  // netrafí ani jeden zo 75 záznamov. LWC skladá časovú os ako ZJEDNOTENIE
+  // časov všetkých sérií, takže modelový graf mal 179 stĺpcov proti 104 na
+  // hlavnom a rovnaký logický index znamenal na každom grafe iný dátum. Žiadne
+  // ladenie synchronizácie to opraviť nemohlo. Prekryv preto prilepíme na čas
+  // najbližšej sviečky; tolerancia 4 dni, aby sa nespojili dva rôzne bary.
+  const candleTimes = candles.map(c => Number(c.time));
+  const snapToCandle = (t) => {
+    const x = Number(t);
+    let best = x, bestDelta = Infinity;
+    for (const ct of candleTimes) {
+      const delta = Math.abs(x - ct);
+      if (delta < bestDelta) { bestDelta = delta; best = ct; }
+    }
+    return bestDelta <= 4 * 86400 ? best : x;
+  };
+  const overlay = rawOverlay.map(r => ({ ...r, time: snapToCandle(r.time) }));
+
   const visibleOverlay = pc_hideBacktestMisses ? overlay.filter(r => r.correct !== false) : overlay;
   const overlayStart = overlay.length ? overlay[0].time : firstCandle.time;
   const padCandles = candles
@@ -854,16 +874,19 @@ function renderCharts(data) {
     .map(c => ({ time: c.time, open: c.close, high: c.close, low: c.close, close: c.close }));
 
   if (pc_showBacktest && overlay.length) {
-    // Skryté omyly sa NEVYHADZUJÚ zo série — nahradí ich whitespace ({time} bez
-    // cien). LWC ho nevykreslí, ale index si podrží. Keby bar vypadol, posunuli
-    // by sa všetky nasledujúce indexy a logická synchronizácia s hlavným grafom
-    // by od toho miesta ukazovala iný dátum — presne to rozhadzovalo osi.
-    const predCandles = overlay.map(r => (
-      (pc_hideBacktestMisses && r.correct === false)
-        ? { time: r.time }
-        : { time:  r.time, open:  r.pred_open, high:  r.pred_high,
-            low:   r.pred_low, close: r.pred_close }
-    ));
+    // Skryté omyly sa nevyhadzujú zo série — vykreslia sa úplne priehľadné.
+    // Zachovajú si SKUTOČNÉ ceny (nie nulové či jednotkové), inak by stiahli
+    // cenovú os. Priehľadná sviečka je spoľahlivejšia než whitespace bod, ktorý
+    // v candlestick sérii nemusí index rezervovať.
+    const INVISIBLE = 'rgba(0,0,0,0)';
+    const predCandles = overlay.map(r => {
+      const bar = { time:  r.time, open: r.pred_open, high: r.pred_high,
+                    low:   r.pred_low, close: r.pred_close };
+      if (pc_hideBacktestMisses && r.correct === false) {
+        bar.color = INVISIBLE; bar.borderColor = INVISIBLE; bar.wickColor = INVISIBLE;
+      }
+      return bar;
+    });
     pc_predCandleSeries.setData([...padCandles, ...predCandles]);
 
     // hit/miss markers on pred candles
