@@ -11,6 +11,14 @@ services:
         value: "1"
       - key: DATA_DIR
         value: /data
+      # Pro tier (4 GB). Bez tejto premennej padá kód na default "low" a beží
+      # v úspornom režime aj na zaplatenom stroji.
+      - key: DASH_MEMORY_PROFILE
+        value: normal
+      # ML_N_JOBS=2 využije obe jadrá. Bez tohto by si každý joblib worker
+      # otvoril ešte vlastné BLAS vlákna a bili by sa o tie isté dve jadrá.
+      - key: OMP_NUM_THREADS
+        value: "1"
       - key: ETORO_API_KEY_1
         sync: false
       - key: ETORO_USER_KEY_1

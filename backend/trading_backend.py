@@ -126,6 +126,14 @@ def admin_memory():
             "massive_sp500": ENABLE_MASSIVE_SP500,
             "massive_market": ENABLE_MASSIVE_MARKET,
         },
+        "ml_params": {
+            "n_estimators": ML_N_ESTIMATORS,
+            "max_depth": ML_MAX_DEPTH,
+            "min_samples_leaf": ML_MIN_SAMPLES_LEAF,
+            "calibration_cv": ML_CALIB_CV,
+            "n_jobs": ML_N_JOBS,
+            "omp_num_threads": os.getenv("OMP_NUM_THREADS"),
+        },
         "cache_sizes": {
             "model": len(_MODEL_CACHE) if "_MODEL_CACHE" in globals() else None,
             "backtest": len(_BACKTEST_CACHE) if "_BACKTEST_CACHE" in globals() else None,
@@ -283,6 +291,31 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
 # posledná sviečka) nezmení, výsledok je identický — tak ho cacheujeme do najbližšej
 # uzavretej sviečky. ML ukladá len (acc, bull_prob), nie samotný model (šetrí RAM
 # na Render free tieri); regime ukladá celý dict (malý).
+# Hyperparametre RandomForestu. Pôvodné hodnoty (50 stromov, hĺbka 4, kalibrácia
+# na 2 foldoch, jedno jadro) boli orezané na 512 MB Render tier, nie zvolené
+# podľa kvality modelu. Sú ladené cez env, aby sa dali meniť bez redeployu —
+# accuracy z walk-forward foldov sa zobrazuje v UI, takže dopad zmeny vidno hneď.
+#
+# Cena: CalibratedClassifierCV(cv=N) fituje N lesov a volá sa 4× (3 foldy +
+# finálny model). Cache sa kľúčuje poslednou týždennou sviečkou, takže sa platí
+# raz za ticker za týždeň — ale platí sa PRIAMO V REQUEST PATH pri načítaní
+# grafu, takže to nie je zadarmo.
+#
+# Merané na 260 týždenných sviečkach, čas relatívne k pôvodnej konfigurácii:
+#   50/4/cv2/1job   1.0x   (pôvodná, orezaná na 512 MB)
+#   150/6/cv2/2job  3.6x   (default nižšie)
+#   300/6/cv2/2job  7.1x
+#   300/8/cv3/2job 10.0x   (~7 s na ticker — na request path priveľa)
+# n_jobs=2 pomáha menej, než by sa čakalo: pri takto malých lesoch zožerie
+# réžia joblibu väčšinu zisku z druhého jadra.
+ML_N_ESTIMATORS = int(os.getenv("ML_N_ESTIMATORS", "50" if _LOW_MEMORY else "150"))
+ML_MAX_DEPTH = int(os.getenv("ML_MAX_DEPTH", "4" if _LOW_MEMORY else "6"))
+ML_MIN_SAMPLES_LEAF = int(os.getenv("ML_MIN_SAMPLES_LEAF", "5"))
+ML_CALIB_CV = int(os.getenv("ML_CALIB_CV", "2"))
+# n_jobs>1 má zmysel až od 2 CPU. Pozor na oversubscription: ak nie je
+# OMP_NUM_THREADS=1, každý joblib worker si ešte otvorí vlastné BLAS vlákna.
+ML_N_JOBS = int(os.getenv("ML_N_JOBS", "1" if _LOW_MEMORY else "2"))
+
 _MODEL_CACHE: dict = {}
 _MODEL_CACHE_LOCK = threading.Lock()
 _MODEL_CACHE_MAX = 48 if _LOW_MEMORY else 256
@@ -330,10 +363,11 @@ def train_ml_model(df, cache_key=None):
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.calibration import CalibratedClassifierCV
         base = RandomForestClassifier(
-            n_estimators=50, max_depth=4,
-            min_samples_leaf=5, random_state=42, n_jobs=1
+            n_estimators=ML_N_ESTIMATORS, max_depth=ML_MAX_DEPTH,
+            min_samples_leaf=ML_MIN_SAMPLES_LEAF, random_state=42,
+            n_jobs=ML_N_JOBS,
         )
-        return CalibratedClassifierCV(base, cv=2)
+        return CalibratedClassifierCV(base, cv=ML_CALIB_CV)
 
     # Walk-forward foldy: train na [0:60%/70%/80%], test na nasledujúcich 10 %
     fold_accs = []
@@ -4740,8 +4774,13 @@ def get_chart(
         print("[CHART] Step 11: ML training...", flush=True)
         if detail_mode == "advanced" and ENABLE_PREDICTIVE_ML:
             try:
+                _ml_t0 = _time_module.monotonic()
                 _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
-                print("[CHART] Step 12: ML done", flush=True)
+                _ml_ms = (_time_module.monotonic() - _ml_t0) * 1000
+                # Cache hit je rádovo mikrosekundy; čo vidno v logu, je skutočný fit.
+                print(f"[CHART] Step 12: ML done in {_ml_ms:.0f} ms "
+                      f"(trees={ML_N_ESTIMATORS} depth={ML_MAX_DEPTH} "
+                      f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS})", flush=True)
             except Exception:
                 ml_acc, ml_bull_prob = None, 0.5
         else:
