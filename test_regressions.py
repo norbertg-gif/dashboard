@@ -1423,3 +1423,48 @@ class OhlcvBatchCacheKeyRegressionTests(unittest.TestCase):
             check=True, capture_output=True, text=True,
         )
         self.assertEqual(json.loads(completed.stdout), expected)
+
+
+class MlDriversRegressionTests(unittest.TestCase):
+    """train_ml_model vracia 4-tuple. Predtým vracalo 3 — rozbalenie na volajúcej
+    strane je tichý ValueError zachytený v except vetve, takže by sa ML len
+    prestalo počítať a UI by ukázalo prázdne hodnoty bez chybovej hlášky."""
+
+    @staticmethod
+    def _frame(seed=3, n=200):
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        close = 100 * np.exp(np.cumsum(rng.normal(0.001, 0.03, n)))
+        df = pd.DataFrame(
+            {"Close": close, "Open": close * 0.99, "High": close * 1.02,
+             "Low": close * 0.98, "Volume": rng.integers(1e5, 1e6, n)},
+            index=pd.date_range("2021-01-01", periods=n, freq="W"),
+        )
+        for feat in tb.ML_FEATURES:
+            df[feat] = rng.normal(0, 1, n)
+        # Signál do rsi, aby model mal čo nájsť a importance nebola náhodná
+        df["rsi"] = (df["Close"].shift(-1) > df["Close"]).astype(float)
+        return df
+
+    def test_returns_four_values_with_drivers(self):
+        model, acc, bull, drivers = tb.train_ml_model(self._frame(), cache_key=None)
+        self.assertIsNotNone(acc)
+        self.assertTrue(drivers, "drivers nesmú byť prázdne pri úspešnom fite")
+        top = drivers[0]
+        self.assertEqual(set(top), {"feature", "importance", "zscore"})
+        self.assertIn(top["feature"], tb.ML_FEATURES)
+        self.assertEqual(top["feature"], "rsi", "najsilnejšia feature má byť tá so signálom")
+
+    def test_short_frame_still_returns_four_values(self):
+        result = tb.train_ml_model(self._frame(n=30), cache_key=None)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[3], [])
+
+    def test_legacy_two_tuple_cache_entry_does_not_crash(self):
+        """Cache je in-memory, ale po deployi v nej môžu byť staré záznamy."""
+        tb._MODEL_CACHE[("ml", "LEGACY")] = (55.0, 0.6)
+        try:
+            model, acc, bull, drivers = tb.train_ml_model(self._frame(), cache_key="LEGACY")
+            self.assertEqual((acc, bull, drivers), (55.0, 0.6, []))
+        finally:
+            tb._MODEL_CACHE.pop(("ml", "LEGACY"), None)

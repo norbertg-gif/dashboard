@@ -1481,7 +1481,8 @@ function pc_renderSidebar(data) {
     <div class="pred-row"><span class="tt key" data-tip="Predikovaná záverečná cena. Vypočítaná z váženého composite signálu a ATR.">Close <span class="tt-icon">ⓘ</span></span><span class="val">${pc.close.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Sila kombinovaného technického signálu. Rozsah -100% až +100%. Blízko nuly = model si nie je istý smerom.">Composite signal <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--pred)">${(p.composite*100).toFixed(1)}%</span></div>
     ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? CHART_COLORS.up : data.ml_bull_prob <= 45 ? CHART_COLORS.down : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
-    ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Historická presnosť ML modelu na testovacej sade (30% dát). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
+    ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Priemerná presnosť ML modelu cez 3 walk-forward foldy (trénuje sa na 60/70/80% histórie, testuje na nasledujúcich 10%). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
+    ${renderMlDrivers(data.ml_drivers)}
     ${horizonNote}
   `;
 
@@ -3016,4 +3017,37 @@ function exportSnapshot() {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => { btn.innerHTML = '&#128190; Export snapshot'; btn.disabled = false; }, 2000);
+}
+
+// ── ML drivers ───────────────────────────────────────────────────────────────
+// Importance je globálna (platí pre model, nie pre tento týždeň), z-skóre je
+// aktuálne. Až kombinácia oboch niečo hovorí: dôležitá feature s netypickou
+// hodnotou je to, čo reálne ťahá predikciu práve teraz.
+const ML_FEATURE_LABELS = {
+  ret_1: 'Návratnosť 1 sviečka', ret_3: 'Návratnosť 3 sviečky',
+  ret_5: 'Návratnosť 5 sviečok', body: 'Telo sviečky', range: 'Rozpätie sviečky',
+  volatility: 'Volatilita', ema20_dist: 'Vzdialenosť od EMA20', rsi: 'RSI',
+  macd_hist: 'MACD histogram', vol_ratio: 'Objem vs priemer',
+  roc_4: 'Rate of change (4)', pos_52w: 'Pozícia v 52-týž. rozsahu',
+};
+
+function renderMlDrivers(drivers) {
+  if (!Array.isArray(drivers) || !drivers.length) return '';
+  const rows = drivers.map(d => {
+    const label = ML_FEATURE_LABELS[d.feature] || d.feature;
+    // |z| >= 1.5 = hodnota mimo bežného pásma → stojí za pozornosť
+    const odd = Math.abs(d.zscore) >= 1.5;
+    const zColor = odd ? (d.zscore > 0 ? CHART_COLORS.up : CHART_COLORS.down) : 'var(--muted)';
+    const zText = `${d.zscore > 0 ? '+' : ''}${d.zscore.toFixed(2)}σ`;
+    return `<div class="pred-row">
+      <span class="tt key" data-tip="Podiel na rozhodovaní modelu: ${d.importance}%. Aktuálna hodnota je ${zText} od historického priemeru.">
+        ${label}${odd ? ' ⚠' : ''} <span class="tt-icon">ⓘ</span></span>
+      <span class="val"><span style="color:var(--muted)">${d.importance}%</span>
+        <span style="color:${zColor};margin-left:8px">${zText}</span></span>
+    </div>`;
+  }).join('');
+  return `<div class="pred-row" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+      <span class="tt key" data-tip="Features s najväčším vplyvom na model, a ako netypická je ich súčasná hodnota (σ = smerodajné odchýlky od priemeru). ⚠ = hodnota mimo bežného pásma.">
+        Čo ženie predikciu <span class="tt-icon">ⓘ</span></span><span class="val"></span>
+    </div>${rows}`;
 }

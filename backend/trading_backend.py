@@ -346,13 +346,15 @@ def train_ml_model(df, cache_key=None):
     Pri cache hit je model None (nepoužíva sa downstream) — vraciame (acc, bull)."""
     cached = _model_cache_get("ml", cache_key)
     if cached is not None:
-        return None, cached[0], cached[1]
+        # Staršie záznamy v cache môžu byť ešte 2-tuple (bez drivers).
+        return (None, cached[0], cached[1],
+                cached[2] if len(cached) > 2 else [])
     df_ml = df.copy()
     df_ml["target"] = (df_ml["Close"].shift(-1) > df_ml["Close"]).astype(int)
     df_ml = df_ml.dropna(subset=ML_FEATURES + ["target"])
 
     if len(df_ml) < 40:
-        return None, None, 0.5
+        return None, None, 0.5, []
 
     usable = df_ml.iloc[:-1]  # last row has no future close
     X_all = usable[ML_FEATURES].values
@@ -384,7 +386,7 @@ def train_ml_model(df, cache_key=None):
             continue
 
     if not fold_accs:
-        return None, None, 0.5
+        return None, None, 0.5, []
 
     acc = float(np.mean(fold_accs)) * 100
 
@@ -395,8 +397,51 @@ def train_ml_model(df, cache_key=None):
     bull_prob = float(model.predict_proba(last_row)[0][1])
 
     acc_rounded = round(acc, 1)
-    _model_cache_put("ml", cache_key, (acc_rounded, bull_prob))
-    return model, acc_rounded, bull_prob
+    drivers = _ml_drivers(model, X_all, last_row[0])
+    _model_cache_put("ml", cache_key, (acc_rounded, bull_prob, drivers))
+    return model, acc_rounded, bull_prob, drivers
+
+
+def _ml_drivers(model, X_train, last_values, top_n: int = 5):
+    """Ktoré features ženú predikciu — importance modelu + ako netypická je
+    ich aktuálna hodnota.
+
+    Samotná importance je globálna (platí pre model, nie pre tento konkrétny
+    týždeň), preto sa k nej pridáva z-skóre poslednej sviečky voči trénovacím
+    dátam. Kombinácia "dôležitá feature + netypická hodnota" je to, čo v praxi
+    vysvetľuje, prečo model práve teraz hlási to, čo hlási.
+
+    Zámerne to nie je SHAP — tá by bola per-prediction presnejšia, ale je to
+    ďalšia závislosť a ďalší výpočet v request path.
+    """
+    try:
+        # CalibratedClassifierCV drží skutočné lesy vo vnútri; naprieč
+        # kalibračnými foldmi sa importance priemeruje.
+        forests = []
+        for cal in getattr(model, "calibrated_classifiers_", []):
+            est = getattr(cal, "estimator", None) or getattr(cal, "base_estimator", None)
+            if est is not None and hasattr(est, "feature_importances_"):
+                forests.append(est.feature_importances_)
+        if not forests:
+            return []
+        importances = np.mean(forests, axis=0)
+
+        mean = X_train.mean(axis=0)
+        std = X_train.std(axis=0)
+        std = np.where(std == 0, 1.0, std)      # konštantná feature → z=0
+        zscores = (np.asarray(last_values, dtype=float) - mean) / std
+
+        order = np.argsort(importances)[::-1][:top_n]
+        return [
+            {
+                "feature": ML_FEATURES[i],
+                "importance": round(float(importances[i]) * 100, 1),
+                "zscore": round(float(zscores[i]), 2),
+            }
+            for i in order
+        ]
+    except Exception:
+        return []
 
 
 # ── HMM Regime Detection ──────────────────────────────────────────────────────
@@ -4775,16 +4820,17 @@ def get_chart(
         if detail_mode == "advanced" and ENABLE_PREDICTIVE_ML:
             try:
                 _ml_t0 = _time_module.monotonic()
-                _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
+                _ml_model, ml_acc, ml_bull_prob, ml_drivers = train_ml_model(
+                    df, cache_key=_model_key)
                 _ml_ms = (_time_module.monotonic() - _ml_t0) * 1000
                 # Cache hit je rádovo mikrosekundy; čo vidno v logu, je skutočný fit.
                 print(f"[CHART] Step 12: ML done in {_ml_ms:.0f} ms "
                       f"(trees={ML_N_ESTIMATORS} depth={ML_MAX_DEPTH} "
                       f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS})", flush=True)
             except Exception:
-                ml_acc, ml_bull_prob = None, 0.5
+                ml_acc, ml_bull_prob, ml_drivers = None, 0.5, []
         else:
-            ml_acc, ml_bull_prob = None, 0.5
+            ml_acc, ml_bull_prob, ml_drivers = None, 0.5, []
             print("[CHART] Step 12: ML skipped (ENABLE_PREDICTIVE_ML=0)", flush=True)
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
@@ -5160,6 +5206,7 @@ def get_chart(
                 ),
                 "pred_default_close": round(pred_default["close"], 4) if pred_default else None,
                 "ml_accuracy": ml_acc,
+                "ml_drivers": ml_drivers,
                 "ml_bull_prob": round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
                 "regime": regime_info,
                 "signal_outcome_summary": signal_outcome_summary,
