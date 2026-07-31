@@ -2010,11 +2010,13 @@ async function loadChart(id, opts = {}) {
     const acct  = activeAccount || '1';
 
     // ── Skontroluj batch cache (naplnený z loadAll) ──
-    const batchKey = `${sym}|${period}|${interval}|${haParam}`;
+    const batchKey = ohlcvBatchKey({
+      symbol: sym, period, interval, ha: haParam, indicators: allInds,
+      account: acct, limit: CHART_INITIAL_BARS, before: '',
+    });
     let name, data, instrumentId;
-    if (opts.refresh !== 1 && _ohlcvBatchCache.has(batchKey)) {
-      const cached = _ohlcvBatchCache.get(batchKey);
-      _ohlcvBatchCache.delete(batchKey);   // jednorázové použitie
+    const cached = opts.refresh !== 1 ? ohlcvBatchTake(batchKey) : null;
+    if (cached) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
@@ -2321,6 +2323,37 @@ async function loadMovers() {
 
 // Jednorázový cache naplnený z batch fetchu — loadChart ho spotrebuje a zmaže
 const _ohlcvBatchCache = new Map();
+const OHLCV_BATCH_TTL_MS = 60_000;   // po minúte sú dáta na graf aj tak zastarané
+const OHLCV_BATCH_MAX = 64;
+
+// Kanonický kľúč batch odpovede. MUSÍ sa zhodovať s ohlcv_batch_key()
+// v trading_backend.py — je to protokol, nie len lokálna cache.
+// Indikátory sa zoraďujú, aby 'ema,rsi' a 'rsi,ema' dali ten istý kľúč.
+function ohlcvBatchKey({ symbol, period, interval, ha, indicators, account, limit, before }) {
+  const inds = String(indicators || '').split(',').filter(Boolean).sort().join(',');
+  return `${symbol}|${period}|${interval}|${ha ? 1 : 0}|${inds}|${account}|${limit || 0}|${before || ''}`;
+}
+
+// Nekonzumované záznamy (zavretý panel, chyba pri renderi) tu inak zostanú
+// navždy a neskôr ich prevezme iný panel s rovnakým kľúčom — hodiny staré dáta,
+// prípadne z iného eToro účtu. Preto TTL aj strop veľkosti.
+function ohlcvBatchSet(key, data) {
+  _ohlcvBatchCache.set(key, { data, ts: Date.now() });
+  if (_ohlcvBatchCache.size > OHLCV_BATCH_MAX) {
+    for (const k of _ohlcvBatchCache.keys()) {
+      _ohlcvBatchCache.delete(k);            // Map drží poradie vloženia → FIFO
+      if (_ohlcvBatchCache.size <= OHLCV_BATCH_MAX) break;
+    }
+  }
+}
+
+function ohlcvBatchTake(key) {
+  const hit = _ohlcvBatchCache.get(key);
+  if (!hit) return null;
+  _ohlcvBatchCache.delete(key);              // jednorázové použitie
+  if (Date.now() - hit.ts > OHLCV_BATCH_TTL_MS) return null;
+  return hit.data;
+}
 
 async function loadAll() {
   const panels = [...document.querySelectorAll('.panel')]
@@ -2366,9 +2399,9 @@ async function loadAll() {
 
     // Naplň cache — loadChart si data vyzdvihne
     requests.forEach(req => {
-      const key  = `${req.symbol}|${req.period}|${req.interval}|${req.ha}`;
+      const key  = ohlcvBatchKey(req);
       const data = batchResult[key];
-      if (data && !data.error) _ohlcvBatchCache.set(key, data);
+      if (data && !data.error) ohlcvBatchSet(key, data);
     });
   } catch(e) {
     console.warn('OHLCV batch zlyhalo, fallback na jednotlivé fetchy:', e);

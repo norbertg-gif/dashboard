@@ -4354,12 +4354,29 @@ def get_ohlcv(
             "patterns": patterns}
 
 
+def ohlcv_batch_key(sym, period, interval, ha, indicators, account, limit, before) -> str:
+    """Kanonický kľúč batch odpovede. MUSÍ sa zhodovať s ohlcvBatchKey() v charts.js.
+
+    Do kľúča patrí všetko, čo mení tvar odpovede. Bez `indicators` a `account`
+    kolidovali dva panely s rovnakým symbolom a timeframe, ale rôznymi
+    indikátormi — druhý výsledok prepísal prvý a panel sa vykreslil s cudzími
+    indikátormi.
+
+    `refresh` v kľúči zámerne NIE JE: frontend batch cache pri refreshi vôbec
+    nečíta, takže by kľúč len zbytočne triešťil.
+
+    Indikátory sa zoraďujú, aby "ema,rsi" a "rsi,ema" dali ten istý kľúč.
+    """
+    inds = ",".join(sorted(part for part in str(indicators or "").split(",") if part))
+    return f"{sym}|{period}|{interval}|{int(ha)}|{inds}|{account}|{int(limit or 0)}|{before or ''}"
+
+
 @app.post("/api/ohlcv/batch")
 async def get_ohlcv_batch(request: Request):
     """
     Batch verzia /api/ohlcv — načíta viac symbolov paralelne v jednom requeste.
     Body: {"requests": [{"symbol":"AAPL","period":"6mo","interval":"1d","indicators":"ema,rsi","ha":0,"account":"1"}, ...]}
-    Response: {"AAPL|6mo|1d|0": {data...}, "MSFT|6mo|1d|0": {data...}, ...}
+    Response: {"AAPL|6mo|1d|0|ema,rsi|1|0|": {data...}, ...}
     """
     body = await request.json()
     reqs = body.get("requests", [])
@@ -4376,7 +4393,7 @@ async def get_ohlcv_batch(request: Request):
         refresh  = int(req.get("refresh", 1))
         limit    = int(req.get("limit", 0))
         before   = str(req.get("before", ""))
-        key      = f"{sym}|{period}|{interval}|{ha}"
+        key      = ohlcv_batch_key(sym, period, interval, ha, inds, account, limit, before)
         try:
             result = get_ohlcv(
                 symbol=sym, period=period, interval=interval,

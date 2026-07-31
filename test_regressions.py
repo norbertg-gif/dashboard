@@ -4,6 +4,7 @@
 import tempfile
 import unittest
 import json
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
@@ -1363,3 +1364,62 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class OhlcvBatchCacheKeyRegressionTests(unittest.TestCase):
+    """Kľúč batch odpovede je protokol medzi backendom a charts.js.
+
+    Pôvodne bol 'sym|period|interval|ha', takže dva panely s rovnakým symbolom
+    a timeframe, ale rôznymi indikátormi, kolidovali: backend druhým výsledkom
+    prepísal prvý a panel sa vykreslil s cudzími indikátormi.
+    """
+
+    def test_indicators_and_account_change_the_key(self):
+        base = ("AAPL", "auto", "1d", 0, "ema,rsi", "1", 300, "")
+        other_inds = ("AAPL", "auto", "1d", 0, "macd", "1", 300, "")
+        other_acct = ("AAPL", "auto", "1d", 0, "ema,rsi", "2", 300, "")
+        self.assertNotEqual(tb.ohlcv_batch_key(*base), tb.ohlcv_batch_key(*other_inds))
+        self.assertNotEqual(tb.ohlcv_batch_key(*base), tb.ohlcv_batch_key(*other_acct))
+
+    def test_indicator_order_does_not_change_the_key(self):
+        self.assertEqual(
+            tb.ohlcv_batch_key("AAPL", "auto", "1d", 0, "ema,rsi", "1", 300, ""),
+            tb.ohlcv_batch_key("AAPL", "auto", "1d", 0, "rsi,ema", "1", 300, ""),
+        )
+
+    def test_python_and_javascript_agree(self):
+        """Ak sa tieto dve implementácie rozídu, batch cache prestane trafovať
+        a každý panel ticho spadne na fallback fetch — teda strata výkonu bez
+        jedinej chybovej hlášky."""
+        cases = [
+            dict(symbol="AAPL", period="auto", interval="1d", ha=0,
+                 indicators="ema,rsi", account="1", limit=300, before=""),
+            dict(symbol="AAPL", period="auto", interval="1d", ha=0,
+                 indicators="rsi,ema", account="1", limit=300, before=""),
+            dict(symbol="AAPL", period="auto", interval="1d", ha=1,
+                 indicators="", account="2", limit=0, before=""),
+            dict(symbol="MSFT", period="6mo", interval="1wk", ha=0,
+                 indicators="adx,bb,ema,ichimoku,macd,obv,rsi,stochrsi",
+                 account="1", limit=300, before="2024-01-01"),
+        ]
+        expected = [
+            tb.ohlcv_batch_key(c["symbol"], c["period"], c["interval"], c["ha"],
+                               c["indicators"], c["account"], c["limit"], c["before"])
+            for c in cases
+        ]
+        # Funkcia sa vyreže v Pythone a node dostane už hotový zdroj — inak by sa
+        # JS regex musel escapovať cez Python aj shell a ticho by sa rozbil.
+        charts_src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(
+            encoding="utf-8"
+        )
+        match = re.search(r"^function ohlcvBatchKey\(.*?^\}", charts_src, re.S | re.M)
+        self.assertIsNotNone(match, "ohlcvBatchKey() sa v charts.js nenašla")
+        script = match.group(0) + (
+            "\nprocess.stdout.write(JSON.stringify("
+            "JSON.parse(process.argv[1]).map(ohlcvBatchKey)));"
+        )
+        completed = subprocess.run(
+            ["node", "-e", script, json.dumps(cases)],
+            check=True, capture_output=True, text=True,
+        )
+        self.assertEqual(json.loads(completed.stdout), expected)
