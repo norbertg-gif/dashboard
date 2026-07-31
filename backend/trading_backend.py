@@ -60,6 +60,11 @@ DATA_ROOT = Path(os.getenv("DATA_DIR", str(APP_ROOT))).resolve()
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Trading Dashboard API")
 
+try:
+    from backend import mem_watch
+except ImportError:  # spustenie priamo z adresára backend/
+    import mem_watch
+
 
 # ?? Memory profile / feature flags ???????????????????????????????????????????
 def _env_bool(name: str, default: bool) -> bool:
@@ -102,7 +107,9 @@ def _process_memory_mb() -> dict:
                     "tracemalloc_peak_mb": round(peak / 1024 / 1024, 1), "source": "tracemalloc"}
         except Exception:
             pass
-    return {"rss_mb": round(rss_mb, 1) if rss_mb is not None else None, "source": source}
+    return {"rss_mb": round(rss_mb, 1) if rss_mb is not None else None,
+            "rss_current_mb": mem_watch.current_rss_mb(),
+            "source": source}
 
 
 @app.get("/api/admin/memory")
@@ -1234,6 +1241,19 @@ class _BasicAuth(BaseHTTPMiddleware):
                    headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
 
 app.add_middleware(_BasicAuth)
+
+# Memory watchdog. add_middleware vkladá na začiatok zoznamu, takže posledné
+# pridané je najvonkajšie — počítajú sa teda aj requesty odmietnuté auth
+# vrstvou, čo je zámer: aj zamietnutý request stojí pamäť.
+app.add_middleware(mem_watch.RequestTracker)
+
+
+mem_watch.start(DATA_ROOT)
+
+
+@app.get("/api/admin/memory/history")
+def admin_memory_history(hours: float = Query(24.0, ge=0.1, le=24 * 14)):
+    return mem_watch.analyze(DATA_ROOT, hours)
 
 def _public_client_key(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
@@ -6842,6 +6862,8 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
     tickers, universe_label, universe_key = scanner_universe_from_dip()
     dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
     scanner_memory_start = _process_memory_mb().get("rss_mb")
+    _scanner_job = mem_watch.track_job("scanner")
+    _scanner_job.__enter__()
 
     with _scanner_lock:
         _scanner_state.update({
@@ -6960,6 +6982,8 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
                 "current": None,
                 "error": str(e)[:120],
             })
+    finally:
+        _scanner_job.__exit__(None, None, None)
 
 
 def _start_nasdaq_scanner(
