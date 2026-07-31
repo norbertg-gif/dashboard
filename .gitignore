@@ -24,3 +24,8 @@ corp_actions/
 earnings_symbol/
 api_call_stats.json
 .claude/
+
+# Memory watchdog samples (lokalne behy, DATA_DIR=APP_ROOT)
+mem_watch.jsonl
+mem_watch.jsonl.tmp
+memtest_data/
