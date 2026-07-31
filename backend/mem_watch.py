@@ -12,6 +12,7 @@ Bez závislostí mimo stdlib. Na Windows RSS nie je dostupná a vzorkovač sa
 nespustí; lokálne meranie treba robiť pod WSL2 alebo na Linuxe.
 """
 
+import ctypes
 import json
 import os
 import threading
@@ -39,16 +40,89 @@ ENABLED = _env_on("MEM_WATCH", True)
 
 
 # ── Zdroj pravdy: aktuálna RSS ───────────────────────────────────────────────
-def current_rss_mb():
-    """Aktuálna RSS v MB, alebo None ak ju platforma neposkytuje (Windows)."""
+def _rss_linux():
     try:
         with open("/proc/self/status", "r") as fh:
             for line in fh:
                 if line.startswith("VmRSS:"):
-                    return round(int(line.split()[1]) / 1024.0, 1)
+                    return int(line.split()[1]) / 1024.0
     except (OSError, ValueError, IndexError):
-        pass
+        return None
     return None
+
+
+_win_api_cache = "unset"
+
+
+def _win_api():
+    """Jednorazovo pripraví GetProcessMemoryInfo. None na ne-Windows systémoch.
+
+    Explicitné argtypes/restype sú nutné — bez nich sa handle procesu na
+    64-bit Windows odovzdá orezaný a volanie zlyhá.
+    """
+    global _win_api_cache
+    if _win_api_cache != "unset":
+        return _win_api_cache
+    _win_api_cache = None
+    try:
+        from ctypes import wintypes
+
+        class _COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_info = kernel32.K32GetProcessMemoryInfo
+        get_info.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(_COUNTERS),
+            wintypes.DWORD,
+        ]
+        get_info.restype = wintypes.BOOL
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        _win_api_cache = (get_info, kernel32.GetCurrentProcess, _COUNTERS)
+    except Exception:
+        _win_api_cache = None
+    return _win_api_cache
+
+
+def _rss_windows():
+    """WorkingSetSize cez GetProcessMemoryInfo — windowsový ekvivalent RSS.
+
+    Nie je to to isté číslo ako Linux VmRSS (iný alokátor, iné účtovanie
+    zdieľaných stránok), ale na otázku "ako často prekročíme 512 MB a pri čom"
+    je presnosť plne postačujúca.
+    """
+    setup = _win_api()
+    if setup is None:
+        return None
+    get_info, get_proc, counters_cls = setup
+    try:
+        counters = counters_cls()
+        counters.cb = ctypes.sizeof(counters_cls)
+        if not get_info(get_proc(), ctypes.byref(counters), counters.cb):
+            return None
+        return counters.WorkingSetSize / (1024.0 * 1024.0)
+    except Exception:
+        return None
+
+
+def current_rss_mb():
+    """Aktuálna RSS v MB, alebo None ak ju platforma neposkytuje."""
+    value = _rss_linux()
+    if value is None:
+        value = _rss_windows()
+    return round(value, 1) if value is not None else None
 
 
 # ── Registry bežiacich operácií ──────────────────────────────────────────────
