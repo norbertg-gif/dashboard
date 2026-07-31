@@ -131,6 +131,8 @@ def admin_memory():
             "max_depth": ML_MAX_DEPTH,
             "min_samples_leaf": ML_MIN_SAMPLES_LEAF,
             "calibration_cv": ML_CALIB_CV,
+            "fold_fractions": list(ML_FOLD_FRACTIONS),
+            "fold_window": ML_FOLD_WINDOW,
             "n_jobs": ML_N_JOBS,
             "omp_num_threads": os.getenv("OMP_NUM_THREADS"),
         },
@@ -308,13 +310,26 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
 #   300/8/cv3/2job 10.0x   (~7 s na ticker — na request path priveľa)
 # n_jobs=2 pomáha menej, než by sa čakalo: pri takto malých lesoch zožerie
 # réžia joblibu väčšinu zisku z druhého jadra.
-ML_N_ESTIMATORS = int(os.getenv("ML_N_ESTIMATORS", "50" if _LOW_MEMORY else "150"))
+ML_N_ESTIMATORS = int(os.getenv("ML_N_ESTIMATORS", "50" if _LOW_MEMORY else "100"))
 ML_MAX_DEPTH = int(os.getenv("ML_MAX_DEPTH", "4" if _LOW_MEMORY else "6"))
 ML_MIN_SAMPLES_LEAF = int(os.getenv("ML_MIN_SAMPLES_LEAF", "5"))
 ML_CALIB_CV = int(os.getenv("ML_CALIB_CV", "2"))
 # n_jobs>1 má zmysel až od 2 CPU. Pozor na oversubscription: ak nie je
 # OMP_NUM_THREADS=1, každý joblib worker si ešte otvorí vlastné BLAS vlákna.
 ML_N_JOBS = int(os.getenv("ML_N_JOBS", "1" if _LOW_MEMORY else "2"))
+
+# Walk-forward foldy. Spoľahlivosť accuracy závisí od počtu OTESTOVANÝCH vzoriek,
+# nie od počtu foldov: zdvojnásobenie foldov pri zúženom okne testuje presne tie
+# isté dáta za dvojnásobok času. Merané na 8 datasetoch (rozptyl odhadu, nižší
+# je lepší):
+#   3 foldy, okno 10 %  -> pokrytie 30 %, rozptyl 5.3
+#   6 foldov, okno 5 %  -> pokrytie 30 %, rozptyl 7.0   (horšie A drahšie)
+#   5 foldov, okno 10 % -> pokrytie 50 %, rozptyl 3.3
+# Foldy nezvyšujú pamäť — fity idú sekvenčne, v RAM je vždy len jeden model.
+ML_FOLD_FRACTIONS = tuple(
+    float(x) for x in os.getenv("ML_FOLD_FRACTIONS", "0.50,0.60,0.70,0.80,0.90").split(",") if x
+)
+ML_FOLD_WINDOW = float(os.getenv("ML_FOLD_WINDOW", "0.10"))
 
 _MODEL_CACHE: dict = {}
 _MODEL_CACHE_LOCK = threading.Lock()
@@ -371,11 +386,11 @@ def train_ml_model(df, cache_key=None):
         )
         return CalibratedClassifierCV(base, cv=ML_CALIB_CV)
 
-    # Walk-forward foldy: train na [0:60%/70%/80%], test na nasledujúcich 10 %
+    # Walk-forward foldy: train na [0:frac], test na nasledujúcich ML_FOLD_WINDOW
     fold_accs = []
-    for train_frac in (0.60, 0.70, 0.80):
+    for train_frac in ML_FOLD_FRACTIONS:
         split = int(n * train_frac)
-        test_end = int(n * (train_frac + 0.10))
+        test_end = int(n * (train_frac + ML_FOLD_WINDOW))
         if split < 20 or test_end - split < 5:
             continue
         m = make_model()
@@ -4826,7 +4841,8 @@ def get_chart(
                 # Cache hit je rádovo mikrosekundy; čo vidno v logu, je skutočný fit.
                 print(f"[CHART] Step 12: ML done in {_ml_ms:.0f} ms "
                       f"(trees={ML_N_ESTIMATORS} depth={ML_MAX_DEPTH} "
-                      f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS})", flush=True)
+                      f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS} "
+                      f"folds={len(ML_FOLD_FRACTIONS)})", flush=True)
             except Exception:
                 ml_acc, ml_bull_prob, ml_drivers = None, 0.5, []
         else:
