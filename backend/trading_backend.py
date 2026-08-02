@@ -5,7 +5,7 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import asyncio
-import gc, json, os, math, threading
+import gc, json, os, math, sys, threading
 import re
 import hashlib
 import hmac
@@ -23,6 +23,20 @@ import pandas as pd
 import requests
 import urllib.parse
 import time as _time_module
+
+# ── STDOUT ENCODING ───────────────────────────────────────────────────────────
+# Logovacie hlášky sú po slovensky, takže obsahujú diakritiku. Na konzole bez
+# UTF-8 (Windows default je cp1250/cp1252) vyhodí print UnicodeEncodeError —
+# a keď taký print stojí vnútri except vetvy, výnimka z LOGOVANIA prepíše
+# pôvodnú chybu a diagnostika ukáže úplne iný problém (reálne sa to stalo pri
+# NOT_AUTHORIZED z Massive). Log nikdy nesmie meniť tok riadenia.
+# Na Linuxe/Renderi je stdout UTF-8 už teraz, takže tam je to no-op.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass          # nie každý stream reconfigure podporuje (pytest capture, pipe)
+del _stream
 
 # ── RETRY HELPER ──────────────────────────────────────────────────────────────
 def fetch_with_retry(url: str, headers: dict = None, timeout: int = 10,

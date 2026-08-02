@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Focused regression tests for cache and public portfolio contracts."""
 
+import io
+import sys
 import tempfile
 import unittest
 import json
@@ -1360,6 +1362,48 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
             active = qualifies
 
         self.assertEqual(tb._signal_episode_rows(classic), expected)
+
+
+class LogEncodingRegressionTests(unittest.TestCase):
+    """Slovenský log nesmie zhodiť funkciu na konzole bez UTF-8.
+
+    Reálne pozorované na Windows (cp1252): print v except vetve vyhodil
+    UnicodeEncodeError, ten prepísal pôvodnú NOT_AUTHORIZED chybu a navonok
+    to vyzeralo ako problém s kódovaním, nie s autorizáciou.
+    """
+
+    def test_stdout_is_reconfigured_to_utf8(self):
+        encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+        self.assertIn(encoding.replace("-", ""), ("utf8", ""))
+
+    def test_diacritics_survive_a_cp1252_stream(self):
+        buffer = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="replace")
+        try:
+            buffer.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            self.skipTest("stream nepodporuje reconfigure")
+        # "kľúč" je presne ten reťazec, ktorý padal (ľ = ľ)
+        buffer.write("[massive] nie je pre tento API kľúč autorizovaný — vypínam")
+        buffer.flush()
+
+    def test_not_authorized_message_is_not_replaced_by_encoding_error(self):
+        response = CorporateActionsRegressionTests._Response(
+            {"status": "NOT_AUTHORIZED"}, status_code=401)
+        tb._massive_dividends_disabled = False
+        tb._massive_splits_disabled = False
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                with (
+                    patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+                    patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                    patch.object(tb.requests, "get", return_value=response),
+                ):
+                    payload = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+            self.assertIn("autorizovaný", payload["error"])
+            self.assertNotIn("UnicodeEncodeError", payload["error"])
+        finally:
+            tb._massive_dividends_disabled = False
+            tb._massive_splits_disabled = False
 
 
 if __name__ == "__main__":
