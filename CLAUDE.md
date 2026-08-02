@@ -110,6 +110,22 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+0. **Redukcia analytického šumu — POMENOVANÉ 2026-08-02, NEROZPRACOVANÉ.**
+   Používateľ: informácie sú „skvelé, ale z pohľadu užívateľa málo využívané".
+   Vzniklo ~12 interpretačných vrstiev (RS, makro režim, news clustering,
+   chart health, market context bar, chart patterny, correlation map, company
+   profile, insights, ML karta, HMM režim, volume profile), z ktorých viacero
+   odpovedá na otázky s horizontom dní až týždňov — pri 12+ mesačnom horizonte
+   sú to kontext, nie vstup do rozhodnutia. Každá jednotlivo bola dobré
+   rozhodnutie; problém je ich súčet naraz na obrazovke.
+   **Pri riešení neodstraňovať vrstvy naslepo.** Poradie otázok: (a) ktoré
+   povrchy sú rozhodovacie (Verdikt, Týždenný plán, Investor Inbox) a ktoré
+   dôkazové (Analytika) — dôkazy nemajú konkurovať rozhodnutiu o pozornosť;
+   (b) Basic/Advanced prepínač (`td_ui_mode`) už existuje ako hotová páka —
+   presun vrstvy do `.advanced-only` je lacnejší a vratnejší než zmazanie;
+   (c) až potom zvažovať odstránenie, a to len pri vrstve, ktorú ani
+   Advanced režim neospravedlní. Merania o využívaní neexistujú (žiadna
+   telemetria) — rozhoduje používateľ, nie odhad.
 1. **Predictive chart accuracy → 60%+ directional. UZAVRETÉ AKO NEDOSIAHNUTEĽNÉ v tomto feature priestore (2026-07-07).** Tri merania na reálnych dátach (34 S&P500 tickerov, walk-forward, ~6k predikcií/horizont) zhodne: (a) "always up" base rate rastie s horizontom 53.4 % (1w) → 56.8 % (4w) → 61.1 % (12w) a ŽIADEN variant ju neprekoná — analog vote je pri 4w −5pp, pri 12w −7.7pp pod base; (b) confidence gating nefunguje: subsety s vysokou zhodou susedov (|vote| ≥ 0.3…0.8) sú na VLASTNOM base rate horšie, nie lepšie; (c) regime-conditioning (trend×vol bucket kandidátov) nepomáha (−2 až −10pp); (d) kľúčové: kedykoľvek model povie "down", trafí < 50 % (drift-down subsety 48.9/46.1/40.3 % pri 1w/4w/12w — mean reversion zožerie každú persistence-based odchýlku). Preto: NEskúšať ďalšie ladenie smeru z cenových/technických features (k, recency, gating, horizonty, regime — všetko zmerané). Jediné nezmerané cesty vyžadujú NOVÚ informáciu: cross-sectional RS features, fundament/news. Hodnota analog modelu je magnitúda (avg err 4.5 % vs 18.6 % composite) a vysvetliteľnosť, nie smer. Eval skripty: scratchpad `horizon_eval.py`, `followup_eval.py`, dataset all_stocks_5yr.csv.
 2. **Regime-aware signal analytics.** ✅ INFRAŠTRUKTÚRA HOTOVÁ. (a) Backfill: `POST /api/admin/backfill-regime-context` (target=log|archive|both, ?ticker, ?limit, ?force) idempotentne dopĺňa regime kontext do starých signálov cez `_backfill_ticker_context` → reuse `build_signal_context` (zscore + weekly_bullish dopočítané z dát orezaných po dátume signálu, žiadny look-ahead, tag `context_source='backfill'`). Spúšťať po dávkach (HMM per signál náročný). (b) Per-regime tabuľka: nová `regime` skupina v `build_signal_outcome_analytics` segments (bull/sideways/bear/high_volatility), signály nesú `regime` label z log kontextu; frontend `segmentTable('regime')` v Analytike signálov, skrytá kým nie sú dáta. (c) Auto-kontext: `/api/chart` pri 90-dňovom prepočte dopĺňa chýbajúci kontext novým aj starým signálom so stropom `_ctx_budget=4` HMM fitov na request (posledná sviečka vždy) — pri bežnom prezeraní sa medzery samy zaplnia, manuálny backfill je len na hromadné dobehnutie. Ďalej: po nazbieraní ~20–30 signálov/regime zvážiť per-regime váženie scoringu (zatiaľ NEOVPLYVŇUJE C1–C4).
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
