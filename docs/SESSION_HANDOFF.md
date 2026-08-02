@@ -1,6 +1,6 @@
 # Handoff: Trading Dashboard
 
-Dátum: 2026-07-15, doplnené 2026-07-31 (**sekcia 6** — Render Pro, ML
+Dátum: 2026-07-15, doplnené 2026-07-31 (**sekcia 6** — Render upgrade, ML
 rozšírenie, memory watchdog). Pri rozpore so sekciami 1–5 platí sekcia 6,
 je novšia. Toto je zlúčený, jediný handoff dokument — nahrádza všetky
 predchádzajúce (staršiu viac-session poznámku aj samostatný súbor
@@ -316,11 +316,11 @@ nesmú zvyšovať pamäťovú stopu Renderu bez merateľného prínosu.
 - Nový commit iba navrhnúť, ak používateľ výslovne nepožiada o
   commit/push — tento handoff dokument sám osebe nevykonáva žiadny commit.
 
-## 6. SESSION 2026-07-31 — Render Pro, ML rozšírenie, memory watchdog
+## 6. SESSION 2026-07-31 — Render upgrade, ML rozšírenie, memory watchdog
 
 Táto session začala ako prieskum migrácie z Render.com (512 MB strop bránil
 ďalšiemu vývoju), ale skončila inde: **migrácia je zrušená**, Render zostáva a
-bol upgradnutý na Pro. Čas šiel do odblokovania funkcií, ktoré 512 MB strop
+bol upgradnutý na platený plán. Čas šiel do odblokovania funkcií, ktoré 512 MB strop
 držal vypnuté.
 
 ### Rozhodnutie o hostingu — UZAVRETÉ
@@ -331,7 +331,10 @@ workload zlá voľba: appka je always-on proces s rezidentným scientific
 stackom, takže usage-based billing meria obsadenú pamäť nepretržite —
 "mostly idle" neznamená lacno. Odporúčali fixnú cenu (Koyeb 2 GB alebo VPS).
 
-**Používateľ sa rozhodol zostať na Renderi a upgradnúť na Pro.** Dôvod nie je
+**Používateľ sa rozhodol zostať na Renderi a upgradnúť z Starter na Standard.**
+(Skorší text tu hovoril „Pro" — Render UI k 2026-08-02 hlása instance type
+**Standard**, event log zaznamenal „Instance type changed from Starter to
+Standard". Názov plánu bol v tomto dokumente uvedený nesprávne.) Dôvod nie je
 technický: produkt prináša väčšiu hodnotu než rozdiel v cene a ďalšie hľadanie
 alternatív prestalo dávať zmysel. Hetznerove plány boli navyše v tom čase
 označené ako "not available". **Túto tému neotvárať znova bez výslovného
@@ -423,7 +426,7 @@ konfigurácii:
 ```
 
 `n_jobs=2` pomáha menej, než by sa čakalo — réžia joblibu zožerie väčšinu
-zisku z druhého jadra. **Reálny prínos Pro tieru je RAM, nie CPU.**
+zisku z druhého jadra. **Reálny prínos upgradu je RAM, nie CPU.**
 
 **Walk-forward foldy: pôvodný plán 3 → 6-8 bol MERANÍM VYVRÁTENÝ.**
 Spoľahlivosť accuracy závisí od počtu otestovaných vzoriek, nie od počtu
@@ -461,7 +464,8 @@ upgrade tieru. Dvanásť floatov odpovedá na tú istú otázku. SHAP zamietnut�
 
 ### Stav prostredia po deployi
 
-Render **Pro**. `render.yaml` sa **NEAPLIKUJE** — služba nie je
+Render **Standard** (platený plán, nie Pro — over v Render UI, ak niečo závisí
+od konkrétnych limitov). `render.yaml` sa **NEAPLIKUJE** — služba nie je
 Blueprint-managed, premenné treba pridávať ručne v Render dashboarde. Ručne
 nastavené: `DASH_MEMORY_PROFILE=normal` (bez neho kód padá na default `low` a
 zaplatený stroj beží v úspornom režime) a `OMP_NUM_THREADS=1` (aby si joblib
@@ -487,7 +491,7 @@ takže **RSS ešte porastie** — na dimenzovanie je priskoro.
    systematicky pod 50 % aj na iných tickeroch, má to dôsledok pre váhu ML v
    compositu. ML je len jeden vstup — C1–C4 bežia nezávisle.
 3. **`/api/admin/memory/history?hours=24`** po dni prevádzky — dá odpoveď, či
-   Pro nebolo predimenzované.
+   Standard nebol predimenzovaný.
 4. **⚠ pri |σ| >= 1.5** — na screenshote bolo vidno len pri Volatilite, hoci
    ret_1 (+5.58σ) a ret_5 (+2.90σ) ho mali mať tiež. Neoverené, môže ísť o
    chybu v `renderMlDrivers()`.
