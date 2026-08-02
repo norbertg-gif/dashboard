@@ -431,6 +431,30 @@ def train_ml_model(df, cache_key=None):
     return model, acc_rounded, bull_prob, drivers
 
 
+def ml_base_rate(df) -> float | None:
+    """Podiel rastových sviečok — referencia, voči ktorej sa číta ML accuracy.
+
+    Model, ktorý by vždy povedal "up", dosiahne base rate zadarmo. Accuracy
+    54 % teda nie je schopnosť, ak base rate je tiež 54 %. Merané na 20
+    tickeroch (5y weekly, produkčná konfigurácia): priemerný edge +0.1 pp,
+    t = +0.20 — teda žiadna merateľná hrana. Číslo bez tejto referencie
+    pôsobí ako kvalita modelu, hoci ňou nie je.
+
+    Počíta sa na tom istom výbere riadkov ako accuracy (po dropna cez
+    ML_FEATURES, bez poslednej sviečky), inak by sa porovnávali dve rôzne
+    populácie.
+    """
+    try:
+        frame = df.copy()
+        frame["target"] = (frame["Close"].shift(-1) > frame["Close"]).astype(int)
+        frame = frame.dropna(subset=ML_FEATURES + ["target"])
+        if len(frame) < 40:
+            return None
+        return round(float(frame["target"].iloc[:-1].mean()) * 100, 1)
+    except Exception:
+        return None
+
+
 def _ml_drivers(model, X_train, last_values, top_n: int = 5):
     """Ktoré features ženú predikciu — importance modelu + ako netypická je
     ich aktuálna hodnota.
@@ -4851,6 +4875,7 @@ def get_chart(
                 _ml_t0 = _time_module.monotonic()
                 _ml_model, ml_acc, ml_bull_prob, ml_drivers = train_ml_model(
                     df, cache_key=_model_key)
+                ml_base = ml_base_rate(df)
                 _ml_ms = (_time_module.monotonic() - _ml_t0) * 1000
                 # Cache hit je rádovo mikrosekundy; čo vidno v logu, je skutočný fit.
                 print(f"[CHART] Step 12: ML done in {_ml_ms:.0f} ms "
@@ -4858,9 +4883,9 @@ def get_chart(
                       f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS} "
                       f"folds={len(ML_FOLD_FRACTIONS)})", flush=True)
             except Exception:
-                ml_acc, ml_bull_prob, ml_drivers = None, 0.5, []
+                ml_acc, ml_bull_prob, ml_drivers, ml_base = None, 0.5, [], None
         else:
-            ml_acc, ml_bull_prob, ml_drivers = None, 0.5, []
+            ml_acc, ml_bull_prob, ml_drivers, ml_base = None, 0.5, [], None
             print("[CHART] Step 12: ML skipped (ENABLE_PREDICTIVE_ML=0)", flush=True)
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
@@ -5236,6 +5261,7 @@ def get_chart(
                 ),
                 "pred_default_close": round(pred_default["close"], 4) if pred_default else None,
                 "ml_accuracy": ml_acc,
+                "ml_base_rate": ml_base,
                 "ml_drivers": ml_drivers,
                 "ml_bull_prob": round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
                 "regime": regime_info,

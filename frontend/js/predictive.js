@@ -1481,7 +1481,7 @@ function pc_renderSidebar(data) {
     <div class="pred-row"><span class="tt key" data-tip="Predikovaná záverečná cena. Vypočítaná z váženého composite signálu a ATR.">Close <span class="tt-icon">ⓘ</span></span><span class="val">${pc.close.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Sila kombinovaného technického signálu. Rozsah -100% až +100%. Blízko nuly = model si nie je istý smerom.">Composite signal <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--pred)">${(p.composite*100).toFixed(1)}%</span></div>
     ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? CHART_COLORS.up : data.ml_bull_prob <= 45 ? CHART_COLORS.down : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
-    ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Priemerná presnosť ML modelu cez 3 walk-forward foldy (trénuje sa na 60/70/80% histórie, testuje na nasledujúcich 10%). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
+    ${mlAccuracyRow(data)}
     ${renderMlDrivers(data.ml_drivers)}
     ${horizonNote}
   `;
@@ -3030,6 +3030,34 @@ const ML_FEATURE_LABELS = {
   macd_hist: 'MACD histogram', vol_ratio: 'Objem vs priemer',
   roc_4: 'Rate of change (4)', pos_52w: 'Pozícia v 52-týž. rozsahu',
 };
+
+// ML accuracy sa nečíta voči 50 %, ale voči base rate tickera — podielu
+// rastových sviečok. Model, ktorý by vždy povedal "up", dosiahne base rate
+// zadarmo, takže vypovedá až rozdiel (edge). Merané na 20 tickeroch
+// (5y weekly, produkčná konfigurácia): priemerný edge +0.1 pp, t = +0.20,
+// 12/20 pod base rate — teda žiadna merateľná hrana. Preto sa base rate
+// zobrazuje vedľa accuracy a nie je skrytý v tooltipe.
+function mlAccuracyRow(data) {
+  if (data.ml_accuracy == null) return '';
+  const base = data.ml_base_rate;
+  const tip = base == null
+    ? 'Priemerná presnosť ML modelu cez walk-forward foldy. Čítaj ju voči base rate tickera (podiel rastových sviečok), nie voči 50 %.'
+    : `Presnosť ML modelu cez walk-forward foldy vs base rate tickera (${base} % sviečok rástlo). `
+      + 'Model, ktorý by vždy povedal "rast", dosiahne base rate zadarmo — vypovedá až rozdiel. '
+      + 'Merané na 20 tickeroch: priemerný edge +0.1 pp, teda ML nemá merateľnú hranu v smere.';
+
+  let valHtml = `<span style="color:var(--muted)">${data.ml_accuracy}%</span>`;
+  if (base != null) {
+    const edge = Math.round((data.ml_accuracy - base) * 10) / 10;
+    // Hranica 2 pp je pod rozptylom edge medzi tickermi (σ ≈ 4 pp), takže
+    // farba nesmie sľubovať viac než "v rámci šumu".
+    const color = Math.abs(edge) < 2 ? 'var(--muted)'
+      : (edge > 0 ? CHART_COLORS.up : CHART_COLORS.down);
+    valHtml += `<span style="color:var(--muted);margin-left:6px">/ base ${base}%</span>`
+      + `<span style="color:${color};margin-left:6px">${edge > 0 ? '+' : ''}${edge.toFixed(1)}pp</span>`;
+  }
+  return `<div class="pred-row"><span class="tt key" data-tip="${tip}">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val">${valHtml}</span></div>`;
+}
 
 function renderMlDrivers(drivers) {
   if (!Array.isArray(drivers) || !drivers.length) return '';

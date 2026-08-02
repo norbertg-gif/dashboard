@@ -1364,6 +1364,39 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
         self.assertEqual(tb._signal_episode_rows(classic), expected)
 
 
+class MlBaseRateRegressionTests(unittest.TestCase):
+    """ML accuracy bez base rate pôsobí ako kvalita modelu, hoci ňou nie je."""
+
+    def _frame(self, n=120, up_ratio=0.8):
+        import numpy as np
+        rng = np.random.default_rng(7)
+        # up_ratio riadi, koľko sviečok rastie — base rate musí ísť za tým.
+        steps = np.where(rng.random(n) < up_ratio, 1.0, -1.0) * 0.02
+        close = 100 * np.cumprod(1 + steps)
+        idx = pd.date_range("2020-01-05", periods=n, freq="W")
+        frame = pd.DataFrame({
+            "Open": close * 0.99, "High": close * 1.02,
+            "Low": close * 0.98, "Close": close,
+            "Volume": np.full(n, 1_000_000.0),
+        }, index=idx)
+        return tb.add_indicators(frame)
+
+    def test_base_rate_tracks_the_share_of_rising_candles(self):
+        mostly_up = tb.ml_base_rate(self._frame(up_ratio=0.8))
+        mostly_down = tb.ml_base_rate(self._frame(up_ratio=0.2))
+        self.assertIsNotNone(mostly_up)
+        self.assertIsNotNone(mostly_down)
+        self.assertGreater(mostly_up, 60)
+        self.assertLess(mostly_down, 40)
+
+    def test_short_history_returns_none_instead_of_a_misleading_number(self):
+        self.assertIsNone(tb.ml_base_rate(self._frame(n=30)))
+
+    def test_broken_input_is_fail_soft(self):
+        self.assertIsNone(tb.ml_base_rate(None))
+        self.assertIsNone(tb.ml_base_rate(pd.DataFrame()))
+
+
 class LogEncodingRegressionTests(unittest.TestCase):
     """Slovenský log nesmie zhodiť funkciu na konzole bez UTF-8.
 
