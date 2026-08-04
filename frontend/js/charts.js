@@ -556,7 +556,12 @@ function toggleIndicator(pid, ind) {
   document.getElementById(`ind-${pid}-${ind}`)?.classList.toggle(`active-${ind}`, r.indicators[ind]);
   updateSubVisibility(pid);
   saveLayout();
-  loadChart(pid);
+  // noLiveAfter: prepnutie indikátora nepotrebuje čerstvejšie sviečky — tie sú
+  // už na obrazovke a nemenia sa, mení sa len to, čo sa cez ne kreslí. Bez toho
+  // si každý toggle vypýtal aj následný refresh=1 load, ktorý ide na eToro po
+  // tail sviečky (~15 s, keď je disk cache staršia než TTL). Živé ceny tečú
+  // nezávisle cez WebSocket, takže sa tu o aktuálnosť neprichádza.
+  loadChart(pid, { noLiveAfter: true });
 }
 
 function updateSubVisibility(pid) {
