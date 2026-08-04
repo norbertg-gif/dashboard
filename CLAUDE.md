@@ -145,14 +145,17 @@ These were already in the codebase and need to stay fixed:
    VaR, Monte Carlo „pravdepodobnosť úspechu", AI zhrnutia portfólia a ESG
    overlaye (trendy 2026, ale odpovedajú na otázky s iným horizontom).
 
-0b. **eToro kolieska na HA grafoch — DIAGNOSTIKOVANÉ 2026-08-04, NEIMPLEMENTOVANÉ.**
-   `applyEtoroMarkers()` robí dve veci naraz: cenové čiary cez
-   `createPriceLine({price: pos.openRate})` sú ukotvené na REÁLNU cenu a na HA
-   osi by sedeli na zlej výške, ale markery `{time, position:'belowBar'}` sú
-   ukotvené na čas a sviečku, takže na HA fungujú bez zmeny. Dnes ich vypína
-   jeden spoločný `if (!r.indicators.ha …)` (charts.js ~2071 a ~2152), takže s
-   čiarami padnú aj kolieska. Riešenie: rozdeliť — markery kresliť vždy, cenové
-   čiary preskočiť pri HA (dotýka sa troch miest vo funkcii: orders, avg, entry).
+0b. **eToro kolieska na HA grafoch — HOTOVÉ 2026-08-04.**
+   `applyEtoroMarkers(id, sym, r, data, {priceScale})` — `priceScale:false`
+   vynechá všetko ukotvené na REÁLNU cenu (vstupné čiary, čiary objednávok,
+   priemerná cena pre `etoroPct` badge), markery `{time, position:'belowBar'}`
+   sa kreslia vždy, lebo sú ukotvené na čas a sviečku. Volajúce miesta posielajú
+   `priceScale: !r.indicators.ha`. Zároveň bolo treba prestať mazať markery v HA
+   vetve `loadChart()` (`setSeriesMarkers(r.candleSeries, [])`) — kým tam bolo,
+   kolieska na HA nemohli vzniknúť ani po oprave.
+   **Zámerne nezmenené:** earnings markery (`applyEarningsMarkers`) sú stále
+   vypnuté pri HA, hoci sú tiež ukotvené na čas — rovnaký argument by platil,
+   ale používateľ pýtal len pozičné kolieska.
    Používateľ: informácie sú „skvelé, ale z pohľadu užívateľa málo využívané".
    Vzniklo ~12 interpretačných vrstiev (RS, makro režim, news clustering,
    chart health, market context bar, chart patterny, correlation map, company
