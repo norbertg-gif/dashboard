@@ -10656,6 +10656,19 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                     EARNINGS_CACHE_FILE.write_text(json.dumps(ec), encoding="utf-8")
             except Exception:
                 pass
+    # Cieľ analytikov sa medzi obnovami PRENÁŠA zo starého záznamu, keď ho nový
+    # fetch nedodá. Zdroje sú nespoľahlivé každý inak (Finnhub free tier ho pre
+    # časť tickerov nedá, Yahoo z Render IP prejde len občas, FMP má vlastné
+    # limity), takže "teraz sa nepodarilo" NIE JE to isté ako "cieľ neexistuje".
+    # Bez tohto stačí jedna neúspešná obnova a údaj zmizne z karty, z grafu aj
+    # zo stĺpca v Portfóliu — presne to spôsobil bump schémy 16→17 (2026-08-04),
+    # ktorý zahodil platné ciele a nový fetch ich nevedel zopakovať.
+    # `carried_from` drží pôvodný čas, aby bolo vidno, aký je údaj starý.
+    if not payload.get("price_target") and cached and cached.get("price_target"):
+        carried = dict(cached["price_target"])
+        carried.setdefault("carried_from", cached.get("fetched_at"))
+        payload["price_target"] = carried
+        print(f"[insights] price target {sym}: prenesený z predošlej cache")
     try:
         YAHOO_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         fpath.write_text(json.dumps(payload), encoding="utf-8")
