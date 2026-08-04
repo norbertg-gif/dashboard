@@ -240,6 +240,60 @@ let pc_orderPriceLines = [];   // čakajúce objednávky na hlavnom weekly grafe
 let pc_analystTarget = { ticker: null, value: null };
 let pc_analystTargetLines = [];   // [{series, line}] — pc_realSeries pretrváva, treba čistiť ručne
 
+let pc_entryPriceLines = [];   // [{series, line}] — rovnaký dôvod na ručné čistenie ako vyššie
+
+// Priemerná vstupná cena držaných pozícií ako vodorovná čiara. Vstup bol doteraz
+// v Analytike len v tooltipe markera, takže úroveň na osi nebola vidno. Spolu s
+// cieľom analytikov a aktuálnou cenou dáva jedna os tri úrovne naraz.
+// Váži sa jednotkami cez OBA účty — je to jedna pozícia v jednom titule, bez
+// ohľadu na to, cez ktorý účet vznikla.
+function pc_applyEntryPriceLine() {
+  for (const entry of pc_entryPriceLines) {
+    try { entry.series.removePriceLine(entry.line); } catch (e) {}
+  }
+  pc_entryPriceLines = [];
+
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (!sym || typeof etoroPositionsAll === 'undefined') return;
+  const upper = String(sym).toUpperCase();
+
+  let units = 0, cost = 0, pnl = 0;
+  for (const acct of ['1', '2']) {
+    for (const pos of (etoroPositionsAll[acct] || [])) {
+      if (pos.symbol !== upper) continue;
+      const u = Number(pos.units) || 0;
+      const rate = Number(pos.openRate) || 0;
+      if (u <= 0 || rate <= 0) continue;
+      units += u;
+      cost += u * rate;
+      pnl += Number(pos._livePnl ?? pos.pnl ?? 0) || 0;
+    }
+  }
+  if (units <= 0 || cost <= 0) return;
+  const avg = cost / units;
+
+  // Farba podľa P/L pozície, nie podľa porovnania s cenou — shorty a páka by
+  // porovnanie prevrátili (rovnaký pitfall ako v CLAUDE.md pri portfóliu).
+  const color = pnl >= 0 ? CHART_COLORS.upDim : CHART_COLORS.downDim;
+  const targets = [];
+  if (pc_realSeries) targets.push(pc_realSeries);
+  if (pc_dailyMainSeries && !pc_dailyHaEnabled) targets.push(pc_dailyMainSeries);
+
+  for (const series of targets) {
+    try {
+      const line = series.createPriceLine({
+        price:            avg,
+        color,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Priem. vstup',
+      });
+      pc_entryPriceLines.push({ series, line });
+    } catch (e) {}
+  }
+}
+
 function pc_applyAnalystTargetLine() {
   // Staré čiary preč vždy — aj keď nová hodnota neexistuje, inak by po prepnutí
   // na ticker bez cieľa ostala visieť čiara predchádzajúceho.
@@ -888,6 +942,7 @@ function renderCharts(data) {
     }
   }
   pc_applyAnalystTargetLine();
+  pc_applyEntryPriceLine();
   if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
@@ -2215,9 +2270,11 @@ function renderDailyMain(data) {
       } catch(e) {}
     }
   }
-  // Cieľ analytikov — daily séria je nová, ale weekly čiara v registri ukazuje
-  // na starú sériu, takže sa prekresľujú obe naraz (funkcia si vyčistí svoje).
+  // Cieľ analytikov a priemerný vstup — daily séria je nová, ale weekly čiary v
+  // registri ukazujú na starú sériu, takže sa prekresľuje všetko naraz (obe
+  // funkcie si vyčistia svoje).
   pc_applyAnalystTargetLine();
+  pc_applyEntryPriceLine();
 
   const ind = data.daily_indicators || {};
   if (ind.ema20 && ind.ema20.length) {
