@@ -110,6 +110,36 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-3. **Benchmark portfólia — NAJVYŠŠIA PRIORITA, ODSÚHLASENÉ 2026-08-04.**
+   Dashboard vie povedať `+25,8 %`, ale nie či je to dobré. Používateľ venoval
+   rok testovaniu, či sa stratégia osvedčí — bez benchmarku tú otázku nemá voči
+   čomu zodpovedať, a je to jediné číslo, ktoré mení rozhodnutie „ísť s väčšími
+   peniazmi?". **Lacné:** `/api/etoro/daily-gain` sa už ťahá (`renderGainPanel`
+   v Portfóliu) a QQQ/SPY sú v OHLCV cache — ide o porovnanie dvoch kriviek za
+   rovnaké obdobie.
+   **Zámerne NEROBIŤ:** alfa, beta, Sortino, Ulcer Index, XIRR/money-weighted
+   return, atribúciu na výber/timing/koncentráciu. Pri 52 pozíciách za 8
+   mesiacov je to šum s dvomi desatinnými miestami; XIRR navyše potrebuje
+   históriu cash flow, ktorú eToro spoľahlivo nedáva.
+   Nadväzne (malá zmena, veľký dopad): **benchmark-relative výsledok signálov**
+   v existujúcej signal outcome analytics — „+8,2 % za 90 dní, ale QQQ +6,1 %".
+   Až to povie, či scanner pridáva hodnotu, alebo len sedí na rastúcom trhu.
+
+-2. **Redizajn Prehľadu podľa referencie — PREBIEHA, LADÍ SA.**
+   Používateľ dodal mockup (2026-08-04) a chce ísť jeho smerom: tmavý terminálový
+   štýl, KPI riadok hore, pod ním bloky *čo riešiť / príležitosti / kontext*,
+   koláčový graf príspevku k výnosu, prehľadová tabuľka pozícií.
+   **Hotové:** karta „Príspevok k výnosu" (donut, `homeContributionHtml`
+   v `home.js` + `.home-contrib*` v CSS) — bez nového fetchu, počíta z pozícií,
+   ktoré Home už má. Geometria aj % idú z HRUBÉHO zisku (súčet kladných P/L),
+   lebo výseč nemôže byť záporná; straty sú v samostatnom riadku pod grafom,
+   aby nezmizli.
+   **Pri ďalšom ladení:** z mockupu preberať remeslo (hustota bez tiesne,
+   hierarchia typografiou, konzistentné odsadenie, badge ako význam), NIE počet
+   údajov — na referencii je naraz ~30 hodnôt, čo je presne problém z položky 0.
+   Existujúce karty *Pozornosť* a *DIP kandidáti* už zodpovedajú blokom
+   „Čo treba riešiť" a „Nové príležitosti" z mockupu; netreba ich stavať nanovo.
+
 -1. **Sektorová heatmapa vstup/DCA — NAVRHNUTÉ A ODSÚHLASENÉ 2026-08-04, NEIMPLEMENTOVANÉ.**
    Vizuál, z ktorého sa dá rozhodnúť o vstupe alebo DCA. Prešlo testom „aké
    rozhodnutie to mení" (vstup a DCA sú rozhodnutia, nie dôkazy) — na rozdiel od

@@ -282,6 +282,90 @@ function homeDipHtml(scan) {
     </div>`).join('')}</div>`;
 }
 
+// ── Príspevok k výnosu ────────────────────────────────────────────────────────
+// Odpovedá na "na čom výsledok naozaj stojí". Celkové P/L povie, že rok vyšiel;
+// tento koláč povie, či za tým je široká základňa alebo tri tituly.
+// Bez nového fetchu — pozície sú už v Home dátach (port1/port2).
+//
+// Geometria aj percentá idú z HRUBÉHO zisku (súčet kladných P/L), nie z čistého.
+// Výseč nemôže byť záporná, takže miešať stratové pozície do toho istého kruhu
+// by bolo buď nezobraziteľné, alebo by percentá nesedeli s plochou. Straty preto
+// idú do samostatného riadku pod grafom, aby nezmizli.
+const HOME_CONTRIB_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#64748b'];
+const HOME_CONTRIB_TOP = 5;
+
+function homeContributionRows(port1, port2) {
+  const sel = homeGetAcctSel();
+  const perTicker = new Map();
+  for (const [id, port] of [['1', port1], ['2', port2]]) {
+    if (!sel[id]) continue;
+    for (const pos of (port?.positions || [])) {
+      if (pos.type !== 'Stock' && pos.type !== 'ETF') continue;
+      const sym = pos.symbol;
+      if (!sym) continue;
+      const pnl = Number(pos._livePnl ?? pos.pnl ?? 0);
+      if (!Number.isFinite(pnl)) continue;
+      perTicker.set(sym, (perTicker.get(sym) || 0) + pnl);
+    }
+  }
+  const all = [...perTicker.entries()].map(([sym, pnl]) => ({ sym, pnl }));
+  const winners = all.filter(r => r.pnl > 0).sort((a, b) => b.pnl - a.pnl);
+  const gross = winners.reduce((s, r) => s + r.pnl, 0);
+  const losses = all.filter(r => r.pnl < 0).reduce((s, r) => s + r.pnl, 0);
+  const top = winners.slice(0, HOME_CONTRIB_TOP);
+  const restPnl = winners.slice(HOME_CONTRIB_TOP).reduce((s, r) => s + r.pnl, 0);
+  const rows = top.map(r => ({ ...r, pct: gross ? r.pnl / gross * 100 : 0 }));
+  if (restPnl > 0) {
+    rows.push({ sym: 'Ostatné', pnl: restPnl, pct: gross ? restPnl / gross * 100 : 0,
+                rest: true, count: winners.length - top.length });
+  }
+  return { rows, gross, losses, net: gross + losses, loserCount: all.filter(r => r.pnl < 0).length };
+}
+
+function homeContributionHtml(port1, port2) {
+  const { rows, gross, losses, net, loserCount } = homeContributionRows(port1, port2);
+  if (!rows.length) {
+    return `<div class="home-empty">Zatiaľ žiadna zisková pozícia.</div>`;
+  }
+  // Donut cez stroke-dasharray na kruhu — žiadna knižnica, škáluje sa s CSS a
+  // farby idú z rovnakej palety ako legenda.
+  const R = 54, C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = rows.map((r, i) => {
+    const len = Math.max(0, r.pct) / 100 * C;
+    const seg = `<circle class="home-contrib-arc" cx="70" cy="70" r="${R}" fill="none"
+      stroke="${HOME_CONTRIB_COLORS[i % HOME_CONTRIB_COLORS.length]}" stroke-width="16"
+      stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}"
+      transform="rotate(-90 70 70)"><title>${escHtml(r.sym)} · ${r.pct.toFixed(1)} %</title></circle>`;
+    offset += len;
+    return seg;
+  }).join('');
+  const legend = rows.map((r, i) => `
+    <div class="home-contrib-row"${r.rest ? '' : ` onclick="homeOpenTicker('${escHtml(r.sym)}')" style="cursor:pointer;"`}>
+      <span class="home-contrib-dot" style="background:${HOME_CONTRIB_COLORS[i % HOME_CONTRIB_COLORS.length]};"></span>
+      <span class="home-contrib-sym">${escHtml(r.sym)}${r.rest && r.count ? ` <span class="home-contrib-note">(${r.count})</span>` : ''}</span>
+      <span class="home-contrib-pct">${r.pct.toFixed(1)} %</span>
+    </div>`).join('');
+  const lossLine = losses < 0
+    ? `<div class="home-contrib-foot">Stratové pozície (${loserCount}): ${homeFmtUsd(losses)} · čisté P/L ${homeFmtUsd(net)}</div>`
+    : '';
+  return `<div class="home-contrib">
+    <div class="home-contrib-chart">
+      <svg viewBox="0 0 140 140" role="img" aria-label="Príspevok k hrubému zisku">
+        <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--border)" stroke-width="16" opacity="0.35"></circle>
+        ${arcs}
+      </svg>
+      <div class="home-contrib-center">
+        <div class="home-contrib-total">${homeFmtUsd(gross)}</div>
+        <div class="home-contrib-label">hrubý zisk</div>
+      </div>
+    </div>
+    <div class="home-contrib-legend">${legend}</div>
+    ${lossLine}
+  </div>`;
+}
+
 function homeCard(title, bodyHtml, opts = {}) {
   const extraClass = opts.className ? ` ${opts.className}` : '';
   return `<div class="home-card${opts.wide ? ' home-card-wide' : ''}${extraClass}">
@@ -303,6 +387,7 @@ function homeContentHtml(data) {
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
       <div class="home-grid">
+        ${homeCard('Príspevok k výnosu', homeContributionHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
         ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
         ${homeCard('Pozornosť', homePlanHtml(data.plan), { className: 'home-card-attention' })}
         ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}

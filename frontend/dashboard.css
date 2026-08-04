@@ -5552,6 +5552,94 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .home-pos { color: var(--up); }
 .home-neg { color: var(--down); }
 
+/* Príspevok k výnosu — donut + legenda vedľa seba, pod 380px pod sebou. */
+.home-contrib {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.home-contrib-chart {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  flex: 0 0 auto;
+}
+.home-contrib-chart svg { width: 100%; height: 100%; display: block; }
+.home-contrib-arc { transition: opacity 0.15s ease; }
+.home-contrib-chart:hover .home-contrib-arc { opacity: 0.55; }
+.home-contrib-chart .home-contrib-arc:hover { opacity: 1; }
+.home-contrib-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+.home-contrib-total {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--up);
+  line-height: 1.15;
+}
+.home-contrib-label {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted2);
+}
+.home-contrib-legend {
+  flex: 1 1 150px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.home-contrib-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border-radius: var(--radius-sm);
+  padding: 1px 3px;
+}
+.home-contrib-row:hover { background: var(--bg3); }
+.home-contrib-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.home-contrib-sym {
+  flex: 1 1 auto;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-contrib-note { color: var(--muted2); }
+.home-contrib-pct {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.home-contrib-foot {
+  flex: 1 0 100%;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--muted2);
+  border-top: 1px solid var(--border);
+  padding-top: 7px;
+}
+@media (max-width: 380px) {
+  .home-contrib { flex-direction: column; align-items: flex-start; }
+}
+
 .home-movers-cols {
   display: grid;
   grid-template-columns: 1fr 1fr;
