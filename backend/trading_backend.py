@@ -8839,7 +8839,7 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 16
+INSIGHTS_SCHEMA_VERSION = 17   # 17: FMP ako tretí zdroj price_target (invaliduje cache bez cieľa)
 AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
 AV_EARNINGS_CACHE_TTL_H = 24 * 30
 AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
@@ -9497,6 +9497,18 @@ def _insights_fetch_finnhub(sym: str) -> dict:
             }
     except Exception as e:
         print(f"[insights] price target {sym} failed: {_scrub_token(e)}")
+    # FMP ako tretí zdroj. Finnhub free tier cieľ pre časť tickerov nedá (prázdna
+    # odpoveď bez chyby, prípadne 403) a Yahoo fallback z Render IP neprejde, takže
+    # bez tohto ostávala karta aj čiara na grafe prázdna pri bežných tituloch.
+    # Funkcia už existovala, ale volala ju len fair-value karta.
+    if not out.get("price_target"):
+        try:
+            fmp_pt = _fmp_price_target(sym)
+            if fmp_pt:
+                out["price_target"] = fmp_pt
+                print(f"[insights] price target {sym}: FMP fallback")
+        except Exception as e:
+            print(f"[insights] price target {sym} FMP failed: {_scrub_token(e)}")
     try:
         r = requests.get("https://finnhub.io/api/v1/stock/metric",
                          params={"symbol": sym, "metric": "all", "token": api_key}, timeout=15)
