@@ -242,6 +242,46 @@ let pc_analystTargetLines = [];   // [{series, line}] — pc_realSeries pretrvá
 
 let pc_entryPriceLines = [];   // [{series, line}] — rovnaký dôvod na ručné čistenie ako vyššie
 
+// LWC neberie cenové čiary do autoškálovania a graf nemá vertikálny scroll, takže
+// čiara nad/pod rozsahom sviečok je nakreslená, ale nevidno ju. (Presne preto
+// existuje aj renderChartOrderBadge v charts.js.) Rozsah preto rozširujeme sami.
+//
+// Strop 25 %: pozícia staršia než okno grafu (kúpené pred 3 rokmi, graf 2r) alebo
+// extrémny cieľ by inak stlačili sviečky na nečitateľný pásik. Nad limitom sa
+// úroveň proste nezobrazí — radšej chýbajúca čiara než rozbitý graf.
+const PC_LEVEL_AUTOSCALE_MAX_EXPAND = 0.25;
+
+function pc_extraPriceLevels() {
+  const out = [];
+  const target = Number(pc_analystTarget.value);
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (Number.isFinite(target) && target > 0 && sym &&
+      pc_analystTarget.ticker === String(sym).toUpperCase()) {
+    out.push(target);
+  }
+  for (const entry of pc_entryPriceLines) {
+    const p = Number(entry.price);
+    if (Number.isFinite(p) && p > 0) out.push(p);
+  }
+  return out;
+}
+
+function pc_levelAutoscaleProvider(baseImplementation) {
+  const res = baseImplementation();
+  const range = res?.priceRange;
+  if (!range) return res;
+  const levels = pc_extraPriceLevels();
+  if (!levels.length) return res;
+  const span = Math.abs(range.maxValue - range.minValue) || 1;
+  const slack = span * PC_LEVEL_AUTOSCALE_MAX_EXPAND;
+  let { minValue, maxValue } = range;
+  for (const level of levels) {
+    if (level > maxValue && level - maxValue <= slack) maxValue = level;
+    else if (level < minValue && minValue - level <= slack) minValue = level;
+  }
+  return { ...res, priceRange: { minValue, maxValue } };
+}
+
 // Priemerná vstupná cena držaných pozícií ako vodorovná čiara. Vstup bol doteraz
 // v Analytike len v tooltipe markera, takže úroveň na osi nebola vidno. Spolu s
 // cieľom analytikov a aktuálnou cenou dáva jedna os tri úrovne naraz.
@@ -289,8 +329,18 @@ function pc_applyEntryPriceLine() {
         axisLabelVisible: true,
         title:            'Priem. vstup',
       });
-      pc_entryPriceLines.push({ series, line });
+      pc_entryPriceLines.push({ series, line, price: avg });
     } catch (e) {}
+  }
+  pc_refreshLevelAutoscale();
+}
+
+// Autoscale sa prepočíta až pri zmene dát/options — po pridaní či odobraní čiar
+// ho treba šťuchnúť, inak by sa nová úroveň zohľadnila až pri ďalšom setData.
+function pc_refreshLevelAutoscale() {
+  for (const series of [pc_realSeries, pc_dailyMainSeries]) {
+    if (!series) continue;
+    try { series.applyOptions({ autoscaleInfoProvider: pc_levelAutoscaleProvider }); } catch (e) {}
   }
 }
 
@@ -327,6 +377,7 @@ function pc_applyAnalystTargetLine() {
       pc_analystTargetLines.push({ series, line });
     } catch (e) {}
   }
+  pc_refreshLevelAutoscale();
 }
 let pc_weeklyBaseMarkers = [];
 let pc_dailyMainBaseMarkers = [];
@@ -682,6 +733,7 @@ function initCharts() {
     upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
     borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
     wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
+    autoscaleInfoProvider: pc_levelAutoscaleProvider,
   });
   // Volume histogram (dole, farebne zelená/červená ako v štandardných grafoch)
   pc_realVolSeries = pc_realChartInst.addSeries(LightweightCharts.HistogramSeries, {
@@ -2246,6 +2298,7 @@ function renderDailyMain(data) {
     upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
     borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
     wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
+    autoscaleInfoProvider: pc_levelAutoscaleProvider,
   });
   pc_dailyMainSeries = cs;
   cs.setData(chartCandles);
