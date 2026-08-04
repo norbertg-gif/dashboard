@@ -231,6 +231,49 @@ function togglePredictiveModelChart() {
 let pc_realChartInst = null, pc_predChartInst = null;
 let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testing)
 let pc_orderPriceLines = [];   // čakajúce objednávky na hlavnom weekly grafe — treba čistiť medzi reloadmi (pc_realSeries pretrváva)
+
+// Priemerný cieľ analytikov ako vodorovná čiara na grafe. Hodnota prichádza
+// asynchrónne z /api/ticker/insights (pc_loadInsights), takže sa drží stranou a
+// čiara sa kreslí z DVOCH strán: keď dorazia insights aj keď sa prekreslí graf —
+// podľa toho, čo príde neskôr. Bez toho by čiara chýbala pri rýchlom prepnutí
+// tickera alebo pri prepnutí weekly/daily.
+let pc_analystTarget = { ticker: null, value: null };
+let pc_analystTargetLines = [];   // [{series, line}] — pc_realSeries pretrváva, treba čistiť ručne
+
+function pc_applyAnalystTargetLine() {
+  // Staré čiary preč vždy — aj keď nová hodnota neexistuje, inak by po prepnutí
+  // na ticker bez cieľa ostala visieť čiara predchádzajúceho.
+  for (const entry of pc_analystTargetLines) {
+    try { entry.series.removePriceLine(entry.line); } catch (e) {}
+  }
+  pc_analystTargetLines = [];
+
+  const value = Number(pc_analystTarget.value);
+  if (!Number.isFinite(value) || value <= 0) return;
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (!sym || pc_analystTarget.ticker !== String(sym).toUpperCase()) return;
+
+  const targets = [];
+  if (pc_realSeries) targets.push(pc_realSeries);
+  // Denný graf sa pri Heikin Ashi vynecháva: os je prepočítaná, takže čiara na
+  // reálnej cieľovej cene by sedela na zlej výške (rovnaký dôvod ako pri
+  // eToro vstupných čiarach v charts.js).
+  if (pc_dailyMainSeries && !pc_dailyHaEnabled) targets.push(pc_dailyMainSeries);
+
+  for (const series of targets) {
+    try {
+      const line = series.createPriceLine({
+        price:            value,
+        color:            CHART_COLORS.analystTarget,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Cieľ analytikov',
+      });
+      pc_analystTargetLines.push({ series, line });
+    } catch (e) {}
+  }
+}
 let pc_weeklyBaseMarkers = [];
 let pc_dailyMainBaseMarkers = [];
 let pc_earningsHistory = [];
@@ -844,6 +887,7 @@ function renderCharts(data) {
       } catch(e) {}
     }
   }
+  pc_applyAnalystTargetLine();
   if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
@@ -2171,6 +2215,9 @@ function renderDailyMain(data) {
       } catch(e) {}
     }
   }
+  // Cieľ analytikov — daily séria je nová, ale weekly čiara v registri ukazuje
+  // na starú sériu, takže sa prekresľujú obe naraz (funkcia si vyčistí svoje).
+  pc_applyAnalystTargetLine();
 
   const ind = data.daily_indicators || {};
   if (ind.ema20 && ind.ema20.length) {
@@ -2329,6 +2376,10 @@ async function pc_loadInsights(ticker) {
     }
     const d = await r.json();
     if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
+    // Cieľ analytikov ide aj na graf ako vodorovná čiara — tu je jediné miesto,
+    // kde hodnota vzniká, takže sa odtiaľto rovno prekreslí.
+    pc_analystTarget = { ticker: sym, value: Number(d?.price_target?.mean) || null };
+    pc_applyAnalystTargetLine();
     pc_setEarningsHistory(sym, d.eps_history);
     const fundamentals = d.roic_fundamentals || {};
     const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';

@@ -17,6 +17,9 @@ const CHART_COLORS = {
   up: '#26a69a', down: '#ef5350',
   upDim: '#26a69a55', downDim: '#ef535055',
   neutral: '#94a3b8', pending: '#f59e0b', pendingDim: '#f59e0b66',
+  // Cieľ analytikov — svetlomodrá, zámerne mimo P/L palety aj mimo amber
+  // objednávok: je to externý názor, nie stav pozície ani vlastný príkaz.
+  analystTarget: '#7dd3fc',
 };
 
 // ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
