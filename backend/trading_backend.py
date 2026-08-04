@@ -3542,6 +3542,133 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+# ── Doplňovač cieľových cien analytikov ───────────────────────────────────────
+# Cieľ je pomaly sa meniaci údaj (analytici ho menia rádovo v týždňoch), ale
+# zdroje sú nespoľahlivé a každý inak. Namiesto ťahania v request path beží
+# sekvenčný worker, ktorý doplní tickery bez cieľa a obnoví tie starších než
+# PRICE_TARGET_TTL_DAYS. Spúšťa sa lenivo z Portfólia/Analytiky, nie pri štarte.
+#
+# Sekvenčne a s pauzou zámerne: Finnhub free tier má 60 volaní/min a paralelné
+# workery už raz spôsobili OOM reštarty na Renderi (viď SCANNER_MAX_WORKERS).
+PRICE_TARGET_TTL_DAYS = 7
+PRICE_TARGET_BATCH_MAX = 40      # strop na jeden beh — zvyšok dobehne nabudúce
+PRICE_TARGET_SLEEP_S = 1.2       # ~50 volaní/min, pod limitom Finnhubu
+_price_target_state = {"running": False, "started_at": 0.0, "done": 0,
+                       "total": 0, "updated": 0, "finished_at": 0.0}
+_price_target_lock = threading.Lock()
+
+
+def _price_target_needs_update(sym: str) -> bool:
+    """True keď ticker nemá cieľ, alebo je starší než TTL. Chýbajúci insights
+    súbor je tiež dôvod — worker ho nevytvára, len obnoví cieľ v existujúcom."""
+    fpath = YAHOO_INSIGHTS_DIR / f"{sym}.json"
+    if not fpath.exists():
+        return False
+    try:
+        data = json.loads(fpath.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    pt = data.get("price_target")
+    if not pt or not pt.get("mean"):
+        return True
+    stamp = pt.get("target_fetched_at") or pt.get("carried_from") or data.get("fetched_at")
+    if not stamp:
+        return True
+    try:
+        age_d = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).days
+    except Exception:
+        return True
+    return age_d >= PRICE_TARGET_TTL_DAYS
+
+
+def _price_target_fetch_any(sym: str) -> dict | None:
+    """Finnhub → FMP. Yahoo sa tu zámerne nevolá: z Render IP prejde len občas
+    a stojí dve blokujúce HTTP volania (auth + quoteSummary) — v pozadí to
+    nestojí za to, insights ho v request path aj tak skúsi."""
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if api_key:
+        try:
+            r = requests.get("https://finnhub.io/api/v1/stock/price-target",
+                             params={"symbol": sym, "token": api_key}, timeout=15)
+            r.raise_for_status()
+            pt = r.json() or {}
+            if pt.get("targetMean"):
+                return {"mean": pt.get("targetMean"), "low": pt.get("targetLow"),
+                        "high": pt.get("targetHigh"), "median": pt.get("targetMedian"),
+                        "updated_at": pt.get("lastUpdated"), "source": "finnhub"}
+        except Exception as e:
+            print(f"  [targets] {sym} finnhub: {_scrub_token(e)}")
+    try:
+        return _fmp_price_target(sym)
+    except Exception as e:
+        print(f"  [targets] {sym} fmp: {_scrub_token(e)}")
+    return None
+
+
+def _price_target_worker(symbols: list[str]):
+    updated = 0
+    try:
+        for i, sym in enumerate(symbols):
+            _price_target_state["done"] = i
+            pt = _price_target_fetch_any(sym)
+            if pt:
+                fpath = YAHOO_INSIGHTS_DIR / f"{sym}.json"
+                try:
+                    data = json.loads(fpath.read_text(encoding="utf-8"))
+                    pt["target_fetched_at"] = datetime.now(timezone.utc).isoformat()
+                    data["price_target"] = pt
+                    # Zapisuje sa len toto pole; zvyšok payloadu (insider, EPS,
+                    # earnings) ostáva ako bol vrátane vlastného fetched_at,
+                    # aby sa 12h TTL insights týmto zápisom neposúvalo.
+                    tmp = fpath.with_suffix(".json.tmp")
+                    tmp.write_text(json.dumps(data), encoding="utf-8")
+                    tmp.replace(fpath)
+                    updated += 1
+                except Exception as e:
+                    print(f"  [targets] {sym} zápis zlyhal: {e}")
+            _time_module.sleep(PRICE_TARGET_SLEEP_S)
+    finally:
+        _price_target_state.update({"running": False, "done": len(symbols),
+                                    "updated": updated,
+                                    "finished_at": _time_module.time()})
+        print(f"  [targets] hotovo: {updated}/{len(symbols)} aktualizovaných")
+
+
+@app.post("/api/targets/backfill")
+def backfill_price_targets():
+    """Doplní/obnoví cieľové ceny na pozadí pre držané tituly + watchlist.
+
+    Fire-and-forget: vracia hneď, koľko tickerov sa zaradilo. Frontend to volá
+    pri otvorení Portfólia/Analytiky; opakované volanie počas behu je no-op.
+    """
+    with _price_target_lock:
+        if _price_target_state["running"]:
+            return {"started": False, "reason": "already_running", **_price_target_state}
+        universe = set(_get_portfolio_symbols())
+        try:
+            for item in _read_watchlist_file():
+                sym = str((item or {}).get("symbol") or "").strip().upper()
+                if sym:
+                    universe.add(sym)
+        except Exception:
+            pass
+        pending = sorted(s for s in universe if _price_target_needs_update(s))
+        batch = pending[:PRICE_TARGET_BATCH_MAX]
+        if not batch:
+            return {"started": False, "reason": "nothing_to_do",
+                    "universe": len(universe), "pending": 0}
+        _price_target_state.update({"running": True, "started_at": _time_module.time(),
+                                    "done": 0, "total": len(batch), "updated": 0})
+        threading.Thread(target=_price_target_worker, args=(batch,), daemon=True).start()
+    return {"started": True, "queued": len(batch), "pending_total": len(pending),
+            "universe": len(universe)}
+
+
+@app.get("/api/targets/status")
+def price_targets_status():
+    return dict(_price_target_state)
+
+
 # ── Sektorová expozícia portfólia ─────────────────────────────────────────────
 # Odpovedá na "kam smerovať ďalší nákup" a "odkiaľ naozaj pochádza zisk".
 # Stavia výhradne na už existujúcich zdrojoch: agregované pozície oboch účtov
@@ -3734,37 +3861,34 @@ def get_portfolio_correlation(days: int = Query(90, ge=30, le=365)):
 
 
 def _get_portfolio_symbols() -> set:
-    """Načíta symboly zo všetkých portfólií (oba účty)."""
+    """Načíta symboly zo všetkých portfólií (oba účty).
+
+    BUG (fixed 2026-08-05): čítalo sa z legacy raw cache `portfolio_{acct}`,
+    ktorú od zavedenia processed cache (de2fe81) už nikto nezapisuje — takže
+    to vracalo prázdnu množinu a startup prefetch ticho preskakoval VŠETKY
+    portfóliové symboly. Júlový audit opravil len zlý JSON kľúč vnútri, nie
+    mŕtvu cestu, takže bug prežil. Teraz sa berie ten istý zdroj ako pre
+    Scanner PORT badge / DCA / Inbox — `_get_portfolio_holdings()`, ktoré číta
+    `_positions_cache` s fallbackom na `processed_{account}`.
+
+    Zámerne sa tu už NEŤAHÁ z eToro pri prázdnej cache: prefetch je pomocná
+    optimalizácia, nie dôvod na blokujúci round-trip pri štarte. Keď cache
+    ešte nie je, prefetch symboly proste vynechá a naplní sa pri prvom
+    otvorení Portfólia.
+
+    Na rozdiel od `_get_portfolio_holdings()` sa tu NEFILTRUJE na Stock/ETF —
+    prefetch hreje OHLCV pre všetko, čo držíš, vrátane krypta.
+    """
     syms = set()
     for acct in ["1", "2"]:
         try:
-            port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{acct}"
-            cached = cache_read(port_cache_path)
-            if cached:
-                # BUG (fixed 2026-07-09): cache_read vracia surový /pnl/real
-                # payload — pozície sú pod clientPortfolio.positions, nie na
-                # top-level "positions". Predtým to vždy vrátilo [] a prefetch
-                # tak ticho vynechával všetky portfolio symboly.
-                for pos in cached.get("clientPortfolio", {}).get("positions", []):
-                    iid = pos.get("instrumentID") or pos.get("instrumentId")
-                    inst = load_instruments().get(iid, {})
-                    sym = inst.get("symbol")
-                    if sym:
-                        syms.add(sym)
-            else:
-                # Načítaj live
-                resp = fetch_with_retry(f"{ETORO_PROXY}/pnl/real?account={acct}", timeout=15, retries=2)
-                data = resp.json()
-                cache_write(port_cache_path, data)
-                port = data.get("clientPortfolio", {})
-                for pos in port.get("positions", []):
-                    iid = pos.get("instrumentID") or pos.get("instrumentId")
-                    inst = load_instruments().get(iid, {})
-                    sym = inst.get("symbol")
-                    if sym:
-                        syms.add(sym)
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                sym = pos.get("symbol")
+                if sym:
+                    syms.add(sym)
         except Exception as e:
-            print(f"  [prefetch] Portfolio {acct} error: {e}")
+            print(f"  [prefetch] Portfolio {acct} symbols error: {e}")
     return syms
 
 

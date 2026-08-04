@@ -136,6 +136,28 @@ async function getInstrumentId(sym) {
 // ── MAIN TABS ────────────────────────────────────────────────────────────────
 let activeMainTab = 'home';
 
+// Cieľové ceny analytikov sa menia rádovo v týždňoch, takže ich dopĺňa worker na
+// pozadí (POST /api/targets/backfill), nie request path. Spúšťa sa lenivo pri
+// otvorení Portfólia/Analytiky a klient si drží vlastný odstup, aby prepínanie
+// tabov neposielalo požiadavku pri každom kliknutí. Server je aj tak idempotentný
+// (druhé volanie počas behu je no-op) — toto len šetrí zbytočné kolá.
+const TARGETS_BACKFILL_KEY = 'td_targets_backfill_at';
+const TARGETS_BACKFILL_MIN_GAP_MS = 6 * 60 * 60 * 1000;   // 6 h
+
+function maybeBackfillTargets() {
+  try {
+    const last = Number(localStorage.getItem(TARGETS_BACKFILL_KEY) || 0);
+    if (Date.now() - last < TARGETS_BACKFILL_MIN_GAP_MS) return;
+    localStorage.setItem(TARGETS_BACKFILL_KEY, String(Date.now()));
+  } catch (e) { /* private mode — proste sa pokúsi zakaždým */ }
+  // Fire-and-forget: výsledok nikoho nezaujíma, cieľe sa objavia pri ďalšom
+  // otvorení tickera. Chyba sa ticho ignoruje, je to pomocná vrstva.
+  fetch(`${API}/api/targets/backfill`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { if (d?.started) console.log(`[targets] backfill spustený: ${d.queued} tickerov`); })
+    .catch(() => {});
+}
+
 function switchMainTab(tab) {
   // História je v Basic móde skrytá — presmeruj všetky vstupné cesty
   // (URL param rieši init v main.js, toto kryje priame volania/popout linky)
@@ -150,6 +172,7 @@ function switchMainTab(tab) {
   document.getElementById('tab-' + tab)?.classList.add('active');
   // Predictive chart — init on first switch, resize on subsequent
   if (tab === 'predictive') {
+    maybeBackfillTargets();
     if (!window._predChartInitialized) {
       window._predChartInitialized = true;
       // Wait for tab to be fully visible before init
@@ -207,6 +230,7 @@ function switchMainTab(tab) {
     if (typeof renderHomeView === 'function') renderHomeView();
   } else if (tab === 'portfolio') {
     renderPortMainView();
+    maybeBackfillTargets();
   } else if (tab === 'charts') {
     // Grafy vytvorené so skrytým tabom môžu mať šírku 0 → po zobrazení doraz veľkosti
     setTimeout(fixupChartSizes, 60);
