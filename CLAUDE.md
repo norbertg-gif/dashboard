@@ -140,7 +140,10 @@ These were already in the codebase and need to stay fixed:
    Existujúce karty *Pozornosť* a *DIP kandidáti* už zodpovedajú blokom
    „Čo treba riešiť" a „Nové príležitosti" z mockupu; netreba ich stavať nanovo.
 
--1. **Sektorová heatmapa vstup/DCA — NAVRHNUTÉ A ODSÚHLASENÉ 2026-08-04, NEIMPLEMENTOVANÉ.**
+-1. **Heatmapa vstup/DCA — ĎALŠIA V PORADÍ, ODSÚHLASENÉ 2026-08-04.**
+   **Umiestnenie: Prehľad (Home), nie Portfólio ani Scanner** (rozhodnuté
+   2026-08-05) — je to rozhodovací povrch a Prehľad je prvá otvorená obrazovka.
+   Zapadá do redizajnu podľa referencie (položka -2).
    Vizuál, z ktorého sa dá rozhodnúť o vstupe alebo DCA. Prešlo testom „aké
    rozhodnutie to mení" (vstup a DCA sú rozhodnutia, nie dôkazy) — na rozdiel od
    chart health / scanner tieru, ktoré odpovedajú „je to zdravé?".
