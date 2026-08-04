@@ -1670,6 +1670,32 @@ function applyPatternMarkers(id, r, patterns) {
 // prepočítava os, takže čiara na `pos.openRate` by sedela na zlej výške — ale
 // markery sú ukotvené na čas a sviečku (`{time, position:'belowBar'}`), takže na
 // HA fungujú bez zmeny. Kým to bolo v jednej vetve, s čiarami padli aj kolieska.
+// Cieľ analytikov v chart docku. Beží mimo hlavného toku (nie await), aby sa
+// markery nezdržiavali kvôli insights fetchu — čiara doskočí, keď dorazí.
+// `getPortfolioAnalystInfo` je z portfolio.js: má Map cache aj dedupláciu
+// súbežných požiadaviek, takže opakované otvorenie toho istého tickera je zadarmo.
+function applyDockAnalystTarget(id, symbol, r) {
+  if (typeof getPortfolioAnalystInfo !== 'function') return;
+  const seq = r.loadSeq;
+  getPortfolioAnalystInfo(symbol).then(info => {
+    const target = Number(info?.target);
+    // Panel sa mohol medzitým prekresliť alebo prepnúť na iný ticker.
+    if (!Number.isFinite(target) || target <= 0) return;
+    if (!r.candleSeries || r.loadSeq !== seq) return;
+    try {
+      const pl = r.candleSeries.createPriceLine({
+        price:            target,
+        color:            CHART_COLORS.analystTarget,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Cieľ',
+      });
+      (r.targetPriceLines ||= []).push(pl);
+    } catch (e) {}
+  }).catch(() => {});
+}
+
 async function applyEtoroMarkers(id, symbol, r, chartData, opts = {}) {
   const priceScale = opts.priceScale !== false;
   // Vymaž staré price lines
@@ -1685,7 +1711,15 @@ async function applyEtoroMarkers(id, symbol, r, chartData, opts = {}) {
     r.orderPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
   }
   r.orderPriceLines = [];
+  if (r.targetPriceLines) {
+    r.targetPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
+  }
+  r.targetPriceLines = [];
   r._etoroMarkersList = [];
+  // Cieľ analytikov len v chart docku (Portfólio). Do štandardných panelov
+  // Grafov zámerne NEJDE — tam je informácií dosť a panelov býva otvorených
+  // veľa naraz, takže by to znamenalo insights fetch pre každý z nich.
+  if (id === dockPanelId && priceScale) applyDockAnalystTarget(id, symbol, r);
 
   // Načítaj pozície pre oba účty ak ešte nie sú, alebo ak je cache staršia než ETORO_POSITIONS_TTL_MS
   // (rovnaký fetch dopĺňa aj etoroOrdersAll — žiadne extra volanie)

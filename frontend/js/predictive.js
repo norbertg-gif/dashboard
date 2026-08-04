@@ -297,7 +297,7 @@ function pc_applyEntryPriceLine() {
   if (!sym || typeof etoroPositionsAll === 'undefined') return;
   const upper = String(sym).toUpperCase();
 
-  let units = 0, cost = 0, pnl = 0;
+  let units = 0, cost = 0;
   for (const acct of ['1', '2']) {
     for (const pos of (etoroPositionsAll[acct] || [])) {
       if (pos.symbol !== upper) continue;
@@ -306,15 +306,16 @@ function pc_applyEntryPriceLine() {
       if (u <= 0 || rate <= 0) continue;
       units += u;
       cost += u * rate;
-      pnl += Number(pos._livePnl ?? pos.pnl ?? 0) || 0;
     }
   }
   if (units <= 0 || cost <= 0) return;
   const avg = cost / units;
 
-  // Farba podľa P/L pozície, nie podľa porovnania s cenou — shorty a páka by
-  // porovnanie prevrátili (rovnaký pitfall ako v CLAUDE.md pri portfóliu).
-  const color = pnl >= 0 ? CHART_COLORS.upDim : CHART_COLORS.downDim;
+  // Farba je pevná modrá, nie P/L zelená/červená: tyrkysová `upDim` splývala so
+  // sviečkami a čiara má byť čitateľná ako orientačná úroveň, nie ako ďalší
+  // signál zisku/straty. To, či si nad alebo pod vstupom, vidno z polohy čiary
+  // voči cene — farba na to netreba.
+  const color = CHART_COLORS.entryAvg;
   const targets = [];
   if (pc_realSeries) targets.push(pc_realSeries);
   if (pc_dailyMainSeries && !pc_dailyHaEnabled) targets.push(pc_dailyMainSeries);

@@ -17,9 +17,12 @@ const CHART_COLORS = {
   up: '#26a69a', down: '#ef5350',
   upDim: '#26a69a55', downDim: '#ef535055',
   neutral: '#94a3b8', pending: '#f59e0b', pendingDim: '#f59e0b66',
-  // Cieľ analytikov — svetlomodrá, zámerne mimo P/L palety aj mimo amber
-  // objednávok: je to externý názor, nie stav pozície ani vlastný príkaz.
-  analystTarget: '#7dd3fc',
+  // Analytické úrovne na grafe sú OBE modré, len v inom odtieni — sú to
+  // orientačné čiary, nie stav pozície. Modrá je zámerne mimo P/L palety
+  // (zelená/červená) aj mimo amber objednávok, takže nesplývajú so sviečkami
+  // ani nesugerujú zisk či stratu.
+  entryAvg: '#2563eb',        // priemerný nákup — tmavšia
+  analystTarget: '#7dd3fc',   // cieľ analytikov — svetlejšia
 };
 
 // ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
