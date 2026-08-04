@@ -415,8 +415,14 @@ function pc_setEarningsHistory(ticker, history) {
 
 // ── Volume Profile (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) ──
 let pc_vpPrimitive = null;
-let pc_vpEnabled = localStorage.getItem('pc_vp_enabled') === '1';
-let pc_patternsEnabled = localStorage.getItem('pc_patterns_enabled') === '1';
+// Basic režim skrýva ovládacie checkboxy oboch overlayov (.advanced-only), takže
+// zapnutý uložený stav by nakreslil overlay, ktorý sa nedá vypnúť. Uložená
+// hodnota v localStorage sa nemaže, len sa v Basic ignoruje — prepnutie späť do
+// Advanced ju obnoví pri najbližšom načítaní stránky (tieto flagy sa
+// vyhodnocujú raz, pri načítaní modulu). isAdvancedUiMode() je deklarácia
+// funkcie v core.js, ktorý sa načíta skôr, takže volanie je bezpečné.
+let pc_vpEnabled = isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1';
+let pc_patternsEnabled = isAdvancedUiMode() && localStorage.getItem('pc_patterns_enabled') === '1';
 const PC_VP_BINS = 40;
 
 class VolumeProfilePrimitive {
@@ -1253,7 +1259,7 @@ function pc_renderDailyExtra(data) {
     </div>`;
   };
   const representationComparison = representation.classic || representation.heikin_ashi
-    ? `<div class="signal-compare">
+    ? `<div class="signal-compare advanced-only">
         <div class="signal-compare-heading">
           <span>KLASICKÉ SVIEČKY VS HEIKIN ASHI</span>
           <small>Rovnaké C1–C4 pravidlo (score ≥ 2), prvý deň epizódy · výsledok po ${Number(representation.horizon) || 90} obchodných dňoch</small>
@@ -1344,7 +1350,7 @@ function pc_renderDailyExtra(data) {
       </details>
 
       <!-- ── MULTI-TIMEFRAME ALIGNMENT ──────────────────────────── -->
-      <div>
+      <div class="advanced-only">
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
                     letter-spacing:0.06em;margin-bottom:6px;">
           ZHODA ČASOVÝCH RÁMCOV

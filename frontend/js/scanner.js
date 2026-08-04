@@ -1271,7 +1271,7 @@ function renderMarketContext() {
     if (mm.fed_funds != null) bits.push(`Fed ${mm.fed_funds} %`);
     if (mm.unemployment != null) bits.push(`Nezam. ${mm.unemployment} %`);
     const tip = `Makro (FRED) — ${mm.note}. ${bits.join(' · ')}. Interpretácia, neovplyvňuje C1–C4.`;
-    parts.push(`<span class="mc-chip mc-regime ${mCls}" title="${tip}">⬢ ${mm.label}</span>`);
+    parts.push(`<span class="mc-chip mc-regime advanced-only ${mCls}" title="${tip}">⬢ ${mm.label}</span>`);
   }
   const massive = m.massive;
   if (massive) {
