@@ -110,7 +110,49 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
-0. **Redukcia analytického šumu — POMENOVANÉ 2026-08-02, NEROZPRACOVANÉ.**
+-1. **Sektorová heatmapa vstup/DCA — NAVRHNUTÉ A ODSÚHLASENÉ 2026-08-04, NEIMPLEMENTOVANÉ.**
+   Vizuál, z ktorého sa dá rozhodnúť o vstupe alebo DCA. Prešlo testom „aké
+   rozhodnutie to mení" (vstup a DCA sú rozhodnutia, nie dôkazy) — na rozdiel od
+   chart health / scanner tieru, ktoré odpovedajú „je to zdravé?".
+   Dohodnutý tvar: bunka = ticker, dva bloky **Držím** (oba účty) a **Sledujem**
+   (watchlist + scanner kandidáti); farba = zložená pripravenosť pre Držím,
+   prepínateľná veličina pre Sledujem; veľkosť bunky pri držaných = váha
+   pozície; klik otvorí Verdikt. Navyše prepínač **Daily / Weekly pohyb** ako
+   tretia farbiaca veličina — dáta sú zadarmo, `/api/movers` a
+   `attention_daily_pct` počítajú denný pohyb a startup prefetch warmuje
+   `OneWeek` presne pre watchlist + portfolio symboly.
+   **Scanner kandidáti sa berú podľa už existujúceho pravidla Týždenného plánu**
+   (sekcia „Možný nákup": buy tier + DIP ≥ `dca_dip_min` + chart health nie Bad,
+   držané vylúčené) — zámerne ŽIADNY nový prah, aby sa povrchy nerozišli.
+   Ticker mimo watchlistu/portfólia nemusí mať týždenné sviečky v cache → šedá
+   bunka, fail-soft. **Nesmie priniesť nový výpočet** — iba iný pohľad na
+   existujúce polia, inak vzniká trinásta vrstva.
+
+0. **Redukcia analytického šumu — ČIASTOČNE HOTOVÉ 2026-08-04.**
+   Prvá vlna hotová: z ~13 vrstiev ostáva v Basic šesť. Za `.advanced-only`
+   pribudli makro režim (FRED chip), Volume Profile, chart patterny, porovnanie
+   Klasické vs Heikin Ashi a Zhoda časových rámcov; predtým tam boli len
+   correlation map, ML karta a HMM režim. V Basic ostávajú RS, Firma &
+   očakávania, O firme, chart health, market context bar a news (za tlačidlom).
+   Pri VP a patternoch nestačila trieda — ich stav je v localStorage, takže
+   skrytie checkboxu by nechalo kresliť overlay bez možnosti vypnúť ho; oba
+   flagy sa v Basic čítajú ako vypnuté, uložená hodnota ostáva.
+   **Zavrhnuté pri tom istom prechode (neotvárať znova):** téza k pozícii /
+   dôvod nákupu — už raz v dashboarde bola a bola zrušená pre nevyužívanie;
+   odpočet do ročného daňového testu — používateľ chce hviezdičku manuálne a
+   výslovne nechce, aby vek pozície ovplyvňoval algoritmy; medián výnosu —
+   používateľ meria úspešnosť POČTOM ziskových titulov, nie váženým kapitálom;
+   VaR, Monte Carlo „pravdepodobnosť úspechu", AI zhrnutia portfólia a ESG
+   overlaye (trendy 2026, ale odpovedajú na otázky s iným horizontom).
+
+0b. **eToro kolieska na HA grafoch — DIAGNOSTIKOVANÉ 2026-08-04, NEIMPLEMENTOVANÉ.**
+   `applyEtoroMarkers()` robí dve veci naraz: cenové čiary cez
+   `createPriceLine({price: pos.openRate})` sú ukotvené na REÁLNU cenu a na HA
+   osi by sedeli na zlej výške, ale markery `{time, position:'belowBar'}` sú
+   ukotvené na čas a sviečku, takže na HA fungujú bez zmeny. Dnes ich vypína
+   jeden spoločný `if (!r.indicators.ha …)` (charts.js ~2071 a ~2152), takže s
+   čiarami padnú aj kolieska. Riešenie: rozdeliť — markery kresliť vždy, cenové
+   čiary preskočiť pri HA (dotýka sa troch miest vo funkcii: orders, avg, entry).
    Používateľ: informácie sú „skvelé, ale z pohľadu užívateľa málo využívané".
    Vzniklo ~12 interpretačných vrstiev (RS, makro režim, news clustering,
    chart health, market context bar, chart patterny, correlation map, company

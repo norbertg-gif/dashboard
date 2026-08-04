@@ -478,6 +478,99 @@ function renderDcaCard(data) {
 // Heatmapa korelácií denných výnosov držaných titulov (oba účty) z OHLCV cache.
 // Odhalí skrytú koncentráciu — tituly, ktoré sa hýbu spolu aj naprieč sektormi.
 // Interpretačná vrstva; nevstupuje do C1–C4, DCA ani účtovania.
+// ── Sektorová expozícia ───────────────────────────────────────────────────────
+// Kapitál a zisk vedľa seba: keď sektor berie 40 % kapitálu a robí 70 % zisku,
+// výsledok stojí na sektorovej stávke, aj keď ju používateľ vedome neurobil.
+// Úspešnosť sa počíta POČTOM titulov, nie váženým kapitálom — takto meria
+// stratégiu (rozhodnutie 2026-08-04). Interpretačná vrstva, nevstupuje nikam.
+let _sectorsCache = { data: null, ts: 0 };
+const SECTORS_CARD_TTL_MS = 15 * 60 * 1000;
+const PORT_SECTORS_COLLAPSED_KEY = 'td_portfolio_sectors_collapsed';
+
+function isPortfolioSectorsCollapsed() {
+  const v = localStorage.getItem(PORT_SECTORS_COLLAPSED_KEY);
+  return v == null ? true : v === '1';   // default zbalená — jeden riadok stačí
+}
+
+function togglePortfolioSectors() {
+  localStorage.setItem(PORT_SECTORS_COLLAPSED_KEY, isPortfolioSectorsCollapsed() ? '0' : '1');
+  renderSectorCard(_sectorsCache.data);
+  if (!isPortfolioSectorsCollapsed() && !_sectorsCache.data) loadSectorCard();
+}
+
+function sectorCardHead(data = null) {
+  const collapsed = isPortfolioSectorsCollapsed();
+  let sub = 'kam smerujú peniaze a odkiaľ pochádza zisk';
+  const top = (data?.sectors || [])[0];
+  if (top && top.amount_pct != null) {
+    // Zbalený stav nesie tú jednu vetu, kvôli ktorej karta existuje.
+    sub = `${escHtml(top.sector)} ${top.amount_pct} % kapitálu`
+        + (top.pnl_pct != null ? ` / ${top.pnl_pct} % zisku` : '');
+  }
+  const refresh = collapsed ? '' :
+    `<button class="btn" style="margin-left:auto;font-size:10px;padding:3px 9px;" onclick="loadSectorCard(true)">Refresh</button>`;
+  return `<div class="dca-head" style="display:flex;align-items:center;gap:8px;">
+    <button class="btn dca-toggle" onclick="togglePortfolioSectors()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <b style="font-size:12px;">Sektory</b>
+    <span style="color:var(--muted);font-size:10.5px;">${sub}</span>
+    ${refresh}
+  </div>`;
+}
+
+async function loadSectorCard(force = false) {
+  const wrap = document.getElementById('portfolio-sectors');
+  if (!wrap || isPortfolioSectorsCollapsed()) return;
+  if (!force && _sectorsCache.data && Date.now() - _sectorsCache.ts < SECTORS_CARD_TTL_MS) {
+    renderSectorCard(_sectorsCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/sectors`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _sectorsCache = { data: await r.json(), ts: Date.now() };
+    renderSectorCard(_sectorsCache.data);
+  } catch (e) {
+    wrap.innerHTML = `${sectorCardHead()}<div class="signal-outcome-note">Sektory sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderSectorCard(data) {
+  const wrap = document.getElementById('portfolio-sectors');
+  if (!wrap) return;
+  const head = sectorCardHead(data);
+  if (isPortfolioSectorsCollapsed()) { wrap.innerHTML = head; return; }
+  if (!data) { wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>`; return; }
+  const sectors = data.sectors || [];
+  if (!sectors.length) {
+    wrap.innerHTML = `${head}<div class="signal-outcome-note">Žiadne držané tituly.</div>`;
+    return;
+  }
+  let html = `${head}<table class="port-table" style="width:100%;font-size:11px;"><thead><tr>
+    <th style="text-align:left;">Sektor</th><th class="r">Titulov</th>
+    <th class="r">Kapitál</th><th class="r">Zisk</th><th class="r">V zisku</th></tr></thead><tbody>`;
+  for (const s of sectors) {
+    const unknown = s.sector === 'Nezaradené';
+    const pnlCls = s.pnl >= 0 ? 'port-pos' : 'port-neg';
+    // Podiel na zisku môže byť záporný (stratový sektor) — znamienko sa ukazuje,
+    // aby sa stratový sektor nedal zameniť s malým ziskovým.
+    const pnlPct = s.pnl_pct == null ? '—' : `${s.pnl_pct >= 0 ? '' : ''}${s.pnl_pct} %`;
+    html += `<tr title="${escHtml((s.symbols || []).join(', '))}"${unknown ? ' style="opacity:0.65;"' : ''}>
+      <td style="text-align:left;">${escHtml(s.sector)}</td>
+      <td class="r">${s.count}</td>
+      <td class="r">${s.amount_pct == null ? '—' : s.amount_pct + ' %'}</td>
+      <td class="r ${pnlCls}">${pnlPct}</td>
+      <td class="r">${s.green}/${s.count}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  const t = data.totals || {};
+  if (t.unmapped) {
+    html += `<div class="signal-outcome-note">${t.unmapped} ${t.unmapped === 1 ? 'titul sa nepodarilo zaradiť' : 'titulov sa nepodarilo zaradiť'} — mapovanie je odvodené z Finnhub odvetvia a spoľahlivo pokrýva US tituly. Percentá preto nepokrývajú celé portfólio.</div>`;
+  }
+  html += `<div class="signal-outcome-note">Kapitál = podiel na investovanom. Zisk = podiel na celkovom P/L. „V zisku" počíta tituly, nie sumy. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
+  wrap.innerHTML = html;
+}
+
 let _corrCache = { data: null, ts: 0 };
 const CORR_CARD_TTL_MS = 15 * 60 * 1000;
 const PORT_CORR_COLLAPSED_KEY = 'td_portfolio_corr_collapsed';
@@ -1779,10 +1872,12 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
+    html += `<div id="portfolio-sectors">${sectorCardHead(_sectorsCache.data)}</div>`;
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       html += `<div id="portfolio-corr" class="advanced-only">${corrCardHead(_corrCache.data)}</div>`;
     }
     setTimeout(() => loadDcaCandidates(), 0);
+    setTimeout(() => { if (!isPortfolioSectorsCollapsed()) loadSectorCard(); }, 0);
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
     }

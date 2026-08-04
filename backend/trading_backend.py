@@ -3542,6 +3542,114 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+# ── Sektorová expozícia portfólia ─────────────────────────────────────────────
+# Odpovedá na "kam smerovať ďalší nákup" a "odkiaľ naozaj pochádza zisk".
+# Stavia výhradne na už existujúcich zdrojoch: agregované pozície oboch účtov
+# (_get_portfolio_holdings) + ticker→sektor mapa z Finnhub profilu, ktorá už má
+# 90d disk cache kvôli RS karte. Interpretačná vrstva — NEVSTUPUJE do C1–C4,
+# scanner tieru, DCA prahov ani portfóliového účtovania.
+_SECTORS_CACHE = {"key": None, "data": None, "ts": 0.0}
+SECTORS_CACHE_TTL = 900          # 15 min RAM cache
+SECTORS_LOOKUP_BUDGET = 12       # max. NOVÝCH Finnhub profilov na jeden request
+
+
+@app.get("/api/portfolio/sectors")
+def get_portfolio_sectors():
+    """Rozpad držaných titulov (Stock/ETF, oba účty) podľa sektora.
+
+    Na sektor vracia počet titulov, podiel na investovanom kapitáli, podiel na
+    celkovom P/L a počet ziskových titulov. Kapitál a zisk sú zámerne vedľa
+    seba: keď sektor berie 40 % kapitálu a robí 70 % zisku, výsledok stojí na
+    sektorovej stávke, aj keď ju používateľ vedome neurobil.
+
+    Úspešnosť sa počíta POČTOM titulov, nie váženým kapitálom — používateľ meria
+    stratégiu takto (rozhodnutie 2026-08-04).
+
+    Tickery, ktoré sa nepodarí zmapovať (typicky európske burzy — mapovanie je
+    odvodené z Finnhub odvetvia a stavané na US tituly), padajú do koša
+    'Nezaradené'. Ten je vždy súčasťou výstupu, aby percentá netvrdili pokrytie,
+    ktoré nemajú.
+    """
+    holdings = _get_portfolio_holdings()
+    if not holdings:
+        return {"sectors": [], "totals": {"symbols": 0, "amount": 0.0, "pnl": 0.0,
+                                          "green": 0, "unmapped": 0},
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    cache_key = tuple(sorted((s, round(float(h.get("amount") or 0), 2),
+                              round(float(h.get("pnl") or 0), 2))
+                             for s, h in holdings.items()))
+    now = _time_module.time()
+    if _SECTORS_CACHE["key"] == cache_key and now - _SECTORS_CACHE["ts"] < SECTORS_CACHE_TTL:
+        return _SECTORS_CACHE["data"]
+
+    # Sektor sa doťahuje iba pre tickery, ktoré ho v 90d cache ešte nemajú, a to
+    # so stropom na request — pri prvom otvorení s prázdnou cache by 50+
+    # sekvenčných Finnhub volaní request zablokovalo. Nezaradené tituly sa
+    # doplnia pri ďalšom otvorení (rovnaký vzor ako _ctx_budget v /api/chart).
+    budget = SECTORS_LOOKUP_BUDGET
+    groups: dict = {}
+    unmapped = 0
+    for sym, h in holdings.items():
+        amount = float(h.get("amount") or 0)
+        pnl = float(h.get("pnl") or 0)
+        etf = None
+        try:
+            cached_only = budget <= 0
+            etf, _industry = _ticker_sector_etf_cached_only(sym) if cached_only \
+                else _ticker_sector_etf(sym)
+            if not cached_only:
+                budget -= 1
+        except Exception as e:
+            print(f"  [sectors] {sym}: {e}")
+        name = _SECTOR_ETFS.get(etf) if etf else None
+        if not name:
+            name = "Nezaradené"
+            unmapped += 1
+        g = groups.setdefault(name, {"sector": name, "etf": etf if name != "Nezaradené" else None,
+                                     "symbols": [], "count": 0, "amount": 0.0,
+                                     "pnl": 0.0, "green": 0})
+        g["symbols"].append(sym)
+        g["count"] += 1
+        g["amount"] += amount
+        g["pnl"] += pnl
+        if pnl > 0:
+            g["green"] += 1
+
+    total_amount = sum(g["amount"] for g in groups.values())
+    total_pnl = sum(g["pnl"] for g in groups.values())
+    total_green = sum(g["green"] for g in groups.values())
+
+    out = []
+    for g in groups.values():
+        g["amount"] = round(g["amount"], 2)
+        g["pnl"] = round(g["pnl"], 2)
+        g["symbols"].sort()
+        g["amount_pct"] = round(g["amount"] / total_amount * 100, 1) if total_amount else None
+        # Podiel na zisku má zmysel len keď je celkové P/L nenulové. Pri zápornom
+        # celkovom P/L by delenie prevrátilo znamienka, preto sa delí absolútnou
+        # hodnotou — sektor v strate tak vyjde záporne aj v celkovo ziskovom
+        # portfóliu a poradie ostáva čitateľné.
+        g["pnl_pct"] = round(g["pnl"] / abs(total_pnl) * 100, 1) if total_pnl else None
+        out.append(g)
+    out.sort(key=lambda g: -(g["amount"] or 0))
+
+    data = {
+        "sectors": out,
+        "totals": {
+            "symbols": sum(g["count"] for g in out),
+            "amount": round(total_amount, 2),
+            "pnl": round(total_pnl, 2),
+            "green": total_green,
+            "unmapped": unmapped,
+        },
+        "lookup_budget_left": budget,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _SECTORS_CACHE.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
 # ── Korelačná mapa portfólia ──────────────────────────────────────────────────
 # Interpretačná vrstva: odhalí skrytú koncentráciu (tituly čo sa hýbu spolu).
 # Čisto z OHLCV disk cache — žiadne nové API volania, žiadny vplyv na účtovanie.
@@ -10179,6 +10287,32 @@ def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
     Pri fetchi uloží aj surovú burzu ('exchange') pre Google Finance odkazy."""
     etf, industry, _exch = _finnhub_profile_cached(sym)
     return etf, industry
+
+
+def _ticker_sector_etf_cached_only(sym: str) -> tuple[str | None, str | None]:
+    """Ako _ticker_sector_etf, ale NIKDY nesiahne na sieť — vráti (None, None),
+    keď ticker v 90d disk cache nie je. Používa sektorový prehľad portfólia po
+    vyčerpaní rozpočtu na nové Finnhub profily; chýbajúce sa doplnia pri ďalšom
+    otvorení namiesto toho, aby prvý request čakal na desiatky volaní."""
+    sym = sym.upper()
+    with _sector_cache_lock:
+        if not SECTOR_CACHE_FILE.exists():
+            return None, None
+        try:
+            cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return None, None
+    hit = cache.get(sym)
+    if not hit:
+        return None, None
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(hit["fetched_at"])).days
+    except Exception:
+        return None, None
+    # Stale záznam sa tu berie ako platný: sektor firmy sa nemení tak, aby stálo
+    # za to nechať bunku prázdnu, a čerstvosť si vyrieši normálna cesta.
+    return hit.get("etf"), hit.get("industry")
 
 
 def _finnhub_profile_cached(sym: str) -> tuple[str | None, str | None, str | None]:
