@@ -25,10 +25,17 @@ function homeToggleAcct(acct) {
   // Aspoň jeden účet musí ostať zapnutý — klik na posledný aktívny sa ignoruje.
   if (!next['1'] && !next['2']) return;
   try { localStorage.setItem(HOME_ACCTS_KEY, JSON.stringify(next)); } catch (e) {}
-  // Len KPI blok — zvyšok stránky sa dát účtov netýka, netreba nič refetchovať.
+  // Prekresliť treba KAŽDÝ blok, ktorý číta homeGetAcctSel() — dnes KPI riadok a
+  // koláč príspevku k výnosu. Nič sa nerefetchuje, oba počítajú z _homeLastData.
+  // (Movers/plán/earnings/DIP na výbere účtov nezávisia.)
+  if (!_homeLastData) return;
   const kpiEl = document.getElementById('home-kpi-block');
-  if (kpiEl && _homeLastData) {
+  if (kpiEl) {
     kpiEl.outerHTML = homePortfolioKpiHtml(_homeLastData.port1, _homeLastData.port2);
+  }
+  const contribEl = document.getElementById('home-contrib-block');
+  if (contribEl) {
+    contribEl.outerHTML = homeContributionBlockHtml(_homeLastData.port1, _homeLastData.port2);
   }
 }
 
@@ -322,6 +329,12 @@ function homeContributionRows(port1, port2) {
   return { rows, gross, losses, net: gross + losses, loserCount: all.filter(r => r.pnl < 0).length };
 }
 
+// Obal s pevným id, aby vedel prepínač účtov prekresliť práve tento blok bez
+// re-renderu celej stránky (rovnaký vzor ako #home-kpi-block).
+function homeContributionBlockHtml(port1, port2) {
+  return `<div id="home-contrib-block">${homeContributionHtml(port1, port2)}</div>`;
+}
+
 function homeContributionHtml(port1, port2) {
   const { rows, gross, losses, net, loserCount } = homeContributionRows(port1, port2);
   if (!rows.length) {
@@ -387,7 +400,7 @@ function homeContentHtml(data) {
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
       <div class="home-grid">
-        ${homeCard('Príspevok k výnosu', homeContributionHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
+        ${homeCard('Príspevok k výnosu', homeContributionBlockHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
         ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
         ${homeCard('Pozornosť', homePlanHtml(data.plan), { className: 'home-card-attention' })}
         ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}
