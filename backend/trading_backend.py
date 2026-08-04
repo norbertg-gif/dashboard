@@ -3582,9 +3582,16 @@ def _price_target_needs_update(sym: str) -> bool:
 
 
 def _price_target_fetch_any(sym: str) -> dict | None:
-    """Finnhub → FMP. Yahoo sa tu zámerne nevolá: z Render IP prejde len občas
-    a stojí dve blokujúce HTTP volania (auth + quoteSummary) — v pozadí to
-    nestojí za to, insights ho v request path aj tak skúsi."""
+    """Finnhub → FMP → Yahoo.
+
+    Yahoo tu pôvodne nebol, s odôvodnením že z Render IP prejde len občas a
+    stojí dve blokujúce volania. To je ale argument pre request path — v
+    background workeri je pomalý zdroj, ktorý údaj DODÁ, lepší než rýchly,
+    ktorý ho nedodá. Prvý beh (2026-08-05) to potvrdil: 0 z 25 tickerov
+    aktualizovaných, kým jediný reálne fungujúci zdroj (`source: yahoo+av`
+    v existujúcich cache záznamoch) bol vynechaný. Poradie ostáva, Yahoo je
+    posledná záchrana.
+    """
     api_key = os.getenv("FINNHUB_API_KEY", "").strip()
     if api_key:
         try:
@@ -3599,9 +3606,23 @@ def _price_target_fetch_any(sym: str) -> dict | None:
         except Exception as e:
             print(f"  [targets] {sym} finnhub: {_scrub_token(e)}")
     try:
-        return _fmp_price_target(sym)
+        fmp = _fmp_price_target(sym)
+        if fmp:
+            return fmp
     except Exception as e:
         print(f"  [targets] {sym} fmp: {_scrub_token(e)}")
+    try:
+        qs = _yahoo_quote_summary(sym, "financialData")
+        fd = (qs or {}).get("financialData") or {}
+        mean = _yraw(fd.get("targetMeanPrice"))
+        if mean:
+            return {"mean": mean,
+                    "low": _yraw(fd.get("targetLowPrice")),
+                    "high": _yraw(fd.get("targetHighPrice")),
+                    "median": _yraw(fd.get("targetMedianPrice")),
+                    "source": "yahoo"}
+    except Exception as e:
+        print(f"  [targets] {sym} yahoo: {_scrub_token(e)}")
     return None
 
 
