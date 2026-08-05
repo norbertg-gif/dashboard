@@ -414,6 +414,42 @@ function benchNum(v, unit = ' %') {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${unit}`;
 }
 
+// Zatvorené obchody idú NAŽIVO na eToro (trade history sa necachuje), takže sa
+// načítajú až na kliknutie — hlavná karta má ostať okamžitá. Je to ale jediné
+// číslo, ktoré zaplní survivorship dieru, tak je ponuka viditeľná.
+let _benchClosed = null;
+
+async function loadBenchmarkClosed() {
+  const el = document.getElementById('bm-closed');
+  if (!el) return;
+  el.innerHTML = `<span class="bm-ew-sub"><span class="spinner"></span> Načítavam zatvorené obchody z eToro…</span>`;
+  try {
+    const r = await fetch(`${API}/api/portfolio/benchmark/closed?months=24`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _benchClosed = await r.json();
+    el.innerHTML = benchClosedHtml(_benchClosed);
+  } catch (e) {
+    el.innerHTML = `<span class="bm-ew-sub">Nepodarilo sa načítať: ${escHtml(e.message)}</span>`;
+  }
+}
+
+function benchClosedHtml(d) {
+  if (!d?.available) {
+    return `<span class="bm-ew-sub">Za posledné 2 roky nie sú zatvorené Stock/ETF obchody${d?.reason === 'history_failed' ? ' (história sa nenačítala)' : ''}.</span>`;
+  }
+  const ex = d.excess_pp;
+  return `<div class="bm-ew-grid">
+    <div><span class="bm-ew-lbl">Zatvorené obchody (${d.trades})</span>
+      <span class="bm-ew-val ${d.return_pct >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(d.return_pct)}</span>
+      <span class="bm-ew-sub">rovnaké vklady ${benchNum(d.equal_weight_pct)} · $${Number(d.invested).toLocaleString('sk-SK', {maximumFractionDigits: 0})} obratu</span></div>
+    <div><span class="bm-ew-lbl">Voči QQQ</span>
+      <span class="bm-ew-val ${ex == null ? '' : ex >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ex, ' pb')}</span>
+      <span class="bm-ew-sub">${d.beat_count} z ${d.trades} nad indexom · QQQ ${benchNum(d.bench_pct)}</span></div>
+  </div>
+  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najhoršie zatvorené: ${
+    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.excess_pp, ' pb')}`).join(' · ')}</div>` : ''}`;
+}
+
 function renderBenchmarkCard(data) {
   const wrap = document.getElementById('home-bench-block');
   if (!wrap) return;
@@ -489,6 +525,12 @@ function renderBenchmarkCard(data) {
       ${medLine}
     </div>
     ${ewBlock}
+    <div class="bm-ew">
+      <div class="bm-list-title">Vrátane zatvorených obchodov
+        <button type="button" class="hm-tab" style="margin-left:8px;"
+          onclick="loadBenchmarkClosed()">načítať</button></div>
+      <div id="bm-closed"><span class="bm-ew-sub">Hlavné čísla vyššie počítajú len otvorené pozície. Toto dopočíta aj zatvorené obchody za 2 roky — ide naživo na eToro, preto na vyžiadanie.</span></div>
+    </div>
     <div class="bm-lists">
       <div><div class="bm-list-title">Najviac nad QQQ</div>${top.map(rowLine).join('')}</div>
       <div><div class="bm-list-title">Najviac pod QQQ</div>${worst.map(rowLine).join('')}</div>

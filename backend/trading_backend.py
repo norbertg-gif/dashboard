@@ -3602,6 +3602,112 @@ def _benchmark_return_since(series: list, since: date) -> float | None:
     return (end - start) / start * 100
 
 
+def _benchmark_return_between(series: list, since: date, until: date) -> float | None:
+    """% zmena indexu medzi dvoma dátumami — pre ZATVORENÉ obchody, kde okno
+    nekončí dnes, ale v deň zatvorenia. Start je prvý obchodný deň >= `since`,
+    end posledný <= `until`."""
+    if not series:
+        return None
+    start = next((c for d, c in series if d >= since), None)
+    end = None
+    for d, c in series:
+        if d <= until:
+            end = c
+        else:
+            break
+    if not start or not end:
+        return None
+    return (end - start) / start * 100
+
+
+_benchmark_closed_cache = {"key": None, "data": None, "ts": 0.0}
+BENCHMARK_CLOSED_TTL = 12 * 3600      # zatvorené obchody sa menia zriedka
+
+
+@app.get("/api/portfolio/benchmark/closed")
+def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
+    """To isté porovnanie, ale pre ZATVORENÉ Stock/ETF obchody Účtu 1.
+
+    Zapĺňa jedinú dieru hlavnej karty: tá počíta len otvorené pozície, takže je
+    skreslená survivorship biasom — obchod zatvorený v strate v nej nie je.
+    Až spolu obe čísla odpovedajú na otázku „aj po započítaní strát som na tom
+    dobre?".
+
+    Na rozdiel od zvyšku karty toto SIAHA NA eToro (trade history sa nikde
+    necachuje), preto vlastný endpoint, 12h cache a lazy načítanie z UI —
+    hlavná karta má ostať okamžitá.
+    """
+    min_date = (datetime.now(timezone.utc) - timedelta(days=months * 31)).date().isoformat()
+    cache_key = (months, min_date)
+    now = _time_module.time()
+    if _benchmark_closed_cache["key"] == cache_key and now - _benchmark_closed_cache["ts"] < BENCHMARK_CLOSED_TTL:
+        return _benchmark_closed_cache["data"]
+
+    try:
+        hist = get_trade_history(account="1", minDate=min_date)
+    except Exception as e:
+        return {"available": False, "reason": "history_failed", "detail": _scrub_token(str(e))}
+
+    instruments = load_instruments()
+    qqq = _benchmark_closes("QQQ")
+    rows, skipped = [], 0
+    for t in (hist.get("trades") or []):
+        iid = t.get("instrumentId")
+        type_id = (instruments.get(iid, {}) or {}).get("typeID")
+        if type_id not in (5, 6):          # 5=Stock, 6=ETF — krypto a zvyšok von
+            continue
+        inv = float(_num_or_none(t.get("investment")) or 0)
+        net = float(_num_or_none(t.get("netProfit")) or 0)
+        if inv <= 0 or not t.get("openTimestamp") or not t.get("closeTimestamp"):
+            skipped += 1
+            continue
+        try:
+            o = datetime.fromisoformat(str(t["openTimestamp"]).replace("Z", "+00:00")).date()
+            c = datetime.fromisoformat(str(t["closeTimestamp"]).replace("Z", "+00:00")).date()
+        except Exception:
+            skipped += 1
+            continue
+        r_pos = net / inv * 100
+        r_bench = _benchmark_return_between(qqq or [], o, c)
+        rows.append({
+            "symbol": t.get("symbol"), "opened": o.isoformat(), "closed": c.isoformat(),
+            "amount": round(inv, 2), "return_pct": round(r_pos, 2),
+            "bench_pct": round(r_bench, 2) if r_bench is not None else None,
+            "excess_pp": round(r_pos - r_bench, 2) if r_bench is not None else None,
+        })
+
+    if not rows:
+        data = {"available": False, "reason": "no_closed_trades", "months": months}
+        _benchmark_closed_cache.update({"key": cache_key, "data": data, "ts": now})
+        return data
+
+    total = sum(r["amount"] for r in rows)
+    weighted = sum(r["amount"] * r["return_pct"] for r in rows) / total if total else None
+    equal = sum(r["return_pct"] for r in rows) / len(rows)
+    with_bench = [r for r in rows if r["excess_pp"] is not None]
+    bench_weighted = (sum(r["amount"] * r["bench_pct"] for r in with_bench)
+                      / sum(r["amount"] for r in with_bench)) if with_bench else None
+    rows.sort(key=lambda r: (r["excess_pp"] is None, r["excess_pp"] or 0))
+
+    data = {
+        "available": True,
+        "months": months,
+        "trades": len(rows),
+        "invested": round(total, 2),
+        "return_pct": round(weighted, 2) if weighted is not None else None,
+        "equal_weight_pct": round(equal, 2),
+        "bench_pct": round(bench_weighted, 2) if bench_weighted is not None else None,
+        "excess_pp": round(weighted - bench_weighted, 2)
+                     if (weighted is not None and bench_weighted is not None) else None,
+        "beat_count": sum(1 for r in with_bench if r["excess_pp"] > 0),
+        "worst": rows[:3],
+        "skipped": skipped,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _benchmark_closed_cache.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
 @app.get("/api/portfolio/benchmark")
 def get_portfolio_benchmark():
     """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
