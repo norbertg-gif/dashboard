@@ -2496,6 +2496,15 @@ async def save_dash_settings(request: Request):
     return {"ok": True, "settings": current}
 
 
+def _position_dip_metrics(symbol: str, amount: float, denominator: float,
+                          dip_scores: dict) -> tuple[float | int | None, float | None]:
+    """Return the existing DIP join and invested-position weight calculation."""
+    dip = dip_scores.get(str(symbol or "").upper())
+    dip_total = _num_or_none(dip.get("total")) if isinstance(dip, dict) else None
+    weight_pct = amount / denominator * 100 if denominator else None
+    return dip_total, weight_pct
+
+
 @app.get("/api/portfolio/dca")
 def get_dca_candidates(
     account: str = Query("1"),
@@ -2551,9 +2560,9 @@ def get_dca_candidates(
         pnl_pct = (e["pnl"] / amount * 100) if amount else 0.0
         if pnl_pct > -loss_pct:
             continue  # nie je dosť v strate na DCA úvahu
-        weight = (amount / equity * 100) if equity else 0.0
-        dip = dip_scores.get(sym)
-        dip_total = _num_or_none(dip.get("total")) if dip else None
+        dip_total, weight = _position_dip_metrics(sym, amount, equity, dip_scores)
+        # Preserve the existing DCA contract: missing equity historically returned zero.
+        weight = weight if weight is not None else 0.0
 
         if dip_total is None:
             flag = "no_data"
@@ -4313,6 +4322,22 @@ def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
             prev = float(daily.iloc[-2]["Close"])
             if prev and last:
                 return (last - prev) / prev * 100, last
+    except Exception:
+        pass
+    return None
+
+
+def _weekly_change_from_cache(sym: str) -> tuple[float, float] | None:
+    """Return the latest weekly percent change from OneWeek disk cache only."""
+    try:
+        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneWeek")
+        if raw:
+            candles = _flatten_ohlcv(raw)
+            if len(candles) >= 2:
+                last = float(candles[-1].get("close") or candles[-1].get("c") or 0)
+                prev = float(candles[-2].get("close") or candles[-2].get("c") or 0)
+                if prev and last:
+                    return (last - prev) / prev * 100, last
     except Exception:
         pass
     return None
@@ -7838,6 +7863,27 @@ def get_investor_inbox(refresh: int = Query(0)):
 WEEKLY_PLAN_CACHE_TTL = 86400
 
 
+def _passes_weekly_buy_rule(row: dict, held_symbols, dip_min: float) -> bool:
+    """Shared predicate for the weekly plan's possible-buy selection."""
+    ticker = str(row.get("ticker") or "").upper()
+    if not ticker or ticker in held_symbols:
+        return False
+    signal = row.get("recent_signal") or {}
+    if not isinstance(signal, dict):
+        return False
+    if signal.get("tier") != "buy":
+        return False
+    dip_total = _num_or_none(row.get("dip_total"))
+    if dip_total is None or dip_total < dip_min:
+        return False
+    health = row.get("chart_health") or {}
+    if not isinstance(health, dict):
+        health = {}
+    daily_status = str((health.get("daily") or {}).get("status") or "").lower()
+    weekly_status = str((health.get("weekly") or {}).get("status") or "").lower()
+    return "bad" not in (daily_status, weekly_status)
+
+
 @app.get("/api/investor/plan")
 def get_investor_plan(refresh: int = Query(0)):
     """Týždenný plán: ľudská syntéza NAD Investor Inboxom — nie nový analytický
@@ -7908,19 +7954,10 @@ def get_investor_plan(refresh: int = Query(0)):
         scan = enrich_scanner_payload(load_scanner_cache()) or {}
         for row in (scan.get("results") or []):
             t = str(row.get("ticker") or "").upper()
-            if not t or t in holdings or t in used_tickers:
+            if t in used_tickers or not _passes_weekly_buy_rule(row, holdings, dip_min):
                 continue
             sig = row.get("recent_signal") or {}
-            if sig.get("tier") != "buy":
-                continue
-            dip = row.get("dip_total")
-            if dip is None or float(dip) < dip_min:
-                continue
-            ch = row.get("chart_health") or {}
-            dstat = str((ch.get("daily") or {}).get("status") or "").lower()
-            wstat = str((ch.get("weekly") or {}).get("status") or "").lower()
-            if "bad" in (dstat, wstat):
-                continue
+            dip = _num_or_none(row.get("dip_total"))
             buy_rows.append({
                 "ticker": t,
                 "summary": f"{t} má buy signál {sig.get('score', '?')}/4 aj DIP kvalitu ({int(float(dip))}) — stojí za detail.",
@@ -7949,6 +7986,190 @@ def get_investor_plan(refresh: int = Query(0)):
         "quiet": {"count": len(quiet), "tickers": quiet},
     }
     return _investor_cache_set(cache_key, payload)
+
+
+_HOME_HEATMAP_CACHE = {"key": None, "data": None, "ts": 0.0}
+HOME_HEATMAP_CACHE_TTL = 900
+
+
+def _heatmap_chart_health(row: dict) -> str | None:
+    health = row.get("chart_health") or {}
+    if not isinstance(health, dict):
+        return None
+    statuses = {
+        str((health.get(timeframe) or {}).get("status") or "").lower()
+        for timeframe in ("daily", "weekly")
+    }
+    if "bad" in statuses:
+        return "Bad"
+    if "risk" in statuses:
+        return "Risk"
+    if "ok" in statuses:
+        return "OK"
+    return None
+
+
+def _heatmap_reason_number(value) -> str:
+    number = float(value)
+    text = str(int(number)) if number.is_integer() else f"{number:.1f}"
+    return text.replace(".", ",")
+
+
+def _heatmap_readiness(dip, signal_score, health: str | None,
+                       pnl_pct, held: bool) -> tuple[int | None, list[str]]:
+    """Build a display-only 40/25/20/15 composite over available inputs."""
+    components: list[tuple[float, float]] = []
+    reasons: list[str] = []
+
+    dip_value = _num_or_none(dip)
+    if dip_value is not None:
+        components.append((min(100.0, max(0.0, float(dip_value))), 40.0))
+        reasons.append(f"DIP {_heatmap_reason_number(dip_value)}")
+
+    signal_value = _num_or_none(signal_score)
+    if signal_value is not None:
+        components.append((min(100.0, max(0.0, float(signal_value) / 4 * 100)), 25.0))
+        reasons.append(f"sign\u00e1l {_heatmap_reason_number(signal_value)}/4")
+
+    health_scores = {"OK": 100.0, "Risk": 50.0, "Bad": 0.0}
+    if health in health_scores:
+        components.append((health_scores[health], 20.0))
+        reasons.append(f"graf {health}")
+
+    pnl_value = _num_or_none(pnl_pct)
+    if held and pnl_value is not None:
+        components.append((min(100.0, max(0.0, -float(pnl_value))), 15.0))
+        if pnl_value < 0:
+            reasons.append(f"strata {_heatmap_reason_number(abs(pnl_value))} % vo\u010di priemeru")
+        else:
+            reasons.append("bez straty vo\u010di priemeru")
+
+    total_weight = sum(weight for _value, weight in components)
+    if not total_weight:
+        return None, reasons
+    score = sum(value * weight for value, weight in components) / total_weight
+    return int(round(min(100.0, max(0.0, score)))), reasons
+
+
+def _heatmap_change(change: tuple[float, float] | None) -> float | None:
+    return round(float(change[0]), 2) if change is not None else None
+
+
+@app.get("/api/home/heatmap")
+def get_home_heatmap():
+    """Compose one cache-only view for deciding where to enter or add.
+
+    The readiness number combines only existing DIP, signal, chart-health and
+    held-position P/L fields. It is a display-only interpretation and must
+    never be read back into C1-C4, scanner tiers, DCA thresholds or accounting.
+    This route performs no scans, refreshes, provider calls or eToro calls.
+    """
+    settings = _dash_settings()
+    dip_min = float(settings["dca_dip_min"])
+    max_weight = float(settings["dca_max_weight"])
+    holdings = {
+        str(symbol).upper(): item
+        for symbol, item in _get_portfolio_holdings().items()
+    }
+    held_symbols = set(holdings)
+    invested = sum(float(_num_or_none(item.get("amount")) or 0) for item in holdings.values())
+
+    dip_raw = load_dip_scores()
+    if not isinstance(dip_raw, dict):
+        dip_raw = {}
+    dip_scores = {
+        str(symbol).upper(): value for symbol, value in dip_raw.items()
+        if not str(symbol).startswith("_") and isinstance(value, dict)
+    }
+    scanner_cache = load_scanner_cache() or {}
+    raw_scanner_rows = scanner_cache.get("results") if isinstance(scanner_cache, dict) else []
+    scanner_rows = []
+    for source_row in (raw_scanner_rows or []):
+        if not isinstance(source_row, dict):
+            continue
+        row = dict(source_row)
+        ticker = str(row.get("ticker") or "").upper()
+        current_dip = dip_scores.get(ticker)
+        row["dip_total"] = _num_or_none(current_dip.get("total")) if current_dip else None
+        scanner_rows.append(row)
+    scanner_by_symbol = {
+        str(row.get("ticker") or "").upper(): row
+        for row in scanner_rows if row.get("ticker")
+    }
+
+    watch_symbols = {
+        str(item.get("symbol") or "").upper()
+        for item in _read_watchlist_file() if item.get("symbol")
+    }
+    watch_symbols.update(
+        str(row.get("ticker") or "").upper()
+        for row in scanner_rows
+        if _passes_weekly_buy_rule(row, held_symbols, dip_min)
+    )
+    watch_symbols.difference_update(held_symbols)
+    watch_symbols.discard("")
+
+    def build_row(symbol: str, held: bool) -> dict:
+        holding = holdings.get(symbol) or {}
+        amount = float(_num_or_none(holding.get("amount")) or 0)
+        pnl_pct = _num_or_none(holding.get("pnl_pct")) if held else None
+        dip, weight_pct = _position_dip_metrics(symbol, amount, invested, dip_scores)
+        scanner_row = scanner_by_symbol.get(symbol) or {}
+        scanner_dip = _num_or_none(scanner_row.get("dip_total"))
+        if scanner_dip is not None:
+            dip = scanner_dip
+        signal = scanner_row.get("recent_signal") or {}
+        if not isinstance(signal, dict):
+            signal = {}
+        signal_score = _num_or_none(signal.get("score"))
+        signal_tier = signal.get("tier") or None
+        health = _heatmap_chart_health(scanner_row)
+        daily_pct = _heatmap_change(_daily_change_from_cache(symbol))
+        weekly_pct = _heatmap_change(_weekly_change_from_cache(symbol))
+        readiness, reasons = _heatmap_readiness(
+            dip, signal_score, health, pnl_pct, held,
+        )
+        return {
+            "symbol": symbol,
+            "weight_pct": round(weight_pct, 2) if held and weight_pct is not None else None,
+            "pnl_pct": pnl_pct,
+            "dip": dip,
+            "signal_score": signal_score,
+            "signal_tier": signal_tier,
+            "chart_health": health,
+            "daily_pct": daily_pct,
+            "weekly_pct": weekly_pct,
+            "readiness": readiness,
+            "readiness_reasons": reasons,
+        }
+
+    held_rows = [build_row(symbol, True) for symbol in sorted(held_symbols)]
+    watch_rows = [build_row(symbol, False) for symbol in sorted(watch_symbols)]
+    composed = {
+        "held": held_rows,
+        "watch": watch_rows,
+        "totals": {
+            "held": len(held_rows),
+            "watch": len(watch_rows),
+            "invested": round(invested, 2),
+        },
+    }
+    cache_inputs = {
+        "payload": composed,
+        "settings": {"dca_dip_min": dip_min, "dca_max_weight": max_weight},
+    }
+    cache_key = hashlib.blake2b(
+        json.dumps(cache_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        digest_size=16,
+    ).hexdigest()
+    now = _time_module.time()
+    if (_HOME_HEATMAP_CACHE["key"] == cache_key
+            and now - _HOME_HEATMAP_CACHE["ts"] < HOME_HEATMAP_CACHE_TTL):
+        return _HOME_HEATMAP_CACHE["data"]
+
+    data = {**composed, "generated_at": datetime.now(timezone.utc).isoformat()}
+    _HOME_HEATMAP_CACHE.update({"key": cache_key, "data": data, "ts": now})
+    return data
 
 
 ASSISTANT_EXPORT_SCHEMA_VERSION = "1.2"

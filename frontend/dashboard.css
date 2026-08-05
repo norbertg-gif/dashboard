@@ -5552,6 +5552,85 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .home-pos { color: var(--up); }
 .home-neg { color: var(--down); }
 
+/* Heatmapa "kde nastúpiť alebo pridať" — dva bloky dlaždíc, jedna farbená
+   veličina naraz. Bunky rastú s váhou pozície cez flex-grow, takže riadok
+   ostáva zarovnaný a veľká pozícia je väčšia bez počítania mriežky. */
+.home-card-heatmap { margin-bottom: 14px; }
+.hm-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.hm-tab {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.hm-tab:hover { color: var(--text); border-color: var(--muted2); }
+.hm-tab.active {
+  background: var(--bg3);
+  color: var(--text);
+  border-color: var(--blue);
+}
+.hm-block + .hm-block { margin-top: 10px; }
+.hm-block-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted2);
+  margin-bottom: 5px;
+}
+.hm-count {
+  font-family: var(--font-mono);
+  color: var(--muted3);
+  letter-spacing: 0;
+}
+.hm-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hm-cell {
+  flex: 1 1 74px;
+  min-width: 74px;
+  max-width: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.hm-cell:hover {
+  border-color: var(--blue);
+  transform: translateY(-1px);
+}
+.hm-sym {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+}
+.hm-val {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Príspevok k výnosu — donut + legenda vedľa seba, pod 380px pod sebou. */
 .home-contrib {
   display: flex;

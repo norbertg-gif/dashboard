@@ -157,10 +157,21 @@ These were already in the codebase and need to stay fixed:
    Existujúce karty *Pozornosť* a *DIP kandidáti* už zodpovedajú blokom
    „Čo treba riešiť" a „Nové príležitosti" z mockupu; netreba ich stavať nanovo.
 
--1. **Heatmapa vstup/DCA — ĎALŠIA V PORADÍ, ODSÚHLASENÉ 2026-08-04.**
-   **Umiestnenie: Prehľad (Home), nie Portfólio ani Scanner** (rozhodnuté
-   2026-08-05) — je to rozhodovací povrch a Prehľad je prvá otvorená obrazovka.
-   Zapadá do redizajnu podľa referencie (položka -2).
+-1. **Heatmapa vstup/DCA — HOTOVÉ 2026-08-05.**
+   `GET /api/home/heatmap` skladá dva bloky (`held` = držané Stock/ETF oboch
+   účtov, `watch` = watchlist + scanner kandidáti) VÝHRADNE z existujúcich cache
+   — žiadny scan, žiadne eToro volanie, 15 min RAM cache. Kandidáti prechádzajú
+   `_passes_weekly_buy_rule()`, teda tým istým pravidlom ako sekcia „Možný
+   nákup" v Týždennom pláne (extrahované z `get_investor_plan`, aby sa povrchy
+   nemohli rozísť). `_position_dip_metrics()` je rovnaká extrakcia z DCA route.
+   Frontend: karta „Kde nastúpiť alebo pridať" na Prehľade, farbí sa VŽDY len
+   jedna veličina naraz (pripravenosť / DIP / signál / denný / týždenný pohyb) —
+   miešanie viacerých do bunky by spravilo ďalšie nepriehľadné skóre. Veľkosť
+   bunky = váha pozície (`flex-grow`), klik otvorí Verdikt, **sivá = chýbajúce
+   dáta, nie nula**.
+   `_heatmap_readiness()` je 40 % DIP / 25 % signál / 20 % chart health / 15 %
+   strata voči priemeru, renormalizované cez DOSTUPNÉ zložky — **výlučne
+   prezentačné, nikdy sa nesmie čítať späť do skóringu**.
    Vizuál, z ktorého sa dá rozhodnúť o vstupe alebo DCA. Prešlo testom „aké
    rozhodnutie to mení" (vstup a DCA sú rozhodnutia, nie dôkazy) — na rozdiel od
    chart health / scanner tieru, ktoré odpovedajú „je to zdravé?".

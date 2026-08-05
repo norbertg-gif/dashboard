@@ -88,6 +88,9 @@ async function renderHomeView(force = false) {
   // refresh=1 fetchov na eToro proxy (Home sa má dať prepínať bez trestu).
   if (!force && _homeLastData && (Date.now() - _homeLastFetchMs) < HOME_DATA_TTL_MS) {
     el.innerHTML = homeContentHtml(_homeLastData);
+    // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
+    // aby ju nedržal ten istý TTL ako portfóliový snapshot.
+    setTimeout(() => loadHeatmapCard(), 0);
     return;
   }
 
@@ -130,6 +133,7 @@ async function renderHomeView(force = false) {
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
+    setTimeout(() => loadHeatmapCard(), 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
@@ -379,6 +383,130 @@ function homeContributionHtml(port1, port2) {
   </div>`;
 }
 
+// ── Heatmapa: kde nastúpiť / kde pridať ───────────────────────────────────────
+// Rozhodovací povrch, nie dôkazový: odpovedá na "kam teraz", nie "čo sa stalo".
+// Dáta z /api/home/heatmap — všetko z existujúcich cache, žiadny nový výpočet.
+// Farbí sa VŽDY len jedna veličina naraz; miešanie viacerých do jednej bunky by
+// z toho spravilo ďalšie nepriehľadné skóre, čomu sa celý dashboard vyhýba.
+let _heatmapCache = { data: null, ts: 0 };
+const HEATMAP_TTL_MS = 15 * 60 * 1000;
+const HEATMAP_METRIC_KEY = 'td_home_heatmap_metric';
+
+const HEATMAP_METRICS = {
+  readiness: { label: 'Pripravenosť', field: 'readiness', kind: 'score', unit: '' },
+  dip:       { label: 'DIP',          field: 'dip',       kind: 'score', unit: '' },
+  signal:    { label: 'Signál',       field: 'signal_score', kind: 'signal', unit: '/4' },
+  daily:     { label: 'Denný pohyb',  field: 'daily_pct',  kind: 'change', unit: ' %' },
+  weekly:    { label: 'Týždenný pohyb', field: 'weekly_pct', kind: 'change', unit: ' %' },
+};
+
+function homeHeatmapMetric() {
+  const v = localStorage.getItem(HEATMAP_METRIC_KEY);
+  return HEATMAP_METRICS[v] ? v : 'readiness';
+}
+
+function homeSetHeatmapMetric(key) {
+  if (!HEATMAP_METRICS[key]) return;
+  localStorage.setItem(HEATMAP_METRIC_KEY, key);
+  renderHeatmapCard(_heatmapCache.data);
+}
+
+// Skóre (pripravenosť, DIP, signál): jednofarebná škála — viac = zelenšie.
+// Pohyb: divergentná škála okolo nuly, lebo znamienko je tam podstatné.
+// Chýbajúca hodnota je sivá, nie nula — to je rozdiel medzi "nevieme" a "nula".
+function heatmapCellStyle(value, kind) {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return 'background:var(--bg3);color:var(--muted3);';
+  }
+  const v = Number(value);
+  if (kind === 'change') {
+    const mag = Math.min(1, Math.abs(v) / 6);          // ±6 % = plná sýtosť
+    const col = v >= 0 ? 'var(--up)' : 'var(--down)';
+    return `background:color-mix(in oklch, ${col} ${Math.round(mag * 70)}%, transparent);`;
+  }
+  const pct = kind === 'signal' ? Math.min(1, v / 4) : Math.min(1, Math.max(0, v / 100));
+  return `background:color-mix(in oklch, var(--up) ${Math.round(pct * 70)}%, transparent);`;
+}
+
+function heatmapCellHtml(row, metricKey) {
+  const m = HEATMAP_METRICS[metricKey];
+  const raw = row?.[m.field];
+  const shown = raw == null ? '—'
+    : m.kind === 'change' ? `${Number(raw) >= 0 ? '+' : ''}${Number(raw).toFixed(1)}${m.unit}`
+    : `${Number(raw).toFixed(0)}${m.unit}`;
+  // Držané bunky rastú s váhou pozície — na prvý pohľad vidno, či by DCA
+  // pridávala do niečoho, čo už je veľké.
+  const w = Number(row?.weight_pct);
+  const grow = Number.isFinite(w) ? Math.min(2.4, 1 + w / 6) : 1;
+  const tip = [
+    row?.readiness_reasons?.length ? row.readiness_reasons.join(' · ') : null,
+    Number.isFinite(w) ? `váha ${w.toFixed(1)} %` : null,
+    row?.pnl_pct != null ? `P/L ${Number(row.pnl_pct).toFixed(1)} %` : null,
+    row?.chart_health ? `graf ${row.chart_health}` : null,
+  ].filter(Boolean).join(' · ');
+  return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind)}flex-grow:${grow.toFixed(2)};"
+      title="${escHtml(tip || row?.symbol || '')}" onclick="openVerdictTicker('${escHtml(row.symbol)}')">
+    <span class="hm-sym">${escHtml(row.symbol)}</span>
+    <span class="hm-val">${shown}</span>
+  </button>`;
+}
+
+function heatmapBlockHtml(title, rows, metricKey, emptyText) {
+  if (!rows || !rows.length) {
+    return `<div class="hm-block"><div class="hm-block-title">${title}</div>
+      <div class="home-empty">${emptyText}</div></div>`;
+  }
+  const m = HEATMAP_METRICS[metricKey];
+  // Zoradenie podľa farbenej veličiny — najzaujímavejšie vľavo hore.
+  const sorted = [...rows].sort((a, b) => {
+    const av = Number(a?.[m.field]), bv = Number(b?.[m.field]);
+    if (!Number.isFinite(av) && !Number.isFinite(bv)) return 0;
+    if (!Number.isFinite(av)) return 1;
+    if (!Number.isFinite(bv)) return -1;
+    return bv - av;
+  });
+  return `<div class="hm-block">
+    <div class="hm-block-title">${title} <span class="hm-count">${rows.length}</span></div>
+    <div class="hm-grid">${sorted.map(r => heatmapCellHtml(r, metricKey)).join('')}</div>
+  </div>`;
+}
+
+function heatmapCardHead() {
+  const cur = homeHeatmapMetric();
+  const buttons = Object.entries(HEATMAP_METRICS).map(([key, m]) =>
+    `<button type="button" class="hm-tab ${key === cur ? 'active' : ''}"
+       onclick="homeSetHeatmapMetric('${key}')">${m.label}</button>`).join('');
+  return `<div class="hm-tabs">${buttons}</div>`;
+}
+
+async function loadHeatmapCard(force = false) {
+  const wrap = document.getElementById('home-heatmap-block');
+  if (!wrap) return;
+  if (!force && _heatmapCache.data && Date.now() - _heatmapCache.ts < HEATMAP_TTL_MS) {
+    renderHeatmapCard(_heatmapCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/home/heatmap`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _heatmapCache = { data: await r.json(), ts: Date.now() };
+    renderHeatmapCard(_heatmapCache.data);
+  } catch (e) {
+    wrap.innerHTML = `<div class="home-empty">Heatmapu sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderHeatmapCard(data) {
+  const wrap = document.getElementById('home-heatmap-block');
+  if (!wrap) return;
+  if (!data) { wrap.innerHTML = `<div class="home-empty">Načítavam…</div>`; return; }
+  const metric = homeHeatmapMetric();
+  wrap.innerHTML = heatmapCardHead()
+    + heatmapBlockHtml('Držím', data.held, metric, 'Žiadne držané tituly.')
+    + heatmapBlockHtml('Sledujem', data.watch, metric, 'Žiadne sledované tituly.')
+    + `<div class="signal-outcome-note">Veľkosť bunky = váha pozície. Klik otvorí Verdikt. Sivá znamená chýbajúce dáta, nie nulu. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
+}
+
 function homeCard(title, bodyHtml, opts = {}) {
   const extraClass = opts.className ? ` ${opts.className}` : '';
   return `<div class="home-card${opts.wide ? ' home-card-wide' : ''}${extraClass}">
@@ -399,6 +527,9 @@ function homeContentHtml(data) {
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
+      ${homeCard('Kde nastúpiť alebo pridať',
+        `<div id="home-heatmap-block"><div class="home-empty">Načítavam…</div></div>`,
+        { className: 'home-card-heatmap' })}
       <div class="home-grid">
         ${homeCard('Príspevok k výnosu', homeContributionBlockHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
         ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
