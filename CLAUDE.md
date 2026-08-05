@@ -111,6 +111,22 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-4. **BUG: subpanel oscilátora nelícuje s hlavným grafom v Analytike — HLÁSENÉ 2026-08-05.**
+   Overené na RSI 14 aj MACD (AMD, weekly, 2 roky, 104 sviečok): spodný subpanel
+   má širší časový rozsah než hlavný graf — hlavný končí okolo mája 2026,
+   subpanel pokračuje do júla a začína inde. Osi teda nie sú zarovnané, nie je
+   to optický klam.
+   **Kde hľadať:** `buildSubpanel()` v `predictive.js` synchronizuje časovú os
+   cez `subscribeVisibleLogicalRangeChange`. Logical range je index sviečky, nie
+   dátum — takže ak subpanel dostane INÝ POČET bodov než hlavná séria (napr. RSI
+   počítané z dennej série pri weekly grafe, alebo séria bez orezania na tých
+   istých 104 sviečok), rovnaký logical range ukáže iné dátumy a osi sa
+   rozídu. Prvý krok je porovnať `length` dát hlavnej série a subpanelu, nie
+   ladiť handler.
+   Pozn.: `pc_realRangeHandler`/`pc_realCrosshairHandler` sa pri prepínaní
+   subpanelu odhlasujú (audit 2026-07-10) — zrejme nesúvisí, ale je to tá istá
+   oblasť kódu.
+
 -3. **Benchmark portfólia — NAJVYŠŠIA PRIORITA, ODSÚHLASENÉ 2026-08-04.**
    Dashboard vie povedať `+25,8 %`, ale nie či je to dobré. Používateľ venoval
    rok testovaniu, či sa stratégia osvedčí — bez benchmarku tú otázku nemá voči
