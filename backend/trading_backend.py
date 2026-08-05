@@ -4330,7 +4330,25 @@ def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
 HEATMAP_MAX_STALE_DAYS = 6      # staršia posledná sviečka → radšej "nevieme"
 
 
-def _cached_change_pct(sym: str, calendar_days: int) -> tuple[float, float] | None:
+def _live_rates_from_positions() -> dict:
+    """{symbol: currentRate} z portfóliovej cache oboch účtov (cache-only).
+    Rovnaký zdroj živej ceny, aký používa /api/movers — heatmapa ho potrebuje,
+    aby jej denný pohyb sedel s Top pohybmi a s panelmi Grafov."""
+    rates = {}
+    for acct in ("1", "2"):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                sym = pos.get("symbol")
+                rate = pos.get("currentRate")
+                if sym and isinstance(rate, (int, float)) and rate > 0:
+                    rates[sym] = float(rate)
+        except Exception:
+            pass
+    return rates
+
+
+def _cached_change_pct(sym: str, calendar_days: int, live_last: float | None = None) -> tuple[float, float] | None:
     """Percentuálny pohyb za `calendar_days` z DENNEJ OHLCV cache (cache-only).
 
     Prečo z dennej a nie z `OneWeek`: týždenná cache sa obnovuje zriedka, takže
@@ -4362,16 +4380,28 @@ def _cached_change_pct(sym: str, calendar_days: int) -> tuple[float, float] | No
         if (datetime.now(timezone.utc).date() - last_date).days > HEATMAP_MAX_STALE_DAYS:
             return None
 
-        target = last_date - timedelta(days=calendar_days)
+        # Referenčný bod: pri živej cene je "teraz" dnešok, nie dátum poslednej
+        # uloženej sviečky. Bez toho by sa živá cena porovnávala o deň hlbšie do
+        # minulosti (dnes vs predvčerajšok) vždy, keď cache ešte nemá dnešok.
+        anchor = datetime.now(timezone.utc).date() if live_last else last_date
+        target = anchor - timedelta(days=calendar_days)
+        # Pri živej cene sa smie použiť aj posledná uložená sviečka ako predošlý
+        # close; bez nej je posledná sviečka sama "teraz" a porovnávať ju so
+        # sebou nedáva zmysel.
+        pool = candles if live_last else candles[:-1]
         prev_c = None
-        for c in reversed(candles[:-1]):
+        for c in reversed(pool):
             if _cdate(c) <= target:
                 prev_c = c
                 break
         if prev_c is None:
             return None
 
-        last = float(last_c.get("close") or last_c.get("c") or 0)
+        # Živá cena má prednosť pred posledným closom: denná cache dostane
+        # dnešnú sviečku až po uzávierke, takže bez tohto ukazovala heatmapa
+        # včerajší pohyb, kým panel Grafov vedľa nej už dnešný (MU 0,0 % vs
+        # +1,66 %, nahlásené 2026-08-05).
+        last = float(live_last) if live_last else float(last_c.get("close") or last_c.get("c") or 0)
         prev = float(prev_c.get("close") or prev_c.get("c") or 0)
         if not prev or not last:
             return None
@@ -8123,6 +8153,7 @@ def get_home_heatmap():
     }
     held_symbols = set(holdings)
     invested = sum(float(_num_or_none(item.get("amount")) or 0) for item in holdings.values())
+    live_rates = _live_rates_from_positions()
 
     dip_raw = load_dip_scores()
     if not isinstance(dip_raw, dict):
@@ -8177,8 +8208,9 @@ def get_home_heatmap():
         # Obe cez `_cached_change_pct`, teda s kontrolou zastaranosti — heatmapa
         # radšej neukáže nič než mesiac staré číslo tváriace sa ako dnešné.
         # (`_daily_change_from_cache` ostáva nedotknuté kvôli /api/movers.)
-        daily_pct = _heatmap_change(_cached_change_pct(symbol, 1))
-        weekly_pct = _heatmap_change(_cached_change_pct(symbol, 7))
+        live_rate = live_rates.get(symbol)
+        daily_pct = _heatmap_change(_cached_change_pct(symbol, 1, live_rate))
+        weekly_pct = _heatmap_change(_cached_change_pct(symbol, 7, live_rate))
         readiness, reasons = _heatmap_readiness(
             dip, signal_score, health, pnl_pct, held,
         )
