@@ -437,20 +437,22 @@ function benchClosedHtml(d) {
   if (!d?.available) {
     return `<span class="bm-ew-sub">Za posledné 2 roky nie sú zatvorené Stock/ETF obchody${d?.reason === 'history_failed' ? ' (história sa nenačítala)' : ''}.</span>`;
   }
+  // Hlavné je REÁLNE zavreté: koľko to zarobilo a koľko obchodov skončilo
+  // v strate. Odstup od indexu je až druhotný — obchod uzavretý v zisku, ktorý
+  // len zaostal za QQQ, používateľa nezaujíma (rozhodnuté 2026-08-05).
   const ex = d.excess_pp;
+  const np = Number(d.net_profit);
   return `<div class="bm-ew-grid">
-    <div><span class="bm-ew-lbl">Zatvorené obchody (${d.trades})</span>
-      <span class="bm-ew-val ${d.return_pct >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(d.return_pct)}</span>
-      <span class="bm-ew-sub">rovnaké vklady ${benchNum(d.equal_weight_pct)} · $${Number(d.invested).toLocaleString('sk-SK', {maximumFractionDigits: 0})} obratu</span></div>
+    <div><span class="bm-ew-lbl">Reálne zavreté (${d.trades})</span>
+      <span class="bm-ew-val ${np >= 0 ? 'home-pos' : 'home-neg'}">${np >= 0 ? '+' : '−'}$${Math.abs(np).toLocaleString('sk-SK', {maximumFractionDigits: 0})}</span>
+      <span class="bm-ew-sub">${benchNum(d.return_pct)} z $${Number(d.invested).toLocaleString('sk-SK', {maximumFractionDigits: 0})} obratu · ${
+        d.loss_count ? `${d.loss_count} v strate` : 'žiadny v strate'}</span></div>
     <div><span class="bm-ew-lbl">Voči QQQ</span>
       <span class="bm-ew-val ${ex == null ? '' : ex >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ex, ' pb')}</span>
       <span class="bm-ew-sub">${d.beat_count} z ${d.trades} nad indexom · QQQ ${benchNum(d.bench_pct)}</span></div>
   </div>
-  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najviac pod QQQ: ${
-    // Vlastný výnos MUSÍ byť vidno vedľa odstupu — "−55,4 pb" samo o sebe sa
-    // číta ako strata, hoci obchod mohol skončiť v zisku a len zaostať za
-    // indexom. (Nahlásené 2026-08-05: "žiaden PYPL som v mínuse nezatváral".)
-    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.return_pct)} vs QQQ ${benchNum(w.bench_pct)}`).join(' · ')}</div>` : ''}`;
+  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najslabšie zavreté: ${
+    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.return_pct)}`).join(' · ')}</div>` : ''}`;
 }
 
 function renderBenchmarkCard(data) {

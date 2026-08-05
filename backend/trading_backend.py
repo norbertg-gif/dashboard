@@ -3689,6 +3689,7 @@ def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
         rows.append({
             "symbol": t.get("symbol"), "opened": o.isoformat(), "closed": c.isoformat(),
             "amount": round(inv, 2), "return_pct": round(r_pos, 2),
+            "net_profit": round(net, 2),
             "bench_pct": round(r_bench, 2) if r_bench is not None else None,
             "excess_pp": round(r_pos - r_bench, 2) if r_bench is not None else None,
         })
@@ -3704,7 +3705,10 @@ def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
     with_bench = [r for r in rows if r["excess_pp"] is not None]
     bench_weighted = (sum(r["amount"] * r["bench_pct"] for r in with_bench)
                       / sum(r["amount"] for r in with_bench)) if with_bench else None
-    rows.sort(key=lambda r: (r["excess_pp"] is None, r["excess_pp"] or 0))
+    # Zoradenie podľa SKUTOČNÉHO výsledku, nie podľa odstupu od indexu.
+    # Používateľa zaujíma, čo reálne zarobil alebo stratil — obchod uzavretý
+    # v zisku, ktorý len zaostal za QQQ, nie je "najhorší" (rozhodnuté 2026-08-05).
+    rows.sort(key=lambda r: r["return_pct"])
 
     data = {
         "available": True,
@@ -3717,6 +3721,8 @@ def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
         "excess_pp": round(weighted - bench_weighted, 2)
                      if (weighted is not None and bench_weighted is not None) else None,
         "beat_count": sum(1 for r in with_bench if r["excess_pp"] > 0),
+        "net_profit": round(sum(r["net_profit"] for r in rows), 2),
+        "loss_count": sum(1 for r in rows if r["net_profit"] < 0),
         "worst": rows[:3],
         "skipped": skipped,
         "generated_at": datetime.now(timezone.utc).isoformat(),
