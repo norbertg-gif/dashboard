@@ -444,6 +444,14 @@ function heatmapHelpHtml() {
     <b>neráta ho ako nulu</b>. Vysoké číslo pri MSFT teda znamená „DIP je vysoký a
     graf je zdravý“, nie „všetko štyri hovorí kúp“.</p>
 
+    <p><b>Čo scanner vlastne pokrýva.</b> Prechádza importovaný DIP rebríček
+    (Nasdaq-100 je len záloha, keď import chýba) — teda aj tituly, ktoré nemáš
+    ani vo watchliste, ani v portfóliu. Preto sa v bloku <b>Sledujem</b> objavujú
+    aj mená, ktoré nikde nesleduješ: sú to nájdení kandidáti. A naopak,
+    <b>európske tituly</b> (napr. RHM.DE, NOVO-B.CO, TEP.PA) v tom rebríčku nie sú
+    nikdy, takže ostanú sivé — nie preto, že sú zlé, ale preto, že sa na ne
+    scanner nepozerá.</p>
+
     <p><b>Praktický postup.</b><br>
     • <b>Držím</b> → prepni na <b>DIP</b>. Najvyššie dlaždice sú kandidáti na DCA.
     Veľkosť dlaždice ti hneď povie, či by si nepridával do niečoho, čo už je veľké.<br>
