@@ -3643,9 +3643,20 @@ def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
     if _benchmark_closed_cache["key"] == cache_key and now - _benchmark_closed_cache["ts"] < BENCHMARK_CLOSED_TTL:
         return _benchmark_closed_cache["data"]
 
+    # POZOR: `get_trade_history` je FastAPI route funkcia — jej defaulty sú
+    # `Query(...)` objekty, nie hodnoty. Pri priamom volaní z kódu treba vyplniť
+    # VŠETKY parametre, inak sa dovnútra dostane Query inštancia a funkcia spadne
+    # (prvý pokus 2026-08-05 padal presne na tomto: `maxDate` bol Query objekt).
     try:
-        hist = get_trade_history(account="1", minDate=min_date)
+        hist = get_trade_history(
+            account="1",
+            minDate=min_date,
+            maxDate=datetime.now(timezone.utc).date().isoformat(),
+            page=0,
+            pageSize=100,
+        )
     except Exception as e:
+        print(f"  [benchmark/closed] {type(e).__name__}: {_scrub_token(str(e))}")
         return {"available": False, "reason": "history_failed", "detail": _scrub_token(str(e))}
 
     instruments = load_instruments()
