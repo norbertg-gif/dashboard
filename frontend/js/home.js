@@ -430,8 +430,15 @@ function heatmapCellStyle(value, kind) {
 
 function heatmapCellHtml(row, metricKey) {
   const m = HEATMAP_METRICS[metricKey];
-  const raw = row?.[m.field];
+  let raw = row?.[m.field];
+  // Scanner videl ticker, ale čerstvý signál nemá — to je odpoveď „žiadny",
+  // nie chýbajúce dáta. (`recent_signal` je nullable aj pri prítomnom riadku:
+  // dosť vysoký DIP drží ticker vo výsledkoch aj bez signálu.) Bez tohto
+  // rozlíšenia vyzerá „nemá signál" rovnako ako „nepozreli sme sa naň".
+  const noSignal = metricKey === 'signal' && raw == null && row?.scanned;
+  if (noSignal) raw = 0;
   const shown = raw == null ? '—'
+    : noSignal ? '0/4'
     : m.kind === 'change' ? `${Number(raw) >= 0 ? '+' : ''}${Number(raw).toFixed(1)}${m.unit}`
     : `${Number(raw).toFixed(0)}${m.unit}`;
   // Držané bunky rastú s váhou pozície — na prvý pohľad vidno, či by DCA
@@ -439,6 +446,7 @@ function heatmapCellHtml(row, metricKey) {
   const w = Number(row?.weight_pct);
   const grow = Number.isFinite(w) ? Math.min(2.4, 1 + w / 6) : 1;
   const tip = [
+    noSignal ? 'v scanneri je, čerstvý signál nemá' : null,
     row?.readiness_reasons?.length ? row.readiness_reasons.join(' · ') : null,
     Number.isFinite(w) ? `váha ${w.toFixed(1)} %` : null,
     row?.pnl_pct != null ? `P/L ${Number(row.pnl_pct).toFixed(1)} %` : null,
@@ -504,7 +512,7 @@ function renderHeatmapCard(data) {
   wrap.innerHTML = heatmapCardHead()
     + heatmapBlockHtml('Držím', data.held, metric, 'Žiadne držané tituly.')
     + heatmapBlockHtml('Sledujem', data.watch, metric, 'Žiadne sledované tituly.')
-    + `<div class="signal-outcome-note">Veľkosť bunky = váha pozície. Klik otvorí Verdikt. Sivá znamená chýbajúce dáta, nie nulu. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
+    + `<div class="signal-outcome-note">Veľkosť bunky = váha pozície. Klik otvorí Verdikt. Sivá znamená chýbajúce dáta, nie nulu — v režime Signál je <b>0/4</b> „scanner ho videl, signál nemá“, kým sivá je „scanner ho nevidel“. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
 }
 
 function homeCard(title, bodyHtml, opts = {}) {

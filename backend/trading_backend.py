@@ -8204,6 +8204,11 @@ def get_home_heatmap():
             signal = {}
         signal_score = _num_or_none(signal.get("score"))
         signal_tier = signal.get("tier") or None
+        # Rozlíš "scanner ho nevidel" od "scanner ho videl a signál nemá".
+        # `recent_signal` je nullable aj pri prítomnom riadku (DIP ≥ prah drží
+        # ticker vo výsledkoch aj bez čerstvého signálu), takže bez tohto by
+        # obe skončili šedé — a to je ten istý omyl ako pripravenosť 0.
+        scanned = bool(scanner_row)
         health = _heatmap_chart_health(scanner_row)
         # Obe cez `_cached_change_pct`, teda s kontrolou zastaranosti — heatmapa
         # radšej neukáže nič než mesiac staré číslo tváriace sa ako dnešné.
@@ -8221,6 +8226,7 @@ def get_home_heatmap():
             "dip": dip,
             "signal_score": signal_score,
             "signal_tier": signal_tier,
+            "scanned": scanned,
             "chart_health": health,
             "daily_pct": daily_pct,
             "weekly_pct": weekly_pct,
