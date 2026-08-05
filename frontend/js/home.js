@@ -393,12 +393,68 @@ const HEATMAP_TTL_MS = 15 * 60 * 1000;
 const HEATMAP_METRIC_KEY = 'td_home_heatmap_metric';
 
 const HEATMAP_METRICS = {
-  readiness: { label: 'Pripravenosť', field: 'readiness', kind: 'score', unit: '' },
-  dip:       { label: 'DIP',          field: 'dip',       kind: 'score', unit: '' },
-  signal:    { label: 'Signál',       field: 'signal_score', kind: 'signal', unit: '/4' },
-  daily:     { label: 'Denný pohyb',  field: 'daily_pct',  kind: 'change', unit: ' %' },
-  weekly:    { label: 'Týždenný pohyb', field: 'weekly_pct', kind: 'change', unit: ' %' },
+  readiness: { label: 'Pripravenosť', field: 'readiness', kind: 'score', unit: '',
+    hint: 'Súhrn: koľko vecí naraz hovorí pre nákup. Váhy 40 % DIP, 25 % signál, 20 % zdravie grafu, 15 % strata voči tvojmu priemeru.' },
+  dip:       { label: 'DIP',          field: 'dip',       kind: 'score', unit: '',
+    hint: 'Ako výhodne je titul ocenený podľa DIP rankingu. Vyššie = väčšia zľava. Nie je to pokyn na nákup, ale poradie kandidátov.' },
+  signal:    { label: 'Signál',       field: 'signal_score', kind: 'signal', unit: '/4',
+    hint: 'Technický setup C1–C4 z posledného skenu. 0/4 je úplne bežný stav — signál je krátka udalosť, nie trvalá vlastnosť titulu.' },
+  daily:     { label: 'Denný pohyb',  field: 'daily_pct',  kind: 'change', unit: ' %',
+    hint: 'Čistý pohyb ceny za deň. Kontext, nie dôvod na akciu — pri 12-mesačnom horizonte je to šum.' },
+  weekly:    { label: 'Týždenný pohyb', field: 'weekly_pct', kind: 'change', unit: ' %',
+    hint: 'Pohyb ceny za 7 dní. Rovnako kontext — užitočný na všimnutie si, že sa niečo deje, nie na rozhodnutie.' },
 };
+
+const HEATMAP_HELP_KEY = 'td_home_heatmap_help';
+
+function isHeatmapHelpOpen() {
+  return localStorage.getItem(HEATMAP_HELP_KEY) === '1';
+}
+
+function toggleHeatmapHelp() {
+  localStorage.setItem(HEATMAP_HELP_KEY, isHeatmapHelpOpen() ? '0' : '1');
+  renderHeatmapCard(_heatmapCache.data);
+}
+
+// Zámerne dlhší text: tri režimy ukazujú tri rôzne obrázky a bez vysvetlenia to
+// vyzerá ako nekonzistentnosť. Nie je — merajú rôzne veci na rôznych časových
+// mierkach a NEMAJÚ sa zhodovať.
+function heatmapHelpHtml() {
+  if (!isHeatmapHelpOpen()) return '';
+  return `<div class="hm-help">
+    <p><b>Prečo si režimy navzájom neodporujú.</b> Každý odpovedá na inú otázku.
+    DIP hovorí <i>„aká je cena voči tomu, čo titul obvykle stojí"</i>. Signál hovorí
+    <i>„stalo sa práve teraz niečo v grafe"</i>. Pohyb hovorí <i>„čo sa dialo za deň
+    či týždeň"</i>. Titul môže byť pokojne lacný (vysoký DIP) a zároveň bez signálu —
+    to je normálne, dokonca najčastejší stav.</p>
+
+    <p><b>Prečo je pri DIP skoro všetko zelené.</b> DIP je poradie v rámci
+    importovaného rebríčka, nie percento. Väčšina tvojich titulov sa doň dostala
+    práve preto, že tam nejako vyšli. Zelená teda znamená <i>„vysoko v rebríčku"</i>,
+    nie <i>„kúp"</i>. Čítaj ho porovnávacím okom: zaujímavé je, ktoré sú
+    <b>najvyššie</b>, nie že sú zelené.</p>
+
+    <p><b>Prečo je pri Signáli skoro všade 0/4.</b> Signál je udalosť, ktorá trvá
+    pár dní — musia sa zísť podmienky C1–C4 naraz. Keby ich mala väčšina titulov
+    stále, nebol by to signál. <b>0/4</b> znamená „scanner sa pozrel, nič tam
+    teraz nie je“, sivá znamená „scanner sa naň vôbec nepozeral“.</p>
+
+    <p><b>Ako môže mať MSFT pripravenosť 80 a signál 0/4.</b> Pripravenosť ráta len
+    zložky, ktoré existujú. Keď signál chýba, rozdelí jeho váhu medzi ostatné —
+    <b>neráta ho ako nulu</b>. Vysoké číslo pri MSFT teda znamená „DIP je vysoký a
+    graf je zdravý“, nie „všetko štyri hovorí kúp“.</p>
+
+    <p><b>Praktický postup.</b><br>
+    • <b>Držím</b> → prepni na <b>DIP</b>. Najvyššie dlaždice sú kandidáti na DCA.
+    Veľkosť dlaždice ti hneď povie, či by si nepridával do niečoho, čo už je veľké.<br>
+    • <b>Sledujem</b> → prepni na <b>Signál</b>. Čokoľvek 2/4 a viac stojí za otvorenie
+    Verdiktu.<br>
+    • <b>Pohyb</b> používaj len na všimnutie si, že sa niečo deje — nie ako dôvod.</p>
+
+    <p class="hm-help-warn">Nič z tejto karty nevstupuje do skóringu, DCA prahov
+    ani účtovníctva. Je to pohľad na dáta, ktoré už máš inde.</p>
+  </div>`;
+}
 
 function homeHeatmapMetric() {
   const v = localStorage.getItem(HEATMAP_METRIC_KEY);
@@ -484,7 +540,15 @@ function heatmapCardHead() {
   const buttons = Object.entries(HEATMAP_METRICS).map(([key, m]) =>
     `<button type="button" class="hm-tab ${key === cur ? 'active' : ''}"
        onclick="homeSetHeatmapMetric('${key}')">${m.label}</button>`).join('');
-  return `<div class="hm-tabs">${buttons}</div>`;
+  const open = isHeatmapHelpOpen();
+  // Jednoveta k aktívnemu režimu je vždy viditeľná — plný výklad až na vyžiadanie,
+  // nech karta neplní obrazovku textom, keď už používateľ vie, na čo sa pozerá.
+  return `<div class="hm-tabs">${buttons}
+      <button type="button" class="hm-tab hm-help-btn ${open ? 'active' : ''}"
+        onclick="toggleHeatmapHelp()" title="Ako to čítať">${open ? '× zavrieť' : '? ako to čítať'}</button>
+    </div>
+    <div class="hm-hint">${escHtml(HEATMAP_METRICS[cur].hint)}</div>
+    ${heatmapHelpHtml()}`;
 }
 
 async function loadHeatmapCard(force = false) {
