@@ -2385,6 +2385,12 @@ def get_trade_history(
             "instrumentId": iid,
             "symbol": etoro_symbol_to_yf(inst.get("symbol") or str(iid)),
             "name": inst.get("name") or str(iid),
+            # Typ inštrumentu — bez neho sa história nedá filtrovať na akcie /
+            # ETF / krypto, čo je pri zmiešanom účte prvá vec, ktorú človek chce.
+            # Rovnaká mapa ako v get_portfolio (viď CLAUDE.md, InstrumentTypeID).
+            "type": {1: "Forex", 2: "Index", 4: "Commodity", 5: "Stock",
+                     6: "ETF", 10: "Crypto"}.get(
+                         inst.get("typeID") or inst.get("InstrumentTypeID") or 0, "Other"),
             "isBuy": pick(t, "isBuy", "IsBuy", default=True),
             "leverage": pick(t, "leverage", "Leverage"),
             "openRate": pick(t, "openRate", "OpenRate"),

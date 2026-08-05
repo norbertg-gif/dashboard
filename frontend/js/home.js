@@ -446,8 +446,11 @@ function benchClosedHtml(d) {
       <span class="bm-ew-val ${ex == null ? '' : ex >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ex, ' pb')}</span>
       <span class="bm-ew-sub">${d.beat_count} z ${d.trades} nad indexom · QQQ ${benchNum(d.bench_pct)}</span></div>
   </div>
-  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najhoršie zatvorené: ${
-    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.excess_pp, ' pb')}`).join(' · ')}</div>` : ''}`;
+  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najviac pod QQQ: ${
+    // Vlastný výnos MUSÍ byť vidno vedľa odstupu — "−55,4 pb" samo o sebe sa
+    // číta ako strata, hoci obchod mohol skončiť v zisku a len zaostať za
+    // indexom. (Nahlásené 2026-08-05: "žiaden PYPL som v mínuse nezatváral".)
+    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.return_pct)} vs QQQ ${benchNum(w.bench_pct)}`).join(' · ')}</div>` : ''}`;
 }
 
 function renderBenchmarkCard(data) {

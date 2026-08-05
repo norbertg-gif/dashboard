@@ -214,6 +214,46 @@ async function renderRatesView(force = false) {
   </div>`;
 }
 
+const HIST_TYPE_KEY = 'td_hist_type';
+// 'stock' zahŕňa aj ETF zámerne — pri dlhodobom investovaní je to tá istá
+// kategória rozhodovania; kto chce rozlíšiť, má samostatné 'etf'.
+const HIST_TYPES = [
+  ['all', 'Všetko'], ['stock', 'Akcie + ETF'], ['etf', 'Len ETF'],
+  ['crypto', 'Krypto'], ['other', 'Ostatné'],
+];
+
+function historyTypeMatches(t, filter) {
+  const type = t?.type || 'Other';
+  switch (filter) {
+    case 'stock':  return type === 'Stock' || type === 'ETF';
+    case 'etf':    return type === 'ETF';
+    case 'crypto': return type === 'Crypto';
+    case 'other':  return !['Stock', 'ETF', 'Crypto'].includes(type);
+    default:       return true;
+  }
+}
+
+function setHistoryType(v) {
+  localStorage.setItem(HIST_TYPE_KEY, v);
+  renderHistoryView(false);      // len prekreslenie, žiadny nový fetch
+}
+
+// KPI z filtrovanej množiny. `fallback` je serverový súhrn — použije sa len keď
+// filter nie je aktívny a nič sa nefiltrovalo, aby čísla sedeli s eToro.
+function historySummaryFor(rows, fallback) {
+  if (!rows.length) return { count: 0, winRate: 0, netProfit: 0, fees: 0 };
+  const wins = rows.filter(t => (t.netProfit || 0) > 0).length;
+  const net = rows.reduce((a, t) => a + (t.netProfit || 0), 0);
+  const inv = rows.reduce((a, t) => a + (t.investment || 0), 0);
+  return {
+    count: rows.length,
+    winRate: rows.length ? wins / rows.length * 100 : 0,
+    netProfit: net,
+    profitPct: inv ? net / inv * 100 : null,
+    fees: rows.reduce((a, t) => a + (t.fees || 0), 0),
+  };
+}
+
 async function renderHistoryView(force = false) {
   const el = document.getElementById('main-history');
   if (!el) return;
@@ -230,8 +270,15 @@ async function renderHistoryView(force = false) {
       return;
     }
   }
-  const s = historyData.summary || {};
-  const trades = [...(historyData.trades || [])].sort((a, b) => compareHistoryRows(a, b));
+  // Filter podľa typu inštrumentu. Pri zmiešanom účte (akcie + krypto) je súhrn
+  // cez všetko málokedy to, čo človek chce vidieť — a KPI sa preto počítajú
+  // z FILTROVANEJ množiny, inak by hlavička protirečila tabuľke pod ňou.
+  const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
+  const allTrades = historyData.trades || [];
+  const trades = allTrades
+    .filter(t => historyTypeMatches(t, typeFilter))
+    .sort((a, b) => compareHistoryRows(a, b));
+  const s = historySummaryFor(trades, historyData.summary);
   const histHeaders = [
     ['symbol', 'Symbol'],
     ['openTimestamp', 'Open'],
@@ -256,6 +303,18 @@ async function renderHistoryView(force = false) {
             <input id="hist-max-date" type="date" value="${escHtml(historyData.maxDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
           </label>
           <button class="btn primary" onclick="applyHistoryRange()">Nacitat</button>
+        </div>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-group">
+        <span class="tb-label">Typ</span>
+        <div class="tb-items">
+          <select class="sel" onchange="setHistoryType(this.value)">
+            ${HIST_TYPES.map(([v, lbl]) =>
+              `<option value="${v}"${typeFilter === v ? ' selected' : ''}>${lbl}</option>`).join('')}
+          </select>
+          ${typeFilter !== 'all'
+            ? `<span style="color:var(--muted2);font-size:10.5px;">${trades.length} z ${allTrades.length}</span>` : ''}
         </div>
       </div>
       <div class="tb-sep"></div>
@@ -321,7 +380,10 @@ function sortHistory(key) {
 }
 
 function exportHistoryCSV() {
-  const trades = historyData?.trades || [];
+  // Export ide z rovnakej filtrovanej množiny ako tabuľka — inak by človek
+  // vyfiltroval akcie, klikol Export a dostal aj krypto.
+  const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
+  const trades = (historyData?.trades || []).filter(t => historyTypeMatches(t, typeFilter));
   if (!trades.length) return;
   const cols = [
     ['symbol', 'Symbol'],
