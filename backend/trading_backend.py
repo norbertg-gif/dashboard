@@ -4327,20 +4327,62 @@ def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
     return None
 
 
-def _weekly_change_from_cache(sym: str) -> tuple[float, float] | None:
-    """Return the latest weekly percent change from OneWeek disk cache only."""
+HEATMAP_MAX_STALE_DAYS = 6      # staršia posledná sviečka → radšej "nevieme"
+
+
+def _cached_change_pct(sym: str, calendar_days: int) -> tuple[float, float] | None:
+    """Percentuálny pohyb za `calendar_days` z DENNEJ OHLCV cache (cache-only).
+
+    Prečo z dennej a nie z `OneWeek`: týždenná cache sa obnovuje zriedka, takže
+    porovnanie posledných dvoch týždenných sviečok vie vrátiť reálny, ale mesiac
+    starý pohyb. IREN takto ukazoval −28,8 % za týždeň, kým graf zjavne stúpal
+    (nahlásené 2026-08-05). Denná cache má tail refresh, takže je čerstvá.
+
+    Zastaranosť sa kontroluje explicitne: keď je posledná sviečka staršia než
+    HEATMAP_MAX_STALE_DAYS, vráti None. Šedá bunka („nevieme") je poctivejšia
+    než číslo, ktoré vyzerá aktuálne a nie je.
+
+    `calendar_days=1` funguje aj cez víkend: hľadá poslednú sviečku s dátumom
+    <= (posledný deň − 1), čo v pondelok vyberie piatok.
+    """
     try:
-        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneWeek")
-        if raw:
-            candles = _flatten_ohlcv(raw)
-            if len(candles) >= 2:
-                last = float(candles[-1].get("close") or candles[-1].get("c") or 0)
-                prev = float(candles[-2].get("close") or candles[-2].get("c") or 0)
-                if prev and last:
-                    return (last - prev) / prev * 100, last
+        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneDay")
+        if not raw:
+            return None
+        candles = [c for c in _flatten_ohlcv(raw) if (c.get("fromDate") or "")]
+        if len(candles) < 2:
+            return None
+        candles.sort(key=lambda c: str(c.get("fromDate")))
+
+        def _cdate(c):
+            return datetime.fromisoformat(str(c["fromDate"])[:10]).date()
+
+        last_c = candles[-1]
+        last_date = _cdate(last_c)
+        if (datetime.now(timezone.utc).date() - last_date).days > HEATMAP_MAX_STALE_DAYS:
+            return None
+
+        target = last_date - timedelta(days=calendar_days)
+        prev_c = None
+        for c in reversed(candles[:-1]):
+            if _cdate(c) <= target:
+                prev_c = c
+                break
+        if prev_c is None:
+            return None
+
+        last = float(last_c.get("close") or last_c.get("c") or 0)
+        prev = float(prev_c.get("close") or prev_c.get("c") or 0)
+        if not prev or not last:
+            return None
+        return (last - prev) / prev * 100, last
     except Exception:
-        pass
-    return None
+        return None
+
+
+def _weekly_change_from_cache(sym: str) -> tuple[float, float] | None:
+    """7-dňový pohyb — viď `_cached_change_pct` prečo z dennej cache."""
+    return _cached_change_pct(sym, 7)
 
 
 def _merge_ohlcv_tail(cached: dict, new_data: dict, interval: str, max_candles: int = 1000) -> dict:
@@ -8044,6 +8086,14 @@ def _heatmap_readiness(dip, signal_score, health: str | None,
         else:
             reasons.append("bez straty vo\u010di priemeru")
 
+    # Skóre má zmysel len keď existuje aspoň jedna VECNÁ zložka (DIP alebo
+    # signál). Bez nich ostáva nanajvýš „nie si v strate", z čoho vyšla 0 —
+    # a bunka potom tvrdila „pripravenosť 0/100", hoci správna odpoveď bola
+    # „nevieme". Presne ten rozdiel, ktorý má vo zvyšku karty držať šedá farba
+    # (nahlásené 2026-08-05: desiatky držaných titulov ukazovali 0).
+    if dip_value is None and signal_value is None:
+        return None, reasons
+
     total_weight = sum(weight for _value, weight in components)
     if not total_weight:
         return None, reasons
@@ -8124,8 +8174,11 @@ def get_home_heatmap():
         signal_score = _num_or_none(signal.get("score"))
         signal_tier = signal.get("tier") or None
         health = _heatmap_chart_health(scanner_row)
-        daily_pct = _heatmap_change(_daily_change_from_cache(symbol))
-        weekly_pct = _heatmap_change(_weekly_change_from_cache(symbol))
+        # Obe cez `_cached_change_pct`, teda s kontrolou zastaranosti — heatmapa
+        # radšej neukáže nič než mesiac staré číslo tváriace sa ako dnešné.
+        # (`_daily_change_from_cache` ostáva nedotknuté kvôli /api/movers.)
+        daily_pct = _heatmap_change(_cached_change_pct(symbol, 1))
+        weekly_pct = _heatmap_change(_cached_change_pct(symbol, 7))
         readiness, reasons = _heatmap_readiness(
             dip, signal_score, health, pnl_pct, held,
         )
