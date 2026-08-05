@@ -459,6 +459,12 @@ function heatmapHelpHtml() {
     Verdiktu.<br>
     • <b>Pohyb</b> používaj len na všimnutie si, že sa niečo deje — nie ako dôvod.</p>
 
+    <p><b>Prečo sú skóre modré a nie zelené.</b> Zelená a červená znamenajú
+    v celom dashboarde rast/pokles a zisk/stratu. Pripravenosť, DIP ani signál
+    nie sú smer — sú to miery istoty, a zelená by pri nich podprahovo hovorila
+    „kúp“. Modrá škála je preto zámerná: <b>tmavšia = nižšie, sýtejšia = vyššie</b>.
+    Zeleno-červené ostávajú iba režimy pohybu, kde smer naozaj je tým obsahom.</p>
+
     <p class="hm-help-warn">Nič z tejto karty nevstupuje do skóringu, DCA prahov
     ani účtovníctva. Je to pohľad na dáta, ktoré už máš inde.</p>
   </div>`;
@@ -515,7 +521,12 @@ function heatmapCellStyle(value, kind, range) {
   } else {
     pct = kind === 'signal' ? Math.min(1, v / 4) : Math.min(1, Math.max(0, v / 100));
   }
-  return `background:color-mix(in oklch, var(--up) ${Math.round(pct * 70)}%, transparent);`;
+  // Skóre sa farbí MODROU, nie zelenou. Zelená/červená v tomto dashboarde
+  // znamenajú rast/pokles a zisk/stratu — na miere istoty by podprahovo hovorili
+  // "kúp" alebo "predaj", hoci hovoria len "vysoko/nízko v rebríčku".
+  // Rovnaký dôvod, prečo sú modré aj čiary priemerného vstupu a cieľa analytikov.
+  // Amber sa nepoužíva zámerne: patrí čakajúcim objednávkam a stavu "pozri sa".
+  return `background:color-mix(in oklch, var(--blue) ${Math.round(pct * 78)}%, transparent);`;
 }
 
 function heatmapCellHtml(row, metricKey, range) {
