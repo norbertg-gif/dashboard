@@ -5591,6 +5591,34 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   margin-top: 2px;
 }
 .bm-warn { color: var(--yellow); }
+.bm-ew {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.bm-ew-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 6px 22px;
+}
+.bm-ew-lbl {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--muted2);
+}
+.bm-ew-val {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+.bm-ew-sub {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--muted3);
+  margin-top: 1px;
+}
 .bm-lists {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -3607,8 +3607,10 @@ def get_portfolio_benchmark():
     """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
     od otvorenia každej pozície. Viď blok komentárov vyššie — hlavne výhradu, že
     zatvorené obchody sa nezapočítavajú."""
+    # Zámerne LEN účet 1 (rozhodnutie 2026-08-05): účet 2 má inú povahu a
+    # miešanie oboch dávalo číslo, ktoré nesedelo so žiadnym z nich.
     lots = []
-    for acct in ("1", "2"):
+    for acct in ("1",):
         try:
             cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
             for pos in (cached or {}).get("data", []):
@@ -3676,12 +3678,44 @@ def get_portfolio_benchmark():
     rows.sort(key=lambda r: (r["excess_pp"] is None, -(r["excess_pp"] or 0)))
 
     beat = sum(1 for r in rows if (r["excess_pp"] or 0) > 0)
+
+    # Medián excessu vedľa váženého priemeru: priemer ťahá pár extrémov (NET,
+    # AMD majú stovky pb), takže sám o sebe nerozlíši "vyberám dobre naprieč"
+    # od "trafil som dva zásahy". Medián je na extrémy imúnny.
+    excesses = sorted(r["excess_pp"] for r in rows if r["excess_pp"] is not None)
+    median_excess = None
+    if excesses:
+        mid = len(excesses) // 2
+        median_excess = (excesses[mid] if len(excesses) % 2
+                         else (excesses[mid - 1] + excesses[mid]) / 2)
+
+    # Syntetický test rovnakých vkladov: čo by vyšlo, keby do KAŽDÉHO obchodu
+    # išla rovnaká suma. Oddeľuje kvalitu VÝBERU od veľkosti pozícií — dnes sú
+    # obe zamiešané v jednom čísle. Matematicky: pri rovnakom vklade I/N do N
+    # obchodov je celkový výnos presne priemer jednotlivých výnosov.
+    returns = [r["return_pct"] for r in rows if r["return_pct"] is not None]
+    equal_weight = None
+    if returns and port_return is not None:
+        ew_pct = sum(returns) / len(returns)
+        equal_weight = {
+            "return_pct": round(ew_pct, 2),
+            "pnl": round(total_amount * ew_pct / 100, 2),
+            # Kladné = veľkosti pozícií POMOHLI (do lepších obchodov išlo viac).
+            "sizing_effect_pp": round(port_return - ew_pct, 2),
+            "sizing_effect_usd": round(total_amount * (port_return - ew_pct) / 100, 2),
+            "per_trade": round(total_amount / len(returns), 2),
+            "trades": len(returns),
+        }
+
     data = {
         "available": True,
+        "account": "1",
         "portfolio_return_pct": round(port_return, 2) if port_return is not None else None,
         "benchmarks": benchmarks,
         "positions": len(rows),
         "beat_count": beat,
+        "median_excess_pp": round(median_excess, 2) if median_excess is not None else None,
+        "equal_weight": equal_weight,
         "invested": round(total_amount, 2),
         "rows": rows,
         "generated_at": datetime.now(timezone.utc).isoformat(),

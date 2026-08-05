@@ -437,6 +437,38 @@ function renderBenchmarkCard(data) {
     </div>`;
   }).join('');
 
+  // Medián vedľa priemeru: priemer ťahá pár extrémov, medián hovorí o typickej
+  // pozícii. Rozdiel medzi nimi je práve tá informácia "šírka vs zásahy".
+  const med = data.median_excess_pp;
+  const medLine = med == null ? '' :
+    `<div class="bm-col">
+      <div class="bm-label">Typická pozícia</div>
+      <div class="bm-diff ${med >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(med, ' pb')}</div>
+      <div class="bm-sub">medián — imúnny voči extrémom</div>
+    </div>`;
+
+  // Syntetický test: rovnaká suma do každého obchodu. Oddeľuje kvalitu výberu
+  // od veľkosti pozícií.
+  const ew = data.equal_weight;
+  const ewBlock = !ew ? '' : (() => {
+    const eff = Number(ew.sizing_effect_pp);
+    const good = eff >= 0;
+    const usd = Number(ew.sizing_effect_usd);
+    return `<div class="bm-ew">
+      <div class="bm-list-title">Keby do každého obchodu išla rovnaká suma</div>
+      <div class="bm-ew-grid">
+        <div><span class="bm-ew-lbl">Rovnaké vklady</span>
+          <span class="bm-ew-val ${ew.return_pct >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ew.return_pct)}</span>
+          <span class="bm-ew-sub">$${Number(ew.pnl).toLocaleString('sk-SK', {maximumFractionDigits: 0})} · po $${Number(ew.per_trade).toLocaleString('sk-SK', {maximumFractionDigits: 0})} do ${ew.trades} obchodov</span></div>
+        <div><span class="bm-ew-lbl">Efekt veľkostí</span>
+          <span class="bm-ew-val ${good ? 'home-pos' : 'home-neg'}">${benchNum(eff, ' pb')}</span>
+          <span class="bm-ew-sub">${good
+            ? `veľkosti pomohli — do lepších obchodov išlo viac (${usd >= 0 ? '+' : ''}$${Math.abs(usd).toLocaleString('sk-SK', {maximumFractionDigits: 0})})`
+            : `veľkosti uškodili — viac kapitálu šlo do slabších obchodov (−$${Math.abs(usd).toLocaleString('sk-SK', {maximumFractionDigits: 0})})`}</span></div>
+      </div>
+    </div>`;
+  })();
+
   const beat = data.beat_count, total = data.positions;
   const top = (data.rows || []).filter(r => r.excess_pp != null).slice(0, 3);
   const worst = (data.rows || []).filter(r => r.excess_pp != null).slice(-3).reverse();
@@ -451,15 +483,17 @@ function renderBenchmarkCard(data) {
       <div class="bm-col bm-col-main">
         <div class="bm-label">Moje výbery</div>
         <div class="bm-main ${port >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(port)}</div>
-        <div class="bm-sub">${beat} z ${total} pozícií nad indexom</div>
+        <div class="bm-sub">${beat} z ${total} obchodov nad indexom · len Účet 1</div>
       </div>
       ${cols}
+      ${medLine}
     </div>
+    ${ewBlock}
     <div class="bm-lists">
       <div><div class="bm-list-title">Najviac nad QQQ</div>${top.map(rowLine).join('')}</div>
       <div><div class="bm-list-title">Najviac pod QQQ</div>${worst.map(rowLine).join('')}</div>
     </div>
-    <div class="signal-outcome-note">Každá pozícia sa porovnáva s indexom za obdobie <b>od svojho otvorenia</b>, vážené investovanou sumou — meria to kvalitu výberu titulov, nie načasovanie trhu. Počíta len <b>otvorené Stock/ETF pozície</b>: zatvorené obchody, krypto ani kopírované portfóliá tu nie sú, takže to nie je výkonnosť účtu. Je to skreslené v prospech portfólia — prežívajúce pozície sú tie, ktoré si nezatvoril v strate.</div>`;
+    <div class="signal-outcome-note">Každá pozícia sa porovnáva s indexom za obdobie <b>od svojho otvorenia</b>, vážené investovanou sumou — meria to kvalitu výberu titulov, nie načasovanie trhu. Počíta len <b>otvorené Stock/ETF pozície Účtu 1</b>: zatvorené obchody, krypto, Účet 2 ani kopírované portfóliá tu nie sú, takže to nie je výkonnosť účtu. Je to skreslené v prospech portfólia — prežívajúce pozície sú tie, ktoré si nezatvoril v strate.</div>`;
 }
 
 // ── Heatmapa: kde nastúpiť / kde pridať ───────────────────────────────────────
