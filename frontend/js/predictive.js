@@ -2024,7 +2024,16 @@ function clearOverlays() {
 
 function pc_applyOverlays() {
   if (!pc_lastData || !pc_lastData.indicators) return;
-  const ind = pc_lastData.indicators;
+  // Rovnaký nesúlad zdrojov ako v buildSubpanel (eToro sviečky vs yfinance
+  // indikátory) — orež overlaye na rozsah sviečok, nech nerozťahujú os.
+  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: Senkou A/B sú zámerne posunuté dopredu,
+  // takže mrak pred poslednou sviečkou je funkcia, nie chyba.
+  const candles = pc_lastData.candles;
+  const rawInd = pc_lastData.indicators;
+  const ind = { ...rawInd };
+  for (const key of ['ema10', 'ema20', 'ichi_tenkan', 'ichi_kijun']) {
+    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
+  }
   clearOverlays();
 
   if (document.getElementById('chk_ema10').checked) {
@@ -2076,7 +2085,33 @@ function applySubpanel() {
   buildSubpanel(val, pc_lastData.indicators, pc_lastData.candles);
 }
 
+// Indikátory a vykresľované sviečky pochádzajú z RÔZNYCH zdrojov: `/api/chart`
+// vracia sviečky z eToro (`_etoro_display_candles`, aby graf vyzeral rovnako ako
+// v Grafoch), ale indikátory počíta z yfinance/Massive. Zámerné rozhodnutie
+// (2026-07-08), lenže obe série majú iný časový rozsah — a subpanel sa
+// synchronizuje cez LOGICAL RANGE, teda index sviečky, nie dátum. Body mimo
+// rozsahu sviečok teda posunuli indexy a os subpanelu sa rozišla s hlavným
+// grafom (nahlásené 2026-08-05 na RSI aj MACD).
+//
+// Orezanie na časový rozsah sviečok, nie na presnú zhodu časov: keby sa
+// zarovnanie týždňa medzi zdrojmi líšilo čo i len o deň, presná zhoda by
+// vyhodila všetko a subpanel by ostal prázdny.
+function pc_clipToCandles(series, candles) {
+  if (!Array.isArray(series) || !series.length) return series || [];
+  if (!Array.isArray(candles) || !candles.length) return series;
+  const first = candles[0].time;
+  const last = candles[candles.length - 1].time;
+  return series.filter(p => p && p.time >= first && p.time <= last);
+}
+
 function buildSubpanel(type, ind, candles) {
+  // Orež všetky indikátorové rady naraz — nižšie sa už pracuje len s `ind`.
+  const clipKeys = ['rsi', 'macd', 'macd_sig', 'macd_hist', 'stoch_k', 'stoch_d',
+                    'adx', 'di_plus', 'di_minus'];
+  ind = { ...ind };
+  for (const key of clipKeys) {
+    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
+  }
   const block = document.getElementById('subpanelBlock');
   block.style.display = 'flex';
   const label = document.getElementById('subpanelLabel');
