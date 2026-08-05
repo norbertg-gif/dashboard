@@ -90,7 +90,7 @@ async function renderHomeView(force = false) {
     el.innerHTML = homeContentHtml(_homeLastData);
     // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
     // aby ju nedržal ten istý TTL ako portfóliový snapshot.
-    setTimeout(() => loadHeatmapCard(), 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
     return;
   }
 
@@ -133,7 +133,7 @@ async function renderHomeView(force = false) {
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
-    setTimeout(() => loadHeatmapCard(), 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
@@ -381,6 +381,85 @@ function homeContributionHtml(port1, port2) {
     <div class="home-contrib-legend">${legend}</div>
     ${lossLine}
   </div>`;
+}
+
+// ── Benchmark: porovnanie výberov proti indexu ────────────────────────────────
+// Odpovedá na "zarobili moje výbery viac, než keby som v tých istých momentoch
+// kupoval index?". NIE je to krivka výkonnosti účtu — eToro `daily-gain` a
+// `gain` merajú celý účet vrátane krypta, páky a kopírovaných portfólií, takže
+// na hodnotenie DIP stratégie sa nedajú použiť (overené 2026-08-05).
+let _benchCache = { data: null, ts: 0 };
+const BENCH_TTL_MS = 15 * 60 * 1000;
+
+async function loadBenchmarkCard(force = false) {
+  const wrap = document.getElementById('home-bench-block');
+  if (!wrap) return;
+  if (!force && _benchCache.data && Date.now() - _benchCache.ts < BENCH_TTL_MS) {
+    renderBenchmarkCard(_benchCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/benchmark`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _benchCache = { data: await r.json(), ts: Date.now() };
+    renderBenchmarkCard(_benchCache.data);
+  } catch (e) {
+    wrap.innerHTML = `<div class="home-empty">Porovnanie sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function benchNum(v, unit = ' %') {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${unit}`;
+}
+
+function renderBenchmarkCard(data) {
+  const wrap = document.getElementById('home-bench-block');
+  if (!wrap) return;
+  if (!data) { wrap.innerHTML = `<div class="home-empty">Načítavam…</div>`; return; }
+  if (!data.available) {
+    wrap.innerHTML = `<div class="home-empty">Zatiaľ nie sú žiadne otvorené Stock/ETF pozície na porovnanie.</div>`;
+    return;
+  }
+  const port = Number(data.portfolio_return_pct);
+  const cols = ['QQQ', 'SPY'].map(sym => {
+    const b = data.benchmarks?.[sym];
+    const bv = b?.return_pct;
+    const diff = (Number.isFinite(port) && bv != null) ? port - Number(bv) : null;
+    const cls = diff == null ? '' : diff >= 0 ? 'home-pos' : 'home-neg';
+    return `<div class="bm-col">
+      <div class="bm-label">vs ${sym}</div>
+      <div class="bm-diff ${cls}">${benchNum(diff, ' pb')}</div>
+      <div class="bm-sub">${sym} za rovnaké obdobia ${benchNum(bv)}</div>
+      ${b?.coverage_pct != null && b.coverage_pct < 99
+        ? `<div class="bm-sub bm-warn">pokrytie ${b.coverage_pct} % kapitálu</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const beat = data.beat_count, total = data.positions;
+  const top = (data.rows || []).filter(r => r.excess_pp != null).slice(0, 3);
+  const worst = (data.rows || []).filter(r => r.excess_pp != null).slice(-3).reverse();
+  const rowLine = r => `<div class="bm-row" onclick="homeOpenTicker('${escHtml(r.symbol)}')">
+      <span class="bm-row-sym">${escHtml(r.symbol)}</span>
+      <span class="bm-row-val ${r.excess_pp >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(r.excess_pp, ' pb')}</span>
+      <span class="bm-row-sub">${benchNum(r.return_pct)} vs ${benchNum(r.bench_pct)}</span>
+    </div>`;
+
+  wrap.innerHTML = `
+    <div class="bm-head">
+      <div class="bm-col bm-col-main">
+        <div class="bm-label">Moje výbery</div>
+        <div class="bm-main ${port >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(port)}</div>
+        <div class="bm-sub">${beat} z ${total} pozícií nad indexom</div>
+      </div>
+      ${cols}
+    </div>
+    <div class="bm-lists">
+      <div><div class="bm-list-title">Najviac nad QQQ</div>${top.map(rowLine).join('')}</div>
+      <div><div class="bm-list-title">Najviac pod QQQ</div>${worst.map(rowLine).join('')}</div>
+    </div>
+    <div class="signal-outcome-note">Každá pozícia sa porovnáva s indexom za obdobie <b>od svojho otvorenia</b>, vážené investovanou sumou — meria to kvalitu výberu titulov, nie načasovanie trhu. Počíta len <b>otvorené Stock/ETF pozície</b>: zatvorené obchody, krypto ani kopírované portfóliá tu nie sú, takže to nie je výkonnosť účtu. Je to skreslené v prospech portfólia — prežívajúce pozície sú tie, ktoré si nezatvoril v strate.</div>`;
 }
 
 // ── Heatmapa: kde nastúpiť / kde pridať ───────────────────────────────────────
@@ -645,6 +724,9 @@ function homeContentHtml(data) {
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
+      ${homeCard('Moje výbery vs index',
+        `<div id="home-bench-block"><div class="home-empty">Načítavam…</div></div>`,
+        { className: 'home-card-bench' })}
       ${homeCard('Kde nastúpiť alebo pridať',
         `<div id="home-heatmap-block"><div class="home-empty">Načítavam…</div></div>`,
         { className: 'home-card-heatmap' })}

@@ -3551,6 +3551,145 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+# ── Benchmark: porovnanie výberov proti indexu za ZHODNÉ obdobia ──────────────
+# Odpovedá na otázku "zarobili moje výbery viac, než keby som v tých istých
+# momentoch kupoval index?" — teda meria kvalitu výberu titulov, nie načasovanie
+# trhu ani celkovú výkonnosť účtu.
+#
+# Prečo nie krivka portfólia z eToro `daily-gain`: tá séria zreťazená za rok dá
+# −35,7 %, kým Stock/ETF pozície sú +25,8 % (overené 2026-08-05). Meria celý
+# účet vrátane krypta, ktoré používateľ zámerne ignoruje, aj zatvorených
+# krypto strát z júla. Je to iná otázka než "funguje môj DIP scanner".
+#
+# Toto porovnanie naopak izoluje presne to, čo sa hodnotí: každá otvorená
+# Stock/ETF pozícia proti indexu za obdobie OD SVOJHO otvorenia, vážené sumou.
+#
+# VÝHRADA, ktorá musí ostať viditeľná aj v UI: počíta iba OTVORENÉ pozície,
+# takže ignoruje zatvorené obchody. Pri dlhom horizonte a zriedkavom zatváraní
+# je to prijateľné, ale je to skreslenie v prospech portfólia (prežívajúce
+# pozície sú tie, ktoré neboli zatvorené v strate).
+BENCHMARK_SYMBOLS = ("QQQ", "SPY")
+BENCHMARK_CACHE_TTL = 900
+_benchmark_cache = {"key": None, "data": None, "ts": 0.0}
+
+
+def _benchmark_closes(symbol: str) -> list | None:
+    """[(date, close)] pre index, zoradené. Z rovnakého zdroja ako market context."""
+    try:
+        df = _yf_download_cached(symbol, "2y", "1d")
+        if df is None or df.empty:
+            return None
+        closes = df["Close"].astype(float)
+        return [(idx.date() if hasattr(idx, "date") else idx, float(val))
+                for idx, val in closes.items()]
+    except Exception as e:
+        print(f"  [benchmark] {symbol}: {_scrub_token(e)}")
+        return None
+
+
+def _benchmark_return_since(series: list, since: date) -> float | None:
+    """% zmena indexu od prvého obchodného dňa >= `since` po posledný dostupný.
+    Prvý deň NA alebo PO otvorení pozície: keď si kupoval v sobotu alebo pred
+    sviatkom, referenciou je najbližší deň, kedy sa naozaj dalo kúpiť."""
+    if not series:
+        return None
+    start = next((c for d, c in series if d >= since), None)
+    if not start:
+        return None            # pozícia otvorená neskôr než siaha séria
+    end = series[-1][1]
+    if not start or not end:
+        return None
+    return (end - start) / start * 100
+
+
+@app.get("/api/portfolio/benchmark")
+def get_portfolio_benchmark():
+    """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
+    od otvorenia každej pozície. Viď blok komentárov vyššie — hlavne výhradu, že
+    zatvorené obchody sa nezapočítavajú."""
+    lots = []
+    for acct in ("1", "2"):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                if pos.get("type") not in ("Stock", "ETF"):
+                    continue
+                amount = float(_num_or_none(pos.get("amount")) or 0)
+                pnl = float(_num_or_none(pos.get("pnl")) or 0)
+                opened = str(pos.get("openDateTime") or "")[:10]
+                if amount <= 0 or not opened:
+                    continue
+                try:
+                    opened_d = datetime.fromisoformat(opened).date()
+                except Exception:
+                    continue
+                lots.append({"symbol": pos.get("symbol"), "amount": amount,
+                             "pnl": pnl, "opened": opened_d})
+        except Exception as e:
+            print(f"  [benchmark] account {acct}: {_scrub_token(e)}")
+
+    if not lots:
+        return {"available": False, "reason": "no_positions"}
+
+    cache_key = tuple(sorted((l["symbol"], round(l["amount"], 2), round(l["pnl"], 2),
+                              l["opened"].isoformat()) for l in lots))
+    now = _time_module.time()
+    if _benchmark_cache["key"] == cache_key and now - _benchmark_cache["ts"] < BENCHMARK_CACHE_TTL:
+        return _benchmark_cache["data"]
+
+    series = {s: _benchmark_closes(s) for s in BENCHMARK_SYMBOLS}
+    total_amount = sum(l["amount"] for l in lots)
+    port_return = sum(l["pnl"] for l in lots) / total_amount * 100 if total_amount else None
+
+    benchmarks = {}
+    for sym, ser in series.items():
+        if not ser:
+            benchmarks[sym] = None
+            continue
+        weighted, covered = 0.0, 0.0
+        for l in lots:
+            r = _benchmark_return_since(ser, l["opened"])
+            if r is None:
+                continue        # fail-soft: pozícia mimo rozsahu série sa vynechá
+            weighted += l["amount"] * r
+            covered += l["amount"]
+        benchmarks[sym] = {
+            "return_pct": round(weighted / covered, 2) if covered else None,
+            # Podiel kapitálu, ktorý sa naozaj dal porovnať — bez neho by
+            # percento tvrdilo pokrytie, ktoré nemá.
+            "coverage_pct": round(covered / total_amount * 100, 1) if total_amount else None,
+        }
+
+    rows = []
+    for l in lots:
+        r_pos = l["pnl"] / l["amount"] * 100 if l["amount"] else None
+        r_bench = _benchmark_return_since(series.get("QQQ") or [], l["opened"])
+        rows.append({
+            "symbol": l["symbol"],
+            "opened": l["opened"].isoformat(),
+            "amount": round(l["amount"], 2),
+            "return_pct": round(r_pos, 2) if r_pos is not None else None,
+            "bench_pct": round(r_bench, 2) if r_bench is not None else None,
+            "excess_pp": round(r_pos - r_bench, 2)
+                         if (r_pos is not None and r_bench is not None) else None,
+        })
+    rows.sort(key=lambda r: (r["excess_pp"] is None, -(r["excess_pp"] or 0)))
+
+    beat = sum(1 for r in rows if (r["excess_pp"] or 0) > 0)
+    data = {
+        "available": True,
+        "portfolio_return_pct": round(port_return, 2) if port_return is not None else None,
+        "benchmarks": benchmarks,
+        "positions": len(rows),
+        "beat_count": beat,
+        "invested": round(total_amount, 2),
+        "rows": rows,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _benchmark_cache.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
 # ── Doplňovač cieľových cien analytikov ───────────────────────────────────────
 # Cieľ je pomaly sa meniaci údaj (analytici ho menia rádovo v týždňoch), ale
 # zdroje sú nespoľahlivé a každý inak. Namiesto ťahania v request path beží

@@ -127,20 +127,22 @@ These were already in the codebase and need to stay fixed:
    subpanelu odhlasujú (audit 2026-07-10) — zrejme nesúvisí, ale je to tá istá
    oblasť kódu.
 
--3. **Benchmark portfólia — NAJVYŠŠIA PRIORITA, ODSÚHLASENÉ 2026-08-04.**
-   Dashboard vie povedať `+25,8 %`, ale nie či je to dobré. Používateľ venoval
-   rok testovaniu, či sa stratégia osvedčí — bez benchmarku tú otázku nemá voči
-   čomu zodpovedať, a je to jediné číslo, ktoré mení rozhodnutie „ísť s väčšími
-   peniazmi?". **Lacné:** `/api/etoro/daily-gain` sa už ťahá (`renderGainPanel`
-   v Portfóliu) a QQQ/SPY sú v OHLCV cache — ide o porovnanie dvoch kriviek za
-   rovnaké obdobie.
-   **Zámerne NEROBIŤ:** alfa, beta, Sortino, Ulcer Index, XIRR/money-weighted
-   return, atribúciu na výber/timing/koncentráciu. Pri 52 pozíciách za 8
-   mesiacov je to šum s dvomi desatinnými miestami; XIRR navyše potrebuje
-   históriu cash flow, ktorú eToro spoľahlivo nedáva.
-   Nadväzne (malá zmena, veľký dopad): **benchmark-relative výsledok signálov**
-   v existujúcej signal outcome analytics — „+8,2 % za 90 dní, ale QQQ +6,1 %".
-   Až to povie, či scanner pridáva hodnotu, alebo len sedí na rastúcom trhu.
+-3. **Benchmark — HOTOVÉ 2026-08-05, ale INAK než sa plánovalo.**
+   `GET /api/portfolio/benchmark` porovnáva každú otvorenú Stock/ETF pozíciu
+   s QQQ a SPY za obdobie **od jej otvorenia**, vážené investovanou sumou.
+   Karta „Moje výbery vs index" na Prehľade.
+   **Prečo nie krivka z eToro:** `daily-gain` zreťazený za rok dá −35,7 %, kým
+   Stock/ETF pozície sú +25,8 %; `gain` hlási ročné hodnoty ako +362 %, −68 %,
+   +225 %. Obe metriky merajú CELÝ účet vrátane krypta (ktoré používateľ
+   zámerne ignoruje), páky, zatvorených krypto strát z júla a kopírovaných
+   Smart Portfolios. Na hodnotenie DIP stratégie sú nepoužiteľné — a keby sa
+   použili, vyšlo by vierohodne vyzerajúce nesprávne číslo.
+   Porovnanie po pozíciách naopak izoluje presne to, čo sa hodnotí: vlastné
+   Stock/ETF výbery (mirrors sú v eToro payloade oddelený zoznam, do `data`
+   nevstupujú). Meria kvalitu VÝBERU, nie načasovanie trhu.
+   **Výhrada, ktorá musí ostať v UI:** počíta len otvorené pozície, takže je
+   skreslené v prospech portfólia (survivorship — zatvorené straty chýbajú).
+   Zámerne NEROBENÉ: alfa, beta, Sortino, Ulcer, XIRR, atribúcia.
 
 -2. **Redizajn Prehľadu podľa referencie — PREBIEHA, LADÍ SA.**
    Používateľ dodal mockup (2026-08-04) a chce ísť jeho smerom: tmavý terminálový
