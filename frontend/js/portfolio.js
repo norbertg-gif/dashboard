@@ -233,6 +233,46 @@ function historyTypeMatches(t, filter) {
   }
 }
 
+const HIST_GROUP_KEY = 'td_hist_group';
+
+// Zoskupenie po tituloch. Pri čiastočných zatvoreniach a viacerých tranžiach je
+// riadok na obchod ťažko čitateľný — eToro to vo svojom pohľade robí rovnako.
+// Kľúče sa zámerne volajú ako pri jednotlivých obchodoch (`investment`,
+// `netProfit`, `openTimestamp`…), aby existujúce triedenie fungovalo bez zmien.
+function historyGroupBySymbol(rows) {
+  const by = new Map();
+  for (const t of rows) {
+    const sym = t.symbol || '?';
+    let g = by.get(sym);
+    if (!g) {
+      g = { symbol: sym, name: t.name || sym, trades: 0, investment: 0,
+            netProfit: 0, fees: 0, openTimestamp: t.openTimestamp || '',
+            closeTimestamp: t.closeTimestamp || '', _days: [], type: t.type };
+      by.set(sym, g);
+    }
+    g.trades += 1;
+    g.investment += Number(t.investment || 0);
+    g.netProfit += Number(t.netProfit || 0);
+    g.fees += Number(t.fees || 0);
+    // Prvý vstup a posledný výstup — okno, v ktorom si s titulom pracoval.
+    if (t.openTimestamp && (!g.openTimestamp || t.openTimestamp < g.openTimestamp)) g.openTimestamp = t.openTimestamp;
+    if (t.closeTimestamp && (!g.closeTimestamp || t.closeTimestamp > g.closeTimestamp)) g.closeTimestamp = t.closeTimestamp;
+    if (t.daysHeld != null) g._days.push(Number(t.daysHeld));
+  }
+  return [...by.values()].map(g => ({
+    ...g,
+    // Percento z celkovej investovanej sumy, nie priemer percent — inak by malá
+    // tranža s +200 % prebila veľkú s +2 % a číslo by nesedelo s dolármi.
+    profitPct: g.investment ? g.netProfit / g.investment * 100 : null,
+    daysHeld: g._days.length ? Math.round(g._days.reduce((a, b) => a + b, 0) / g._days.length) : null,
+  }));
+}
+
+function setHistoryGroup(v) {
+  localStorage.setItem(HIST_GROUP_KEY, v);
+  renderHistoryView(false);
+}
+
 function setHistoryType(v) {
   localStorage.setItem(HIST_TYPE_KEY, v);
   renderHistoryView(false);      // len prekreslenie, žiadny nový fetch
@@ -274,12 +314,24 @@ async function renderHistoryView(force = false) {
   // cez všetko málokedy to, čo človek chce vidieť — a KPI sa preto počítajú
   // z FILTROVANEJ množiny, inak by hlavička protirečila tabuľke pod ňou.
   const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
+  const grouped = localStorage.getItem(HIST_GROUP_KEY) === 'symbol';
   const allTrades = historyData.trades || [];
-  const trades = allTrades
-    .filter(t => historyTypeMatches(t, typeFilter))
+  const filtered = allTrades.filter(t => historyTypeMatches(t, typeFilter));
+  // KPI vždy z jednotlivých obchodov — zoskupenie mení pohľad na tabuľku, nie
+  // to, koľko obchodov si spravil a aký mali win rate.
+  const s = historySummaryFor(filtered, historyData.summary);
+  const trades = (grouped ? historyGroupBySymbol(filtered) : filtered)
     .sort((a, b) => compareHistoryRows(a, b));
-  const s = historySummaryFor(trades, historyData.summary);
-  const histHeaders = [
+  const histHeaders = grouped ? [
+    ['symbol', 'Symbol'],
+    ['trades', 'Obchodov'],
+    ['openTimestamp', 'Prvý vstup'],
+    ['closeTimestamp', 'Posledný výstup'],
+    ['investment', 'Investment'],
+    ['netProfit', 'P/L'],
+    ['profitPct', '%'],
+    ['daysHeld', 'Ø dní'],
+  ] : [
     ['symbol', 'Symbol'],
     ['openTimestamp', 'Open'],
     ['openRate', 'Vstup'],
@@ -303,6 +355,14 @@ async function renderHistoryView(force = false) {
             <input id="hist-max-date" type="date" value="${escHtml(historyData.maxDate || '')}" style="background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px;border-radius:4px;margin-left:3px;">
           </label>
           <button class="btn primary" onclick="applyHistoryRange()">Nacitat</button>
+        </div>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-group">
+        <span class="tb-label">Pohľad</span>
+        <div class="tb-items">
+          <button class="btn${grouped ? '' : ' primary'}" onclick="setHistoryGroup('trade')">Per obchod</button>
+          <button class="btn${grouped ? ' primary' : ''}" onclick="setHistoryGroup('symbol')">Per titul</button>
         </div>
       </div>
       <div class="tb-sep"></div>
@@ -334,16 +394,24 @@ async function renderHistoryView(force = false) {
     </tr></thead><tbody>
       ${trades.map(t => {
         const pnl = Number(t.netProfit || 0);
-        return `<tr>
-          <td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>
+        const symCell = `<td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>`;
+        const tail = `<td>$${Number(t.investment || 0).toFixed(2)}</td>
+          <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
+          <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
+          <td>${t.daysHeld ?? '-'}</td>`;
+        return grouped ? `<tr>
+          ${symCell}
+          <td>${t.trades}</td>
+          <td>${escHtml((t.openTimestamp || '').slice(0,10))}</td>
+          <td>${escHtml((t.closeTimestamp || '').slice(0,10))}</td>
+          ${tail}
+        </tr>` : `<tr>
+          ${symCell}
           <td>${escHtml((t.openTimestamp || '').slice(0,10))}</td>
           <td class="r">${t.openRate != null ? fmtPrice(Number(t.openRate)) : '-'}</td>
           <td>${escHtml((t.closeTimestamp || '').slice(0,10))}</td>
           <td class="r">${t.closeRate != null ? fmtPrice(Number(t.closeRate)) : '-'}</td>
-          <td>$${Number(t.investment || 0).toFixed(2)}</td>
-          <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
-          <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
-          <td>${t.daysHeld ?? '-'}</td>
+          ${tail}
         </tr>`;
       }).join('')}
     </tbody></table>

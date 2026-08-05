@@ -2308,13 +2308,29 @@ def get_trade_history(
     # pozícia má pri čiastočných uzavretiach viac history riadkov so zhodným
     # positionId, preto positionId NIE je vhodný dedup kľúč.
     def _row_key(it):
-        oid = it.get("orderId") or it.get("orderID") or it.get("OrderID")
-        if oid is not None:
-            return ("o", oid)
-        return ("c",
-                it.get("positionId") or it.get("positionID") or it.get("PositionID"),
-                it.get("closeTimestamp") or it.get("closeDateTime") or it.get("CloseTimestamp"),
-                it.get("openTimestamp") or it.get("openDateTime") or it.get("OpenTimestamp"))
+        """Identita riadku pre deduplikáciu naprieč stránkami.
+
+        BUG (fixed 2026-08-05): kľúčom bol SAMOTNÝ `orderId`, keď existoval.
+        Pri ČIASTOČNOM zatvorení pozície vracia eToro pre všetky časti ten istý
+        orderId (je to jedna pôvodná objednávka), takže druhá a ďalšie časti sa
+        zahodili ako duplikáty. Konkrétne: NFLX zatvorený na dvakrát
+        ($509,30 dňa 31.07. a $490,70 dňa 29.07.) sa v histórii objavil raz.
+        Dôsledok bol tichý — chýbajúce riadky, podhodnotený počet obchodov a
+        neúplný realizovaný P/L.
+
+        Kľúč preto obsahuje aj čas zatvorenia a objem: dve časti tej istej
+        objednávky sa v nich líšia, kým skutočný duplikát z prekrývajúcej sa
+        stránky je zhodný vo všetkom.
+        """
+        return (
+            it.get("orderId") or it.get("orderID") or it.get("OrderID"),
+            it.get("positionId") or it.get("positionID") or it.get("PositionID"),
+            it.get("closeTimestamp") or it.get("closeDateTime") or it.get("CloseTimestamp"),
+            it.get("openTimestamp") or it.get("openDateTime") or it.get("OpenTimestamp"),
+            # Objem odlíši aj časti zatvorené v tú istú sekundu.
+            str(it.get("units") or it.get("Units") or ""),
+            str(it.get("investment") or it.get("Investment") or ""),
+        )
 
     items: list = []
     seen_keys: set = set()
