@@ -475,10 +475,29 @@ function homeSetHeatmapMetric(key) {
   renderHeatmapCard(_heatmapCache.data);
 }
 
-// Skóre (pripravenosť, DIP, signál): jednofarebná škála — viac = zelenšie.
+// Skóre (pripravenosť, DIP, signál): jednofarebná škála — viac = sýtejšie.
 // Pohyb: divergentná škála okolo nuly, lebo znamienko je tam podstatné.
 // Chýbajúca hodnota je sivá, nie nula — to je rozdiel medzi "nevieme" a "nula".
-function heatmapCellStyle(value, kind) {
+//
+// Škáluje sa RELATÍVNE k hodnotám, ktoré sú práve na obrazovke, nie k absolútnym
+// 0–100. Dôvod: DIP sa reálne pohybuje v pásme ~80–130 a pripravenosť ~40–80,
+// takže absolútna škála hodila všetko do hornej tretiny a všetko bolo rovnako
+// zelené — farba potom nenesie žiadnu informáciu a rozdiely musíš čítať z čísel.
+// Pri relatívnej škále je najnižšia hodnota tmavá a najvyššia najsýtejšia.
+// Rozsah sa počíta cez OBA bloky naraz, aby boli dlaždice porovnateľné.
+function heatmapScoreRange(data, metricKey) {
+  const m = HEATMAP_METRICS[metricKey];
+  const values = [...(data?.held || []), ...(data?.watch || [])]
+    .map(r => Number(r?.[m.field]))
+    .filter(v => Number.isFinite(v));
+  if (!values.length) return null;
+  const min = Math.min(...values), max = Math.max(...values);
+  // Príliš úzky rozsah by zveličil šum na plný farebný rozdiel.
+  if (max - min < 1e-6) return null;
+  return { min, max };
+}
+
+function heatmapCellStyle(value, kind, range) {
   if (value == null || !Number.isFinite(Number(value))) {
     return 'background:var(--bg3);color:var(--muted3);';
   }
@@ -488,11 +507,18 @@ function heatmapCellStyle(value, kind) {
     const col = v >= 0 ? 'var(--up)' : 'var(--down)';
     return `background:color-mix(in oklch, ${col} ${Math.round(mag * 70)}%, transparent);`;
   }
-  const pct = kind === 'signal' ? Math.min(1, v / 4) : Math.min(1, Math.max(0, v / 100));
+  let pct;
+  if (range) {
+    // 12 % spodný prah: najnižšia dlaždica má ostať viditeľná ako dlaždica,
+    // nie splynúť s pozadím a vyzerať ako chýbajúce dáta.
+    pct = 0.12 + ((v - range.min) / (range.max - range.min)) * 0.88;
+  } else {
+    pct = kind === 'signal' ? Math.min(1, v / 4) : Math.min(1, Math.max(0, v / 100));
+  }
   return `background:color-mix(in oklch, var(--up) ${Math.round(pct * 70)}%, transparent);`;
 }
 
-function heatmapCellHtml(row, metricKey) {
+function heatmapCellHtml(row, metricKey, range) {
   const m = HEATMAP_METRICS[metricKey];
   let raw = row?.[m.field];
   // Scanner videl ticker, ale čerstvý signál nemá — to je odpoveď „žiadny",
@@ -516,14 +542,14 @@ function heatmapCellHtml(row, metricKey) {
     row?.pnl_pct != null ? `P/L ${Number(row.pnl_pct).toFixed(1)} %` : null,
     row?.chart_health ? `graf ${row.chart_health}` : null,
   ].filter(Boolean).join(' · ');
-  return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind)}flex-grow:${grow.toFixed(2)};"
+  return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind, range)}flex-grow:${grow.toFixed(2)};"
       title="${escHtml(tip || row?.symbol || '')}" onclick="openVerdictTicker('${escHtml(row.symbol)}')">
     <span class="hm-sym">${escHtml(row.symbol)}</span>
     <span class="hm-val">${shown}</span>
   </button>`;
 }
 
-function heatmapBlockHtml(title, rows, metricKey, emptyText) {
+function heatmapBlockHtml(title, rows, metricKey, emptyText, range) {
   if (!rows || !rows.length) {
     return `<div class="hm-block"><div class="hm-block-title">${title}</div>
       <div class="home-empty">${emptyText}</div></div>`;
@@ -539,7 +565,7 @@ function heatmapBlockHtml(title, rows, metricKey, emptyText) {
   });
   return `<div class="hm-block">
     <div class="hm-block-title">${title} <span class="hm-count">${rows.length}</span></div>
-    <div class="hm-grid">${sorted.map(r => heatmapCellHtml(r, metricKey)).join('')}</div>
+    <div class="hm-grid">${sorted.map(r => heatmapCellHtml(r, metricKey, range)).join('')}</div>
   </div>`;
 }
 
@@ -581,9 +607,10 @@ function renderHeatmapCard(data) {
   if (!wrap) return;
   if (!data) { wrap.innerHTML = `<div class="home-empty">Načítavam…</div>`; return; }
   const metric = homeHeatmapMetric();
+  const range = heatmapScoreRange(data, metric);
   wrap.innerHTML = heatmapCardHead()
-    + heatmapBlockHtml('Držím', data.held, metric, 'Žiadne držané tituly.')
-    + heatmapBlockHtml('Sledujem', data.watch, metric, 'Žiadne sledované tituly.')
+    + heatmapBlockHtml('Držím', data.held, metric, 'Žiadne držané tituly.', range)
+    + heatmapBlockHtml('Sledujem', data.watch, metric, 'Žiadne sledované tituly.', range)
     + `<div class="signal-outcome-note">Veľkosť bunky = váha pozície. Klik otvorí Verdikt. Sivá znamená chýbajúce dáta, nie nulu — v režime Signál je <b>0/4</b> „scanner ho videl, signál nemá“, kým sivá je „scanner ho nevidel“. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
 }
 
