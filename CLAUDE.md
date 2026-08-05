@@ -80,6 +80,7 @@ These were already in the codebase and need to stay fixed:
 - **eToro sidebar list v `core.js` je legacy no-op.** Duplicitný `renderEtoroList` + mŕtvy `updateEtoroSort` boli odstránené (2026-07-07; pôvodná poznámka tu mala prehodené definície — prvá/mŕtva bola tá SO sort controls). `#etoro-list-inner` v HTML neexistuje, takže `loadEtoroPositions`/`renderEtoroList` sú fail-soft no-op; ostávajú kvôli call-sites pri prepínaní účtov. Ak by sa sidebar list niekedy vracal, treba dorobiť markup aj sort UI.
 - **Chrome má 3 vrstvy (2026-07-07): `#hdr` (kontrastná hlavná lišta s tabmi) → `#toolbar` (workspace skupiny) → sub-lišty tabov.** `#main-tabs` žije priamo v `#hdr` (nie v `#main`); workspace ovládanie (preset/LOAD ALL/movers/stĺpce) je v samostatnom `#toolbar` pod headerom. Segmentované skupiny = `.tb-group` (mikro `.tb-label` + `.tb-items`) + `.tb-sep` oddeľovač — ten istý vzor používajú sub-lišty: Analytika `.controls`, Scanner `.scanner-actions`, Portfólio `.port-toolbar`, História `.tool-toolbar`, Verdikt `.verdict-toolbar`. Nové ovládacie prvky v lištách vkladaj do existujúcej `.tb-group` (alebo pridaj novú skupinu s labelom), nie voľne vedľa skupín. `#hdr-status` + `mem-profile-chip` sú v `.tb-right` workspace lišty. Current look is `glass` (Glass Terminal, 2026-07 handoff): token set in `html[data-variant="glass"]` + component overrides at the END of `dashboard.css`, all scoped `:where(html[data-variant="glass"] body:not(.light-mode))` — zero extra specificity (state classes like `.panel.error-state`, `.portfolio-held.profit/loss`, `.tag-panel-*` must keep winning) and dark-only (light mode intentionally keeps the pre-redesign flat look). Rollback of the whole redesign = switch the attribute back to `odvazna`. Chart canvas colors live in JS (`getChartTheme()` in charts.js), not CSS — keep them in sync with `--bg` when changing the variant.
 - **CSS custom property aliases must be re-declared per override scope.** `--green/--red/--blue/--bg3/--border2/--bear` are aliases (`var(--up)` etc.) declared on `:root`. A custom property substitutes its `var()` refs on the element where it is DECLARED — so `body.light-mode` token overrides do NOT propagate into aliases declared on html; the aliases are therefore re-declared inside `body.light-mode`. Any new theme scope that overrides base tokens must re-declare the aliases too.
+- **Bump verzie schémy cache je pri nespoľahlivých zdrojoch DEŠTRUKTÍVNA operácia.** `INSIGHTS_SCHEMA_VERSION` 16→17 (2026-08-04) zneplatnil všetky uložené insights payloady, aby sa prejavila nová FMP vetva pri `price_target`. Lenže časť tickerov nový fetch nedokázala obnoviť — Finnhub free tier cieľ pre veľa titulov nedá, Yahoo z Render IP prejde len občas, FMP má vlastné limity. GOOG mal hodinu predtým platných 421,79 zo zdroja `yahoo+av` a po bumpe ostal prázdny; zmizol z karty, z čiary na grafe aj zo stĺpca `Cieľ` v Portfóliu. **Správne poradie je: najprv doplniť prenos poľa zo starého záznamu, až potom bumpnúť verziu.** Insights write path teraz cieľ prenáša (`carried_from` drží pôvodný čas), takže jedna neúspešná obnova ho už nezmaže — rovnaký vzor treba použiť pre každé pole z fail-soft zdroja, ktoré sa nedá spoľahlivo zopakovať. Platí všeobecne: „teraz sa nepodarilo" NIE JE „neexistuje".
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise. The public portfolio endpoint reuses the same processed snapshot as the Portfolio tab; do not add a parallel raw-cache calculation path.
 - **Cache identity and writes matter.** Backtest cache identity includes an OHLCV fingerprint, not only the last date/row count. Disk JSON/gzip cache writes must remain temp-file + `os.replace()` atomic and use the striped file lock shared with reads.
 - **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). Schema `1.2` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
@@ -111,6 +112,129 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-4. **BUG: subpanel oscilátora nelícuje s hlavným grafom v Analytike — HLÁSENÉ 2026-08-05.**
+   Overené na RSI 14 aj MACD (AMD, weekly, 2 roky, 104 sviečok): spodný subpanel
+   má širší časový rozsah než hlavný graf — hlavný končí okolo mája 2026,
+   subpanel pokračuje do júla a začína inde. Osi teda nie sú zarovnané, nie je
+   to optický klam.
+   **Kde hľadať:** `buildSubpanel()` v `predictive.js` synchronizuje časovú os
+   cez `subscribeVisibleLogicalRangeChange`. Logical range je index sviečky, nie
+   dátum — takže ak subpanel dostane INÝ POČET bodov než hlavná séria (napr. RSI
+   počítané z dennej série pri weekly grafe, alebo séria bez orezania na tých
+   istých 104 sviečok), rovnaký logical range ukáže iné dátumy a osi sa
+   rozídu. Prvý krok je porovnať `length` dát hlavnej série a subpanelu, nie
+   ladiť handler.
+   Pozn.: `pc_realRangeHandler`/`pc_realCrosshairHandler` sa pri prepínaní
+   subpanelu odhlasujú (audit 2026-07-10) — zrejme nesúvisí, ale je to tá istá
+   oblasť kódu.
+
+-3. **Benchmark — HOTOVÉ 2026-08-05, ale INAK než sa plánovalo.**
+   `GET /api/portfolio/benchmark` porovnáva každú otvorenú Stock/ETF pozíciu
+   s QQQ a SPY za obdobie **od jej otvorenia**, vážené investovanou sumou.
+   Karta „Moje výbery vs index" na Prehľade.
+   **Prečo nie krivka z eToro:** `daily-gain` zreťazený za rok dá −35,7 %, kým
+   Stock/ETF pozície sú +25,8 %; `gain` hlási ročné hodnoty ako +362 %, −68 %,
+   +225 %. Obe metriky merajú CELÝ účet vrátane krypta (ktoré používateľ
+   zámerne ignoruje), páky, zatvorených krypto strát z júla a kopírovaných
+   Smart Portfolios. Na hodnotenie DIP stratégie sú nepoužiteľné — a keby sa
+   použili, vyšlo by vierohodne vyzerajúce nesprávne číslo.
+   Porovnanie po pozíciách naopak izoluje presne to, čo sa hodnotí: vlastné
+   Stock/ETF výbery (mirrors sú v eToro payloade oddelený zoznam, do `data`
+   nevstupujú). Meria kvalitu VÝBERU, nie načasovanie trhu.
+   **Výhrada, ktorá musí ostať v UI:** počíta len otvorené pozície, takže je
+   skreslené v prospech portfólia (survivorship — zatvorené straty chýbajú).
+   Zámerne NEROBENÉ: alfa, beta, Sortino, Ulcer, XIRR, atribúcia.
+
+-2. **Redizajn Prehľadu podľa referencie — PREBIEHA, LADÍ SA.**
+   Používateľ dodal mockup (2026-08-04) a chce ísť jeho smerom: tmavý terminálový
+   štýl, KPI riadok hore, pod ním bloky *čo riešiť / príležitosti / kontext*,
+   koláčový graf príspevku k výnosu, prehľadová tabuľka pozícií.
+   **Hotové:** karta „Príspevok k výnosu" (donut, `homeContributionHtml`
+   v `home.js` + `.home-contrib*` v CSS) — bez nového fetchu, počíta z pozícií,
+   ktoré Home už má. Geometria aj % idú z HRUBÉHO zisku (súčet kladných P/L),
+   lebo výseč nemôže byť záporná; straty sú v samostatnom riadku pod grafom,
+   aby nezmizli.
+   **Pri ďalšom ladení:** z mockupu preberať remeslo (hustota bez tiesne,
+   hierarchia typografiou, konzistentné odsadenie, badge ako význam), NIE počet
+   údajov — na referencii je naraz ~30 hodnôt, čo je presne problém z položky 0.
+   Existujúce karty *Pozornosť* a *DIP kandidáti* už zodpovedajú blokom
+   „Čo treba riešiť" a „Nové príležitosti" z mockupu; netreba ich stavať nanovo.
+
+-1. **Heatmapa vstup/DCA — HOTOVÉ 2026-08-05.**
+   `GET /api/home/heatmap` skladá dva bloky (`held` = držané Stock/ETF oboch
+   účtov, `watch` = watchlist + scanner kandidáti) VÝHRADNE z existujúcich cache
+   — žiadny scan, žiadne eToro volanie, 15 min RAM cache. Kandidáti prechádzajú
+   `_passes_weekly_buy_rule()`, teda tým istým pravidlom ako sekcia „Možný
+   nákup" v Týždennom pláne (extrahované z `get_investor_plan`, aby sa povrchy
+   nemohli rozísť). `_position_dip_metrics()` je rovnaká extrakcia z DCA route.
+   Frontend: karta „Kde nastúpiť alebo pridať" na Prehľade, farbí sa VŽDY len
+   jedna veličina naraz (pripravenosť / DIP / signál / denný / týždenný pohyb) —
+   miešanie viacerých do bunky by spravilo ďalšie nepriehľadné skóre. Veľkosť
+   bunky = váha pozície (`flex-grow`), klik otvorí Verdikt, **sivá = chýbajúce
+   dáta, nie nula**.
+   `_heatmap_readiness()` je 40 % DIP / 25 % signál / 20 % chart health / 15 %
+   strata voči priemeru, renormalizované cez DOSTUPNÉ zložky — **výlučne
+   prezentačné, nikdy sa nesmie čítať späť do skóringu**.
+   Vizuál, z ktorého sa dá rozhodnúť o vstupe alebo DCA. Prešlo testom „aké
+   rozhodnutie to mení" (vstup a DCA sú rozhodnutia, nie dôkazy) — na rozdiel od
+   chart health / scanner tieru, ktoré odpovedajú „je to zdravé?".
+   Dohodnutý tvar: bunka = ticker, dva bloky **Držím** (oba účty) a **Sledujem**
+   (watchlist + scanner kandidáti); farba = zložená pripravenosť pre Držím,
+   prepínateľná veličina pre Sledujem; veľkosť bunky pri držaných = váha
+   pozície; klik otvorí Verdikt. Navyše prepínač **Daily / Weekly pohyb** ako
+   tretia farbiaca veličina — dáta sú zadarmo, `/api/movers` a
+   `attention_daily_pct` počítajú denný pohyb a startup prefetch warmuje
+   `OneWeek` presne pre watchlist + portfolio symboly.
+   **Scanner kandidáti sa berú podľa už existujúceho pravidla Týždenného plánu**
+   (sekcia „Možný nákup": buy tier + DIP ≥ `dca_dip_min` + chart health nie Bad,
+   držané vylúčené) — zámerne ŽIADNY nový prah, aby sa povrchy nerozišli.
+   Ticker mimo watchlistu/portfólia nemusí mať týždenné sviečky v cache → šedá
+   bunka, fail-soft. **Nesmie priniesť nový výpočet** — iba iný pohľad na
+   existujúce polia, inak vzniká trinásta vrstva.
+
+0. **Redukcia analytického šumu — ČIASTOČNE HOTOVÉ 2026-08-04.**
+   Prvá vlna hotová: z ~13 vrstiev ostáva v Basic šesť. Za `.advanced-only`
+   pribudli makro režim (FRED chip), Volume Profile, chart patterny, porovnanie
+   Klasické vs Heikin Ashi a Zhoda časových rámcov; predtým tam boli len
+   correlation map, ML karta a HMM režim. V Basic ostávajú RS, Firma &
+   očakávania, O firme, chart health, market context bar a news (za tlačidlom).
+   Pri VP a patternoch nestačila trieda — ich stav je v localStorage, takže
+   skrytie checkboxu by nechalo kresliť overlay bez možnosti vypnúť ho; oba
+   flagy sa v Basic čítajú ako vypnuté, uložená hodnota ostáva.
+   **Zavrhnuté pri tom istom prechode (neotvárať znova):** téza k pozícii /
+   dôvod nákupu — už raz v dashboarde bola a bola zrušená pre nevyužívanie;
+   odpočet do ročného daňového testu — používateľ chce hviezdičku manuálne a
+   výslovne nechce, aby vek pozície ovplyvňoval algoritmy; medián výnosu —
+   používateľ meria úspešnosť POČTOM ziskových titulov, nie váženým kapitálom;
+   VaR, Monte Carlo „pravdepodobnosť úspechu", AI zhrnutia portfólia a ESG
+   overlaye (trendy 2026, ale odpovedajú na otázky s iným horizontom).
+
+0b. **eToro kolieska na HA grafoch — HOTOVÉ 2026-08-04.**
+   `applyEtoroMarkers(id, sym, r, data, {priceScale})` — `priceScale:false`
+   vynechá všetko ukotvené na REÁLNU cenu (vstupné čiary, čiary objednávok,
+   priemerná cena pre `etoroPct` badge), markery `{time, position:'belowBar'}`
+   sa kreslia vždy, lebo sú ukotvené na čas a sviečku. Volajúce miesta posielajú
+   `priceScale: !r.indicators.ha`. Zároveň bolo treba prestať mazať markery v HA
+   vetve `loadChart()` (`setSeriesMarkers(r.candleSeries, [])`) — kým tam bolo,
+   kolieska na HA nemohli vzniknúť ani po oprave.
+   **Zámerne nezmenené:** earnings markery (`applyEarningsMarkers`) sú stále
+   vypnuté pri HA, hoci sú tiež ukotvené na čas — rovnaký argument by platil,
+   ale používateľ pýtal len pozičné kolieska.
+   Používateľ: informácie sú „skvelé, ale z pohľadu užívateľa málo využívané".
+   Vzniklo ~12 interpretačných vrstiev (RS, makro režim, news clustering,
+   chart health, market context bar, chart patterny, correlation map, company
+   profile, insights, ML karta, HMM režim, volume profile), z ktorých viacero
+   odpovedá na otázky s horizontom dní až týždňov — pri 12+ mesačnom horizonte
+   sú to kontext, nie vstup do rozhodnutia. Každá jednotlivo bola dobré
+   rozhodnutie; problém je ich súčet naraz na obrazovke.
+   **Pri riešení neodstraňovať vrstvy naslepo.** Poradie otázok: (a) ktoré
+   povrchy sú rozhodovacie (Verdikt, Týždenný plán, Investor Inbox) a ktoré
+   dôkazové (Analytika) — dôkazy nemajú konkurovať rozhodnutiu o pozornosť;
+   (b) Basic/Advanced prepínač (`td_ui_mode`) už existuje ako hotová páka —
+   presun vrstvy do `.advanced-only` je lacnejší a vratnejší než zmazanie;
+   (c) až potom zvažovať odstránenie, a to len pri vrstve, ktorú ani
+   Advanced režim neospravedlní. Merania o využívaní neexistujú (žiadna
+   telemetria) — rozhoduje používateľ, nie odhad.
 1. **Predictive chart accuracy → 60%+ directional. UZAVRETÉ AKO NEDOSIAHNUTEĽNÉ v tomto feature priestore (2026-07-07).** Tri merania na reálnych dátach (34 S&P500 tickerov, walk-forward, ~6k predikcií/horizont) zhodne: (a) "always up" base rate rastie s horizontom 53.4 % (1w) → 56.8 % (4w) → 61.1 % (12w) a ŽIADEN variant ju neprekoná — analog vote je pri 4w −5pp, pri 12w −7.7pp pod base; (b) confidence gating nefunguje: subsety s vysokou zhodou susedov (|vote| ≥ 0.3…0.8) sú na VLASTNOM base rate horšie, nie lepšie; (c) regime-conditioning (trend×vol bucket kandidátov) nepomáha (−2 až −10pp); (d) kľúčové: kedykoľvek model povie "down", trafí < 50 % (drift-down subsety 48.9/46.1/40.3 % pri 1w/4w/12w — mean reversion zožerie každú persistence-based odchýlku). Preto: NEskúšať ďalšie ladenie smeru z cenových/technických features (k, recency, gating, horizonty, regime — všetko zmerané). Jediné nezmerané cesty vyžadujú NOVÚ informáciu: cross-sectional RS features, fundament/news. Hodnota analog modelu je magnitúda (avg err 4.5 % vs 18.6 % composite) a vysvetliteľnosť, nie smer. Eval skripty: scratchpad `horizon_eval.py`, `followup_eval.py`, dataset all_stocks_5yr.csv.
 2. **Regime-aware signal analytics.** ✅ INFRAŠTRUKTÚRA HOTOVÁ. (a) Backfill: `POST /api/admin/backfill-regime-context` (target=log|archive|both, ?ticker, ?limit, ?force) idempotentne dopĺňa regime kontext do starých signálov cez `_backfill_ticker_context` → reuse `build_signal_context` (zscore + weekly_bullish dopočítané z dát orezaných po dátume signálu, žiadny look-ahead, tag `context_source='backfill'`). Spúšťať po dávkach (HMM per signál náročný). (b) Per-regime tabuľka: nová `regime` skupina v `build_signal_outcome_analytics` segments (bull/sideways/bear/high_volatility), signály nesú `regime` label z log kontextu; frontend `segmentTable('regime')` v Analytike signálov, skrytá kým nie sú dáta. (c) Auto-kontext: `/api/chart` pri 90-dňovom prepočte dopĺňa chýbajúci kontext novým aj starým signálom so stropom `_ctx_budget=4` HMM fitov na request (posledná sviečka vždy) — pri bežnom prezeraní sa medzery samy zaplnia, manuálny backfill je len na hromadné dobehnutie. Ďalej: po nazbieraní ~20–30 signálov/regime zvážiť per-regime váženie scoringu (zatiaľ NEOVPLYVŇUJE C1–C4).
 3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
@@ -225,6 +349,12 @@ Main source sections:
 - **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only). Výsledok používa spoločnú `scannerCachedJson` 24h client cache; obyčajný render nikdy nevolá force refresh, explicitné ⟳ áno.
 - **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.
 - **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but an imported DIP ranking XLSX is now the primary scanned universe (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). Nasdaq-100 is only the fallback when no DIP import exists. This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks and scanning Nasdaq on top of it created avoidable timeouts. The scanner uses a bounded worker queue, so waiting tickers are not timed out before they actually start. The result table keeps every successfully scanned imported ticker with `TOTAL >= 85` (`DIP_SCANNER_VISIBILITY_THRESHOLD`) even without a fresh technical signal; lower-ranked rows remain signal-only. Therefore `recent_signal` is nullable in cached scanner results: always use `(row.get("recent_signal") or {})`, including sort keys and crossover counters. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
+- **DIP univerzum je len US — overené 2026-08-05.** Finviz vo free tieri ponúka iba
+  `Any / AMEX / CBOE / NASDAQ / NYSE`; európske burzy sú za `Custom (Elite only)`.
+  Dôsledok: európske tituly (`RHM.DE`, `NOVO-B.CO`, `TEP.PA`, `VWCG.L`, `CSG.NV`)
+  sa do DIP rebríčka NIKDY nedostanú, takže v scanneri aj v heatmape ostávajú
+  bez DIP a bez signálu — sivé znamená „scanner ich nepokrýva“, nie „sú zlé“.
+  Netreba to znova skúmať; zmenilo by to len platené Elite konto alebo iný zdroj.
 - **Chart Health** — scanner rows include `chart_health.daily` and `chart_health.weekly` (`OK` / `Risk` / `Bad`) as a human visual-quality filter. It checks EMA regime, recent drawdown, simple swing structure, crash days, and red volume spikes. This is presentation/triage only: it must not change C1-C4, DIP score, scanner tier, or portfolio accounting.
 - **Workflow badges** — scanner/chart/predictive/verdict expose a unified `+ WL` action via `addCurrentToWatchlist()` / `watchlistButtonHtml()`. Scanner ticker cells also show `PORT ±%` from `/api/portfolio/holdings`. Verdikt receives the current context ticker when opened from charts, scanner, or predictive.
    Scanner cache now stores `error_counts` and `error_samples` so the UI can explain large error counts instead of showing only a number. Main table still shows only tickers with a current technical signal; high DIP rank alone is not enough to display a row.

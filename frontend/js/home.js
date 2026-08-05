@@ -25,10 +25,17 @@ function homeToggleAcct(acct) {
   // Aspoň jeden účet musí ostať zapnutý — klik na posledný aktívny sa ignoruje.
   if (!next['1'] && !next['2']) return;
   try { localStorage.setItem(HOME_ACCTS_KEY, JSON.stringify(next)); } catch (e) {}
-  // Len KPI blok — zvyšok stránky sa dát účtov netýka, netreba nič refetchovať.
+  // Prekresliť treba KAŽDÝ blok, ktorý číta homeGetAcctSel() — dnes KPI riadok a
+  // koláč príspevku k výnosu. Nič sa nerefetchuje, oba počítajú z _homeLastData.
+  // (Movers/plán/earnings/DIP na výbere účtov nezávisia.)
+  if (!_homeLastData) return;
   const kpiEl = document.getElementById('home-kpi-block');
-  if (kpiEl && _homeLastData) {
+  if (kpiEl) {
     kpiEl.outerHTML = homePortfolioKpiHtml(_homeLastData.port1, _homeLastData.port2);
+  }
+  const contribEl = document.getElementById('home-contrib-block');
+  if (contribEl) {
+    contribEl.outerHTML = homeContributionBlockHtml(_homeLastData.port1, _homeLastData.port2);
   }
 }
 
@@ -81,6 +88,9 @@ async function renderHomeView(force = false) {
   // refresh=1 fetchov na eToro proxy (Home sa má dať prepínať bez trestu).
   if (!force && _homeLastData && (Date.now() - _homeLastFetchMs) < HOME_DATA_TTL_MS) {
     el.innerHTML = homeContentHtml(_homeLastData);
+    // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
+    // aby ju nedržal ten istý TTL ako portfóliový snapshot.
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
     return;
   }
 
@@ -123,6 +133,7 @@ async function renderHomeView(force = false) {
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
@@ -282,6 +293,498 @@ function homeDipHtml(scan) {
     </div>`).join('')}</div>`;
 }
 
+// ── Príspevok k výnosu ────────────────────────────────────────────────────────
+// Odpovedá na "na čom výsledok naozaj stojí". Celkové P/L povie, že rok vyšiel;
+// tento koláč povie, či za tým je široká základňa alebo tri tituly.
+// Bez nového fetchu — pozície sú už v Home dátach (port1/port2).
+//
+// Geometria aj percentá idú z HRUBÉHO zisku (súčet kladných P/L), nie z čistého.
+// Výseč nemôže byť záporná, takže miešať stratové pozície do toho istého kruhu
+// by bolo buď nezobraziteľné, alebo by percentá nesedeli s plochou. Straty preto
+// idú do samostatného riadku pod grafom, aby nezmizli.
+const HOME_CONTRIB_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#64748b'];
+const HOME_CONTRIB_TOP = 5;
+
+function homeContributionRows(port1, port2) {
+  const sel = homeGetAcctSel();
+  const perTicker = new Map();
+  for (const [id, port] of [['1', port1], ['2', port2]]) {
+    if (!sel[id]) continue;
+    for (const pos of (port?.positions || [])) {
+      if (pos.type !== 'Stock' && pos.type !== 'ETF') continue;
+      const sym = pos.symbol;
+      if (!sym) continue;
+      const pnl = Number(pos._livePnl ?? pos.pnl ?? 0);
+      if (!Number.isFinite(pnl)) continue;
+      perTicker.set(sym, (perTicker.get(sym) || 0) + pnl);
+    }
+  }
+  const all = [...perTicker.entries()].map(([sym, pnl]) => ({ sym, pnl }));
+  const winners = all.filter(r => r.pnl > 0).sort((a, b) => b.pnl - a.pnl);
+  const gross = winners.reduce((s, r) => s + r.pnl, 0);
+  const losses = all.filter(r => r.pnl < 0).reduce((s, r) => s + r.pnl, 0);
+  const top = winners.slice(0, HOME_CONTRIB_TOP);
+  const restPnl = winners.slice(HOME_CONTRIB_TOP).reduce((s, r) => s + r.pnl, 0);
+  const rows = top.map(r => ({ ...r, pct: gross ? r.pnl / gross * 100 : 0 }));
+  if (restPnl > 0) {
+    rows.push({ sym: 'Ostatné', pnl: restPnl, pct: gross ? restPnl / gross * 100 : 0,
+                rest: true, count: winners.length - top.length });
+  }
+  return { rows, gross, losses, net: gross + losses, loserCount: all.filter(r => r.pnl < 0).length };
+}
+
+// Obal s pevným id, aby vedel prepínač účtov prekresliť práve tento blok bez
+// re-renderu celej stránky (rovnaký vzor ako #home-kpi-block).
+function homeContributionBlockHtml(port1, port2) {
+  return `<div id="home-contrib-block">${homeContributionHtml(port1, port2)}</div>`;
+}
+
+function homeContributionHtml(port1, port2) {
+  const { rows, gross, losses, net, loserCount } = homeContributionRows(port1, port2);
+  if (!rows.length) {
+    return `<div class="home-empty">Zatiaľ žiadna zisková pozícia.</div>`;
+  }
+  // Donut cez stroke-dasharray na kruhu — žiadna knižnica, škáluje sa s CSS a
+  // farby idú z rovnakej palety ako legenda.
+  const R = 54, C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = rows.map((r, i) => {
+    const len = Math.max(0, r.pct) / 100 * C;
+    const seg = `<circle class="home-contrib-arc" cx="70" cy="70" r="${R}" fill="none"
+      stroke="${HOME_CONTRIB_COLORS[i % HOME_CONTRIB_COLORS.length]}" stroke-width="16"
+      stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}"
+      transform="rotate(-90 70 70)"><title>${escHtml(r.sym)} · ${r.pct.toFixed(1)} %</title></circle>`;
+    offset += len;
+    return seg;
+  }).join('');
+  const legend = rows.map((r, i) => `
+    <div class="home-contrib-row"${r.rest ? '' : ` onclick="homeOpenTicker('${escHtml(r.sym)}')" style="cursor:pointer;"`}>
+      <span class="home-contrib-dot" style="background:${HOME_CONTRIB_COLORS[i % HOME_CONTRIB_COLORS.length]};"></span>
+      <span class="home-contrib-sym">${escHtml(r.sym)}${r.rest && r.count ? ` <span class="home-contrib-note">(${r.count})</span>` : ''}</span>
+      <span class="home-contrib-pct">${r.pct.toFixed(1)} %</span>
+    </div>`).join('');
+  const lossLine = losses < 0
+    ? `<div class="home-contrib-foot">Stratové pozície (${loserCount}): ${homeFmtUsd(losses)} · čisté P/L ${homeFmtUsd(net)}</div>`
+    : '';
+  return `<div class="home-contrib">
+    <div class="home-contrib-chart">
+      <svg viewBox="0 0 140 140" role="img" aria-label="Príspevok k hrubému zisku">
+        <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--border)" stroke-width="16" opacity="0.35"></circle>
+        ${arcs}
+      </svg>
+      <div class="home-contrib-center">
+        <div class="home-contrib-total">${homeFmtUsd(gross)}</div>
+        <div class="home-contrib-label">hrubý zisk</div>
+      </div>
+    </div>
+    <div class="home-contrib-legend">${legend}</div>
+    ${lossLine}
+  </div>`;
+}
+
+// ── Benchmark: porovnanie výberov proti indexu ────────────────────────────────
+// Odpovedá na "zarobili moje výbery viac, než keby som v tých istých momentoch
+// kupoval index?". NIE je to krivka výkonnosti účtu — eToro `daily-gain` a
+// `gain` merajú celý účet vrátane krypta, páky a kopírovaných portfólií, takže
+// na hodnotenie DIP stratégie sa nedajú použiť (overené 2026-08-05).
+let _benchCache = { data: null, ts: 0 };
+const BENCH_TTL_MS = 15 * 60 * 1000;
+
+async function loadBenchmarkCard(force = false) {
+  const wrap = document.getElementById('home-bench-block');
+  if (!wrap) return;
+  if (!force && _benchCache.data && Date.now() - _benchCache.ts < BENCH_TTL_MS) {
+    renderBenchmarkCard(_benchCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/benchmark`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _benchCache = { data: await r.json(), ts: Date.now() };
+    renderBenchmarkCard(_benchCache.data);
+  } catch (e) {
+    wrap.innerHTML = `<div class="home-empty">Porovnanie sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function benchNum(v, unit = ' %') {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${unit}`;
+}
+
+// Zatvorené obchody idú NAŽIVO na eToro (trade history sa necachuje), takže sa
+// načítajú až na kliknutie — hlavná karta má ostať okamžitá. Je to ale jediné
+// číslo, ktoré zaplní survivorship dieru, tak je ponuka viditeľná.
+let _benchClosed = null;
+
+async function loadBenchmarkClosed() {
+  const el = document.getElementById('bm-closed');
+  if (!el) return;
+  el.innerHTML = `<span class="bm-ew-sub"><span class="spinner"></span> Načítavam zatvorené obchody z eToro…</span>`;
+  try {
+    const r = await fetch(`${API}/api/portfolio/benchmark/closed?months=24`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _benchClosed = await r.json();
+    el.innerHTML = benchClosedHtml(_benchClosed);
+  } catch (e) {
+    el.innerHTML = `<span class="bm-ew-sub">Nepodarilo sa načítať: ${escHtml(e.message)}</span>`;
+  }
+}
+
+function benchClosedHtml(d) {
+  if (!d?.available) {
+    return `<span class="bm-ew-sub">Za posledné 2 roky nie sú zatvorené Stock/ETF obchody${d?.reason === 'history_failed' ? ' (história sa nenačítala)' : ''}.</span>`;
+  }
+  // Hlavné je REÁLNE zavreté: koľko to zarobilo a koľko obchodov skončilo
+  // v strate. Odstup od indexu je až druhotný — obchod uzavretý v zisku, ktorý
+  // len zaostal za QQQ, používateľa nezaujíma (rozhodnuté 2026-08-05).
+  const ex = d.excess_pp;
+  const np = Number(d.net_profit);
+  return `<div class="bm-ew-grid">
+    <div><span class="bm-ew-lbl">Reálne zavreté (${d.trades})</span>
+      <span class="bm-ew-val ${np >= 0 ? 'home-pos' : 'home-neg'}">${np >= 0 ? '+' : '−'}$${Math.abs(np).toLocaleString('sk-SK', {maximumFractionDigits: 0})}</span>
+      <span class="bm-ew-sub">${benchNum(d.return_pct)} z $${Number(d.invested).toLocaleString('sk-SK', {maximumFractionDigits: 0})} obratu · ${
+        d.loss_count ? `${d.loss_count} v strate` : 'žiadny v strate'}</span></div>
+    <div><span class="bm-ew-lbl">Voči QQQ</span>
+      <span class="bm-ew-val ${ex == null ? '' : ex >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ex, ' pb')}</span>
+      <span class="bm-ew-sub">${d.beat_count} z ${d.trades} nad indexom · QQQ ${benchNum(d.bench_pct)}</span></div>
+  </div>
+  ${(d.worst || []).length ? `<div class="bm-ew-sub" style="margin-top:6px;">Najslabšie zavreté: ${
+    d.worst.map(w => `${escHtml(w.symbol)} ${benchNum(w.return_pct)}`).join(' · ')}</div>` : ''}`;
+}
+
+function renderBenchmarkCard(data) {
+  const wrap = document.getElementById('home-bench-block');
+  if (!wrap) return;
+  if (!data) { wrap.innerHTML = `<div class="home-empty">Načítavam…</div>`; return; }
+  if (!data.available) {
+    wrap.innerHTML = `<div class="home-empty">Zatiaľ nie sú žiadne otvorené Stock/ETF pozície na porovnanie.</div>`;
+    return;
+  }
+  const port = Number(data.portfolio_return_pct);
+  const cols = ['QQQ', 'SPY'].map(sym => {
+    const b = data.benchmarks?.[sym];
+    const bv = b?.return_pct;
+    const diff = (Number.isFinite(port) && bv != null) ? port - Number(bv) : null;
+    const cls = diff == null ? '' : diff >= 0 ? 'home-pos' : 'home-neg';
+    return `<div class="bm-col">
+      <div class="bm-label">vs ${sym}</div>
+      <div class="bm-diff ${cls}">${benchNum(diff, ' pb')}</div>
+      <div class="bm-sub">${sym} za rovnaké obdobia ${benchNum(bv)}</div>
+      ${b?.coverage_pct != null && b.coverage_pct < 99
+        ? `<div class="bm-sub bm-warn">pokrytie ${b.coverage_pct} % kapitálu</div>` : ''}
+    </div>`;
+  }).join('');
+
+  // Medián vedľa priemeru: priemer ťahá pár extrémov, medián hovorí o typickej
+  // pozícii. Rozdiel medzi nimi je práve tá informácia "šírka vs zásahy".
+  const med = data.median_excess_pp;
+  const medLine = med == null ? '' :
+    `<div class="bm-col">
+      <div class="bm-label">Typická pozícia</div>
+      <div class="bm-diff ${med >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(med, ' pb')}</div>
+      <div class="bm-sub">medián — imúnny voči extrémom</div>
+    </div>`;
+
+  // Syntetický test: rovnaká suma do každého obchodu. Oddeľuje kvalitu výberu
+  // od veľkosti pozícií.
+  const ew = data.equal_weight;
+  const ewBlock = !ew ? '' : (() => {
+    const eff = Number(ew.sizing_effect_pp);
+    const good = eff >= 0;
+    const usd = Number(ew.sizing_effect_usd);
+    return `<div class="bm-ew">
+      <div class="bm-list-title">Keby do každého obchodu išla rovnaká suma</div>
+      <div class="bm-ew-grid">
+        <div><span class="bm-ew-lbl">Rovnaké vklady</span>
+          <span class="bm-ew-val ${ew.return_pct >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(ew.return_pct)}</span>
+          <span class="bm-ew-sub">$${Number(ew.pnl).toLocaleString('sk-SK', {maximumFractionDigits: 0})} · po $${Number(ew.per_trade).toLocaleString('sk-SK', {maximumFractionDigits: 0})} do ${ew.trades} obchodov</span></div>
+        <div><span class="bm-ew-lbl">Efekt veľkostí</span>
+          <span class="bm-ew-val ${good ? 'home-pos' : 'home-neg'}">${benchNum(eff, ' pb')}</span>
+          <span class="bm-ew-sub">${good
+            ? `veľkosti pomohli — do lepších obchodov išlo viac (${usd >= 0 ? '+' : ''}$${Math.abs(usd).toLocaleString('sk-SK', {maximumFractionDigits: 0})})`
+            : `veľkosti uškodili — viac kapitálu šlo do slabších obchodov (−$${Math.abs(usd).toLocaleString('sk-SK', {maximumFractionDigits: 0})})`}</span></div>
+      </div>
+    </div>`;
+  })();
+
+  const beat = data.beat_count, total = data.positions;
+  const top = (data.rows || []).filter(r => r.excess_pp != null).slice(0, 3);
+  const worst = (data.rows || []).filter(r => r.excess_pp != null).slice(-3).reverse();
+  const rowLine = r => `<div class="bm-row" onclick="homeOpenTicker('${escHtml(r.symbol)}')">
+      <span class="bm-row-sym">${escHtml(r.symbol)}</span>
+      <span class="bm-row-val ${r.excess_pp >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(r.excess_pp, ' pb')}</span>
+      <span class="bm-row-sub">${benchNum(r.return_pct)} vs ${benchNum(r.bench_pct)}</span>
+    </div>`;
+
+  wrap.innerHTML = `
+    <div class="bm-head">
+      <div class="bm-col bm-col-main">
+        <div class="bm-label">Moje výbery</div>
+        <div class="bm-main ${port >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(port)}</div>
+        <div class="bm-sub">${beat} z ${total} obchodov nad indexom · len Účet 1</div>
+      </div>
+      ${cols}
+      ${medLine}
+    </div>
+    ${ewBlock}
+    <div class="bm-ew">
+      <div class="bm-list-title">Vrátane zatvorených obchodov
+        <button type="button" class="hm-tab" style="margin-left:8px;"
+          onclick="loadBenchmarkClosed()">načítať</button></div>
+      <div id="bm-closed"><span class="bm-ew-sub">Hlavné čísla vyššie počítajú len otvorené pozície. Toto dopočíta aj zatvorené obchody za 2 roky — ide naživo na eToro, preto na vyžiadanie.</span></div>
+    </div>
+    <div class="bm-lists">
+      <div><div class="bm-list-title">Najviac nad QQQ</div>${top.map(rowLine).join('')}</div>
+      <div><div class="bm-list-title">Najviac pod QQQ</div>${worst.map(rowLine).join('')}</div>
+    </div>
+    <div class="signal-outcome-note">Každá pozícia sa porovnáva s indexom za obdobie <b>od svojho otvorenia</b>, vážené investovanou sumou — meria to kvalitu výberu titulov, nie načasovanie trhu. Počíta len <b>otvorené Stock/ETF pozície Účtu 1</b>: zatvorené obchody, krypto, Účet 2 ani kopírované portfóliá tu nie sú, takže to nie je výkonnosť účtu. Je to skreslené v prospech portfólia — prežívajúce pozície sú tie, ktoré si nezatvoril v strate.</div>`;
+}
+
+// ── Heatmapa: kde nastúpiť / kde pridať ───────────────────────────────────────
+// Rozhodovací povrch, nie dôkazový: odpovedá na "kam teraz", nie "čo sa stalo".
+// Dáta z /api/home/heatmap — všetko z existujúcich cache, žiadny nový výpočet.
+// Farbí sa VŽDY len jedna veličina naraz; miešanie viacerých do jednej bunky by
+// z toho spravilo ďalšie nepriehľadné skóre, čomu sa celý dashboard vyhýba.
+let _heatmapCache = { data: null, ts: 0 };
+const HEATMAP_TTL_MS = 15 * 60 * 1000;
+const HEATMAP_METRIC_KEY = 'td_home_heatmap_metric';
+
+const HEATMAP_METRICS = {
+  readiness: { label: 'Pripravenosť', field: 'readiness', kind: 'score', unit: '',
+    hint: 'Súhrn: koľko vecí naraz hovorí pre nákup. Váhy 40 % DIP, 25 % signál, 20 % zdravie grafu, 15 % strata voči tvojmu priemeru.' },
+  dip:       { label: 'DIP',          field: 'dip',       kind: 'score', unit: '',
+    hint: 'Ako výhodne je titul ocenený podľa DIP rankingu. Vyššie = väčšia zľava. Nie je to pokyn na nákup, ale poradie kandidátov.' },
+  signal:    { label: 'Signál',       field: 'signal_score', kind: 'signal', unit: '/4',
+    hint: 'Technický setup C1–C4 z posledného skenu. 0/4 je úplne bežný stav — signál je krátka udalosť, nie trvalá vlastnosť titulu.' },
+  daily:     { label: 'Denný pohyb',  field: 'daily_pct',  kind: 'change', unit: ' %',
+    hint: 'Čistý pohyb ceny za deň. Kontext, nie dôvod na akciu — pri 12-mesačnom horizonte je to šum.' },
+  weekly:    { label: 'Týždenný pohyb', field: 'weekly_pct', kind: 'change', unit: ' %',
+    hint: 'Pohyb ceny za 7 dní. Rovnako kontext — užitočný na všimnutie si, že sa niečo deje, nie na rozhodnutie.' },
+};
+
+const HEATMAP_HELP_KEY = 'td_home_heatmap_help';
+
+function isHeatmapHelpOpen() {
+  return localStorage.getItem(HEATMAP_HELP_KEY) === '1';
+}
+
+function toggleHeatmapHelp() {
+  localStorage.setItem(HEATMAP_HELP_KEY, isHeatmapHelpOpen() ? '0' : '1');
+  renderHeatmapCard(_heatmapCache.data);
+}
+
+// Zámerne dlhší text: tri režimy ukazujú tri rôzne obrázky a bez vysvetlenia to
+// vyzerá ako nekonzistentnosť. Nie je — merajú rôzne veci na rôznych časových
+// mierkach a NEMAJÚ sa zhodovať.
+function heatmapHelpHtml() {
+  if (!isHeatmapHelpOpen()) return '';
+  return `<div class="hm-help">
+    <p><b>Prečo si režimy navzájom neodporujú.</b> Každý odpovedá na inú otázku.
+    DIP hovorí <i>„aká je cena voči tomu, čo titul obvykle stojí"</i>. Signál hovorí
+    <i>„stalo sa práve teraz niečo v grafe"</i>. Pohyb hovorí <i>„čo sa dialo za deň
+    či týždeň"</i>. Titul môže byť pokojne lacný (vysoký DIP) a zároveň bez signálu —
+    to je normálne, dokonca najčastejší stav.</p>
+
+    <p><b>Prečo je pri DIP skoro všetko zelené.</b> DIP je poradie v rámci
+    importovaného rebríčka, nie percento. Väčšina tvojich titulov sa doň dostala
+    práve preto, že tam nejako vyšli. Zelená teda znamená <i>„vysoko v rebríčku"</i>,
+    nie <i>„kúp"</i>. Čítaj ho porovnávacím okom: zaujímavé je, ktoré sú
+    <b>najvyššie</b>, nie že sú zelené.</p>
+
+    <p><b>Prečo je pri Signáli skoro všade 0/4.</b> Signál je udalosť, ktorá trvá
+    pár dní — musia sa zísť podmienky C1–C4 naraz. Keby ich mala väčšina titulov
+    stále, nebol by to signál. <b>0/4</b> znamená „scanner sa pozrel, nič tam
+    teraz nie je“, sivá znamená „scanner sa naň vôbec nepozeral“.</p>
+
+    <p><b>Ako môže mať MSFT pripravenosť 80 a signál 0/4.</b> Pripravenosť ráta len
+    zložky, ktoré existujú. Keď signál chýba, rozdelí jeho váhu medzi ostatné —
+    <b>neráta ho ako nulu</b>. Vysoké číslo pri MSFT teda znamená „DIP je vysoký a
+    graf je zdravý“, nie „všetko štyri hovorí kúp“.</p>
+
+    <p><b>Čo scanner vlastne pokrýva.</b> Prechádza importovaný DIP rebríček
+    (Nasdaq-100 je len záloha, keď import chýba) — teda aj tituly, ktoré nemáš
+    ani vo watchliste, ani v portfóliu. Preto sa v bloku <b>Sledujem</b> objavujú
+    aj mená, ktoré nikde nesleduješ: sú to nájdení kandidáti. A naopak,
+    <b>európske tituly</b> (napr. RHM.DE, NOVO-B.CO, TEP.PA) v tom rebríčku nie sú
+    nikdy, takže ostanú sivé — nie preto, že sú zlé, ale preto, že sa na ne
+    scanner nepozerá.</p>
+
+    <p><b>Praktický postup.</b><br>
+    • <b>Držím</b> → prepni na <b>DIP</b>. Najvyššie dlaždice sú kandidáti na DCA.
+    Veľkosť dlaždice ti hneď povie, či by si nepridával do niečoho, čo už je veľké.<br>
+    • <b>Sledujem</b> → prepni na <b>Signál</b>. Čokoľvek 2/4 a viac stojí za otvorenie
+    Verdiktu.<br>
+    • <b>Pohyb</b> používaj len na všimnutie si, že sa niečo deje — nie ako dôvod.</p>
+
+    <p><b>Prečo sú skóre modré a nie zelené.</b> Zelená a červená znamenajú
+    v celom dashboarde rast/pokles a zisk/stratu. Pripravenosť, DIP ani signál
+    nie sú smer — sú to miery istoty, a zelená by pri nich podprahovo hovorila
+    „kúp“. Modrá škála je preto zámerná: <b>tmavšia = nižšie, sýtejšia = vyššie</b>.
+    Zeleno-červené ostávajú iba režimy pohybu, kde smer naozaj je tým obsahom.</p>
+
+    <p class="hm-help-warn">Nič z tejto karty nevstupuje do skóringu, DCA prahov
+    ani účtovníctva. Je to pohľad na dáta, ktoré už máš inde.</p>
+  </div>`;
+}
+
+function homeHeatmapMetric() {
+  const v = localStorage.getItem(HEATMAP_METRIC_KEY);
+  return HEATMAP_METRICS[v] ? v : 'readiness';
+}
+
+function homeSetHeatmapMetric(key) {
+  if (!HEATMAP_METRICS[key]) return;
+  localStorage.setItem(HEATMAP_METRIC_KEY, key);
+  renderHeatmapCard(_heatmapCache.data);
+}
+
+// Skóre (pripravenosť, DIP, signál): jednofarebná škála — viac = sýtejšie.
+// Pohyb: divergentná škála okolo nuly, lebo znamienko je tam podstatné.
+// Chýbajúca hodnota je sivá, nie nula — to je rozdiel medzi "nevieme" a "nula".
+//
+// Škáluje sa RELATÍVNE k hodnotám, ktoré sú práve na obrazovke, nie k absolútnym
+// 0–100. Dôvod: DIP sa reálne pohybuje v pásme ~80–130 a pripravenosť ~40–80,
+// takže absolútna škála hodila všetko do hornej tretiny a všetko bolo rovnako
+// zelené — farba potom nenesie žiadnu informáciu a rozdiely musíš čítať z čísel.
+// Pri relatívnej škále je najnižšia hodnota tmavá a najvyššia najsýtejšia.
+// Rozsah sa počíta cez OBA bloky naraz, aby boli dlaždice porovnateľné.
+function heatmapScoreRange(data, metricKey) {
+  const m = HEATMAP_METRICS[metricKey];
+  const values = [...(data?.held || []), ...(data?.watch || [])]
+    .map(r => Number(r?.[m.field]))
+    .filter(v => Number.isFinite(v));
+  if (!values.length) return null;
+  const min = Math.min(...values), max = Math.max(...values);
+  // Príliš úzky rozsah by zveličil šum na plný farebný rozdiel.
+  if (max - min < 1e-6) return null;
+  return { min, max };
+}
+
+function heatmapCellStyle(value, kind, range) {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return 'background:var(--bg3);color:var(--muted3);';
+  }
+  const v = Number(value);
+  if (kind === 'change') {
+    const mag = Math.min(1, Math.abs(v) / 6);          // ±6 % = plná sýtosť
+    const col = v >= 0 ? 'var(--up)' : 'var(--down)';
+    return `background:color-mix(in oklch, ${col} ${Math.round(mag * 70)}%, transparent);`;
+  }
+  let pct;
+  if (range) {
+    // 12 % spodný prah: najnižšia dlaždica má ostať viditeľná ako dlaždica,
+    // nie splynúť s pozadím a vyzerať ako chýbajúce dáta.
+    pct = 0.12 + ((v - range.min) / (range.max - range.min)) * 0.88;
+  } else {
+    pct = kind === 'signal' ? Math.min(1, v / 4) : Math.min(1, Math.max(0, v / 100));
+  }
+  // Skóre sa farbí MODROU, nie zelenou. Zelená/červená v tomto dashboarde
+  // znamenajú rast/pokles a zisk/stratu — na miere istoty by podprahovo hovorili
+  // "kúp" alebo "predaj", hoci hovoria len "vysoko/nízko v rebríčku".
+  // Rovnaký dôvod, prečo sú modré aj čiary priemerného vstupu a cieľa analytikov.
+  // Amber sa nepoužíva zámerne: patrí čakajúcim objednávkam a stavu "pozri sa".
+  return `background:color-mix(in oklch, var(--blue) ${Math.round(pct * 78)}%, transparent);`;
+}
+
+function heatmapCellHtml(row, metricKey, range) {
+  const m = HEATMAP_METRICS[metricKey];
+  let raw = row?.[m.field];
+  // Scanner videl ticker, ale čerstvý signál nemá — to je odpoveď „žiadny",
+  // nie chýbajúce dáta. (`recent_signal` je nullable aj pri prítomnom riadku:
+  // dosť vysoký DIP drží ticker vo výsledkoch aj bez signálu.) Bez tohto
+  // rozlíšenia vyzerá „nemá signál" rovnako ako „nepozreli sme sa naň".
+  const noSignal = metricKey === 'signal' && raw == null && row?.scanned;
+  if (noSignal) raw = 0;
+  const shown = raw == null ? '—'
+    : noSignal ? '0/4'
+    : m.kind === 'change' ? `${Number(raw) >= 0 ? '+' : ''}${Number(raw).toFixed(1)}${m.unit}`
+    : `${Number(raw).toFixed(0)}${m.unit}`;
+  // Držané bunky rastú s váhou pozície — na prvý pohľad vidno, či by DCA
+  // pridávala do niečoho, čo už je veľké.
+  const w = Number(row?.weight_pct);
+  const grow = Number.isFinite(w) ? Math.min(2.4, 1 + w / 6) : 1;
+  const tip = [
+    noSignal ? 'v scanneri je, čerstvý signál nemá' : null,
+    row?.readiness_reasons?.length ? row.readiness_reasons.join(' · ') : null,
+    Number.isFinite(w) ? `váha ${w.toFixed(1)} %` : null,
+    row?.pnl_pct != null ? `P/L ${Number(row.pnl_pct).toFixed(1)} %` : null,
+    row?.chart_health ? `graf ${row.chart_health}` : null,
+  ].filter(Boolean).join(' · ');
+  return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind, range)}flex-grow:${grow.toFixed(2)};"
+      title="${escHtml(tip || row?.symbol || '')}" onclick="openVerdictTicker('${escHtml(row.symbol)}')">
+    <span class="hm-sym">${escHtml(row.symbol)}</span>
+    <span class="hm-val">${shown}</span>
+  </button>`;
+}
+
+function heatmapBlockHtml(title, rows, metricKey, emptyText, range) {
+  if (!rows || !rows.length) {
+    return `<div class="hm-block"><div class="hm-block-title">${title}</div>
+      <div class="home-empty">${emptyText}</div></div>`;
+  }
+  const m = HEATMAP_METRICS[metricKey];
+  // Zoradenie podľa farbenej veličiny — najzaujímavejšie vľavo hore.
+  const sorted = [...rows].sort((a, b) => {
+    const av = Number(a?.[m.field]), bv = Number(b?.[m.field]);
+    if (!Number.isFinite(av) && !Number.isFinite(bv)) return 0;
+    if (!Number.isFinite(av)) return 1;
+    if (!Number.isFinite(bv)) return -1;
+    return bv - av;
+  });
+  return `<div class="hm-block">
+    <div class="hm-block-title">${title} <span class="hm-count">${rows.length}</span></div>
+    <div class="hm-grid">${sorted.map(r => heatmapCellHtml(r, metricKey, range)).join('')}</div>
+  </div>`;
+}
+
+function heatmapCardHead() {
+  const cur = homeHeatmapMetric();
+  const buttons = Object.entries(HEATMAP_METRICS).map(([key, m]) =>
+    `<button type="button" class="hm-tab ${key === cur ? 'active' : ''}"
+       onclick="homeSetHeatmapMetric('${key}')">${m.label}</button>`).join('');
+  const open = isHeatmapHelpOpen();
+  // Jednoveta k aktívnemu režimu je vždy viditeľná — plný výklad až na vyžiadanie,
+  // nech karta neplní obrazovku textom, keď už používateľ vie, na čo sa pozerá.
+  return `<div class="hm-tabs">${buttons}
+      <button type="button" class="hm-tab hm-help-btn ${open ? 'active' : ''}"
+        onclick="toggleHeatmapHelp()" title="Ako to čítať">${open ? '× zavrieť' : '? ako to čítať'}</button>
+    </div>
+    <div class="hm-hint">${escHtml(HEATMAP_METRICS[cur].hint)}</div>
+    ${heatmapHelpHtml()}`;
+}
+
+async function loadHeatmapCard(force = false) {
+  const wrap = document.getElementById('home-heatmap-block');
+  if (!wrap) return;
+  if (!force && _heatmapCache.data && Date.now() - _heatmapCache.ts < HEATMAP_TTL_MS) {
+    renderHeatmapCard(_heatmapCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/home/heatmap`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _heatmapCache = { data: await r.json(), ts: Date.now() };
+    renderHeatmapCard(_heatmapCache.data);
+  } catch (e) {
+    wrap.innerHTML = `<div class="home-empty">Heatmapu sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderHeatmapCard(data) {
+  const wrap = document.getElementById('home-heatmap-block');
+  if (!wrap) return;
+  if (!data) { wrap.innerHTML = `<div class="home-empty">Načítavam…</div>`; return; }
+  const metric = homeHeatmapMetric();
+  const range = heatmapScoreRange(data, metric);
+  wrap.innerHTML = heatmapCardHead()
+    + heatmapBlockHtml('Držím', data.held, metric, 'Žiadne držané tituly.', range)
+    + heatmapBlockHtml('Sledujem', data.watch, metric, 'Žiadne sledované tituly.', range)
+    + `<div class="signal-outcome-note">Veľkosť bunky = váha pozície. Klik otvorí Verdikt. Sivá znamená chýbajúce dáta, nie nulu — v režime Signál je <b>0/4</b> „scanner ho videl, signál nemá“, kým sivá je „scanner ho nevidel“. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
+}
+
 function homeCard(title, bodyHtml, opts = {}) {
   const extraClass = opts.className ? ` ${opts.className}` : '';
   return `<div class="home-card${opts.wide ? ' home-card-wide' : ''}${extraClass}">
@@ -302,7 +805,14 @@ function homeContentHtml(data) {
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
+      ${homeCard('Moje výbery vs index',
+        `<div id="home-bench-block"><div class="home-empty">Načítavam…</div></div>`,
+        { className: 'home-card-bench' })}
+      ${homeCard('Kde nastúpiť alebo pridať',
+        `<div id="home-heatmap-block"><div class="home-empty">Načítavam…</div></div>`,
+        { className: 'home-card-heatmap' })}
       <div class="home-grid">
+        ${homeCard('Príspevok k výnosu', homeContributionBlockHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
         ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
         ${homeCard('Pozornosť', homePlanHtml(data.plan), { className: 'home-card-attention' })}
         ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}

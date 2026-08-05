@@ -556,7 +556,12 @@ function toggleIndicator(pid, ind) {
   document.getElementById(`ind-${pid}-${ind}`)?.classList.toggle(`active-${ind}`, r.indicators[ind]);
   updateSubVisibility(pid);
   saveLayout();
-  loadChart(pid);
+  // noLiveAfter: prepnutie indikátora nepotrebuje čerstvejšie sviečky — tie sú
+  // už na obrazovke a nemenia sa, mení sa len to, čo sa cez ne kreslí. Bez toho
+  // si každý toggle vypýtal aj následný refresh=1 load, ktorý ide na eToro po
+  // tail sviečky (~15 s, keď je disk cache staršia než TTL). Živé ceny tečú
+  // nezávisle cez WebSocket, takže sa tu o aktuálnosť neprichádza.
+  loadChart(pid, { noLiveAfter: true });
 }
 
 function updateSubVisibility(pid) {
@@ -1660,7 +1665,39 @@ function applyPatternMarkers(id, r, patterns) {
   try { setSeriesMarkers(r.candleSeries, combinedChartMarkers(r)); } catch(e) {}
 }
 
-async function applyEtoroMarkers(id, symbol, r, chartData) {
+// priceScale:false vynechá všetko, čo je ukotvené na REÁLNU cenu (vstupné čiary,
+// čiary objednávok, priemerná cena pre badge) a nechá len markery. Heikin Ashi
+// prepočítava os, takže čiara na `pos.openRate` by sedela na zlej výške — ale
+// markery sú ukotvené na čas a sviečku (`{time, position:'belowBar'}`), takže na
+// HA fungujú bez zmeny. Kým to bolo v jednej vetve, s čiarami padli aj kolieska.
+// Cieľ analytikov v chart docku. Beží mimo hlavného toku (nie await), aby sa
+// markery nezdržiavali kvôli insights fetchu — čiara doskočí, keď dorazí.
+// `getPortfolioAnalystInfo` je z portfolio.js: má Map cache aj dedupláciu
+// súbežných požiadaviek, takže opakované otvorenie toho istého tickera je zadarmo.
+function applyDockAnalystTarget(id, symbol, r) {
+  if (typeof getPortfolioAnalystInfo !== 'function') return;
+  const seq = r.loadSeq;
+  getPortfolioAnalystInfo(symbol).then(info => {
+    const target = Number(info?.target);
+    // Panel sa mohol medzitým prekresliť alebo prepnúť na iný ticker.
+    if (!Number.isFinite(target) || target <= 0) return;
+    if (!r.candleSeries || r.loadSeq !== seq) return;
+    try {
+      const pl = r.candleSeries.createPriceLine({
+        price:            target,
+        color:            CHART_COLORS.analystTarget,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Cieľ',
+      });
+      (r.targetPriceLines ||= []).push(pl);
+    } catch (e) {}
+  }).catch(() => {});
+}
+
+async function applyEtoroMarkers(id, symbol, r, chartData, opts = {}) {
+  const priceScale = opts.priceScale !== false;
   // Vymaž staré price lines
   if (r.avgPriceLine) {
     try { r.candleSeries.removePriceLine(r.avgPriceLine); } catch(e) {}
@@ -1674,7 +1711,15 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     r.orderPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
   }
   r.orderPriceLines = [];
+  if (r.targetPriceLines) {
+    r.targetPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
+  }
+  r.targetPriceLines = [];
   r._etoroMarkersList = [];
+  // Cieľ analytikov len v chart docku (Portfólio). Do štandardných panelov
+  // Grafov zámerne NEJDE — tam je informácií dosť a panelov býva otvorených
+  // veľa naraz, takže by to znamenalo insights fetch pre každý z nich.
+  if (id === dockPanelId && priceScale) applyDockAnalystTarget(id, symbol, r);
 
   // Načítaj pozície pre oba účty ak ešte nie sú, alebo ak je cache staršia než ETORO_POSITIONS_TTL_MS
   // (rovnaký fetch dopĺňa aj etoroOrdersAll — žiadne extra volanie)
@@ -1687,7 +1732,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
 
   // Čakajúce objednávky pre tento ticker (oba účty) — jemná žltá čiara na
   // cieľovej cene, nezávislé od toho, či titul aj reálne držíš.
-  for (const acct of accts) {
+  for (const acct of priceScale ? accts : []) {
     const orders = (etoroOrdersAll[acct] || []).filter(o => o.symbol === symbol && Number(o.rate) > 0);
     for (const o of orders) {
       try {
@@ -1720,7 +1765,7 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
   const lastClose = chartData.length ? chartData[chartData.length - 1].close : null;
 
   // Price lines per pozícia (farebne odlíšené podľa účtu)
-  for (const pos of allPositions) {
+  for (const pos of priceScale ? allPositions : []) {
     if (!pos.openRate) continue;
     const colors = ACCT_COLORS[pos._acct];
     const inProfit = Number.isFinite(pos.pnl) ? pos.pnl >= 0
@@ -1738,8 +1783,12 @@ async function applyEtoroMarkers(id, symbol, r, chartData) {
     } catch(e) {}
   }
 
-  // Priemerná cena — len pre aktívny účet (pre info badge)
-  const mainPositions = etoroPositionsAll[activeAccount || '1'].filter(p => p.symbol === symbol);
+  // Priemerná cena — len pre aktívny účet (pre info badge). Na HA sa preskočí:
+  // `lastClose` je HA close, takže percento voči reálnej vstupnej cene by bolo
+  // nepravdivé. Badge si vystačí s $ hodnotami z live agregátu.
+  const mainPositions = priceScale
+    ? etoroPositionsAll[activeAccount || '1'].filter(p => p.symbol === symbol)
+    : [];
   if (mainPositions.length) {
     const totalUnits = mainPositions.reduce((s, p) => s + (p.units || 0), 0);
     const avgPrice = totalUnits > 0
@@ -1936,11 +1985,9 @@ async function loadOlderChartData(id) {
     applyOverlays(id, r._rawChartData, r);
     r.lastWizardData = r._rawChartData;
     r.hasMoreHistory = !!payload.hasMore;
-    if (!r.indicators.ha) {
-      applyEtoroMarkers(id, sym, r, r._rawChartData)
-        .then(() => updateChartLiveBadges(id))
-        .catch(e => console.warn('eToro markers after history load failed:', e));
-    }
+    applyEtoroMarkers(id, sym, r, r._rawChartData, { priceScale: !r.indicators.ha })
+      .then(() => updateChartLiveBadges(id))
+      .catch(e => console.warn('eToro markers after history load failed:', e));
     if (visible) {
       try { r.mainChart.timeScale().setVisibleRange(visible); } catch(e) {}
     }
@@ -2010,11 +2057,13 @@ async function loadChart(id, opts = {}) {
     const acct  = activeAccount || '1';
 
     // ── Skontroluj batch cache (naplnený z loadAll) ──
-    const batchKey = `${sym}|${period}|${interval}|${haParam}`;
+    const batchKey = ohlcvBatchKey({
+      symbol: sym, period, interval, ha: haParam, indicators: allInds,
+      account: acct, limit: CHART_INITIAL_BARS, before: '',
+    });
     let name, data, instrumentId;
-    if (opts.refresh !== 1 && _ohlcvBatchCache.has(batchKey)) {
-      const cached = _ohlcvBatchCache.get(batchKey);
-      _ohlcvBatchCache.delete(batchKey);   // jednorázové použitie
+    const cached = opts.refresh !== 1 ? ohlcvBatchTake(batchKey) : null;
+    if (cached) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
@@ -2061,8 +2110,8 @@ async function loadChart(id, opts = {}) {
           time:d.time, open:d.open, high:d.high, low:d.low, close:d.close,
         }));
         r.lastWizardData = r._rawChartData;
-        if (!r.indicators.ha && !opts.skipEtoro) {
-          applyEtoroMarkers(id, sym, r, r._rawChartData)
+        if (!opts.skipEtoro) {
+          applyEtoroMarkers(id, sym, r, r._rawChartData, { priceScale: !r.indicators.ha })
             .then(() => updateChartLiveBadges(id))
             .catch(e => console.warn('eToro markers failed:', e));
         }
@@ -2081,8 +2130,9 @@ async function loadChart(id, opts = {}) {
     applyOverlays(id, data, r);
     r.etoroPct = null;
     if (r.indicators.ha) {
-      // Pri HA sú ceny syntetické — markery vstupu by nesedeli
-      setSeriesMarkers(r.candleSeries, []);
+      // Pri HA sú ceny syntetické, takže cenové čiary sa zahodia — markery ale
+      // ostávajú: sú ukotvené na čas a sviečku, nie na cenu, takže na HA sedia.
+      // (Kým sa tu mazali aj markery, kolieska pozícií na HA nikdy nevznikli.)
       if (r.avgPriceLine) { try { r.candleSeries.removePriceLine(r.avgPriceLine); } catch(e){} r.avgPriceLine = null; }
     }
     applyTagToPanel(id, getTag(sym));
@@ -2142,8 +2192,8 @@ async function loadChart(id, opts = {}) {
     const wItem = watchlist.find(w => w.symbol === sym);
     if (wItem) { wItem.price = last.close; wItem.chg = pct; saveWatchlist(); renderSidebar(); }
 
-    if (!r.indicators.ha && !opts.skipEtoro) {
-      applyEtoroMarkers(id, sym, r, data)
+    if (!opts.skipEtoro) {
+      applyEtoroMarkers(id, sym, r, data, { priceScale: !r.indicators.ha })
         .then(() => updateChartLiveBadges(id))
         .catch(e => console.warn('eToro markers failed:', e));
     }
@@ -2321,6 +2371,37 @@ async function loadMovers() {
 
 // Jednorázový cache naplnený z batch fetchu — loadChart ho spotrebuje a zmaže
 const _ohlcvBatchCache = new Map();
+const OHLCV_BATCH_TTL_MS = 60_000;   // po minúte sú dáta na graf aj tak zastarané
+const OHLCV_BATCH_MAX = 64;
+
+// Kanonický kľúč batch odpovede. MUSÍ sa zhodovať s ohlcv_batch_key()
+// v trading_backend.py — je to protokol, nie len lokálna cache.
+// Indikátory sa zoraďujú, aby 'ema,rsi' a 'rsi,ema' dali ten istý kľúč.
+function ohlcvBatchKey({ symbol, period, interval, ha, indicators, account, limit, before }) {
+  const inds = String(indicators || '').split(',').filter(Boolean).sort().join(',');
+  return `${symbol}|${period}|${interval}|${ha ? 1 : 0}|${inds}|${account}|${limit || 0}|${before || ''}`;
+}
+
+// Nekonzumované záznamy (zavretý panel, chyba pri renderi) tu inak zostanú
+// navždy a neskôr ich prevezme iný panel s rovnakým kľúčom — hodiny staré dáta,
+// prípadne z iného eToro účtu. Preto TTL aj strop veľkosti.
+function ohlcvBatchSet(key, data) {
+  _ohlcvBatchCache.set(key, { data, ts: Date.now() });
+  if (_ohlcvBatchCache.size > OHLCV_BATCH_MAX) {
+    for (const k of _ohlcvBatchCache.keys()) {
+      _ohlcvBatchCache.delete(k);            // Map drží poradie vloženia → FIFO
+      if (_ohlcvBatchCache.size <= OHLCV_BATCH_MAX) break;
+    }
+  }
+}
+
+function ohlcvBatchTake(key) {
+  const hit = _ohlcvBatchCache.get(key);
+  if (!hit) return null;
+  _ohlcvBatchCache.delete(key);              // jednorázové použitie
+  if (Date.now() - hit.ts > OHLCV_BATCH_TTL_MS) return null;
+  return hit.data;
+}
 
 async function loadAll() {
   const panels = [...document.querySelectorAll('.panel')]
@@ -2366,9 +2447,9 @@ async function loadAll() {
 
     // Naplň cache — loadChart si data vyzdvihne
     requests.forEach(req => {
-      const key  = `${req.symbol}|${req.period}|${req.interval}|${req.ha}`;
+      const key  = ohlcvBatchKey(req);
       const data = batchResult[key];
-      if (data && !data.error) _ohlcvBatchCache.set(key, data);
+      if (data && !data.error) ohlcvBatchSet(key, data);
     });
   } catch(e) {
     console.warn('OHLCV batch zlyhalo, fallback na jednotlivé fetchy:', e);

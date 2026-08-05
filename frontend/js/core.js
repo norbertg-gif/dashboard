@@ -17,6 +17,12 @@ const CHART_COLORS = {
   up: '#26a69a', down: '#ef5350',
   upDim: '#26a69a55', downDim: '#ef535055',
   neutral: '#94a3b8', pending: '#f59e0b', pendingDim: '#f59e0b66',
+  // Analytické úrovne na grafe sú OBE modré, len v inom odtieni — sú to
+  // orientačné čiary, nie stav pozície. Modrá je zámerne mimo P/L palety
+  // (zelená/červená) aj mimo amber objednávok, takže nesplývajú so sviečkami
+  // ani nesugerujú zisk či stratu.
+  entryAvg: '#2563eb',        // priemerný nákup — tmavšia
+  analystTarget: '#7dd3fc',   // cieľ analytikov — svetlejšia
 };
 
 // ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
@@ -133,6 +139,28 @@ async function getInstrumentId(sym) {
 // ── MAIN TABS ────────────────────────────────────────────────────────────────
 let activeMainTab = 'home';
 
+// Cieľové ceny analytikov sa menia rádovo v týždňoch, takže ich dopĺňa worker na
+// pozadí (POST /api/targets/backfill), nie request path. Spúšťa sa lenivo pri
+// otvorení Portfólia/Analytiky a klient si drží vlastný odstup, aby prepínanie
+// tabov neposielalo požiadavku pri každom kliknutí. Server je aj tak idempotentný
+// (druhé volanie počas behu je no-op) — toto len šetrí zbytočné kolá.
+const TARGETS_BACKFILL_KEY = 'td_targets_backfill_at';
+const TARGETS_BACKFILL_MIN_GAP_MS = 6 * 60 * 60 * 1000;   // 6 h
+
+function maybeBackfillTargets() {
+  try {
+    const last = Number(localStorage.getItem(TARGETS_BACKFILL_KEY) || 0);
+    if (Date.now() - last < TARGETS_BACKFILL_MIN_GAP_MS) return;
+    localStorage.setItem(TARGETS_BACKFILL_KEY, String(Date.now()));
+  } catch (e) { /* private mode — proste sa pokúsi zakaždým */ }
+  // Fire-and-forget: výsledok nikoho nezaujíma, cieľe sa objavia pri ďalšom
+  // otvorení tickera. Chyba sa ticho ignoruje, je to pomocná vrstva.
+  fetch(`${API}/api/targets/backfill`, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { if (d?.started) console.log(`[targets] backfill spustený: ${d.queued} tickerov`); })
+    .catch(() => {});
+}
+
 function switchMainTab(tab) {
   // História je v Basic móde skrytá — presmeruj všetky vstupné cesty
   // (URL param rieši init v main.js, toto kryje priame volania/popout linky)
@@ -147,6 +175,7 @@ function switchMainTab(tab) {
   document.getElementById('tab-' + tab)?.classList.add('active');
   // Predictive chart — init on first switch, resize on subsequent
   if (tab === 'predictive') {
+    maybeBackfillTargets();
     if (!window._predChartInitialized) {
       window._predChartInitialized = true;
       // Wait for tab to be fully visible before init
@@ -204,6 +233,7 @@ function switchMainTab(tab) {
     if (typeof renderHomeView === 'function') renderHomeView();
   } else if (tab === 'portfolio') {
     renderPortMainView();
+    maybeBackfillTargets();
   } else if (tab === 'charts') {
     // Grafy vytvorené so skrytým tabom môžu mať šírku 0 → po zobrazení doraz veľkosti
     setTimeout(fixupChartSizes, 60);
@@ -423,6 +453,11 @@ function toggleUiMode() {
   // Radar limit (3 karty v Basic) sa aplikuje pri renderi — po prepnutí módu re-renderuj z cache
   if (typeof renderOpportunities === 'function' && typeof _oppLastRows !== 'undefined' && _oppLastRows !== null) {
     renderOpportunities(_oppLastRows, _oppLastDays);
+  }
+  if (typeof renderNasdaqScanner === 'function'
+      && typeof _scannerLastPayload !== 'undefined'
+      && _scannerLastPayload) {
+    renderNasdaqScanner(_scannerLastPayload);
   }
 }
 

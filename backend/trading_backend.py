@@ -5,7 +5,7 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import asyncio
-import gc, json, os, math, threading
+import gc, json, os, math, sys, threading
 import re
 import hashlib
 import hmac
@@ -23,6 +23,20 @@ import pandas as pd
 import requests
 import urllib.parse
 import time as _time_module
+
+# ── STDOUT ENCODING ───────────────────────────────────────────────────────────
+# Logovacie hlášky sú po slovensky, takže obsahujú diakritiku. Na konzole bez
+# UTF-8 (Windows default je cp1250/cp1252) vyhodí print UnicodeEncodeError —
+# a keď taký print stojí vnútri except vetvy, výnimka z LOGOVANIA prepíše
+# pôvodnú chybu a diagnostika ukáže úplne iný problém (reálne sa to stalo pri
+# NOT_AUTHORIZED z Massive). Log nikdy nesmie meniť tok riadenia.
+# Na Linuxe/Renderi je stdout UTF-8 už teraz, takže tam je to no-op.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass          # nie každý stream reconfigure podporuje (pytest capture, pipe)
+del _stream
 
 # ── RETRY HELPER ──────────────────────────────────────────────────────────────
 def fetch_with_retry(url: str, headers: dict = None, timeout: int = 10,
@@ -59,6 +73,11 @@ FRONTEND_DIR = APP_ROOT / "frontend"
 DATA_ROOT = Path(os.getenv("DATA_DIR", str(APP_ROOT))).resolve()
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Trading Dashboard API")
+
+try:
+    from backend import mem_watch
+except ImportError:  # spustenie priamo z adresára backend/
+    import mem_watch
 
 
 # ?? Memory profile / feature flags ???????????????????????????????????????????
@@ -102,7 +121,9 @@ def _process_memory_mb() -> dict:
                     "tracemalloc_peak_mb": round(peak / 1024 / 1024, 1), "source": "tracemalloc"}
         except Exception:
             pass
-    return {"rss_mb": round(rss_mb, 1) if rss_mb is not None else None, "source": source}
+    return {"rss_mb": round(rss_mb, 1) if rss_mb is not None else None,
+            "rss_current_mb": mem_watch.current_rss_mb(),
+            "source": source}
 
 
 @app.get("/api/admin/memory")
@@ -118,6 +139,16 @@ def admin_memory():
             "market_breadth": ENABLE_MARKET_BREADTH,
             "massive_sp500": ENABLE_MASSIVE_SP500,
             "massive_market": ENABLE_MASSIVE_MARKET,
+        },
+        "ml_params": {
+            "n_estimators": ML_N_ESTIMATORS,
+            "max_depth": ML_MAX_DEPTH,
+            "min_samples_leaf": ML_MIN_SAMPLES_LEAF,
+            "calibration_cv": ML_CALIB_CV,
+            "fold_fractions": list(ML_FOLD_FRACTIONS),
+            "fold_window": ML_FOLD_WINDOW,
+            "n_jobs": ML_N_JOBS,
+            "omp_num_threads": os.getenv("OMP_NUM_THREADS"),
         },
         "cache_sizes": {
             "model": len(_MODEL_CACHE) if "_MODEL_CACHE" in globals() else None,
@@ -276,6 +307,44 @@ ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
 # posledná sviečka) nezmení, výsledok je identický — tak ho cacheujeme do najbližšej
 # uzavretej sviečky. ML ukladá len (acc, bull_prob), nie samotný model (šetrí RAM
 # na Render free tieri); regime ukladá celý dict (malý).
+# Hyperparametre RandomForestu. Pôvodné hodnoty (50 stromov, hĺbka 4, kalibrácia
+# na 2 foldoch, jedno jadro) boli orezané na 512 MB Render tier, nie zvolené
+# podľa kvality modelu. Sú ladené cez env, aby sa dali meniť bez redeployu —
+# accuracy z walk-forward foldov sa zobrazuje v UI, takže dopad zmeny vidno hneď.
+#
+# Cena: CalibratedClassifierCV(cv=N) fituje N lesov a volá sa 4× (3 foldy +
+# finálny model). Cache sa kľúčuje poslednou týždennou sviečkou, takže sa platí
+# raz za ticker za týždeň — ale platí sa PRIAMO V REQUEST PATH pri načítaní
+# grafu, takže to nie je zadarmo.
+#
+# Merané na 260 týždenných sviečkach, čas relatívne k pôvodnej konfigurácii:
+#   50/4/cv2/1job   1.0x   (pôvodná, orezaná na 512 MB)
+#   150/6/cv2/2job  3.6x   (default nižšie)
+#   300/6/cv2/2job  7.1x
+#   300/8/cv3/2job 10.0x   (~7 s na ticker — na request path priveľa)
+# n_jobs=2 pomáha menej, než by sa čakalo: pri takto malých lesoch zožerie
+# réžia joblibu väčšinu zisku z druhého jadra.
+ML_N_ESTIMATORS = int(os.getenv("ML_N_ESTIMATORS", "50" if _LOW_MEMORY else "100"))
+ML_MAX_DEPTH = int(os.getenv("ML_MAX_DEPTH", "4" if _LOW_MEMORY else "6"))
+ML_MIN_SAMPLES_LEAF = int(os.getenv("ML_MIN_SAMPLES_LEAF", "5"))
+ML_CALIB_CV = int(os.getenv("ML_CALIB_CV", "2"))
+# n_jobs>1 má zmysel až od 2 CPU. Pozor na oversubscription: ak nie je
+# OMP_NUM_THREADS=1, každý joblib worker si ešte otvorí vlastné BLAS vlákna.
+ML_N_JOBS = int(os.getenv("ML_N_JOBS", "1" if _LOW_MEMORY else "2"))
+
+# Walk-forward foldy. Spoľahlivosť accuracy závisí od počtu OTESTOVANÝCH vzoriek,
+# nie od počtu foldov: zdvojnásobenie foldov pri zúženom okne testuje presne tie
+# isté dáta za dvojnásobok času. Merané na 8 datasetoch (rozptyl odhadu, nižší
+# je lepší):
+#   3 foldy, okno 10 %  -> pokrytie 30 %, rozptyl 5.3
+#   6 foldov, okno 5 %  -> pokrytie 30 %, rozptyl 7.0   (horšie A drahšie)
+#   5 foldov, okno 10 % -> pokrytie 50 %, rozptyl 3.3
+# Foldy nezvyšujú pamäť — fity idú sekvenčne, v RAM je vždy len jeden model.
+ML_FOLD_FRACTIONS = tuple(
+    float(x) for x in os.getenv("ML_FOLD_FRACTIONS", "0.50,0.60,0.70,0.80,0.90").split(",") if x
+)
+ML_FOLD_WINDOW = float(os.getenv("ML_FOLD_WINDOW", "0.10"))
+
 _MODEL_CACHE: dict = {}
 _MODEL_CACHE_LOCK = threading.Lock()
 _MODEL_CACHE_MAX = 48 if _LOW_MEMORY else 256
@@ -306,13 +375,15 @@ def train_ml_model(df, cache_key=None):
     Pri cache hit je model None (nepoužíva sa downstream) — vraciame (acc, bull)."""
     cached = _model_cache_get("ml", cache_key)
     if cached is not None:
-        return None, cached[0], cached[1]
+        # Staršie záznamy v cache môžu byť ešte 2-tuple (bez drivers).
+        return (None, cached[0], cached[1],
+                cached[2] if len(cached) > 2 else [])
     df_ml = df.copy()
     df_ml["target"] = (df_ml["Close"].shift(-1) > df_ml["Close"]).astype(int)
     df_ml = df_ml.dropna(subset=ML_FEATURES + ["target"])
 
     if len(df_ml) < 40:
-        return None, None, 0.5
+        return None, None, 0.5, []
 
     usable = df_ml.iloc[:-1]  # last row has no future close
     X_all = usable[ML_FEATURES].values
@@ -323,16 +394,17 @@ def train_ml_model(df, cache_key=None):
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.calibration import CalibratedClassifierCV
         base = RandomForestClassifier(
-            n_estimators=50, max_depth=4,
-            min_samples_leaf=5, random_state=42, n_jobs=1
+            n_estimators=ML_N_ESTIMATORS, max_depth=ML_MAX_DEPTH,
+            min_samples_leaf=ML_MIN_SAMPLES_LEAF, random_state=42,
+            n_jobs=ML_N_JOBS,
         )
-        return CalibratedClassifierCV(base, cv=2)
+        return CalibratedClassifierCV(base, cv=ML_CALIB_CV)
 
-    # Walk-forward foldy: train na [0:60%/70%/80%], test na nasledujúcich 10 %
+    # Walk-forward foldy: train na [0:frac], test na nasledujúcich ML_FOLD_WINDOW
     fold_accs = []
-    for train_frac in (0.60, 0.70, 0.80):
+    for train_frac in ML_FOLD_FRACTIONS:
         split = int(n * train_frac)
-        test_end = int(n * (train_frac + 0.10))
+        test_end = int(n * (train_frac + ML_FOLD_WINDOW))
         if split < 20 or test_end - split < 5:
             continue
         m = make_model()
@@ -343,7 +415,7 @@ def train_ml_model(df, cache_key=None):
             continue
 
     if not fold_accs:
-        return None, None, 0.5
+        return None, None, 0.5, []
 
     acc = float(np.mean(fold_accs)) * 100
 
@@ -354,8 +426,75 @@ def train_ml_model(df, cache_key=None):
     bull_prob = float(model.predict_proba(last_row)[0][1])
 
     acc_rounded = round(acc, 1)
-    _model_cache_put("ml", cache_key, (acc_rounded, bull_prob))
-    return model, acc_rounded, bull_prob
+    drivers = _ml_drivers(model, X_all, last_row[0])
+    _model_cache_put("ml", cache_key, (acc_rounded, bull_prob, drivers))
+    return model, acc_rounded, bull_prob, drivers
+
+
+def ml_base_rate(df) -> float | None:
+    """Podiel rastových sviečok — referencia, voči ktorej sa číta ML accuracy.
+
+    Model, ktorý by vždy povedal "up", dosiahne base rate zadarmo. Accuracy
+    54 % teda nie je schopnosť, ak base rate je tiež 54 %. Merané na 20
+    tickeroch (5y weekly, produkčná konfigurácia): priemerný edge +0.1 pp,
+    t = +0.20 — teda žiadna merateľná hrana. Číslo bez tejto referencie
+    pôsobí ako kvalita modelu, hoci ňou nie je.
+
+    Počíta sa na tom istom výbere riadkov ako accuracy (po dropna cez
+    ML_FEATURES, bez poslednej sviečky), inak by sa porovnávali dve rôzne
+    populácie.
+    """
+    try:
+        frame = df.copy()
+        frame["target"] = (frame["Close"].shift(-1) > frame["Close"]).astype(int)
+        frame = frame.dropna(subset=ML_FEATURES + ["target"])
+        if len(frame) < 40:
+            return None
+        return round(float(frame["target"].iloc[:-1].mean()) * 100, 1)
+    except Exception:
+        return None
+
+
+def _ml_drivers(model, X_train, last_values, top_n: int = 5):
+    """Ktoré features ženú predikciu — importance modelu + ako netypická je
+    ich aktuálna hodnota.
+
+    Samotná importance je globálna (platí pre model, nie pre tento konkrétny
+    týždeň), preto sa k nej pridáva z-skóre poslednej sviečky voči trénovacím
+    dátam. Kombinácia "dôležitá feature + netypická hodnota" je to, čo v praxi
+    vysvetľuje, prečo model práve teraz hlási to, čo hlási.
+
+    Zámerne to nie je SHAP — tá by bola per-prediction presnejšia, ale je to
+    ďalšia závislosť a ďalší výpočet v request path.
+    """
+    try:
+        # CalibratedClassifierCV drží skutočné lesy vo vnútri; naprieč
+        # kalibračnými foldmi sa importance priemeruje.
+        forests = []
+        for cal in getattr(model, "calibrated_classifiers_", []):
+            est = getattr(cal, "estimator", None) or getattr(cal, "base_estimator", None)
+            if est is not None and hasattr(est, "feature_importances_"):
+                forests.append(est.feature_importances_)
+        if not forests:
+            return []
+        importances = np.mean(forests, axis=0)
+
+        mean = X_train.mean(axis=0)
+        std = X_train.std(axis=0)
+        std = np.where(std == 0, 1.0, std)      # konštantná feature → z=0
+        zscores = (np.asarray(last_values, dtype=float) - mean) / std
+
+        order = np.argsort(importances)[::-1][:top_n]
+        return [
+            {
+                "feature": ML_FEATURES[i],
+                "importance": round(float(importances[i]) * 100, 1),
+                "zscore": round(float(zscores[i]), 2),
+            }
+            for i in order
+        ]
+    except Exception:
+        return []
 
 
 # ── HMM Regime Detection ──────────────────────────────────────────────────────
@@ -1234,6 +1373,19 @@ class _BasicAuth(BaseHTTPMiddleware):
                    headers={"WWW-Authenticate": 'Basic realm="Trading Dashboard"'})
 
 app.add_middleware(_BasicAuth)
+
+# Memory watchdog. add_middleware vkladá na začiatok zoznamu, takže posledné
+# pridané je najvonkajšie — počítajú sa teda aj requesty odmietnuté auth
+# vrstvou, čo je zámer: aj zamietnutý request stojí pamäť.
+app.add_middleware(mem_watch.RequestTracker)
+
+
+mem_watch.start(DATA_ROOT)
+
+
+@app.get("/api/admin/memory/history")
+def admin_memory_history(hours: float = Query(24.0, ge=0.1, le=24 * 14)):
+    return mem_watch.analyze(DATA_ROOT, hours)
 
 def _public_client_key(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
@@ -2156,13 +2308,29 @@ def get_trade_history(
     # pozícia má pri čiastočných uzavretiach viac history riadkov so zhodným
     # positionId, preto positionId NIE je vhodný dedup kľúč.
     def _row_key(it):
-        oid = it.get("orderId") or it.get("orderID") or it.get("OrderID")
-        if oid is not None:
-            return ("o", oid)
-        return ("c",
-                it.get("positionId") or it.get("positionID") or it.get("PositionID"),
-                it.get("closeTimestamp") or it.get("closeDateTime") or it.get("CloseTimestamp"),
-                it.get("openTimestamp") or it.get("openDateTime") or it.get("OpenTimestamp"))
+        """Identita riadku pre deduplikáciu naprieč stránkami.
+
+        BUG (fixed 2026-08-05): kľúčom bol SAMOTNÝ `orderId`, keď existoval.
+        Pri ČIASTOČNOM zatvorení pozície vracia eToro pre všetky časti ten istý
+        orderId (je to jedna pôvodná objednávka), takže druhá a ďalšie časti sa
+        zahodili ako duplikáty. Konkrétne: NFLX zatvorený na dvakrát
+        ($509,30 dňa 31.07. a $490,70 dňa 29.07.) sa v histórii objavil raz.
+        Dôsledok bol tichý — chýbajúce riadky, podhodnotený počet obchodov a
+        neúplný realizovaný P/L.
+
+        Kľúč preto obsahuje aj čas zatvorenia a objem: dve časti tej istej
+        objednávky sa v nich líšia, kým skutočný duplikát z prekrývajúcej sa
+        stránky je zhodný vo všetkom.
+        """
+        return (
+            it.get("orderId") or it.get("orderID") or it.get("OrderID"),
+            it.get("positionId") or it.get("positionID") or it.get("PositionID"),
+            it.get("closeTimestamp") or it.get("closeDateTime") or it.get("CloseTimestamp"),
+            it.get("openTimestamp") or it.get("openDateTime") or it.get("OpenTimestamp"),
+            # Objem odlíši aj časti zatvorené v tú istú sekundu.
+            str(it.get("units") or it.get("Units") or ""),
+            str(it.get("investment") or it.get("Investment") or ""),
+        )
 
     items: list = []
     seen_keys: set = set()
@@ -2233,6 +2401,12 @@ def get_trade_history(
             "instrumentId": iid,
             "symbol": etoro_symbol_to_yf(inst.get("symbol") or str(iid)),
             "name": inst.get("name") or str(iid),
+            # Typ inštrumentu — bez neho sa história nedá filtrovať na akcie /
+            # ETF / krypto, čo je pri zmiešanom účte prvá vec, ktorú človek chce.
+            # Rovnaká mapa ako v get_portfolio (viď CLAUDE.md, InstrumentTypeID).
+            "type": {1: "Forex", 2: "Index", 4: "Commodity", 5: "Stock",
+                     6: "ETF", 10: "Crypto"}.get(
+                         inst.get("typeID") or inst.get("InstrumentTypeID") or 0, "Other"),
             "isBuy": pick(t, "isBuy", "IsBuy", default=True),
             "leverage": pick(t, "leverage", "Leverage"),
             "openRate": pick(t, "openRate", "OpenRate"),
@@ -2344,6 +2518,15 @@ async def save_dash_settings(request: Request):
     return {"ok": True, "settings": current}
 
 
+def _position_dip_metrics(symbol: str, amount: float, denominator: float,
+                          dip_scores: dict) -> tuple[float | int | None, float | None]:
+    """Return the existing DIP join and invested-position weight calculation."""
+    dip = dip_scores.get(str(symbol or "").upper())
+    dip_total = _num_or_none(dip.get("total")) if isinstance(dip, dict) else None
+    weight_pct = amount / denominator * 100 if denominator else None
+    return dip_total, weight_pct
+
+
 @app.get("/api/portfolio/dca")
 def get_dca_candidates(
     account: str = Query("1"),
@@ -2399,9 +2582,9 @@ def get_dca_candidates(
         pnl_pct = (e["pnl"] / amount * 100) if amount else 0.0
         if pnl_pct > -loss_pct:
             continue  # nie je dosť v strate na DCA úvahu
-        weight = (amount / equity * 100) if equity else 0.0
-        dip = dip_scores.get(sym)
-        dip_total = _num_or_none(dip.get("total")) if dip else None
+        dip_total, weight = _position_dip_metrics(sym, amount, equity, dip_scores)
+        # Preserve the existing DCA contract: missing equity historically returned zero.
+        weight = weight if weight is not None else 0.0
 
         if dip_total is None:
             flag = "no_data"
@@ -3390,6 +3573,558 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+# ── Benchmark: porovnanie výberov proti indexu za ZHODNÉ obdobia ──────────────
+# Odpovedá na otázku "zarobili moje výbery viac, než keby som v tých istých
+# momentoch kupoval index?" — teda meria kvalitu výberu titulov, nie načasovanie
+# trhu ani celkovú výkonnosť účtu.
+#
+# Prečo nie krivka portfólia z eToro `daily-gain`: tá séria zreťazená za rok dá
+# −35,7 %, kým Stock/ETF pozície sú +25,8 % (overené 2026-08-05). Meria celý
+# účet vrátane krypta, ktoré používateľ zámerne ignoruje, aj zatvorených
+# krypto strát z júla. Je to iná otázka než "funguje môj DIP scanner".
+#
+# Toto porovnanie naopak izoluje presne to, čo sa hodnotí: každá otvorená
+# Stock/ETF pozícia proti indexu za obdobie OD SVOJHO otvorenia, vážené sumou.
+#
+# VÝHRADA, ktorá musí ostať viditeľná aj v UI: počíta iba OTVORENÉ pozície,
+# takže ignoruje zatvorené obchody. Pri dlhom horizonte a zriedkavom zatváraní
+# je to prijateľné, ale je to skreslenie v prospech portfólia (prežívajúce
+# pozície sú tie, ktoré neboli zatvorené v strate).
+BENCHMARK_SYMBOLS = ("QQQ", "SPY")
+BENCHMARK_CACHE_TTL = 900
+_benchmark_cache = {"key": None, "data": None, "ts": 0.0}
+
+
+def _benchmark_closes(symbol: str) -> list | None:
+    """[(date, close)] pre index, zoradené. Z rovnakého zdroja ako market context."""
+    try:
+        df = _yf_download_cached(symbol, "2y", "1d")
+        if df is None or df.empty:
+            return None
+        closes = df["Close"].astype(float)
+        return [(idx.date() if hasattr(idx, "date") else idx, float(val))
+                for idx, val in closes.items()]
+    except Exception as e:
+        print(f"  [benchmark] {symbol}: {_scrub_token(e)}")
+        return None
+
+
+def _benchmark_return_since(series: list, since: date) -> float | None:
+    """% zmena indexu od prvého obchodného dňa >= `since` po posledný dostupný.
+    Prvý deň NA alebo PO otvorení pozície: keď si kupoval v sobotu alebo pred
+    sviatkom, referenciou je najbližší deň, kedy sa naozaj dalo kúpiť."""
+    if not series:
+        return None
+    start = next((c for d, c in series if d >= since), None)
+    if not start:
+        return None            # pozícia otvorená neskôr než siaha séria
+    end = series[-1][1]
+    if not start or not end:
+        return None
+    return (end - start) / start * 100
+
+
+def _benchmark_return_between(series: list, since: date, until: date) -> float | None:
+    """% zmena indexu medzi dvoma dátumami — pre ZATVORENÉ obchody, kde okno
+    nekončí dnes, ale v deň zatvorenia. Start je prvý obchodný deň >= `since`,
+    end posledný <= `until`."""
+    if not series:
+        return None
+    start = next((c for d, c in series if d >= since), None)
+    end = None
+    for d, c in series:
+        if d <= until:
+            end = c
+        else:
+            break
+    if not start or not end:
+        return None
+    return (end - start) / start * 100
+
+
+_benchmark_closed_cache = {"key": None, "data": None, "ts": 0.0}
+BENCHMARK_CLOSED_TTL = 12 * 3600      # zatvorené obchody sa menia zriedka
+
+
+@app.get("/api/portfolio/benchmark/closed")
+def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
+    """To isté porovnanie, ale pre ZATVORENÉ Stock/ETF obchody Účtu 1.
+
+    Zapĺňa jedinú dieru hlavnej karty: tá počíta len otvorené pozície, takže je
+    skreslená survivorship biasom — obchod zatvorený v strate v nej nie je.
+    Až spolu obe čísla odpovedajú na otázku „aj po započítaní strát som na tom
+    dobre?".
+
+    Na rozdiel od zvyšku karty toto SIAHA NA eToro (trade history sa nikde
+    necachuje), preto vlastný endpoint, 12h cache a lazy načítanie z UI —
+    hlavná karta má ostať okamžitá.
+    """
+    min_date = (datetime.now(timezone.utc) - timedelta(days=months * 31)).date().isoformat()
+    cache_key = (months, min_date)
+    now = _time_module.time()
+    if _benchmark_closed_cache["key"] == cache_key and now - _benchmark_closed_cache["ts"] < BENCHMARK_CLOSED_TTL:
+        return _benchmark_closed_cache["data"]
+
+    # POZOR: `get_trade_history` je FastAPI route funkcia — jej defaulty sú
+    # `Query(...)` objekty, nie hodnoty. Pri priamom volaní z kódu treba vyplniť
+    # VŠETKY parametre, inak sa dovnútra dostane Query inštancia a funkcia spadne
+    # (prvý pokus 2026-08-05 padal presne na tomto: `maxDate` bol Query objekt).
+    try:
+        hist = get_trade_history(
+            account="1",
+            minDate=min_date,
+            maxDate=datetime.now(timezone.utc).date().isoformat(),
+            page=0,
+            pageSize=100,
+        )
+    except Exception as e:
+        print(f"  [benchmark/closed] {type(e).__name__}: {_scrub_token(str(e))}")
+        return {"available": False, "reason": "history_failed", "detail": _scrub_token(str(e))}
+
+    instruments = load_instruments()
+    qqq = _benchmark_closes("QQQ")
+    rows, skipped = [], 0
+    for t in (hist.get("trades") or []):
+        iid = t.get("instrumentId")
+        type_id = (instruments.get(iid, {}) or {}).get("typeID")
+        if type_id not in (5, 6):          # 5=Stock, 6=ETF — krypto a zvyšok von
+            continue
+        inv = float(_num_or_none(t.get("investment")) or 0)
+        net = float(_num_or_none(t.get("netProfit")) or 0)
+        if inv <= 0 or not t.get("openTimestamp") or not t.get("closeTimestamp"):
+            skipped += 1
+            continue
+        try:
+            o = datetime.fromisoformat(str(t["openTimestamp"]).replace("Z", "+00:00")).date()
+            c = datetime.fromisoformat(str(t["closeTimestamp"]).replace("Z", "+00:00")).date()
+        except Exception:
+            skipped += 1
+            continue
+        r_pos = net / inv * 100
+        r_bench = _benchmark_return_between(qqq or [], o, c)
+        rows.append({
+            "symbol": t.get("symbol"), "opened": o.isoformat(), "closed": c.isoformat(),
+            "amount": round(inv, 2), "return_pct": round(r_pos, 2),
+            "net_profit": round(net, 2),
+            "bench_pct": round(r_bench, 2) if r_bench is not None else None,
+            "excess_pp": round(r_pos - r_bench, 2) if r_bench is not None else None,
+        })
+
+    if not rows:
+        data = {"available": False, "reason": "no_closed_trades", "months": months}
+        _benchmark_closed_cache.update({"key": cache_key, "data": data, "ts": now})
+        return data
+
+    total = sum(r["amount"] for r in rows)
+    weighted = sum(r["amount"] * r["return_pct"] for r in rows) / total if total else None
+    equal = sum(r["return_pct"] for r in rows) / len(rows)
+    with_bench = [r for r in rows if r["excess_pp"] is not None]
+    bench_weighted = (sum(r["amount"] * r["bench_pct"] for r in with_bench)
+                      / sum(r["amount"] for r in with_bench)) if with_bench else None
+    # Zoradenie podľa SKUTOČNÉHO výsledku, nie podľa odstupu od indexu.
+    # Používateľa zaujíma, čo reálne zarobil alebo stratil — obchod uzavretý
+    # v zisku, ktorý len zaostal za QQQ, nie je "najhorší" (rozhodnuté 2026-08-05).
+    rows.sort(key=lambda r: r["return_pct"])
+
+    data = {
+        "available": True,
+        "months": months,
+        "trades": len(rows),
+        "invested": round(total, 2),
+        "return_pct": round(weighted, 2) if weighted is not None else None,
+        "equal_weight_pct": round(equal, 2),
+        "bench_pct": round(bench_weighted, 2) if bench_weighted is not None else None,
+        "excess_pp": round(weighted - bench_weighted, 2)
+                     if (weighted is not None and bench_weighted is not None) else None,
+        "beat_count": sum(1 for r in with_bench if r["excess_pp"] > 0),
+        "net_profit": round(sum(r["net_profit"] for r in rows), 2),
+        "loss_count": sum(1 for r in rows if r["net_profit"] < 0),
+        "worst": rows[:3],
+        "skipped": skipped,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _benchmark_closed_cache.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
+@app.get("/api/portfolio/benchmark")
+def get_portfolio_benchmark():
+    """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
+    od otvorenia každej pozície. Viď blok komentárov vyššie — hlavne výhradu, že
+    zatvorené obchody sa nezapočítavajú."""
+    # Zámerne LEN účet 1 (rozhodnutie 2026-08-05): účet 2 má inú povahu a
+    # miešanie oboch dávalo číslo, ktoré nesedelo so žiadnym z nich.
+    lots = []
+    for acct in ("1",):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                if pos.get("type") not in ("Stock", "ETF"):
+                    continue
+                amount = float(_num_or_none(pos.get("amount")) or 0)
+                pnl = float(_num_or_none(pos.get("pnl")) or 0)
+                opened = str(pos.get("openDateTime") or "")[:10]
+                if amount <= 0 or not opened:
+                    continue
+                try:
+                    opened_d = datetime.fromisoformat(opened).date()
+                except Exception:
+                    continue
+                lots.append({"symbol": pos.get("symbol"), "amount": amount,
+                             "pnl": pnl, "opened": opened_d})
+        except Exception as e:
+            print(f"  [benchmark] account {acct}: {_scrub_token(e)}")
+
+    if not lots:
+        return {"available": False, "reason": "no_positions"}
+
+    cache_key = tuple(sorted((l["symbol"], round(l["amount"], 2), round(l["pnl"], 2),
+                              l["opened"].isoformat()) for l in lots))
+    now = _time_module.time()
+    if _benchmark_cache["key"] == cache_key and now - _benchmark_cache["ts"] < BENCHMARK_CACHE_TTL:
+        return _benchmark_cache["data"]
+
+    series = {s: _benchmark_closes(s) for s in BENCHMARK_SYMBOLS}
+    total_amount = sum(l["amount"] for l in lots)
+    port_return = sum(l["pnl"] for l in lots) / total_amount * 100 if total_amount else None
+
+    benchmarks = {}
+    for sym, ser in series.items():
+        if not ser:
+            benchmarks[sym] = None
+            continue
+        weighted, covered = 0.0, 0.0
+        for l in lots:
+            r = _benchmark_return_since(ser, l["opened"])
+            if r is None:
+                continue        # fail-soft: pozícia mimo rozsahu série sa vynechá
+            weighted += l["amount"] * r
+            covered += l["amount"]
+        benchmarks[sym] = {
+            "return_pct": round(weighted / covered, 2) if covered else None,
+            # Podiel kapitálu, ktorý sa naozaj dal porovnať — bez neho by
+            # percento tvrdilo pokrytie, ktoré nemá.
+            "coverage_pct": round(covered / total_amount * 100, 1) if total_amount else None,
+        }
+
+    rows = []
+    for l in lots:
+        r_pos = l["pnl"] / l["amount"] * 100 if l["amount"] else None
+        r_bench = _benchmark_return_since(series.get("QQQ") or [], l["opened"])
+        rows.append({
+            "symbol": l["symbol"],
+            "opened": l["opened"].isoformat(),
+            "amount": round(l["amount"], 2),
+            "return_pct": round(r_pos, 2) if r_pos is not None else None,
+            "bench_pct": round(r_bench, 2) if r_bench is not None else None,
+            "excess_pp": round(r_pos - r_bench, 2)
+                         if (r_pos is not None and r_bench is not None) else None,
+        })
+    rows.sort(key=lambda r: (r["excess_pp"] is None, -(r["excess_pp"] or 0)))
+
+    beat = sum(1 for r in rows if (r["excess_pp"] or 0) > 0)
+
+    # Medián excessu vedľa váženého priemeru: priemer ťahá pár extrémov (NET,
+    # AMD majú stovky pb), takže sám o sebe nerozlíši "vyberám dobre naprieč"
+    # od "trafil som dva zásahy". Medián je na extrémy imúnny.
+    excesses = sorted(r["excess_pp"] for r in rows if r["excess_pp"] is not None)
+    median_excess = None
+    if excesses:
+        mid = len(excesses) // 2
+        median_excess = (excesses[mid] if len(excesses) % 2
+                         else (excesses[mid - 1] + excesses[mid]) / 2)
+
+    # Syntetický test rovnakých vkladov: čo by vyšlo, keby do KAŽDÉHO obchodu
+    # išla rovnaká suma. Oddeľuje kvalitu VÝBERU od veľkosti pozícií — dnes sú
+    # obe zamiešané v jednom čísle. Matematicky: pri rovnakom vklade I/N do N
+    # obchodov je celkový výnos presne priemer jednotlivých výnosov.
+    returns = [r["return_pct"] for r in rows if r["return_pct"] is not None]
+    equal_weight = None
+    if returns and port_return is not None:
+        ew_pct = sum(returns) / len(returns)
+        equal_weight = {
+            "return_pct": round(ew_pct, 2),
+            "pnl": round(total_amount * ew_pct / 100, 2),
+            # Kladné = veľkosti pozícií POMOHLI (do lepších obchodov išlo viac).
+            "sizing_effect_pp": round(port_return - ew_pct, 2),
+            "sizing_effect_usd": round(total_amount * (port_return - ew_pct) / 100, 2),
+            "per_trade": round(total_amount / len(returns), 2),
+            "trades": len(returns),
+        }
+
+    data = {
+        "available": True,
+        "account": "1",
+        "portfolio_return_pct": round(port_return, 2) if port_return is not None else None,
+        "benchmarks": benchmarks,
+        "positions": len(rows),
+        "beat_count": beat,
+        "median_excess_pp": round(median_excess, 2) if median_excess is not None else None,
+        "equal_weight": equal_weight,
+        "invested": round(total_amount, 2),
+        "rows": rows,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _benchmark_cache.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
+# ── Doplňovač cieľových cien analytikov ───────────────────────────────────────
+# Cieľ je pomaly sa meniaci údaj (analytici ho menia rádovo v týždňoch), ale
+# zdroje sú nespoľahlivé a každý inak. Namiesto ťahania v request path beží
+# sekvenčný worker, ktorý doplní tickery bez cieľa a obnoví tie starších než
+# PRICE_TARGET_TTL_DAYS. Spúšťa sa lenivo z Portfólia/Analytiky, nie pri štarte.
+#
+# Sekvenčne a s pauzou zámerne: Finnhub free tier má 60 volaní/min a paralelné
+# workery už raz spôsobili OOM reštarty na Renderi (viď SCANNER_MAX_WORKERS).
+PRICE_TARGET_TTL_DAYS = 7
+PRICE_TARGET_BATCH_MAX = 40      # strop na jeden beh — zvyšok dobehne nabudúce
+PRICE_TARGET_SLEEP_S = 1.2       # ~50 volaní/min, pod limitom Finnhubu
+_price_target_state = {"running": False, "started_at": 0.0, "done": 0,
+                       "total": 0, "updated": 0, "finished_at": 0.0}
+_price_target_lock = threading.Lock()
+
+
+def _price_target_needs_update(sym: str) -> bool:
+    """True keď ticker nemá cieľ, alebo je starší než TTL. Chýbajúci insights
+    súbor je tiež dôvod — worker ho nevytvára, len obnoví cieľ v existujúcom."""
+    fpath = YAHOO_INSIGHTS_DIR / f"{sym}.json"
+    if not fpath.exists():
+        return False
+    try:
+        data = json.loads(fpath.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    pt = data.get("price_target")
+    if not pt or not pt.get("mean"):
+        return True
+    stamp = pt.get("target_fetched_at") or pt.get("carried_from") or data.get("fetched_at")
+    if not stamp:
+        return True
+    try:
+        age_d = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).days
+    except Exception:
+        return True
+    return age_d >= PRICE_TARGET_TTL_DAYS
+
+
+def _price_target_fetch_any(sym: str) -> dict | None:
+    """Finnhub → FMP → Yahoo.
+
+    Yahoo tu pôvodne nebol, s odôvodnením že z Render IP prejde len občas a
+    stojí dve blokujúce volania. To je ale argument pre request path — v
+    background workeri je pomalý zdroj, ktorý údaj DODÁ, lepší než rýchly,
+    ktorý ho nedodá. Prvý beh (2026-08-05) to potvrdil: 0 z 25 tickerov
+    aktualizovaných, kým jediný reálne fungujúci zdroj (`source: yahoo+av`
+    v existujúcich cache záznamoch) bol vynechaný. Poradie ostáva, Yahoo je
+    posledná záchrana.
+    """
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if api_key:
+        try:
+            r = requests.get("https://finnhub.io/api/v1/stock/price-target",
+                             params={"symbol": sym, "token": api_key}, timeout=15)
+            r.raise_for_status()
+            pt = r.json() or {}
+            if pt.get("targetMean"):
+                return {"mean": pt.get("targetMean"), "low": pt.get("targetLow"),
+                        "high": pt.get("targetHigh"), "median": pt.get("targetMedian"),
+                        "updated_at": pt.get("lastUpdated"), "source": "finnhub"}
+        except Exception as e:
+            print(f"  [targets] {sym} finnhub: {_scrub_token(e)}")
+    try:
+        fmp = _fmp_price_target(sym)
+        if fmp:
+            return fmp
+    except Exception as e:
+        print(f"  [targets] {sym} fmp: {_scrub_token(e)}")
+    try:
+        qs = _yahoo_quote_summary(sym, "financialData")
+        fd = (qs or {}).get("financialData") or {}
+        mean = _yraw(fd.get("targetMeanPrice"))
+        if mean:
+            return {"mean": mean,
+                    "low": _yraw(fd.get("targetLowPrice")),
+                    "high": _yraw(fd.get("targetHighPrice")),
+                    "median": _yraw(fd.get("targetMedianPrice")),
+                    "source": "yahoo"}
+    except Exception as e:
+        print(f"  [targets] {sym} yahoo: {_scrub_token(e)}")
+    return None
+
+
+def _price_target_worker(symbols: list[str]):
+    updated = 0
+    try:
+        for i, sym in enumerate(symbols):
+            _price_target_state["done"] = i
+            pt = _price_target_fetch_any(sym)
+            if pt:
+                fpath = YAHOO_INSIGHTS_DIR / f"{sym}.json"
+                try:
+                    data = json.loads(fpath.read_text(encoding="utf-8"))
+                    pt["target_fetched_at"] = datetime.now(timezone.utc).isoformat()
+                    data["price_target"] = pt
+                    # Zapisuje sa len toto pole; zvyšok payloadu (insider, EPS,
+                    # earnings) ostáva ako bol vrátane vlastného fetched_at,
+                    # aby sa 12h TTL insights týmto zápisom neposúvalo.
+                    tmp = fpath.with_suffix(".json.tmp")
+                    tmp.write_text(json.dumps(data), encoding="utf-8")
+                    tmp.replace(fpath)
+                    updated += 1
+                except Exception as e:
+                    print(f"  [targets] {sym} zápis zlyhal: {e}")
+            _time_module.sleep(PRICE_TARGET_SLEEP_S)
+    finally:
+        _price_target_state.update({"running": False, "done": len(symbols),
+                                    "updated": updated,
+                                    "finished_at": _time_module.time()})
+        print(f"  [targets] hotovo: {updated}/{len(symbols)} aktualizovaných")
+
+
+@app.post("/api/targets/backfill")
+def backfill_price_targets():
+    """Doplní/obnoví cieľové ceny na pozadí pre držané tituly + watchlist.
+
+    Fire-and-forget: vracia hneď, koľko tickerov sa zaradilo. Frontend to volá
+    pri otvorení Portfólia/Analytiky; opakované volanie počas behu je no-op.
+    """
+    with _price_target_lock:
+        if _price_target_state["running"]:
+            return {"started": False, "reason": "already_running", **_price_target_state}
+        universe = set(_get_portfolio_symbols())
+        try:
+            for item in _read_watchlist_file():
+                sym = str((item or {}).get("symbol") or "").strip().upper()
+                if sym:
+                    universe.add(sym)
+        except Exception:
+            pass
+        pending = sorted(s for s in universe if _price_target_needs_update(s))
+        batch = pending[:PRICE_TARGET_BATCH_MAX]
+        if not batch:
+            return {"started": False, "reason": "nothing_to_do",
+                    "universe": len(universe), "pending": 0}
+        _price_target_state.update({"running": True, "started_at": _time_module.time(),
+                                    "done": 0, "total": len(batch), "updated": 0})
+        threading.Thread(target=_price_target_worker, args=(batch,), daemon=True).start()
+    return {"started": True, "queued": len(batch), "pending_total": len(pending),
+            "universe": len(universe)}
+
+
+@app.get("/api/targets/status")
+def price_targets_status():
+    return dict(_price_target_state)
+
+
+# ── Sektorová expozícia portfólia ─────────────────────────────────────────────
+# Odpovedá na "kam smerovať ďalší nákup" a "odkiaľ naozaj pochádza zisk".
+# Stavia výhradne na už existujúcich zdrojoch: agregované pozície oboch účtov
+# (_get_portfolio_holdings) + ticker→sektor mapa z Finnhub profilu, ktorá už má
+# 90d disk cache kvôli RS karte. Interpretačná vrstva — NEVSTUPUJE do C1–C4,
+# scanner tieru, DCA prahov ani portfóliového účtovania.
+_SECTORS_CACHE = {"key": None, "data": None, "ts": 0.0}
+SECTORS_CACHE_TTL = 900          # 15 min RAM cache
+SECTORS_LOOKUP_BUDGET = 12       # max. NOVÝCH Finnhub profilov na jeden request
+
+
+@app.get("/api/portfolio/sectors")
+def get_portfolio_sectors():
+    """Rozpad držaných titulov (Stock/ETF, oba účty) podľa sektora.
+
+    Na sektor vracia počet titulov, podiel na investovanom kapitáli, podiel na
+    celkovom P/L a počet ziskových titulov. Kapitál a zisk sú zámerne vedľa
+    seba: keď sektor berie 40 % kapitálu a robí 70 % zisku, výsledok stojí na
+    sektorovej stávke, aj keď ju používateľ vedome neurobil.
+
+    Úspešnosť sa počíta POČTOM titulov, nie váženým kapitálom — používateľ meria
+    stratégiu takto (rozhodnutie 2026-08-04).
+
+    Tickery, ktoré sa nepodarí zmapovať (typicky európske burzy — mapovanie je
+    odvodené z Finnhub odvetvia a stavané na US tituly), padajú do koša
+    'Nezaradené'. Ten je vždy súčasťou výstupu, aby percentá netvrdili pokrytie,
+    ktoré nemajú.
+    """
+    holdings = _get_portfolio_holdings()
+    if not holdings:
+        return {"sectors": [], "totals": {"symbols": 0, "amount": 0.0, "pnl": 0.0,
+                                          "green": 0, "unmapped": 0},
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    cache_key = tuple(sorted((s, round(float(h.get("amount") or 0), 2),
+                              round(float(h.get("pnl") or 0), 2))
+                             for s, h in holdings.items()))
+    now = _time_module.time()
+    if _SECTORS_CACHE["key"] == cache_key and now - _SECTORS_CACHE["ts"] < SECTORS_CACHE_TTL:
+        return _SECTORS_CACHE["data"]
+
+    # Sektor sa doťahuje iba pre tickery, ktoré ho v 90d cache ešte nemajú, a to
+    # so stropom na request — pri prvom otvorení s prázdnou cache by 50+
+    # sekvenčných Finnhub volaní request zablokovalo. Nezaradené tituly sa
+    # doplnia pri ďalšom otvorení (rovnaký vzor ako _ctx_budget v /api/chart).
+    budget = SECTORS_LOOKUP_BUDGET
+    groups: dict = {}
+    unmapped = 0
+    for sym, h in holdings.items():
+        amount = float(h.get("amount") or 0)
+        pnl = float(h.get("pnl") or 0)
+        etf = None
+        try:
+            cached_only = budget <= 0
+            etf, _industry = _ticker_sector_etf_cached_only(sym) if cached_only \
+                else _ticker_sector_etf(sym)
+            if not cached_only:
+                budget -= 1
+        except Exception as e:
+            print(f"  [sectors] {sym}: {e}")
+        name = _SECTOR_ETFS.get(etf) if etf else None
+        if not name:
+            name = "Nezaradené"
+            unmapped += 1
+        g = groups.setdefault(name, {"sector": name, "etf": etf if name != "Nezaradené" else None,
+                                     "symbols": [], "count": 0, "amount": 0.0,
+                                     "pnl": 0.0, "green": 0})
+        g["symbols"].append(sym)
+        g["count"] += 1
+        g["amount"] += amount
+        g["pnl"] += pnl
+        if pnl > 0:
+            g["green"] += 1
+
+    total_amount = sum(g["amount"] for g in groups.values())
+    total_pnl = sum(g["pnl"] for g in groups.values())
+    total_green = sum(g["green"] for g in groups.values())
+
+    out = []
+    for g in groups.values():
+        g["amount"] = round(g["amount"], 2)
+        g["pnl"] = round(g["pnl"], 2)
+        g["symbols"].sort()
+        g["amount_pct"] = round(g["amount"] / total_amount * 100, 1) if total_amount else None
+        # Podiel na zisku má zmysel len keď je celkové P/L nenulové. Pri zápornom
+        # celkovom P/L by delenie prevrátilo znamienka, preto sa delí absolútnou
+        # hodnotou — sektor v strate tak vyjde záporne aj v celkovo ziskovom
+        # portfóliu a poradie ostáva čitateľné.
+        g["pnl_pct"] = round(g["pnl"] / abs(total_pnl) * 100, 1) if total_pnl else None
+        out.append(g)
+    out.sort(key=lambda g: -(g["amount"] or 0))
+
+    data = {
+        "sectors": out,
+        "totals": {
+            "symbols": sum(g["count"] for g in out),
+            "amount": round(total_amount, 2),
+            "pnl": round(total_pnl, 2),
+            "green": total_green,
+            "unmapped": unmapped,
+        },
+        "lookup_budget_left": budget,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _SECTORS_CACHE.update({"key": cache_key, "data": data, "ts": now})
+    return data
+
+
 # ── Korelačná mapa portfólia ──────────────────────────────────────────────────
 # Interpretačná vrstva: odhalí skrytú koncentráciu (tituly čo sa hýbu spolu).
 # Čisto z OHLCV disk cache — žiadne nové API volania, žiadny vplyv na účtovanie.
@@ -3474,37 +4209,34 @@ def get_portfolio_correlation(days: int = Query(90, ge=30, le=365)):
 
 
 def _get_portfolio_symbols() -> set:
-    """Načíta symboly zo všetkých portfólií (oba účty)."""
+    """Načíta symboly zo všetkých portfólií (oba účty).
+
+    BUG (fixed 2026-08-05): čítalo sa z legacy raw cache `portfolio_{acct}`,
+    ktorú od zavedenia processed cache (de2fe81) už nikto nezapisuje — takže
+    to vracalo prázdnu množinu a startup prefetch ticho preskakoval VŠETKY
+    portfóliové symboly. Júlový audit opravil len zlý JSON kľúč vnútri, nie
+    mŕtvu cestu, takže bug prežil. Teraz sa berie ten istý zdroj ako pre
+    Scanner PORT badge / DCA / Inbox — `_get_portfolio_holdings()`, ktoré číta
+    `_positions_cache` s fallbackom na `processed_{account}`.
+
+    Zámerne sa tu už NEŤAHÁ z eToro pri prázdnej cache: prefetch je pomocná
+    optimalizácia, nie dôvod na blokujúci round-trip pri štarte. Keď cache
+    ešte nie je, prefetch symboly proste vynechá a naplní sa pri prvom
+    otvorení Portfólia.
+
+    Na rozdiel od `_get_portfolio_holdings()` sa tu NEFILTRUJE na Stock/ETF —
+    prefetch hreje OHLCV pre všetko, čo držíš, vrátane krypta.
+    """
     syms = set()
     for acct in ["1", "2"]:
         try:
-            port_cache_path = CACHE_DIR / "portfolio" / f"portfolio_{acct}"
-            cached = cache_read(port_cache_path)
-            if cached:
-                # BUG (fixed 2026-07-09): cache_read vracia surový /pnl/real
-                # payload — pozície sú pod clientPortfolio.positions, nie na
-                # top-level "positions". Predtým to vždy vrátilo [] a prefetch
-                # tak ticho vynechával všetky portfolio symboly.
-                for pos in cached.get("clientPortfolio", {}).get("positions", []):
-                    iid = pos.get("instrumentID") or pos.get("instrumentId")
-                    inst = load_instruments().get(iid, {})
-                    sym = inst.get("symbol")
-                    if sym:
-                        syms.add(sym)
-            else:
-                # Načítaj live
-                resp = fetch_with_retry(f"{ETORO_PROXY}/pnl/real?account={acct}", timeout=15, retries=2)
-                data = resp.json()
-                cache_write(port_cache_path, data)
-                port = data.get("clientPortfolio", {})
-                for pos in port.get("positions", []):
-                    iid = pos.get("instrumentID") or pos.get("instrumentId")
-                    inst = load_instruments().get(iid, {})
-                    sym = inst.get("symbol")
-                    if sym:
-                        syms.add(sym)
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                sym = pos.get("symbol")
+                if sym:
+                    syms.add(sym)
         except Exception as e:
-            print(f"  [prefetch] Portfolio {acct} error: {e}")
+            print(f"  [prefetch] Portfolio {acct} symbols error: {e}")
     return syms
 
 
@@ -3911,6 +4643,94 @@ def _daily_change_from_cache(sym: str) -> tuple[float, float] | None:
     except Exception:
         pass
     return None
+
+
+HEATMAP_MAX_STALE_DAYS = 6      # staršia posledná sviečka → radšej "nevieme"
+
+
+def _live_rates_from_positions() -> dict:
+    """{symbol: currentRate} z portfóliovej cache oboch účtov (cache-only).
+    Rovnaký zdroj živej ceny, aký používa /api/movers — heatmapa ho potrebuje,
+    aby jej denný pohyb sedel s Top pohybmi a s panelmi Grafov."""
+    rates = {}
+    for acct in ("1", "2"):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for pos in (cached or {}).get("data", []):
+                sym = pos.get("symbol")
+                rate = pos.get("currentRate")
+                if sym and isinstance(rate, (int, float)) and rate > 0:
+                    rates[sym] = float(rate)
+        except Exception:
+            pass
+    return rates
+
+
+def _cached_change_pct(sym: str, calendar_days: int, live_last: float | None = None) -> tuple[float, float] | None:
+    """Percentuálny pohyb za `calendar_days` z DENNEJ OHLCV cache (cache-only).
+
+    Prečo z dennej a nie z `OneWeek`: týždenná cache sa obnovuje zriedka, takže
+    porovnanie posledných dvoch týždenných sviečok vie vrátiť reálny, ale mesiac
+    starý pohyb. IREN takto ukazoval −28,8 % za týždeň, kým graf zjavne stúpal
+    (nahlásené 2026-08-05). Denná cache má tail refresh, takže je čerstvá.
+
+    Zastaranosť sa kontroluje explicitne: keď je posledná sviečka staršia než
+    HEATMAP_MAX_STALE_DAYS, vráti None. Šedá bunka („nevieme") je poctivejšia
+    než číslo, ktoré vyzerá aktuálne a nie je.
+
+    `calendar_days=1` funguje aj cez víkend: hľadá poslednú sviečku s dátumom
+    <= (posledný deň − 1), čo v pondelok vyberie piatok.
+    """
+    try:
+        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym}_OneDay")
+        if not raw:
+            return None
+        candles = [c for c in _flatten_ohlcv(raw) if (c.get("fromDate") or "")]
+        if len(candles) < 2:
+            return None
+        candles.sort(key=lambda c: str(c.get("fromDate")))
+
+        def _cdate(c):
+            return datetime.fromisoformat(str(c["fromDate"])[:10]).date()
+
+        last_c = candles[-1]
+        last_date = _cdate(last_c)
+        if (datetime.now(timezone.utc).date() - last_date).days > HEATMAP_MAX_STALE_DAYS:
+            return None
+
+        # Referenčný bod: pri živej cene je "teraz" dnešok, nie dátum poslednej
+        # uloženej sviečky. Bez toho by sa živá cena porovnávala o deň hlbšie do
+        # minulosti (dnes vs predvčerajšok) vždy, keď cache ešte nemá dnešok.
+        anchor = datetime.now(timezone.utc).date() if live_last else last_date
+        target = anchor - timedelta(days=calendar_days)
+        # Pri živej cene sa smie použiť aj posledná uložená sviečka ako predošlý
+        # close; bez nej je posledná sviečka sama "teraz" a porovnávať ju so
+        # sebou nedáva zmysel.
+        pool = candles if live_last else candles[:-1]
+        prev_c = None
+        for c in reversed(pool):
+            if _cdate(c) <= target:
+                prev_c = c
+                break
+        if prev_c is None:
+            return None
+
+        # Živá cena má prednosť pred posledným closom: denná cache dostane
+        # dnešnú sviečku až po uzávierke, takže bez tohto ukazovala heatmapa
+        # včerajší pohyb, kým panel Grafov vedľa nej už dnešný (MU 0,0 % vs
+        # +1,66 %, nahlásené 2026-08-05).
+        last = float(live_last) if live_last else float(last_c.get("close") or last_c.get("c") or 0)
+        prev = float(prev_c.get("close") or prev_c.get("c") or 0)
+        if not prev or not last:
+            return None
+        return (last - prev) / prev * 100, last
+    except Exception:
+        return None
+
+
+def _weekly_change_from_cache(sym: str) -> tuple[float, float] | None:
+    """7-dňový pohyb — viď `_cached_change_pct` prečo z dennej cache."""
+    return _cached_change_pct(sym, 7)
 
 
 def _merge_ohlcv_tail(cached: dict, new_data: dict, interval: str, max_candles: int = 1000) -> dict:
@@ -4334,12 +5154,29 @@ def get_ohlcv(
             "patterns": patterns}
 
 
+def ohlcv_batch_key(sym, period, interval, ha, indicators, account, limit, before) -> str:
+    """Kanonický kľúč batch odpovede. MUSÍ sa zhodovať s ohlcvBatchKey() v charts.js.
+
+    Do kľúča patrí všetko, čo mení tvar odpovede. Bez `indicators` a `account`
+    kolidovali dva panely s rovnakým symbolom a timeframe, ale rôznymi
+    indikátormi — druhý výsledok prepísal prvý a panel sa vykreslil s cudzími
+    indikátormi.
+
+    `refresh` v kľúči zámerne NIE JE: frontend batch cache pri refreshi vôbec
+    nečíta, takže by kľúč len zbytočne triešťil.
+
+    Indikátory sa zoraďujú, aby "ema,rsi" a "rsi,ema" dali ten istý kľúč.
+    """
+    inds = ",".join(sorted(part for part in str(indicators or "").split(",") if part))
+    return f"{sym}|{period}|{interval}|{int(ha)}|{inds}|{account}|{int(limit or 0)}|{before or ''}"
+
+
 @app.post("/api/ohlcv/batch")
 async def get_ohlcv_batch(request: Request):
     """
     Batch verzia /api/ohlcv — načíta viac symbolov paralelne v jednom requeste.
     Body: {"requests": [{"symbol":"AAPL","period":"6mo","interval":"1d","indicators":"ema,rsi","ha":0,"account":"1"}, ...]}
-    Response: {"AAPL|6mo|1d|0": {data...}, "MSFT|6mo|1d|0": {data...}, ...}
+    Response: {"AAPL|6mo|1d|0|ema,rsi|1|0|": {data...}, ...}
     """
     body = await request.json()
     reqs = body.get("requests", [])
@@ -4356,7 +5193,7 @@ async def get_ohlcv_batch(request: Request):
         refresh  = int(req.get("refresh", 1))
         limit    = int(req.get("limit", 0))
         before   = str(req.get("before", ""))
-        key      = f"{sym}|{period}|{interval}|{ha}"
+        key      = ohlcv_batch_key(sym, period, interval, ha, inds, account, limit, before)
         try:
             result = get_ohlcv(
                 symbol=sym, period=period, interval=interval,
@@ -4703,12 +5540,20 @@ def get_chart(
         print("[CHART] Step 11: ML training...", flush=True)
         if detail_mode == "advanced" and ENABLE_PREDICTIVE_ML:
             try:
-                _ml_model, ml_acc, ml_bull_prob = train_ml_model(df, cache_key=_model_key)
-                print("[CHART] Step 12: ML done", flush=True)
+                _ml_t0 = _time_module.monotonic()
+                _ml_model, ml_acc, ml_bull_prob, ml_drivers = train_ml_model(
+                    df, cache_key=_model_key)
+                ml_base = ml_base_rate(df)
+                _ml_ms = (_time_module.monotonic() - _ml_t0) * 1000
+                # Cache hit je rádovo mikrosekundy; čo vidno v logu, je skutočný fit.
+                print(f"[CHART] Step 12: ML done in {_ml_ms:.0f} ms "
+                      f"(trees={ML_N_ESTIMATORS} depth={ML_MAX_DEPTH} "
+                      f"calib_cv={ML_CALIB_CV} n_jobs={ML_N_JOBS} "
+                      f"folds={len(ML_FOLD_FRACTIONS)})", flush=True)
             except Exception:
-                ml_acc, ml_bull_prob = None, 0.5
+                ml_acc, ml_bull_prob, ml_drivers, ml_base = None, 0.5, [], None
         else:
-            ml_acc, ml_bull_prob = None, 0.5
+            ml_acc, ml_bull_prob, ml_drivers, ml_base = None, 0.5, [], None
             print("[CHART] Step 12: ML skipped (ENABLE_PREDICTIVE_ML=0)", flush=True)
 
         print("[CHART] Step 12b: HMM regime...", flush=True)
@@ -4887,7 +5732,7 @@ def get_chart(
                     date_key = str(row_date.date())
                     zscore   = float(zscore_slice[i]) if i < len(zscore_slice) else 0.0
                     sc, details = score_signal_day(row, zscore)
-                    if sc >= 2:
+                    if signal_qualifies(sc, details):
                         ts = int(pd.Timestamp(row.iloc[0]).timestamp())
                         tier = signal_tier(sc, details["trend"])
                         # Save to log if not already there
@@ -5084,6 +5929,8 @@ def get_chart(
                 ),
                 "pred_default_close": round(pred_default["close"], 4) if pred_default else None,
                 "ml_accuracy": ml_acc,
+                "ml_base_rate": ml_base,
+                "ml_drivers": ml_drivers,
                 "ml_bull_prob": round(ml_bull_prob * 100, 1) if ml_bull_prob else None,
                 "regime": regime_info,
                 "signal_outcome_summary": signal_outcome_summary,
@@ -5422,7 +6269,19 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
     c2 = rsi < SIGNAL_RSI_PULLBACK
     c3 = close > open_ and vol > vol_ma * SIGNAL_VOLUME_MULT
     c4 = zscore <= SIGNAL_ZSCORE_THRESHOLD
-    sc = int(sum([c1, c2, c3, c4]))
+    # C2 sa do skóre počíta LEN keď nepáli C4. Zmerané 2026-07-26 na 23 tituloch
+    # za 2 roky: z 1559 dní s C4 malo 1559 aj C2 — prekryv 100 %, deterministicky.
+    # RSI14 je pod 45 vždy, keď je cena 1.5σ pod 60-dňovým priemerom. Bez tejto
+    # opravy dostal každý C4 deň druhý bod zdarma, prekročil prah "score >= 2"
+    # a stal sa signálom — najčastejší typ signálu (C2+C4, 43 % všetkých) bola
+    # v skutočnosti JEDNA podmienka v dvoch kabátoch.
+    # Meraný dopad (90D, reálne ceny, proti náhodnému vstupu n=3060):
+    #   pôvodne  n=478  win 52.9 %  medián +1.60 %
+    #   po tomto n=413  win 55.4 %  medián +2.87 %
+    # POZOR: C2 sa NEODSTRAŇUJE. Varianty "RSI<35" a "bez C2" boli obe HORŠIE
+    # než pôvodný stav — C2 nesie informáciu, keď C4 nepáli. Chybou bolo len
+    # dvojité počítanie. `details` nižšie hlási c2 pravdivo, mení sa iba skóre.
+    sc = int(c1) + int(c2 and not c4) + int(c3) + int(c4)
     # Trend-primárna klasifikácia (per-bar) podľa štruktúry EMA:
     #   up   = ema10 > ema20            → dip v uptrende = buyovateľný (DIP stratégia)
     #   down = ema10 < ema20 a cena < ema20 → proti-trendový dip (falling-knife)
@@ -5441,6 +6300,36 @@ def score_signal_day(row, zscore: float) -> tuple[int, dict]:
         "trend": trend,
     }
     return sc, details
+
+
+def signal_qualifies(score: int, details: dict) -> bool:
+    """Vznikne zo skóre a podmienok skutočný signál?
+
+    Okrem prahu `score >= 2` sa vyžaduje aspoň jedna podmienka PREPREDANOSTI
+    (C2 RSI pullback alebo C4 z-score dip). Dôvod je štrukturálny: celé pravidlo
+    je nákup prepadu, takže vstup bez jedinej prepredanej podmienky nie je dip,
+    ale naháňanie momenta. Prakticky to vylučuje presne jednu kombináciu —
+    C1+C3 (cena blízko EMA20/Kijun + zelená sviečka s objemom, ale bez akejkoľvek
+    prepredanosti). Žiadna iná kombinácia so skóre 2 nie je bez C2 aj C4.
+
+    Zmerané 2026-07-26 (23 titulov, 2 roky, 90D, reálne ceny; kontrola náhodným
+    vstupom n=3060 dala win 46.1 %, medián −1.93 %):
+      C1+C3 samotné:  n=97   win 45.4 %  medián −1.69 %   ← stratová podskupina
+      pred zmenami:   n=478  win 52.9 %  medián +1.60 %
+      po oboch:       n=279  win 58.8 %  medián +4.95 %
+    Cena: ~42 % menej signálov.
+
+    VÝHRADA: C1+C3 bolo najprv identifikované z dát a až potom sa k tomu našiel
+    štrukturálny argument — to poradie je náchylné na sebaospravedlnenie.
+    Argument „dip-buy musí mať dip" však obstojí aj samostatne. Ber to ako
+    suggestívne, nie potvrdené na inom období.
+
+    POZOR: chvost strát sa touto zmenou NEMENÍ (5. percentil ostáva ~−40 %).
+    Na ten je potrebná exit logika, nie úprava vstupu.
+    """
+    if score < 2:
+        return False
+    return bool(details.get("rsi_pullback") or details.get("zscore_dip"))
 
 
 def signal_tier(score: int, trend: str = "side") -> str:
@@ -5466,7 +6355,7 @@ def _signal_episode_rows(signal_frame: pd.DataFrame, warmup: int = SIGNAL_REPRES
             continue
         row = signal_frame.iloc[position]
         score, details = score_signal_day(row, float(zscores.iloc[position]))
-        qualifies = score >= 2
+        qualifies = signal_qualifies(score, details)
         if qualifies and not active:
             ts = pd.Timestamp(signal_frame.index[position])
             if ts.tzinfo is not None:
@@ -5934,6 +6823,11 @@ def build_signal_outcome_analytics(df_daily: pd.DataFrame, signals: list[dict]) 
 
 SCANNER_CACHE_FILE = DATA_ROOT / "market_scanner_cache.json"
 DIP_SCORES_FILE = DATA_ROOT / "dip_scores.json"
+ROIC_FUNDAMENTALS_DIR = DATA_ROOT / "roic_fundamentals"
+ROIC_TICKER_IDS_FILE = DATA_ROOT / "roic_ticker_ids.json"
+ROIC_FUNDAMENTALS_TTL_SECONDS = 30 * 24 * 60 * 60
+ROIC_DIP_MIN = 100
+ROIC_MIN_REQUEST_INTERVAL_SECONDS = 13.0
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
 SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
@@ -5945,6 +6839,21 @@ _scanner_scheduler_lock = threading.Lock()
 _scanner_scheduler_thread = None
 _scanner_daily_cache_locks_guard = threading.Lock()
 _scanner_daily_cache_locks: dict[str, threading.Lock] = {}
+_roic_enrichment_lock = threading.Lock()
+_roic_worker_guard = threading.Lock()
+_roic_worker_thread = None
+_roic_worker_stop = None
+_roic_rate_lock = threading.Lock()
+_roic_next_request_at = 0.0
+_roic_ticker_ids_lock = threading.Lock()
+_roic_status_lock = threading.Lock()
+_roic_status: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "total": 0, "done": 0, "current": None,
+    "enriched": 0, "unresolved": 0, "requests_made": 0,
+    "last_http_status": None, "last_path": None,
+    "rate_limit": {}, "errors": [],
+}
 _scanner_state = {
     "running": False,
     "started_at": None,
@@ -6024,6 +6933,13 @@ def enrich_with_dip(row: dict, dip_scores: dict) -> dict:
         out["dip_total"] = None
         out["dip_rank"] = None
         out["dip_label"] = "TECH ONLY"
+    # Pure display enrichment. It is intentionally not copied into DIP/FA/TA,
+    # C1-C4, scanner selection or verdict inputs.
+    out["roic_fundamentals"] = (
+        load_roic_fundamentals(ticker)
+        if (_num_or_none(out.get("dip_total")) or -math.inf) >= ROIC_DIP_MIN
+        else None
+    )
     return out
 
 
@@ -6163,6 +7079,7 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
     scores = parse_dip_ranking_xlsx(raw, filename=filename)
     save_dip_scores(scores)
     daily_cache_cold = _prepare_scanner_daily_cache(scores)
+    start_roic_fundamentals_enrichment(scores)
     meta = scores.get("_meta", {})
     return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at"), "daily_cache_cold": daily_cache_cold}
 
@@ -6667,7 +7584,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
         sc, details = score_signal_day(row, zscore)
 
-        if sc >= 2:
+        if signal_qualifies(sc, details):
             tier = signal_tier(sc, details["trend"])
             if date_key not in ticker_slog:
                 entry = {
@@ -6772,6 +7689,8 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
     tickers, universe_label, universe_key = scanner_universe_from_dip()
     dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
     scanner_memory_start = _process_memory_mb().get("rss_mb")
+    _scanner_job = mem_watch.track_job("scanner")
+    _scanner_job.__enter__()
 
     with _scanner_lock:
         _scanner_state.update({
@@ -6890,6 +7809,8 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
                 "current": None,
                 "error": str(e)[:120],
             })
+    finally:
+        _scanner_job.__exit__(None, None, None)
 
 
 def _start_nasdaq_scanner(
@@ -7332,6 +8253,27 @@ def get_investor_inbox(refresh: int = Query(0)):
 WEEKLY_PLAN_CACHE_TTL = 86400
 
 
+def _passes_weekly_buy_rule(row: dict, held_symbols, dip_min: float) -> bool:
+    """Shared predicate for the weekly plan's possible-buy selection."""
+    ticker = str(row.get("ticker") or "").upper()
+    if not ticker or ticker in held_symbols:
+        return False
+    signal = row.get("recent_signal") or {}
+    if not isinstance(signal, dict):
+        return False
+    if signal.get("tier") != "buy":
+        return False
+    dip_total = _num_or_none(row.get("dip_total"))
+    if dip_total is None or dip_total < dip_min:
+        return False
+    health = row.get("chart_health") or {}
+    if not isinstance(health, dict):
+        health = {}
+    daily_status = str((health.get("daily") or {}).get("status") or "").lower()
+    weekly_status = str((health.get("weekly") or {}).get("status") or "").lower()
+    return "bad" not in (daily_status, weekly_status)
+
+
 @app.get("/api/investor/plan")
 def get_investor_plan(refresh: int = Query(0)):
     """Týždenný plán: ľudská syntéza NAD Investor Inboxom — nie nový analytický
@@ -7402,19 +8344,10 @@ def get_investor_plan(refresh: int = Query(0)):
         scan = enrich_scanner_payload(load_scanner_cache()) or {}
         for row in (scan.get("results") or []):
             t = str(row.get("ticker") or "").upper()
-            if not t or t in holdings or t in used_tickers:
+            if t in used_tickers or not _passes_weekly_buy_rule(row, holdings, dip_min):
                 continue
             sig = row.get("recent_signal") or {}
-            if sig.get("tier") != "buy":
-                continue
-            dip = row.get("dip_total")
-            if dip is None or float(dip) < dip_min:
-                continue
-            ch = row.get("chart_health") or {}
-            dstat = str((ch.get("daily") or {}).get("status") or "").lower()
-            wstat = str((ch.get("weekly") or {}).get("status") or "").lower()
-            if "bad" in (dstat, wstat):
-                continue
+            dip = _num_or_none(row.get("dip_total"))
             buy_rows.append({
                 "ticker": t,
                 "summary": f"{t} má buy signál {sig.get('score', '?')}/4 aj DIP kvalitu ({int(float(dip))}) — stojí za detail.",
@@ -7443,6 +8376,209 @@ def get_investor_plan(refresh: int = Query(0)):
         "quiet": {"count": len(quiet), "tickers": quiet},
     }
     return _investor_cache_set(cache_key, payload)
+
+
+_HOME_HEATMAP_CACHE = {"key": None, "data": None, "ts": 0.0}
+HOME_HEATMAP_CACHE_TTL = 900
+
+
+def _heatmap_chart_health(row: dict) -> str | None:
+    health = row.get("chart_health") or {}
+    if not isinstance(health, dict):
+        return None
+    statuses = {
+        str((health.get(timeframe) or {}).get("status") or "").lower()
+        for timeframe in ("daily", "weekly")
+    }
+    if "bad" in statuses:
+        return "Bad"
+    if "risk" in statuses:
+        return "Risk"
+    if "ok" in statuses:
+        return "OK"
+    return None
+
+
+def _heatmap_reason_number(value) -> str:
+    number = float(value)
+    text = str(int(number)) if number.is_integer() else f"{number:.1f}"
+    return text.replace(".", ",")
+
+
+def _heatmap_readiness(dip, signal_score, health: str | None,
+                       pnl_pct, held: bool) -> tuple[int | None, list[str]]:
+    """Build a display-only 40/25/20/15 composite over available inputs."""
+    components: list[tuple[float, float]] = []
+    reasons: list[str] = []
+
+    dip_value = _num_or_none(dip)
+    if dip_value is not None:
+        components.append((min(100.0, max(0.0, float(dip_value))), 40.0))
+        reasons.append(f"DIP {_heatmap_reason_number(dip_value)}")
+
+    signal_value = _num_or_none(signal_score)
+    if signal_value is not None:
+        components.append((min(100.0, max(0.0, float(signal_value) / 4 * 100)), 25.0))
+        reasons.append(f"sign\u00e1l {_heatmap_reason_number(signal_value)}/4")
+
+    health_scores = {"OK": 100.0, "Risk": 50.0, "Bad": 0.0}
+    if health in health_scores:
+        components.append((health_scores[health], 20.0))
+        reasons.append(f"graf {health}")
+
+    pnl_value = _num_or_none(pnl_pct)
+    if held and pnl_value is not None:
+        components.append((min(100.0, max(0.0, -float(pnl_value))), 15.0))
+        if pnl_value < 0:
+            reasons.append(f"strata {_heatmap_reason_number(abs(pnl_value))} % vo\u010di priemeru")
+        else:
+            reasons.append("bez straty vo\u010di priemeru")
+
+    # Skóre má zmysel len keď existuje aspoň jedna VECNÁ zložka (DIP alebo
+    # signál). Bez nich ostáva nanajvýš „nie si v strate", z čoho vyšla 0 —
+    # a bunka potom tvrdila „pripravenosť 0/100", hoci správna odpoveď bola
+    # „nevieme". Presne ten rozdiel, ktorý má vo zvyšku karty držať šedá farba
+    # (nahlásené 2026-08-05: desiatky držaných titulov ukazovali 0).
+    if dip_value is None and signal_value is None:
+        return None, reasons
+
+    total_weight = sum(weight for _value, weight in components)
+    if not total_weight:
+        return None, reasons
+    score = sum(value * weight for value, weight in components) / total_weight
+    return int(round(min(100.0, max(0.0, score)))), reasons
+
+
+def _heatmap_change(change: tuple[float, float] | None) -> float | None:
+    return round(float(change[0]), 2) if change is not None else None
+
+
+@app.get("/api/home/heatmap")
+def get_home_heatmap():
+    """Compose one cache-only view for deciding where to enter or add.
+
+    The readiness number combines only existing DIP, signal, chart-health and
+    held-position P/L fields. It is a display-only interpretation and must
+    never be read back into C1-C4, scanner tiers, DCA thresholds or accounting.
+    This route performs no scans, refreshes, provider calls or eToro calls.
+    """
+    settings = _dash_settings()
+    dip_min = float(settings["dca_dip_min"])
+    max_weight = float(settings["dca_max_weight"])
+    holdings = {
+        str(symbol).upper(): item
+        for symbol, item in _get_portfolio_holdings().items()
+    }
+    held_symbols = set(holdings)
+    invested = sum(float(_num_or_none(item.get("amount")) or 0) for item in holdings.values())
+    live_rates = _live_rates_from_positions()
+
+    dip_raw = load_dip_scores()
+    if not isinstance(dip_raw, dict):
+        dip_raw = {}
+    dip_scores = {
+        str(symbol).upper(): value for symbol, value in dip_raw.items()
+        if not str(symbol).startswith("_") and isinstance(value, dict)
+    }
+    scanner_cache = load_scanner_cache() or {}
+    raw_scanner_rows = scanner_cache.get("results") if isinstance(scanner_cache, dict) else []
+    scanner_rows = []
+    for source_row in (raw_scanner_rows or []):
+        if not isinstance(source_row, dict):
+            continue
+        row = dict(source_row)
+        ticker = str(row.get("ticker") or "").upper()
+        current_dip = dip_scores.get(ticker)
+        row["dip_total"] = _num_or_none(current_dip.get("total")) if current_dip else None
+        scanner_rows.append(row)
+    scanner_by_symbol = {
+        str(row.get("ticker") or "").upper(): row
+        for row in scanner_rows if row.get("ticker")
+    }
+
+    watch_symbols = {
+        str(item.get("symbol") or "").upper()
+        for item in _read_watchlist_file() if item.get("symbol")
+    }
+    watch_symbols.update(
+        str(row.get("ticker") or "").upper()
+        for row in scanner_rows
+        if _passes_weekly_buy_rule(row, held_symbols, dip_min)
+    )
+    watch_symbols.difference_update(held_symbols)
+    watch_symbols.discard("")
+
+    def build_row(symbol: str, held: bool) -> dict:
+        holding = holdings.get(symbol) or {}
+        amount = float(_num_or_none(holding.get("amount")) or 0)
+        pnl_pct = _num_or_none(holding.get("pnl_pct")) if held else None
+        dip, weight_pct = _position_dip_metrics(symbol, amount, invested, dip_scores)
+        scanner_row = scanner_by_symbol.get(symbol) or {}
+        scanner_dip = _num_or_none(scanner_row.get("dip_total"))
+        if scanner_dip is not None:
+            dip = scanner_dip
+        signal = scanner_row.get("recent_signal") or {}
+        if not isinstance(signal, dict):
+            signal = {}
+        signal_score = _num_or_none(signal.get("score"))
+        signal_tier = signal.get("tier") or None
+        # Rozlíš "scanner ho nevidel" od "scanner ho videl a signál nemá".
+        # `recent_signal` je nullable aj pri prítomnom riadku (DIP ≥ prah drží
+        # ticker vo výsledkoch aj bez čerstvého signálu), takže bez tohto by
+        # obe skončili šedé — a to je ten istý omyl ako pripravenosť 0.
+        scanned = bool(scanner_row)
+        health = _heatmap_chart_health(scanner_row)
+        # Obe cez `_cached_change_pct`, teda s kontrolou zastaranosti — heatmapa
+        # radšej neukáže nič než mesiac staré číslo tváriace sa ako dnešné.
+        # (`_daily_change_from_cache` ostáva nedotknuté kvôli /api/movers.)
+        live_rate = live_rates.get(symbol)
+        daily_pct = _heatmap_change(_cached_change_pct(symbol, 1, live_rate))
+        weekly_pct = _heatmap_change(_cached_change_pct(symbol, 7, live_rate))
+        readiness, reasons = _heatmap_readiness(
+            dip, signal_score, health, pnl_pct, held,
+        )
+        return {
+            "symbol": symbol,
+            "weight_pct": round(weight_pct, 2) if held and weight_pct is not None else None,
+            "pnl_pct": pnl_pct,
+            "dip": dip,
+            "signal_score": signal_score,
+            "signal_tier": signal_tier,
+            "scanned": scanned,
+            "chart_health": health,
+            "daily_pct": daily_pct,
+            "weekly_pct": weekly_pct,
+            "readiness": readiness,
+            "readiness_reasons": reasons,
+        }
+
+    held_rows = [build_row(symbol, True) for symbol in sorted(held_symbols)]
+    watch_rows = [build_row(symbol, False) for symbol in sorted(watch_symbols)]
+    composed = {
+        "held": held_rows,
+        "watch": watch_rows,
+        "totals": {
+            "held": len(held_rows),
+            "watch": len(watch_rows),
+            "invested": round(invested, 2),
+        },
+    }
+    cache_inputs = {
+        "payload": composed,
+        "settings": {"dca_dip_min": dip_min, "dca_max_weight": max_weight},
+    }
+    cache_key = hashlib.blake2b(
+        json.dumps(cache_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        digest_size=16,
+    ).hexdigest()
+    now = _time_module.time()
+    if (_HOME_HEATMAP_CACHE["key"] == cache_key
+            and now - _HOME_HEATMAP_CACHE["ts"] < HOME_HEATMAP_CACHE_TTL):
+        return _HOME_HEATMAP_CACHE["data"]
+
+    data = {**composed, "generated_at": datetime.now(timezone.utc).isoformat()}
+    _HOME_HEATMAP_CACHE.update({"key": cache_key, "data": data, "ts": now})
+    return data
 
 
 ASSISTANT_EXPORT_SCHEMA_VERSION = "1.2"
@@ -8478,40 +9614,175 @@ def _yraw(v):
 # ── Ticker insights — insider transakcie + EPS história (Yahoo) ──────────────
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
-INSIGHTS_SCHEMA_VERSION = 14
+INSIGHTS_SCHEMA_VERSION = 17   # 17: FMP ako tretí zdroj price_target (invaliduje cache bez cieľa)
 AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
 AV_EARNINGS_CACHE_TTL_H = 24 * 30
 AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
 _AV_EARNINGS_FETCH_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
+def _insider_transaction_price(transaction_text: str) -> float | None:
+    """Extract a single per-share price; Yahoo sale ranges use their midpoint."""
+    match = re.search(
+        r"\bat\s+price\s+\$?([\d,]+(?:\.\d+)?)"
+        r"(?:\s*-\s*\$?([\d,]+(?:\.\d+)?))?\s+per\s+share\b",
+        str(transaction_text or ""),
+        flags=re.I,
+    )
+    if not match:
+        return None
+    low = float(match.group(1).replace(",", ""))
+    high = float(match.group(2).replace(",", "")) if match.group(2) else low
+    return round((low + high) / 2, 4)
+
+
+def _insider_transaction_kind(transaction_text: str) -> str | None:
+    """Classify only cash purchases and sales, excluding non-cash acquisitions."""
+    text = str(transaction_text or "").lower()
+    if "sale" in text:
+        return "sell"
+    excluded_purchase = ("award", "grant", "exercise", "option", "conversion", "convert")
+    if not any(word in text for word in excluded_purchase) and (
+        "purchase" in text or re.search(r"\bbuy\b", text)
+    ):
+        return "buy"
+    return None
+
+
+def _mark_likely_scheduled_insider_transactions(transactions: list[dict]) -> None:
+    """Annotate repeated sale patterns without removing or reordering trades."""
+    groups: dict[tuple, list[dict]] = {}
+    for transaction in transactions:
+        transaction["scheduled_likely"] = False
+        transaction["scheduled_reason"] = None
+        key = (transaction.get("name"), transaction.get("type"))
+        groups.setdefault(key, []).append(transaction)
+
+    for (_, transaction_type), group in groups.items():
+        if transaction_type != "sell" or len(group) < 3:
+            continue
+
+        share_counts: dict[float, int] = {}
+        for transaction in group:
+            try:
+                shares = abs(float(transaction.get("shares")))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(shares):
+                share_counts[shares] = share_counts.get(shares, 0) + 1
+        same_size_count = max(share_counts.values(), default=0)
+        same_size = same_size_count >= 3
+
+        dates = []
+        for transaction in group:
+            try:
+                dates.append(date.fromisoformat(str(transaction.get("date"))))
+            except (TypeError, ValueError):
+                continue
+        dates.sort()
+        intervals = [
+            (current - previous).days
+            for previous, current in zip(dates, dates[1:])
+            if (current - previous).days > 0
+        ]
+        cadence = False
+        median_days = None
+        if len(intervals) >= 3:
+            ordered = sorted(intervals)
+            midpoint = len(ordered) // 2
+            median_days = (
+                ordered[midpoint]
+                if len(ordered) % 2
+                else (ordered[midpoint - 1] + ordered[midpoint]) / 2
+            )
+            if median_days >= 7:
+                in_band = sum(
+                    1 for interval in intervals
+                    if median_days * 0.75 <= interval <= median_days * 1.25
+                )
+                cadence = in_band * 5 >= len(intervals) * 3
+
+        if not (same_size or cadence):
+            continue
+        reason_parts = []
+        if same_size:
+            reason_parts.append(f"{same_size_count}× rovnaký objem")
+        if cadence:
+            cadence_days = (
+                str(int(median_days))
+                if float(median_days).is_integer()
+                else f"{median_days:.1f}"
+            )
+            reason_parts.append(f"~{cadence_days} dní")
+        reason = ", ".join(reason_parts)
+        for transaction in group:
+            transaction["scheduled_likely"] = True
+            transaction["scheduled_reason"] = reason
+
+
 def _insights_parse(qs: dict) -> dict:
     out: dict = {}
-    # Insider transakcie za 90 dní
+    # Pôvodné 90-dňové agregáty a recent[] zachovávajú doterajšiu sémantiku.
     txs = (qs.get("insiderTransactions") or {}).get("transactions") or []
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    cutoff_2y = (datetime.now(timezone.utc) - timedelta(days=730)).timestamp()
     buys = sells = 0
     buy_val = sell_val = 0.0
     recent = []
+    transactions_2y = []
+    weighted_buy_price = weighted_buy_value = 0.0
     for t in txs:
         ts = _yraw(t.get("startDate"))
-        if not ts or ts < cutoff:
+        if not ts:
             continue
         text = (t.get("transactionText") or "").lower()
-        kind = "buy" if ("purchase" in text or "buy" in text) else ("sell" if "sale" in text else None)
-        if not kind:
-            continue   # awards/grants/exercise bez kontextu nezapočítavaj
+        old_kind = "buy" if ("purchase" in text or "buy" in text) else ("sell" if "sale" in text else None)
         val = float(_yraw(t.get("value")) or 0)
-        if kind == "buy":
-            buys += 1; buy_val += val
-        else:
-            sells += 1; sell_val += val
-        if len(recent) < 6:
-            recent.append({"date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
-                           "name": t.get("filerName"), "relation": t.get("filerRelation"),
-                           "type": kind, "shares": _yraw(t.get("shares")), "value": val or None})
+        if ts >= cutoff and old_kind:
+            if old_kind == "buy":
+                buys += 1; buy_val += val
+            else:
+                sells += 1; sell_val += val
+            if len(recent) < 6:
+                recent.append({"date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+                               "name": t.get("filerName"), "relation": t.get("filerRelation"),
+                               "type": old_kind, "shares": _yraw(t.get("shares")), "value": val or None})
+
+        kind = _insider_transaction_kind(text)
+        if ts < cutoff_2y or not kind:
+            continue
+        price = _insider_transaction_price(text)
+        shares = _yraw(t.get("shares"))
+        transactions_2y.append({
+            "date": datetime.fromtimestamp(ts, timezone.utc).date().isoformat(),
+            "name": t.get("filerName"),
+            "relation": t.get("filerRelation"),
+            "type": kind,
+            "shares": shares,
+            "price": price,
+            "value": val or None,
+        })
+        if kind == "buy" and price is not None:
+            weight = val
+            if weight <= 0:
+                try:
+                    weight = abs(float(shares or 0)) * price
+                except (TypeError, ValueError):
+                    weight = 0
+            if weight > 0:
+                weighted_buy_price += price * weight
+                weighted_buy_value += weight
+    transactions_2y.sort(key=lambda t: t["date"], reverse=True)
+    _mark_likely_scheduled_insider_transactions(transactions_2y)
+    avg_buy_price_2y = (
+        round(weighted_buy_price / weighted_buy_value, 4)
+        if weighted_buy_value > 0 else None
+    )
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
-                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
+                      "transactions_2y": transactions_2y,
+                      "avg_buy_price_2y": avg_buy_price_2y,
+                      "current_vs_avg_buy_pct": None}
     # EPS história z Yahoo earningsHistory — VYPNUTÉ. Zistené naživo na GOOG
     # (2026-07-24): "epsActual" tu vie byť kumulatívne rastúce naprieč
     # kvartálmi (2.87 → 2.82 → 5.11 → 9.11, akoby TTM súčet) zatiaľ čo
@@ -8556,6 +9827,14 @@ def _insights_parse(qs: dict) -> dict:
             "median": _yraw(fd.get("targetMedianPrice")),
             "current": _yraw(fd.get("currentPrice")),
         }
+    current_price = _yraw(fd.get("currentPrice"))
+    if avg_buy_price_2y and current_price is not None:
+        try:
+            out["insider"]["current_vs_avg_buy_pct"] = round(
+                (float(current_price) - avg_buy_price_2y) / avg_buy_price_2y * 100, 2
+            )
+        except (TypeError, ValueError):
+            pass
     ks = qs.get("defaultKeyStatistics") or {}
     short_float = _yraw(ks.get("shortPercentOfFloat"))
     if short_float is not None:
@@ -8919,7 +10198,9 @@ def _insights_fetch_finnhub(sym: str) -> dict:
             recent.append({"date": t.get("transactionDate"), "name": t.get("name"),
                            "relation": None, "type": kind, "shares": shares, "value": val or None})
     out["insider"] = {"buys_90d": buys, "sells_90d": sells,
-                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent}
+                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
+                      "transactions_2y": [], "avg_buy_price_2y": None,
+                      "current_vs_avg_buy_pct": None}
     # EPS surprises — posledné nahlásené kvartály (aspoň posledný rok pokrytia).
     # /stock/earnings vracia "period" = koniec fiškálneho kvartálu (nie dátum
     # reportu — tie sa líšia o týždne), takže chart markery aj karta sedeli na
@@ -8991,6 +10272,18 @@ def _insights_fetch_finnhub(sym: str) -> dict:
             }
     except Exception as e:
         print(f"[insights] price target {sym} failed: {_scrub_token(e)}")
+    # FMP ako tretí zdroj. Finnhub free tier cieľ pre časť tickerov nedá (prázdna
+    # odpoveď bez chyby, prípadne 403) a Yahoo fallback z Render IP neprejde, takže
+    # bez tohto ostávala karta aj čiara na grafe prázdna pri bežných tituloch.
+    # Funkcia už existovala, ale volala ju len fair-value karta.
+    if not out.get("price_target"):
+        try:
+            fmp_pt = _fmp_price_target(sym)
+            if fmp_pt:
+                out["price_target"] = fmp_pt
+                print(f"[insights] price target {sym}: FMP fallback")
+        except Exception as e:
+            print(f"[insights] price target {sym} FMP failed: {_scrub_token(e)}")
     try:
         r = requests.get("https://finnhub.io/api/v1/stock/metric",
                          params={"symbol": sym, "metric": "all", "token": api_key}, timeout=15)
@@ -9783,6 +11076,32 @@ def _ticker_sector_etf(sym: str) -> tuple[str | None, str | None]:
     return etf, industry
 
 
+def _ticker_sector_etf_cached_only(sym: str) -> tuple[str | None, str | None]:
+    """Ako _ticker_sector_etf, ale NIKDY nesiahne na sieť — vráti (None, None),
+    keď ticker v 90d disk cache nie je. Používa sektorový prehľad portfólia po
+    vyčerpaní rozpočtu na nové Finnhub profily; chýbajúce sa doplnia pri ďalšom
+    otvorení namiesto toho, aby prvý request čakal na desiatky volaní."""
+    sym = sym.upper()
+    with _sector_cache_lock:
+        if not SECTOR_CACHE_FILE.exists():
+            return None, None
+        try:
+            cache = json.loads(SECTOR_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return None, None
+    hit = cache.get(sym)
+    if not hit:
+        return None, None
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(hit["fetched_at"])).days
+    except Exception:
+        return None, None
+    # Stale záznam sa tu berie ako platný: sektor firmy sa nemení tak, aby stálo
+    # za to nechať bunku prázdnu, a čerstvosť si vyrieši normálna cesta.
+    return hit.get("etf"), hit.get("industry")
+
+
 def _finnhub_profile_cached(sym: str) -> tuple[str | None, str | None, str | None]:
     """Spoločný resolver na Finnhub profile2 — vracia (etf, industry, exchange_raw).
     Jedno volanie pokrýva sektorové mapovanie aj burzu pre Google odkaz."""
@@ -9933,7 +11252,7 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             schema_ok = cached.get("schema_version") == INSIGHTS_SCHEMA_VERSION
             short_ttl = cached.get("error") or cached.get("eps_history_error")
             if schema_ok and age_h < (1 if short_ttl else INSIGHTS_TTL_H) and not refresh:
-                return cached
+                return _with_roic_fundamentals(cached, sym)
         except Exception:
             cached = None
     core = None
@@ -9959,10 +11278,14 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         core_target_valid = float(core_target.get("mean")) > 0
     except (TypeError, ValueError):
         core_target_valid = False
+    core_insider = (core or {}).get("insider") or {}
     if core is not None and (
         not core.get("analyst_consensus") or not core_target_valid
+        or not core_insider.get("transactions_2y")
     ):
-        qs = _yahoo_quote_summary(sym, "recommendationTrend,financialData")
+        qs = _yahoo_quote_summary(
+            sym, "insiderTransactions,recommendationTrend,financialData"
+        )
         if qs is not None:
             yahoo_extra = _insights_parse(qs)
             enriched = False
@@ -9976,6 +11299,11 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 yahoo_target_valid = False
             if not core_target_valid and yahoo_target_valid:
                 core["price_target"] = yahoo_target
+                enriched = True
+            yahoo_insider = yahoo_extra.get("insider") or {}
+            if (not core_insider.get("transactions_2y")
+                    and yahoo_insider.get("transactions_2y")):
+                core["insider"] = yahoo_insider
                 enriched = True
             if enriched:
                 core["source"] = "finnhub+yahoo"
@@ -10055,7 +11383,11 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             core["yahoo_earnings_error"] = yahoo_eps_error
     if core is None:
         if cached and not cached.get("error"):
-            return {**cached, "stale": True}
+            cached_transactions = (
+                (cached.get("insider") or {}).get("transactions_2y") or []
+            )
+            _mark_likely_scheduled_insider_transactions(cached_transactions)
+            return _with_roic_fundamentals({**cached, "stale": True}, sym)
         payload = {"ticker": sym, "schema_version": INSIGHTS_SCHEMA_VERSION,
                    "error": " | ".join(errs),
                    "fetched_at": datetime.now(timezone.utc).isoformat()}
@@ -10099,12 +11431,25 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                     EARNINGS_CACHE_FILE.write_text(json.dumps(ec), encoding="utf-8")
             except Exception:
                 pass
+    # Cieľ analytikov sa medzi obnovami PRENÁŠA zo starého záznamu, keď ho nový
+    # fetch nedodá. Zdroje sú nespoľahlivé každý inak (Finnhub free tier ho pre
+    # časť tickerov nedá, Yahoo z Render IP prejde len občas, FMP má vlastné
+    # limity), takže "teraz sa nepodarilo" NIE JE to isté ako "cieľ neexistuje".
+    # Bez tohto stačí jedna neúspešná obnova a údaj zmizne z karty, z grafu aj
+    # zo stĺpca v Portfóliu — presne to spôsobil bump schémy 16→17 (2026-08-04),
+    # ktorý zahodil platné ciele a nový fetch ich nevedel zopakovať.
+    # `carried_from` drží pôvodný čas, aby bolo vidno, aký je údaj starý.
+    if not payload.get("price_target") and cached and cached.get("price_target"):
+        carried = dict(cached["price_target"])
+        carried.setdefault("carried_from", cached.get("fetched_at"))
+        payload["price_target"] = carried
+        print(f"[insights] price target {sym}: prenesený z predošlej cache")
     try:
         YAHOO_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         fpath.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
         pass
-    return payload
+    return _with_roic_fundamentals(payload, sym)
 
 # ── Company profile — karta "O firme" v Analytike ────────────────────────────
 COMPANY_PROFILE_DIR = DATA_ROOT / "company_profiles"
@@ -10967,7 +12312,7 @@ def run_checklist(tickers: str = "", days: int = 10):
                 zscore = float(zscore_values[i]) if i < len(zscore_values) else 0.0
                 sc, details = score_signal_day(row, zscore)
 
-                if sc >= 2:
+                if signal_qualifies(sc, details):
                     tier = signal_tier(sc, details["trend"])
                     if date_key not in ticker_slog:
                         entry = {
@@ -11123,6 +12468,521 @@ def _previous_weekday_utc() -> str:
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day.isoformat()
+
+
+ROIC_API_BASE = "https://api.roic.ai/v3.0.0"
+
+
+def _roic_api_key() -> str:
+    """Kľúč je na Renderi pod menom ROIC; ROIC_API_KEY beriem ako alternatívu."""
+    return (os.getenv("ROIC", "") or os.getenv("ROIC_API_KEY", "")).strip()
+
+
+ROIC_TICKER_SEARCH_PATH = "/tickers/search"
+ROIC_RATIO_PATHS = {
+    "profitability": "/fundamental/ratios/profitability/{identifier}",
+    "credit_debt": "/fundamental/ratios/credit/{identifier}",
+}
+
+
+def _roic_atomic_json_write(path: Path, payload: dict) -> bool:
+    temp_path = path.with_name(
+        f"{path.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temp_path, path)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _roic_cache_path(symbol: str) -> Path:
+    safe = re.sub(r"[^A-Z0-9._-]", "_", str(symbol or "").upper())
+    return ROIC_FUNDAMENTALS_DIR / f"{safe}.json"
+
+
+def _roic_read_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _roic_parse_timestamp(value) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _roic_family_is_fresh(cache: dict, family: str, now: float | None = None) -> bool:
+    section = cache.get(family) if isinstance(cache, dict) else None
+    fetched = _roic_parse_timestamp((section or {}).get("fetched_at"))
+    current = _time_module.time() if now is None else now
+    return fetched is not None and current - fetched < ROIC_FUNDAMENTALS_TTL_SECONDS
+
+
+def _roic_rows(payload) -> list[dict]:
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = payload.get("data") or payload.get("results") or []
+        if isinstance(rows, dict):
+            rows = rows.get("data") or rows.get("results") or []
+    else:
+        rows = []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _roic_newest_row(payload) -> dict | None:
+    rows = _roic_rows(payload)
+    if not rows:
+        return None
+    return max(
+        rows,
+        key=lambda row: (
+            str(row.get("fiscal_year") or ""),
+            str(row.get("period_end_date") or ""),
+            str(row.get("period_label") or ""),
+        ),
+    )
+
+
+def _roic_pick_number(row: dict, *keys):
+    for key in keys:
+        value = _num_or_none(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _roic_section(family: str, row: dict) -> dict:
+    common = {
+        "fiscal_year": row.get("fiscal_year"),
+        "period_end_date": row.get("period_end_date"),
+        "period_label": row.get("period_label"),
+        "currency": row.get("currency"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if family == "profitability":
+        return {
+            **common,
+            "roic": _roic_pick_number(row, "return_on_inv_capital"),
+            "roe": _roic_pick_number(row, "return_com_eqy"),
+            "roa": _roic_pick_number(row, "return_on_asset"),
+        }
+    return {
+        **common,
+        # Prvé meno v každom zozname je OVERENÉ z dokumentácie roic.ai
+        # (/api/docs/financial-ratios/credit) — ostatné sú len poistka, keby
+        # zmenili pomenovanie. Pozor, `debt_to_equity` ani `interest_coverage`
+        # v API NEEXISTUJÚ, hoci sa tak intuitívne volajú.
+        "debt_to_equity": _roic_pick_number(
+            row, "tot_debt_to_tot_eqy", "debt_to_equity",
+            "tot_debt_to_tot_equity", "total_debt_to_equity"
+        ),
+        "net_debt_to_ebitda": _roic_pick_number(
+            row, "net_debt_to_ebitda", "net_debt_ebitda"
+        ),
+        "interest_coverage": _roic_pick_number(
+            row, "ebitda_to_interest_expn", "oper_inc_to_int_exp",
+            "interest_coverage", "interest_coverage_ratio",
+            "ebit_to_interest_expn"
+        ),
+        "debt_to_assets": _roic_pick_number(
+            row, "tot_debt_to_tot_asset", "debt_to_assets",
+            "tot_debt_to_tot_assets", "total_debt_to_assets"
+        ),
+        "available_fields": sorted(row.keys()),
+    }
+
+
+def _roic_wait_for_slot(stop_event: threading.Event | None = None) -> bool:
+    """Serialize free-tier requests and remain cancellable while waiting."""
+    global _roic_next_request_at
+    with _roic_rate_lock:
+        delay = max(0.0, _roic_next_request_at - _time_module.time())
+        if delay:
+            if stop_event is not None:
+                if stop_event.wait(delay):
+                    return False
+            else:
+                _time_module.sleep(delay)
+        _roic_next_request_at = max(
+            _roic_next_request_at, _time_module.time()
+        ) + ROIC_MIN_REQUEST_INTERVAL_SECONDS
+    return not (stop_event is not None and stop_event.is_set())
+
+
+def _roic_apply_rate_headers(headers) -> None:
+    """Use server reset as authority, with 13 seconds as a safety floor."""
+    global _roic_next_request_at
+    try:
+        remaining = int(headers.get("x-ratelimit-remaining", ""))
+    except (TypeError, ValueError, AttributeError):
+        remaining = None
+    try:
+        reset = float(headers.get("x-ratelimit-reset", ""))
+    except (TypeError, ValueError, AttributeError):
+        reset = None
+    with _roic_rate_lock:
+        floor = _time_module.time() + ROIC_MIN_REQUEST_INTERVAL_SECONDS
+        _roic_next_request_at = max(_roic_next_request_at, floor)
+        if remaining == 0 and reset is not None:
+            _roic_next_request_at = max(_roic_next_request_at, reset + 0.25)
+
+
+def _roic_note(**fields) -> None:
+    """Zapíš stav workera. Bez tohto sa nedá rozlíšiť „beží a nedobehol" od
+    „spadol" a od „nikdy sa nespustil" — a fail-soft všetko ostatné skryje.
+    Presne to stálo jedno kolo slepého hádania, kým sa našla chyba v resolúcii
+    symbolov. Chyby držím ako krátky rolujúci zoznam, nech to nerastie."""
+    with _roic_status_lock:
+        err = fields.pop("error", None)
+        _roic_status.update(fields)
+        if err:
+            _roic_status["errors"] = ([err] + list(_roic_status.get("errors") or []))[:8]
+
+
+def _roic_get_json(
+    path: str,
+    *,
+    params: dict | None = None,
+    stop_event: threading.Event | None = None,
+    timeout: int = 20,
+    retries: int = 0,
+):
+    key = _roic_api_key()
+    if not key:
+        _roic_note(error="chýba API kľúč (env ROIC)")
+        return None
+    if not _roic_wait_for_slot(stop_event):
+        _roic_note(error=f"prerušené pri čakaní na limit: {path}")
+        return None
+    try:
+        response = requests.get(
+            f"{ROIC_API_BASE}{path}",
+            headers={"Authorization": f"Bearer {key}"},
+            params=params or {},
+            timeout=timeout,
+        )
+        _roic_apply_rate_headers(response.headers)
+        _roic_note(
+            last_http_status=response.status_code,
+            last_path=path,
+            requests_made=int(_roic_status.get("requests_made") or 0) + 1,
+            rate_limit={
+                k.lower(): v for k, v in response.headers.items()
+                if "ratelimit" in k.lower() or k.lower() == "retry-after"
+            },
+        )
+        if response.status_code == 429:
+            _roic_note(error=f"429 na {path} — čakám do resetu")
+            _roic_wait_for_slot(stop_event)
+            return None
+        if response.status_code != 200:
+            _roic_note(error=f"HTTP {response.status_code} na {path}: "
+                             f"{_scrub_token(response.text[:120])}")
+            return None
+        return response.json()
+    except requests.Timeout as e:
+        # /tickers/search vie byť pomalé a vypršať; ticker ID sa pritom cachuje
+        # natrvalo, takže jedno zopakovanie s dlhším čakaním je lacné a ušetrí
+        # trvalo nevyriešený titul.
+        _roic_note(error=f"{path}: timeout {timeout}s"
+                         f"{' — skúšam znova' if retries > 0 else ''}")
+        if retries > 0 and not (stop_event and stop_event.is_set()):
+            return _roic_get_json(
+                path, params=params, stop_event=stop_event,
+                timeout=timeout * 2, retries=retries - 1,
+            )
+        return None
+    except Exception as e:
+        _roic_note(error=f"{path}: {type(e).__name__}: {_scrub_token(e)}")
+        return None
+
+
+def _roic_load_ticker_ids() -> dict:
+    with _roic_ticker_ids_lock:
+        return _roic_read_json(ROIC_TICKER_IDS_FILE)
+
+
+def _roic_save_ticker_id(symbol: str, ticker_id) -> bool:
+    if ticker_id is None or ticker_id == "":
+        return False
+    with _roic_ticker_ids_lock:
+        mapping = _roic_read_json(ROIC_TICKER_IDS_FILE)
+        mapping[str(symbol).upper()] = ticker_id
+        return _roic_atomic_json_write(ROIC_TICKER_IDS_FILE, mapping)
+
+
+def _roic_symbol_matches(row_symbol, sym: str) -> bool:
+    """Zhoda symbolu z roic.ai s naším holým symbolom.
+
+    API vracia KVALIFIKOVANÝ symbol — „NASDAQ:CTSH", nie „CTSH" (dokumentované
+    v /api/docs/tickers/search). Naivné porovnanie celého reťazca preto nikdy
+    nesedelo a resolúcia ticho vracala None, čo fail-soft úplne pohltil.
+    Zároveň naše univerzum nesie Yahoo prípony (TEP.PA, VVSM.DE), ktoré
+    roic.ai nepozná — porovnáva sa teda časť za dvojbodkou aj základ symbolu
+    bez prípony burzy.
+    """
+    raw = str(row_symbol or "").upper()
+    if not raw:
+        return False
+    right = raw.rsplit(":", 1)[-1]
+    base = sym.split(".", 1)[0]
+    return sym in (raw, right) or base in (raw, right)
+
+
+def _roic_resolve_ticker_id(
+    symbol: str, stop_event: threading.Event | None = None
+):
+    sym = str(symbol or "").upper()
+    cached = _roic_load_ticker_ids().get(sym)
+    if cached is not None and cached != "":
+        return cached
+    payload = _roic_get_json(
+        ROIC_TICKER_SEARCH_PATH,
+        # `limit` má default 500 — bez orezania sa tahá zbytočne veľká odpoveď.
+        params={"query": sym.split(".", 1)[0], "search_by": "symbol", "limit": 25},
+        stop_event=stop_event,
+        # Meraný stav ukázal, že práve tento endpoint vie vypršať na 20 s
+        # (5 z 13 titulov). Dlhšie čakanie + jedno zopakovanie.
+        timeout=45, retries=1,
+    )
+    rows = _roic_rows(payload)
+    exact = [
+        row for row in rows
+        if _roic_symbol_matches(row.get("symbol") or row.get("ticker"), sym)
+    ]
+    candidates = exact or (rows if len(rows) == 1 else [])
+    ticker_id = candidates[0].get("id") if candidates else None
+    if ticker_id is not None and ticker_id != "":
+        _roic_save_ticker_id(sym, ticker_id)
+    return ticker_id
+
+
+def _roic_top_dip_symbols(scores: dict) -> list[str]:
+    if not isinstance(scores, dict):
+        return []
+    return [
+        str(symbol).upper()
+        for symbol, dip in scores.items()
+        if not str(symbol).startswith("_")
+        and isinstance(dip, dict)
+        and (_num_or_none(dip.get("total")) or -math.inf) >= ROIC_DIP_MIN
+    ]
+
+
+def _roic_enrich_symbol(
+    symbol: str, stop_event: threading.Event | None = None
+) -> bool:
+    path = _roic_cache_path(symbol)
+    cache = _roic_read_json(path)
+    missing = [
+        family for family in ROIC_RATIO_PATHS
+        if not _roic_family_is_fresh(cache, family)
+    ]
+    if not missing or (stop_event is not None and stop_event.is_set()):
+        return True
+    ticker_id = _roic_resolve_ticker_id(symbol, stop_event)
+    if ticker_id is None:
+        return False
+    changed = False
+    for family in missing:
+        if stop_event is not None and stop_event.is_set():
+            break
+        payload = _roic_get_json(
+            ROIC_RATIO_PATHS[family].format(
+                identifier=urllib.parse.quote(str(ticker_id), safe="")
+            ),
+            params={"period_type": "annual"},
+            stop_event=stop_event,
+        )
+        newest = _roic_newest_row(payload)
+        if newest:
+            cache[family] = _roic_section(family, newest)
+            cache["symbol"] = str(symbol).upper()
+            cache["ticker_id"] = ticker_id
+            _roic_atomic_json_write(path, cache)
+            changed = True
+    return changed
+
+
+def _run_roic_fundamentals_enrichment(
+    scores: dict, stop_event: threading.Event
+) -> None:
+    if not _roic_api_key():
+        _roic_note(running=False, error="worker nespustený — chýba env ROIC")
+        return
+    symbols = _roic_top_dip_symbols(scores)
+    _roic_note(
+        running=True, total=len(symbols), done=0, current=None,
+        started_at=datetime.now(timezone.utc).isoformat(), finished_at=None,
+        enriched=0, unresolved=0, requests_made=0, errors=[],
+    )
+    try:
+        with _roic_enrichment_lock:
+            for index, symbol in enumerate(symbols, start=1):
+                if stop_event.is_set():
+                    _roic_note(error=f"zastavené pri {symbol} ({index}/{len(symbols)})")
+                    break
+                _roic_note(current=symbol, done=index - 1)
+                try:
+                    ok = _roic_enrich_symbol(symbol, stop_event)
+                except Exception as e:
+                    ok = False
+                    _roic_note(error=f"{symbol}: {type(e).__name__}: {_scrub_token(e)}")
+                with _roic_status_lock:
+                    field = "enriched" if ok else "unresolved"
+                    _roic_status[field] = int(_roic_status.get(field) or 0) + 1
+                _roic_note(done=index)
+    finally:
+        _roic_note(
+            running=False, current=None,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@app.get("/api/diagnostics/roic-status")
+def roic_enrichment_status():
+    """Stav obohacovania — beží / kde je / čo padlo / koľko zostáva z limitu."""
+    with _roic_status_lock:
+        status = dict(_roic_status)
+    status["key_configured"] = bool(_roic_api_key())
+    status["dip_min"] = ROIC_DIP_MIN
+    status["ticker_ids_cached"] = len(_roic_load_ticker_ids())
+    return status
+
+
+def start_roic_fundamentals_enrichment(scores: dict | None = None):
+    """Start/replace the resumable post-import worker without scanner locking."""
+    global _roic_worker_thread, _roic_worker_stop
+    scores = scores if isinstance(scores, dict) else load_dip_scores()
+    if not _roic_api_key() or not _roic_top_dip_symbols(scores):
+        return None
+    with _roic_worker_guard:
+        if _roic_worker_stop is not None:
+            _roic_worker_stop.set()
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=_run_roic_fundamentals_enrichment,
+            args=(scores, stop_event),
+            name="roic-fundamentals",
+            daemon=True,
+        )
+        _roic_worker_stop = stop_event
+        _roic_worker_thread = thread
+        thread.start()
+        return thread
+
+
+def load_roic_fundamentals(symbol: str) -> dict | None:
+    """Read-only display payload; never performs an HTTP request."""
+    cache = _roic_read_json(_roic_cache_path(symbol))
+    profitability = cache.get("profitability") or {}
+    credit = cache.get("credit_debt") or {}
+    if not profitability and not credit:
+        return None
+    return {
+        "roic": profitability.get("roic"),
+        "fiscal_year": profitability.get("fiscal_year") or credit.get("fiscal_year"),
+        "period_end_date": (
+            profitability.get("period_end_date") or credit.get("period_end_date")
+        ),
+        "debt_to_equity": credit.get("debt_to_equity"),
+        "net_debt_to_ebitda": credit.get("net_debt_to_ebitda"),
+        "interest_coverage": credit.get("interest_coverage"),
+        "debt_to_assets": credit.get("debt_to_assets"),
+    }
+
+
+def _with_roic_fundamentals(payload: dict, symbol: str) -> dict:
+    dip = load_dip_scores().get(str(symbol or "").upper()) or {}
+    eligible = (_num_or_none(dip.get("total")) or -math.inf) >= ROIC_DIP_MIN
+    return {
+        **payload,
+        "roic_fundamentals": (
+            load_roic_fundamentals(symbol) if eligible else None
+        ),
+    }
+
+
+@app.get("/api/diagnostics/roic/{symbol}")
+def roic_diagnostics(symbol: str):
+    """Ohmatá roic.ai skôr, než na ňom začneme čokoľvek stavať.
+
+    Zisťuje tri veci, ktoré sa z dokumentácie vyčítať nedajú: či kľúč funguje,
+    či endpoint zje HOLÝ symbol (dokumentácia žiada ticker ID, `NASDAQ:AAPL`
+    alebo FIGI — naše univerzum má pritom len holé symboly), a ktoré pole
+    reálne nesie ROIC. Kľúč ide v Bearer hlavičke, nie v query parametri —
+    tie končia v serverových logoch. Samotný kľúč sa nikdy nevypisuje.
+    """
+    sym = _validate_ticker_symbol(symbol)
+    key = _roic_api_key()
+    out: dict = {"symbol": sym, "key_configured": bool(key)}
+    if not key:
+        out["error"] = "Premenná ROIC nie je nastavená"
+        return out
+
+    def probe(identifier: str, family: str = "profitability") -> dict:
+        info: dict = {"identifier": identifier, "family": family}
+        try:
+            resp = requests.get(
+                f"{ROIC_API_BASE}/fundamental/ratios/{family}/{identifier}",
+                headers={"Authorization": f"Bearer {key}"},
+                params={"period_type": "annual"},
+                timeout=20,
+            )
+            info["http_status"] = resp.status_code
+            # Pri Free tieri (5/min) sú limity podstatné — vytiahni, čo posielajú.
+            info["rate_limit_headers"] = {
+                k: v for k, v in resp.headers.items() if "ratelimit" in k.lower()
+            }
+            if resp.status_code != 200:
+                info["body"] = _scrub_token(resp.text[:200])
+                return info
+            data = resp.json()
+            rows = data if isinstance(data, list) else (data.get("data") or [])
+            info["period_count"] = len(rows) if isinstance(rows, list) else None
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                newest = rows[0]
+                info["fields"] = sorted(newest.keys())[:40]
+                # Ktoré pole vyzerá na return on invested capital
+                info["roic_like"] = {
+                    k: v for k, v in newest.items()
+                    if "invest" in k.lower() or k.lower() in ("roic", "returnoninvestedcapital")
+                }
+                info["newest_sample"] = {k: newest.get(k) for k in list(newest)[:12]}
+        except Exception as e:
+            info["error"] = f"{type(e).__name__}: {_scrub_token(e)}"
+        return info
+
+    # Holý symbol vs prefix burzy — treba vedieť, či stačí to prvé.
+    out["probes"] = [probe(sym)]
+    resolved = sym if out["probes"][0].get("http_status") == 200 else None
+    if resolved is None:
+        for prefix in ("NASDAQ", "NYSE"):
+            attempt = probe(f"{prefix}:{sym}")
+            out["probes"].append(attempt)
+            if attempt.get("http_status") == 200:
+                resolved = f"{prefix}:{sym}"
+                break
+    # Druhá rodina, ktorú reálne používame — nech sa dá overiť tá istá cesta,
+    # akú beží obohacovanie, nie len profitability.
+    if resolved:
+        out["credit_probe"] = probe(resolved, family="credit")
+    return out
 
 
 @app.get("/api/diagnostics/earnings/{symbol}")
@@ -11339,6 +13199,10 @@ def help_screenshot(fname: str):
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
     "chart_patterns.js", "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
+    # Nový modul MUSÍ pribudnúť aj sem — inak endpoint vráti 404 a v produkcii
+    # padne všetko, čo ten súbor potrebuje (lokálne to nevidno, ak sa testuje
+    # bez tohto endpointu).
+    "scanner-table-sort.js",
 }
 
 @app.get("/js/{fname}")
@@ -11361,6 +13225,7 @@ if __name__ == "__main__":
         raise RuntimeError("RENDER mode requires DASH_USER and DASH_PASS (fail-closed).")
 
     start_scanner_scheduler_thread()
+    start_roic_fundamentals_enrichment(load_dip_scores())
 
     _PORT = int(os.getenv("PORT", 8766))
     _HOST = "0.0.0.0" if os.getenv("RENDER") else "127.0.0.1"

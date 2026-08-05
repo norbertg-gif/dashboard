@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260726-021342">
+<link rel="stylesheet" href="/dashboard.css?v=20260805-191833">
 </head>
 <body data-main-tab="home">
 
@@ -366,14 +366,14 @@
           <input type="checkbox" id="chk_kumo" onchange="pc_applyOverlays()">
           <label for="chk_kumo">Kumo cloud</label>
         </div>
-        <div class="ind-group-label" style="margin-top:6px;">Objem</div>
-        <div class="ind-check-row">
+        <div class="ind-group-label advanced-only" style="margin-top:6px;">Objem</div>
+        <div class="ind-check-row advanced-only">
           <div class="ind-dot" style="background:rgba(96,165,250,0.45); height:8px; border-radius:2px;"></div>
           <input type="checkbox" id="chk_vp" onchange="pc_toggleVolumeProfile(this)">
           <label for="chk_vp">Volume Profile</label>
         </div>
-        <div class="ind-group-label" style="margin-top:6px;">Chart patterns</div>
-        <div class="ind-check-row">
+        <div class="ind-group-label advanced-only" style="margin-top:6px;">Chart patterns</div>
+        <div class="ind-check-row advanced-only">
           <div class="ind-dot" style="background:#f59e0b;"></div>
           <input type="checkbox" id="chk_patterns" onchange="pc_toggleChartPatterns(this)">
           <label for="chk_patterns">Pattern overlay</label>
@@ -541,16 +541,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260726-021342"></script>
-  <script src="/js/live.js?v=20260726-021342"></script>
-  <script src="/js/portfolio.js?v=20260726-021342"></script>
-  <script src="/js/watchlist.js?v=20260726-021342"></script>
-  <script src="/js/scanner.js?v=20260726-021342"></script>
-  <script src="/js/chart_patterns.js?v=20260726-021342"></script>
-  <script src="/js/predictive.js?v=20260726-021342"></script>
-  <script src="/js/verdict.js?v=20260726-021342"></script>
-  <script src="/js/home.js?v=20260726-021342"></script>
-  <script src="/js/charts.js?v=20260726-021342"></script>
-  <script src="/js/main.js?v=20260726-021342"></script>
+  <script src="/js/core.js?v=20260805-191833"></script>
+  <script src="/js/live.js?v=20260805-191833"></script>
+  <script src="/js/portfolio.js?v=20260805-191833"></script>
+  <script src="/js/watchlist.js?v=20260805-191833"></script>
+  <script src="/js/scanner-table-sort.js?v=20260805-191833"></script>
+  <script src="/js/scanner.js?v=20260805-191833"></script>
+  <script src="/js/chart_patterns.js?v=20260805-191833"></script>
+  <script src="/js/predictive.js?v=20260805-191833"></script>
+  <script src="/js/verdict.js?v=20260805-191833"></script>
+  <script src="/js/home.js?v=20260805-191833"></script>
+  <script src="/js/charts.js?v=20260805-191833"></script>
+  <script src="/js/main.js?v=20260805-191833"></script>
 </body>
 </html>

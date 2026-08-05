@@ -1,6 +1,8 @@
 # Handoff: Trading Dashboard
 
-Dátum: 2026-07-15. Toto je zlúčený, jediný handoff dokument — nahrádza všetky
+Dátum: 2026-07-15, doplnené 2026-07-31 (**sekcia 6** — Render upgrade, ML
+rozšírenie, memory watchdog). Pri rozpore so sekciami 1–5 platí sekcia 6,
+je novšia. Toto je zlúčený, jediný handoff dokument — nahrádza všetky
 predchádzajúce (staršiu viac-session poznámku aj samostatný súbor
 `docs/HANDOFF_2026-07-15.md`, ktorý vznikol paralelne v inej session a bol
 sem zlúčený). Nová session nemá vidieť históriu tohto vlákna — všetky
@@ -313,6 +315,197 @@ nesmú zvyšovať pamäťovú stopu Renderu bez merateľného prínosu.
   používateľa aktuálne anonymizované screenshoty.
 - Nový commit iba navrhnúť, ak používateľ výslovne nepožiada o
   commit/push — tento handoff dokument sám osebe nevykonáva žiadny commit.
+
+## 6. SESSION 2026-07-31 — Render upgrade, ML rozšírenie, memory watchdog
+
+Táto session začala ako prieskum migrácie z Render.com (512 MB strop bránil
+ďalšiemu vývoju), ale skončila inde: **migrácia je zrušená**, Render zostáva a
+bol upgradnutý na platený plán. Čas šiel do odblokovania funkcií, ktoré 512 MB strop
+držal vypnuté.
+
+### Rozhodnutie o hostingu — UZAVRETÉ
+
+Zvažovali sa Railway, Koyeb, Fly.io, DigitalOcean a Hetzner/Scaleway VPS.
+Dvaja nezávislí experti (DeepSeek, Codex) sa zhodli, že Railway je pre tento
+workload zlá voľba: appka je always-on proces s rezidentným scientific
+stackom, takže usage-based billing meria obsadenú pamäť nepretržite —
+"mostly idle" neznamená lacno. Odporúčali fixnú cenu (Koyeb 2 GB alebo VPS).
+
+**Používateľ sa rozhodol zostať na Renderi a upgradnúť z Starter na Standard.**
+(Skorší text tu hovoril „Pro" — Render UI k 2026-08-02 hlása instance type
+**Standard**, event log zaznamenal „Instance type changed from Starter to
+Standard". Názov plánu bol v tomto dokumente uvedený nesprávne.) Dôvod nie je
+technický: produkt prináša väčšiu hodnotu než rozdiel v cene a ďalšie hľadanie
+alternatív prestalo dávať zmysel. Hetznerove plány boli navyše v tom čase
+označené ako "not available". **Túto tému neotvárať znova bez výslovného
+podnetu používateľa.**
+
+Súvisiace: `DASH_ENV=production` namiesto `RENDER=1` sa **nebude robiť** —
+navrhované bolo len kvôli odvodeniu druhého projektu z tohto kódu, ale ten
+druhý projekt s dashboardom nijako nesúvisí.
+
+### Commity (všetky na `main`, testy 71 → 77)
+
+```
+3ae315a  memory watchdog + /api/admin/memory/history
+4fe0a9c  RSS aj na Windows (ctypes), start_memtest.bat
+b7bc1b3  oprava batch OHLCV cache key + TTL
+8b32c59  ML hyperparametre cez env, vyššie defaulty
+d51b609  panel "Čo ženie predikciu" (ml_drivers)
+e9ceabc  walk-forward pokrytie 30 % -> 50 %
+```
+
+### Memory watchdog — `backend/mem_watch.py`
+
+Nový modul vzorkuje **aktuálnu** RSS každých 5 s a zaznamenáva, ktoré
+background joby a ktoré HTTP routy práve bežali.
+
+Pozor na rozdiel: `_process_memory_mb()` číta `resource.ru_maxrss`, čo je
+**monotónny high-water mark celého procesu** — nikdy neklesne, takže sa na
+atribúciu použiť nedá. Watchdog preto číta `/proc/self/status` (Linux) alebo
+`GetProcessMemoryInfo` cez ctypes (Windows).
+
+`GET /api/admin/memory/history?hours=N` vráti pre prahy 512/768/1024/1536 MB
+podiel času nad nimi, počet a dĺžku epizód, a sekundy nad 512 MB rozpadnuté
+podľa routy a podľa jobu. Plus idle baseline zo začiatku vs konca okna
+(retencia pamäte).
+
+Zápis ide do `DATA_DIR/mem_watch.jsonl`, TTL 7 dní, strop 16 MB.
+`track_job("nazov")` je contextmanager na označenie ťažkých operácií —
+zatiaľ obalený **iba scanner**; ML fit, HMM, walk-forward a fundamentals
+enrichment označené nie sú.
+
+Request tracking je **čisté ASGI middleware**, nie `BaseHTTPMiddleware` — tá
+alokuje anyio task group na každý request a nástroj by dvíhal spotrebu, ktorú
+má merať.
+
+### Oprava batch OHLCV cache key
+
+Pôvodný handoff to viedol ako hypotézu — **potvrdené a opravené**.
+
+Kľúč `sym|period|interval|ha` je protokol medzi backendom a `charts.js`, nie
+len lokálna cache. Chýbali `indicators`, `account`, `limit`, `before`, takže
+dva panely s rovnakým symbolom a timeframe, ale rôznymi indikátormi,
+kolidovali: backend druhým výsledkom prepísal prvý a panel sa vykreslil s
+cudzími indikátormi. Druhý panel sa zachránil sám (jednorazové čítanie →
+fallback fetch), preto sa to nikdy neprejavilo ako chyba.
+
+**Druhá chyba, ktorú pôvodný handoff nemal:** frontend `_ohlcvBatchCache`
+nemala expiráciu a čistila sa výhradne konzumáciou — záznam po zavretom alebo
+chybnom paneli tam zostal navždy a neskôr ho prevzal iný panel s rovnakým
+kľúčom (hodiny staré dáta, možno z iného eToro účtu). Pridané TTL 60 s a FIFO
+strop 64 položiek.
+
+Kľúč teraz stavia `ohlcv_batch_key()` v Pythone a `ohlcvBatchKey()` v JS,
+indikátory sa zoraďujú. **Test `test_python_and_javascript_agree` spúšťa obe
+implementácie a porovnáva** — ak sa rozídu, batch cache prestane trafovať a
+každý panel ticho spadne na fallback fetch, teda strata výkonu bez jedinej
+chybovej hlášky.
+
+`refresh` v kľúči zámerne nie je — čítanie je už podmienené
+`opts.refresh !== 1`.
+
+### ML — rozšírenie modelu
+
+Pôvodné `n_estimators=50, max_depth=4, cv=2, n_jobs=1` neboli zvolené podľa
+kvality modelu, ale orezané na 512 MB. Sú teraz **env-laditeľné** (meniteľné
+na Renderi bez redeployu): `ML_N_ESTIMATORS`, `ML_MAX_DEPTH`,
+`ML_MIN_SAMPLES_LEAF`, `ML_CALIB_CV`, `ML_N_JOBS`, `ML_FOLD_FRACTIONS`,
+`ML_FOLD_WINDOW`.
+
+**ML fit beží v request path pri načítaní grafu.** Cache sa kľúčuje poslednou
+týždennou sviečkou, takže sa platí raz za ticker za týždeň — ale platí sa pri
+načítaní grafu. Merané na 260 týždenných sviečkach, relatívne k pôvodnej
+konfigurácii:
+
+```
+50/4/cv2/1job    1.0x   pôvodná
+150/6/cv2/2job   3.6x
+300/6/cv2/2job   7.1x
+300/8/cv3/2job  10.0x   (~7 s na ticker — na request path priveľa)
+```
+
+`n_jobs=2` pomáha menej, než by sa čakalo — réžia joblibu zožerie väčšinu
+zisku z druhého jadra. **Reálny prínos upgradu je RAM, nie CPU.**
+
+**Walk-forward foldy: pôvodný plán 3 → 6-8 bol MERANÍM VYVRÁTENÝ.**
+Spoľahlivosť accuracy závisí od počtu otestovaných vzoriek, nie od počtu
+foldov — zdvojnásobenie foldov pri zúženom testovacom okne testuje presne tie
+isté dáta za dvojnásobok času. Rozptyl odhadu cez 8 datasetov (nižší je
+lepší):
+
+```
+3 foldy, okno 10 %  -> pokrytie 30 %, rozptyl 5.3, 2047 ms
+6 foldov, okno 5 %  -> pokrytie 30 %, rozptyl 7.0, 4210 ms   horšie A drahšie
+5 foldov, okno 10 % -> pokrytie 50 %, rozptyl 3.3, 3510 ms
+```
+
+Finálny default **100 stromov / 5 foldov** stojí toľko čo 150 stromov a 3
+foldy (2998 vs 2961 ms), ale dá o 38 % stabilnejší odhad. Foldy nezvyšujú
+pamäť — fity idú sekvenčne, v RAM je vždy len jeden model.
+
+### Panel "Čo ženie predikciu" (`ml_drivers`)
+
+`train_ml_model()` vracia **4 hodnoty** (predtým 3): `model, acc, bull_prob,
+drivers`. Pozor — rozbalenie na volajúcej strane hodí `ValueError`, ktorý
+spadne do okolitého `except`, takže zabudnuté volanie by **ticho vyplo ML** a
+UI by ukázalo prázdne polia bez chybovej hlášky. Testy pokrývajú počet
+návratových hodnôt, krátke dáta aj staré 2-tuple záznamy, ktoré môžu v
+in-memory cache zostať po deployi.
+
+`drivers` = top 5 features s importance a z-skóre poslednej sviečky voči
+trénovacím dátam; |z| >= 1.5 sa označí ⚠. Importance je globálna, z-skóre
+aktuálne — až kombinácia niečo hovorí.
+
+**Model sa zámerne necacheuje**, hoci to bolo pôvodne navrhnuté: kalibrovaný
+les 100 stromov × až 256 miest v cache by stál viac pamäte, než priniesol
+upgrade tieru. Dvanásť floatov odpovedá na tú istú otázku. SHAP zamietnutý
+(nová závislosť + ďalší výpočet v request path).
+
+### Stav prostredia po deployi
+
+Render **Standard** (platený plán, nie Pro — over v Render UI, ak niečo závisí
+od konkrétnych limitov). `render.yaml` sa **NEAPLIKUJE** — služba nie je
+Blueprint-managed, premenné treba pridávať ručne v Render dashboarde. Ručne
+nastavené: `DASH_MEMORY_PROFILE=normal` (bez neho kód padá na default `low` a
+zaplatený stroj beží v úspornom režime) a `OMP_NUM_THREADS=1` (aby si joblib
+workery neotvárali vlastné BLAS vlákna a nebili sa o tie isté dve jadrá).
+
+Overené cez `/api/admin/memory`: profil `normal`, všetky feature flagy `true`,
+`n_estimators=100, max_depth=6, n_jobs=2`.
+
+RSS: **311 MB** (low profil, ML vypnuté) → **453 MB** (normal, všetko
+zapnuté). Cache boli v čase merania takmer prázdne (`model` 2/256, `yf` 11/60),
+takže **RSS ešte porastie** — na dimenzovanie je priskoro.
+
+### Nedokončené / na overenie
+
+1. **`[CHART] Step 12: ML done in ... ms`** z Render logov — jediné číslo,
+   ktoré nepoznáme (všetky merania sú z lokálneho Windows stroja, nie z Render
+   CPU). Ak nad ~4 s, stiahnuť `ML_N_ESTIMATORS` cez env, bez commitu.
+2. **ML accuracy naprieč tickermi.** Na MSFT vyšla **37,8 %**, teda pod
+   náhodu. Nie je to dôkaz chyby — MSFT malo deň predtým mimoriadne pozitívne
+   earnings a σ hodnoty to potvrdzujú (ret_1 +5.58σ, volatilita +3.43σ,
+   regime High Vol 100 %). Ale accuracy je **historická** (5 foldov cez 50 %
+   histórie), takže ju jedna earningsová sviečka nevysvetľuje. Ak je
+   systematicky pod 50 % aj na iných tickeroch, má to dôsledok pre váhu ML v
+   compositu. ML je len jeden vstup — C1–C4 bežia nezávisle.
+3. **`/api/admin/memory/history?hours=24`** po dni prevádzky — dá odpoveď, či
+   Standard nebol predimenzovaný.
+4. **⚠ pri |σ| >= 1.5** — na screenshote bolo vidno len pri Volatilite, hoci
+   ret_1 (+5.58σ) a ret_5 (+2.90σ) ho mali mať tiež. Neoverené, môže ísť o
+   chybu v `renderMlDrivers()`.
+5. **`SCANNER_MAX_WORKERS`** — v normal profile automaticky 2 → 3. Kód
+   zámerne nemenený: pamäť na worker je zanedbateľná (týždenné dáta sa
+   odvodzujú z denných, takže na ticker ide **jeden** sieťový fetch), binding
+   constraint je **throttling Yahoo**, nie hardvér. Dvíhať postupne cez env a
+   sledovať `error_counts` v scanner výstupe.
+
+### Stále otvorené z pôvodného zoznamu rizík
+
+Symbol resolution VRT/GEV/PWR/BMI, duplicitný live refresh po každom loade,
+canvas subscription lifecycle (unsubscribe), limit markerov.
+
 
 ---
 

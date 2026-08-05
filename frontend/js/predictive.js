@@ -232,6 +232,159 @@ let pc_realChartInst = null, pc_predChartInst = null;
 let pc_markerMeta = {};   // marker id → tooltip html (LWC v5 hover hit-testing)
 let pc_orderPriceLines = [];   // čakajúce objednávky na hlavnom weekly grafe — treba čistiť medzi reloadmi (pc_realSeries pretrváva)
 
+// Priemerný cieľ analytikov ako vodorovná čiara na grafe. Hodnota prichádza
+// asynchrónne z /api/ticker/insights (pc_loadInsights), takže sa drží stranou a
+// čiara sa kreslí z DVOCH strán: keď dorazia insights aj keď sa prekreslí graf —
+// podľa toho, čo príde neskôr. Bez toho by čiara chýbala pri rýchlom prepnutí
+// tickera alebo pri prepnutí weekly/daily.
+let pc_analystTarget = { ticker: null, value: null };
+let pc_analystTargetLines = [];   // [{series, line}] — pc_realSeries pretrváva, treba čistiť ručne
+
+let pc_entryPriceLines = [];   // [{series, line}] — rovnaký dôvod na ručné čistenie ako vyššie
+
+// LWC neberie cenové čiary do autoškálovania a graf nemá vertikálny scroll, takže
+// čiara nad/pod rozsahom sviečok je nakreslená, ale nevidno ju. (Presne preto
+// existuje aj renderChartOrderBadge v charts.js.) Rozsah preto rozširujeme sami.
+//
+// Strop 25 %: pozícia staršia než okno grafu (kúpené pred 3 rokmi, graf 2r) alebo
+// extrémny cieľ by inak stlačili sviečky na nečitateľný pásik. Nad limitom sa
+// úroveň proste nezobrazí — radšej chýbajúca čiara než rozbitý graf.
+const PC_LEVEL_AUTOSCALE_MAX_EXPAND = 0.25;
+
+function pc_extraPriceLevels() {
+  const out = [];
+  const target = Number(pc_analystTarget.value);
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (Number.isFinite(target) && target > 0 && sym &&
+      pc_analystTarget.ticker === String(sym).toUpperCase()) {
+    out.push(target);
+  }
+  for (const entry of pc_entryPriceLines) {
+    const p = Number(entry.price);
+    if (Number.isFinite(p) && p > 0) out.push(p);
+  }
+  return out;
+}
+
+function pc_levelAutoscaleProvider(baseImplementation) {
+  const res = baseImplementation();
+  const range = res?.priceRange;
+  if (!range) return res;
+  const levels = pc_extraPriceLevels();
+  if (!levels.length) return res;
+  const span = Math.abs(range.maxValue - range.minValue) || 1;
+  const slack = span * PC_LEVEL_AUTOSCALE_MAX_EXPAND;
+  let { minValue, maxValue } = range;
+  for (const level of levels) {
+    if (level > maxValue && level - maxValue <= slack) maxValue = level;
+    else if (level < minValue && minValue - level <= slack) minValue = level;
+  }
+  return { ...res, priceRange: { minValue, maxValue } };
+}
+
+// Priemerná vstupná cena držaných pozícií ako vodorovná čiara. Vstup bol doteraz
+// v Analytike len v tooltipe markera, takže úroveň na osi nebola vidno. Spolu s
+// cieľom analytikov a aktuálnou cenou dáva jedna os tri úrovne naraz.
+// Váži sa jednotkami cez OBA účty — je to jedna pozícia v jednom titule, bez
+// ohľadu na to, cez ktorý účet vznikla.
+function pc_applyEntryPriceLine() {
+  for (const entry of pc_entryPriceLines) {
+    try { entry.series.removePriceLine(entry.line); } catch (e) {}
+  }
+  pc_entryPriceLines = [];
+
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (!sym || typeof etoroPositionsAll === 'undefined') return;
+  const upper = String(sym).toUpperCase();
+
+  let units = 0, cost = 0;
+  for (const acct of ['1', '2']) {
+    for (const pos of (etoroPositionsAll[acct] || [])) {
+      if (pos.symbol !== upper) continue;
+      const u = Number(pos.units) || 0;
+      const rate = Number(pos.openRate) || 0;
+      if (u <= 0 || rate <= 0) continue;
+      units += u;
+      cost += u * rate;
+    }
+  }
+  if (units <= 0 || cost <= 0) return;
+  const avg = cost / units;
+
+  // Farba je pevná modrá, nie P/L zelená/červená: tyrkysová `upDim` splývala so
+  // sviečkami a čiara má byť čitateľná ako orientačná úroveň, nie ako ďalší
+  // signál zisku/straty. To, či si nad alebo pod vstupom, vidno z polohy čiary
+  // voči cene — farba na to netreba.
+  const color = CHART_COLORS.entryAvg;
+  const targets = [];
+  if (pc_realSeries) targets.push(pc_realSeries);
+  if (pc_dailyMainSeries && !pc_dailyHaEnabled) targets.push(pc_dailyMainSeries);
+
+  for (const series of targets) {
+    try {
+      const line = series.createPriceLine({
+        price:            avg,
+        color,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Priem. vstup',
+      });
+      pc_entryPriceLines.push({ series, line, price: avg });
+    } catch (e) {}
+  }
+  pc_refreshLevelAutoscale();
+}
+
+// Autoscale sa prepočíta až pri zmene dát/options — po pridaní či odobraní čiar
+// ho treba šťuchnúť, inak by sa nová úroveň zohľadnila až pri ďalšom setData.
+function pc_refreshLevelAutoscale() {
+  for (const series of [pc_realSeries, pc_dailyMainSeries]) {
+    if (!series) continue;
+    try { series.applyOptions({ autoscaleInfoProvider: pc_levelAutoscaleProvider }); } catch (e) {}
+  }
+}
+
+function pc_applyAnalystTargetLine() {
+  // Staré čiary preč vždy — aj keď nová hodnota neexistuje, inak by po prepnutí
+  // na ticker bez cieľa ostala visieť čiara predchádzajúceho.
+  for (const entry of pc_analystTargetLines) {
+    try { entry.series.removePriceLine(entry.line); } catch (e) {}
+  }
+  pc_analystTargetLines = [];
+
+  const value = Number(pc_analystTarget.value);
+  if (!Number.isFinite(value) || value <= 0) return;
+  const sym = typeof pc_currentTicker === 'function' ? pc_currentTicker() : null;
+  if (!sym || pc_analystTarget.ticker !== String(sym).toUpperCase()) return;
+
+  const targets = [];
+  if (pc_realSeries) targets.push(pc_realSeries);
+  // Denný graf sa pri Heikin Ashi vynecháva: os je prepočítaná, takže čiara na
+  // reálnej cieľovej cene by sedela na zlej výške (rovnaký dôvod ako pri
+  // eToro vstupných čiarach v charts.js).
+  if (pc_dailyMainSeries && !pc_dailyHaEnabled) targets.push(pc_dailyMainSeries);
+
+  for (const series of targets) {
+    try {
+      const line = series.createPriceLine({
+        price:            value,
+        color:            CHART_COLORS.analystTarget,
+        lineWidth:        1,
+        lineStyle:        LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:            'Cieľ analytikov',
+      });
+      pc_analystTargetLines.push({ series, line });
+    } catch (e) {}
+  }
+  pc_refreshLevelAutoscale();
+}
+let pc_weeklyBaseMarkers = [];
+let pc_dailyMainBaseMarkers = [];
+let pc_earningsHistory = [];
+let pc_earningsTicker = null;
+
 let pc_realSeries = null, pc_predSeries = null;
 let pc_realVolSeries = null;
 let pc_predCandleSeries = null, pc_futureCandleSeries = null;
@@ -341,10 +494,84 @@ function pc_attachMarkerTooltip(chart, containerId) {
   attachMarkerTooltip(chart, cont, objectId => pc_markerMeta[String(objectId)]);
 }
 
+function pc_clearEarningsMarkerMeta() {
+  for (const markerId of Object.keys(pc_markerMeta)) {
+    if (markerId.startsWith('earnings:predictive:')) delete pc_markerMeta[markerId];
+  }
+}
+
+function pc_buildEarningsMarkers(view, candles) {
+  if (!candles?.length || !pc_earningsHistory.length) return [];
+  return pc_earningsHistory.map((h, index) => {
+    if (!h?.date) return null;
+    const time = resolveMarkerTime({ openDate: h.date }, candles);
+    if (!time) return null;
+    const markerId = `earnings:predictive:${view}:${index}:${h.date}`;
+    const color = h.beat == null ? CHART_COLORS.neutral
+      : (h.beat ? CHART_COLORS.up : CHART_COLORS.down);
+    const actual = Number(h.actual);
+    const estimate = Number(h.estimate);
+    const surprise = h.surprise_pct == null ? NaN : Number(h.surprise_pct);
+    const fmtEps = value => Number.isFinite(value) ? value.toFixed(2) : '?';
+    pc_markerMeta[markerId] = { html:
+      `<b>Earnings</b> · ${escHtml(h.quarter || h.date)}` +
+      `<div style="display:flex;gap:10px;margin-top:2px;">` +
+        `<span class="tip-muted">Actual</span><b>${fmtEps(actual)}</b>` +
+        `<span class="tip-muted">Odhad</span><b>${fmtEps(estimate)}</b>` +
+      `</div>` +
+      (h.beat == null
+        ? `<div class="tip-muted" style="margin-top:2px;">porovnanie nie je porovnateľné</div>`
+        : (Number.isFinite(surprise)
+          ? `<div style="color:${color};margin-top:2px;">${surprise >= 0 ? '+' : ''}${surprise.toFixed(1)}% ${h.beat ? 'beat' : 'miss'}</div>`
+          : '')) };
+    return { id: markerId, time, position: 'aboveBar', color, shape: 'circle', size: 0, text: 'E' };
+  }).filter(Boolean);
+}
+
+function pc_applyMainChartMarkers() {
+  pc_clearEarningsMarkerMeta();
+  const ticker = String(pc_lastData?.ticker || '').trim().toUpperCase();
+  const hasCurrentEarnings = ticker && pc_earningsTicker === ticker;
+  if (pc_realSeries) {
+    const earnings = hasCurrentEarnings
+      ? pc_buildEarningsMarkers('weekly', pc_lastData?.candles || [])
+      : [];
+    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+  }
+  if (pc_dailyMainSeries && pc_dailyMainTicker === ticker) {
+    const earnings = hasCurrentEarnings
+      ? pc_buildEarningsMarkers('daily', pc_lastData?.daily_candles || [])
+      : [];
+    setSeriesMarkers(pc_dailyMainSeries, [...pc_dailyMainBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+  }
+}
+
+function pc_resetEarningsMarkers(ticker) {
+  pc_earningsTicker = String(ticker || '').trim().toUpperCase() || null;
+  pc_earningsHistory = [];
+  pc_clearEarningsMarkerMeta();
+  if (pc_realSeries) setSeriesMarkers(pc_realSeries, pc_weeklyBaseMarkers);
+  if (pc_dailyMainSeries) setSeriesMarkers(pc_dailyMainSeries, pc_dailyMainBaseMarkers);
+}
+
+function pc_setEarningsHistory(ticker, history) {
+  const sym = String(ticker || '').trim().toUpperCase();
+  if (!sym || String(pc_lastData?.ticker || '').trim().toUpperCase() !== sym) return;
+  pc_earningsTicker = sym;
+  pc_earningsHistory = Array.isArray(history) ? history.filter(h => h?.date) : [];
+  pc_applyMainChartMarkers();
+}
+
 // ── Volume Profile (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) ──
 let pc_vpPrimitive = null;
-let pc_vpEnabled = localStorage.getItem('pc_vp_enabled') === '1';
-let pc_patternsEnabled = localStorage.getItem('pc_patterns_enabled') === '1';
+// Basic režim skrýva ovládacie checkboxy oboch overlayov (.advanced-only), takže
+// zapnutý uložený stav by nakreslil overlay, ktorý sa nedá vypnúť. Uložená
+// hodnota v localStorage sa nemaže, len sa v Basic ignoruje — prepnutie späť do
+// Advanced ju obnoví pri najbližšom načítaní stránky (tieto flagy sa
+// vyhodnocujú raz, pri načítaní modulu). isAdvancedUiMode() je deklarácia
+// funkcie v core.js, ktorý sa načíta skôr, takže volanie je bezpečné.
+let pc_vpEnabled = isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1';
+let pc_patternsEnabled = isAdvancedUiMode() && localStorage.getItem('pc_patterns_enabled') === '1';
 const PC_VP_BINS = 40;
 
 class VolumeProfilePrimitive {
@@ -507,6 +734,7 @@ function initCharts() {
     upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
     borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
     wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
+    autoscaleInfoProvider: pc_levelAutoscaleProvider,
   });
   // Volume histogram (dole, farebne zelená/červená ako v štandardných grafoch)
   pc_realVolSeries = pc_realChartInst.addSeries(LightweightCharts.HistogramSeries, {
@@ -552,6 +780,14 @@ function initCharts() {
 
   // Daily mini chart
   // Sync scroll/zoom — len real ↔ pred, daily je nezávislý
+  // Synchronizuje sa LOGICKÝM rozsahom (indexy sviečok), pretože je synchrónny
+  // — nastavenie hneď vráti riadenie a poistka `pc_syncing` stihne zabrániť
+  // spätnému volaniu. Časová synchronizácia sa tu skúšala a bola HORŠIA:
+  // `setVisibleRange` vyvolá callback až asynchrónne, po vypnutí poistky, takže
+  // si grafy rozsah donekonečna prehadzovali a zamrzli na celom datasete —
+  // prejavilo sa to tak, že sa nedali priblížiť ani posunúť.
+  // Podmienkou správnosti je ROVNAKÝ POČET BAROV v oboch sériách; o to sa stará
+  // whitespace výplň pri skrytých omyloch nižšie (hľadaj `pc_hideBacktestMisses`).
   let pc_syncing = false;
   pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (pc_syncing || !range) return;
@@ -734,7 +970,8 @@ function renderCharts(data) {
       markers.push({ id: posId, time: mt, position: 'belowBar', color: col, shape: 'circle', size: 0.5, text: '' });
     });
   }
-  setSeriesMarkers(pc_realSeries, markers.sort((a, b) => a.time - b.time));
+  pc_weeklyBaseMarkers = markers.sort((a, b) => a.time - b.time);
+  pc_applyMainChartMarkers();
 
   // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
   // pc_realSeries pretrváva medzi reloadmi (initCharts beží raz), takže staré
@@ -757,6 +994,8 @@ function renderCharts(data) {
       } catch(e) {}
     }
   }
+  pc_applyAnalystTargetLine();
+  pc_applyEntryPriceLine();
   if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
@@ -765,52 +1004,75 @@ function renderCharts(data) {
   // Pad pc_predCandleSeries with invisible points at start so logical indices align with real chart
   // Use NaN-valued candles — lightweight-charts skips them visually but keeps the index
   const firstCandle = candles[0];
-  const overlay = Array.isArray(bt.overlay) ? bt.overlay : [];
+  const rawOverlay = Array.isArray(bt.overlay) ? bt.overlay : [];
+
+  // Backtest prekryv chodí s časmi posunutými o deň oproti sviečkam — sviečky
+  // sú datované na nedeľu (2026-07-26), prekryv na pondelok (2026-07-27), a
+  // netrafí ani jeden zo 75 záznamov. LWC skladá časovú os ako ZJEDNOTENIE
+  // časov všetkých sérií, takže modelový graf mal 179 stĺpcov proti 104 na
+  // hlavnom a rovnaký logický index znamenal na každom grafe iný dátum. Žiadne
+  // ladenie synchronizácie to opraviť nemohlo. Prekryv preto prilepíme na čas
+  // najbližšej sviečky; tolerancia 4 dni, aby sa nespojili dva rôzne bary.
+  const candleTimes = candles.map(c => Number(c.time));
+  const snapToCandle = (t) => {
+    const x = Number(t);
+    let best = x, bestDelta = Infinity;
+    for (const ct of candleTimes) {
+      const delta = Math.abs(x - ct);
+      if (delta < bestDelta) { bestDelta = delta; best = ct; }
+    }
+    return bestDelta <= 4 * 86400 ? best : x;
+  };
+  const overlay = rawOverlay.map(r => ({ ...r, time: snapToCandle(r.time) }));
+
   const visibleOverlay = pc_hideBacktestMisses ? overlay.filter(r => r.correct !== false) : overlay;
   const overlayStart = overlay.length ? overlay[0].time : firstCandle.time;
   const padCandles = candles
     .filter(c => c.time < overlayStart)
     .map(c => ({ time: c.time, open: c.close, high: c.close, low: c.close, close: c.close }));
 
-  if (pc_showBacktest && overlay.length) {
-    // Use real predicted OHLC from backend
-    const predCandles = visibleOverlay.map(r => ({
-      time:  r.time,
-      open:  r.pred_open,
-      high:  r.pred_high,
-      low:   r.pred_low,
-      close: r.pred_close,
-    }));
-    pc_predCandleSeries.setData([...padCandles, ...predCandles]);
+  // Skryté omyly sa nevyhadzujú zo série — vykreslia sa úplne priehľadné.
+  // Zachovajú si SKUTOČNÉ ceny (nie nulové či jednotkové), inak by stiahli
+  // cenovú os. Priehľadná sviečka je spoľahlivejšia než whitespace bod, ktorý
+  // v candlestick sérii nemusí index rezervovať.
+  const INVISIBLE = 'rgba(0,0,0,0)';
+  const predCandles = overlay.map(r => {
+    const bar = { time:  r.time, open: r.pred_open, high: r.pred_high,
+                  low:   r.pred_low, close: r.pred_close };
+    if (pc_hideBacktestMisses && r.correct === false) {
+      bar.color = INVISIBLE; bar.borderColor = INVISIBLE; bar.wickColor = INVISIBLE;
+    }
+    return bar;
+  });
 
-    // hit/miss markers on pred candles
-    const markers = visibleOverlay.map(r => ({
-      time:     r.time,
-      position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
-      color:    r.correct === null ? '#94a3b8' : r.correct ? CHART_COLORS.up : CHART_COLORS.down,
-      shape:    'circle',
-      size:     r.correct === null ? 0.7 : 0.5,
-    }));
-    setSeriesMarkers(pc_predCandleSeries, markers);
-  } else {
-    pc_predCandleSeries.setData(padCandles);
-    setSeriesMarkers(pc_predCandleSeries, []);
-  }
+  // Séria sa skladá NA JEDNOM mieste, nech sa nedá rozísť s tou vyššie.
+  const showOverlay = pc_showBacktest && overlay.length;
+  const series = showOverlay ? [...padCandles, ...predCandles] : [...padCandles];
 
-  // Future prediction candle (next week)
-  pc_futureCandleSeries.setData([pred]);
-
-  // Current open week: add prediction candle at current week's timestamp
+  // Predikcia práve otvoreného týždňa patrí na ČAS POSLEDNEJ SVIEČKY. Chodí
+  // s rovnakým denným posunom ako prekryv (sviečka nedeľa, predikcia pondelok),
+  // takže bez prilepenia by si vyrobila vlastný stĺpec a modelový graf by bol
+  // popredu o DVE sviečky namiesto jednej — o tú svoju a o budúcu.
   if (data.current_week_open && data.pred_current_candle) {
-    // Append to pc_predCandleSeries after backtest candles
-    const existing = pc_showBacktest && overlay.length
-      ? [...padCandles, ...visibleOverlay.map(r => ({
-          time: r.time, open: r.pred_open, high: r.pred_high,
-          low: r.pred_low, close: r.pred_close,
-        }))]
-      : padCandles;
-    pc_predCandleSeries.setData([...existing, data.pred_current_candle]);
+    const cur = { ...data.pred_current_candle, time: snapToCandle(data.pred_current_candle.time) };
+    const at = series.findIndex(b => b.time === cur.time);
+    if (at >= 0) series[at] = cur; else series.push(cur);
   }
+  pc_predCandleSeries.setData(series);
+
+  setSeriesMarkers(pc_predCandleSeries, showOverlay
+    ? visibleOverlay.map(r => ({
+        time:     r.time,
+        position: r.correct === null ? 'aboveBar' : r.correct ? 'belowBar' : 'aboveBar',
+        color:    r.correct === null ? '#94a3b8' : r.correct ? CHART_COLORS.up : CHART_COLORS.down,
+        shape:    'circle',
+        size:     r.correct === null ? 0.7 : 0.5,
+      }))
+    : []);
+
+  // Budúca predikcia (ďalší týždeň) — jediná, ktorá smie prečnievať vpravo,
+  // lebo pre ňu reálna sviečka ešte neexistuje.
+  pc_futureCandleSeries.setData([pred]);
 
   // Daily mini chart
   if (pc_dailyChartInst && data.daily_candles && data.daily_candles.length) {
@@ -1105,9 +1367,17 @@ function pc_renderDailyExtra(data) {
   }).join('');
   const setupChecks = PC_SETUP_CHECKS.map(item => {
     const active = !!details[item.key];
-    return `<div class="signal-check ${active ? 'active' : 'inactive'}" title="${escHtml(item.tip)}">
+    // C2 sa do skóre nepočíta, keď páli aj C4 — prekryv je 100 % (zmerané na
+    // 1559 z 1559 dní). Bez tejto poznámky by panel ukazoval dve splnené
+    // podmienky a pritom silu 1/4, čo vyzerá ako chyba.
+    const notCounted = item.key === 'rsi_pullback' && active && !!details.zscore_dip;
+    const value = notCounted ? 'splnené · nezapočítané' : (active ? 'splnené' : 'chýba');
+    const tip = notCounted
+      ? item.tip + ' — pri splnenom C4 sa do sily nezapočítava: RSI je pod prahom vždy, keď je cena 1.5σ pod priemerom, takže by šlo o tú istú informáciu dvakrát.'
+      : item.tip;
+    return `<div class="signal-check ${active ? 'active' : 'inactive'}${notCounted ? ' not-counted' : ''}" title="${escHtml(tip)}">
       <span class="signal-check-label">${item.label}</span>
-      <span class="signal-check-value">${active ? 'splnené' : 'chýba'}</span>
+      <span class="signal-check-value">${value}</span>
     </div>`;
   }).join('');
   const representation = data.signal_representation_comparison || {};
@@ -1141,7 +1411,7 @@ function pc_renderDailyExtra(data) {
     </div>`;
   };
   const representationComparison = representation.classic || representation.heikin_ashi
-    ? `<div class="signal-compare">
+    ? `<div class="signal-compare advanced-only">
         <div class="signal-compare-heading">
           <span>KLASICKÉ SVIEČKY VS HEIKIN ASHI</span>
           <small>Rovnaké C1–C4 pravidlo (score ≥ 2), prvý deň epizódy · výsledok po ${Number(representation.horizon) || 90} obchodných dňoch</small>
@@ -1232,7 +1502,7 @@ function pc_renderDailyExtra(data) {
       </details>
 
       <!-- ── MULTI-TIMEFRAME ALIGNMENT ──────────────────────────── -->
-      <div>
+      <div class="advanced-only">
         <div style="font-size:10.5px;font-weight:700;color:var(--text);
                     letter-spacing:0.06em;margin-bottom:6px;">
           ZHODA ČASOVÝCH RÁMCOV
@@ -1369,7 +1639,8 @@ function pc_renderSidebar(data) {
     <div class="pred-row"><span class="tt key" data-tip="Predikovaná záverečná cena. Vypočítaná z váženého composite signálu a ATR.">Close <span class="tt-icon">ⓘ</span></span><span class="val">${pc.close.toFixed(2)}</span></div>
     <div class="pred-row"><span class="tt key" data-tip="Sila kombinovaného technického signálu. Rozsah -100% až +100%. Blízko nuly = model si nie je istý smerom.">Composite signal <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--pred)">${(p.composite*100).toFixed(1)}%</span></div>
     ${data.ml_bull_prob != null ? `<div class="pred-row"><span class="tt key" data-tip="Pravdepodobnosť že nasledujúci týždeň bude close vyšší ako tento. ≥55% = bullish, ≤45% = bearish, medzi = neistota. Vypočítaná RandomForest modelom.">ML bull prob <span class="tt-icon">ⓘ</span></span><span class="val" style="color:${data.ml_bull_prob >= 55 ? CHART_COLORS.up : data.ml_bull_prob <= 45 ? CHART_COLORS.down : '#f59e0b'}">${data.ml_bull_prob}%</span></div>` : ''}
-    ${data.ml_accuracy != null ? `<div class="pred-row"><span class="tt key" data-tip="Historická presnosť ML modelu na testovacej sade (30% dát). 50% = náhodný odhad, 60%+ = dobrý model.">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val" style="color:var(--muted)">${data.ml_accuracy}%</span></div>` : ''}
+    ${mlAccuracyRow(data)}
+    ${renderMlDrivers(data.ml_drivers)}
     ${horizonNote}
   `;
 
@@ -1753,7 +2024,16 @@ function clearOverlays() {
 
 function pc_applyOverlays() {
   if (!pc_lastData || !pc_lastData.indicators) return;
-  const ind = pc_lastData.indicators;
+  // Rovnaký nesúlad zdrojov ako v buildSubpanel (eToro sviečky vs yfinance
+  // indikátory) — orež overlaye na rozsah sviečok, nech nerozťahujú os.
+  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: Senkou A/B sú zámerne posunuté dopredu,
+  // takže mrak pred poslednou sviečkou je funkcia, nie chyba.
+  const candles = pc_lastData.candles;
+  const rawInd = pc_lastData.indicators;
+  const ind = { ...rawInd };
+  for (const key of ['ema10', 'ema20', 'ichi_tenkan', 'ichi_kijun']) {
+    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
+  }
   clearOverlays();
 
   if (document.getElementById('chk_ema10').checked) {
@@ -1805,7 +2085,33 @@ function applySubpanel() {
   buildSubpanel(val, pc_lastData.indicators, pc_lastData.candles);
 }
 
+// Indikátory a vykresľované sviečky pochádzajú z RÔZNYCH zdrojov: `/api/chart`
+// vracia sviečky z eToro (`_etoro_display_candles`, aby graf vyzeral rovnako ako
+// v Grafoch), ale indikátory počíta z yfinance/Massive. Zámerné rozhodnutie
+// (2026-07-08), lenže obe série majú iný časový rozsah — a subpanel sa
+// synchronizuje cez LOGICAL RANGE, teda index sviečky, nie dátum. Body mimo
+// rozsahu sviečok teda posunuli indexy a os subpanelu sa rozišla s hlavným
+// grafom (nahlásené 2026-08-05 na RSI aj MACD).
+//
+// Orezanie na časový rozsah sviečok, nie na presnú zhodu časov: keby sa
+// zarovnanie týždňa medzi zdrojmi líšilo čo i len o deň, presná zhoda by
+// vyhodila všetko a subpanel by ostal prázdny.
+function pc_clipToCandles(series, candles) {
+  if (!Array.isArray(series) || !series.length) return series || [];
+  if (!Array.isArray(candles) || !candles.length) return series;
+  const first = candles[0].time;
+  const last = candles[candles.length - 1].time;
+  return series.filter(p => p && p.time >= first && p.time <= last);
+}
+
 function buildSubpanel(type, ind, candles) {
+  // Orež všetky indikátorové rady naraz — nižšie sa už pracuje len s `ind`.
+  const clipKeys = ['rsi', 'macd', 'macd_sig', 'macd_hist', 'stoch_k', 'stoch_d',
+                    'adx', 'di_plus', 'di_minus'];
+  ind = { ...ind };
+  for (const key of clipKeys) {
+    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
+  }
   const block = document.getElementById('subpanelBlock');
   block.style.display = 'flex';
   const label = document.getElementById('subpanelLabel');
@@ -1928,6 +2234,7 @@ function switchView(view) {
   if (haControls) haControls.style.display = view === 'daily' ? 'flex' : 'none';
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
+  else pc_applyMainChartMarkers();
   pc_applyOverlays();
   pc_applyChartPatterns();
 }
@@ -2027,9 +2334,11 @@ function renderDailyMain(data) {
     upColor: CHART_COLORS.up, downColor: CHART_COLORS.down,
     borderUpColor: CHART_COLORS.up, borderDownColor: CHART_COLORS.down,
     wickUpColor: CHART_COLORS.up, wickDownColor: CHART_COLORS.down,
+    autoscaleInfoProvider: pc_levelAutoscaleProvider,
   });
   pc_dailyMainSeries = cs;
   cs.setData(chartCandles);
+  pc_attachMarkerTooltip(pc_dailyMainInst, 'dailyMainChart');
 
   // Čakajúce objednávky (oba účty) — jemná žltá čiara na cieľovej cene.
   // Celý chart/séria sa tu vytvára nanovo pri každom volaní, takže staré
@@ -2050,6 +2359,11 @@ function renderDailyMain(data) {
       } catch(e) {}
     }
   }
+  // Cieľ analytikov a priemerný vstup — daily séria je nová, ale weekly čiary v
+  // registri ukazujú na starú sériu, takže sa prekresľuje všetko naraz (obe
+  // funkcie si vyčistia svoje).
+  pc_applyAnalystTargetLine();
+  pc_applyEntryPriceLine();
 
   const ind = data.daily_indicators || {};
   if (ind.ema20 && ind.ema20.length) {
@@ -2061,8 +2375,9 @@ function renderDailyMain(data) {
     kj.setData(ind.ichi_kijun);
   }
 
+  pc_dailyMainBaseMarkers = [];
   if (data.daily_buy_signals && data.daily_buy_signals.length) {
-    const markers = data.daily_buy_signals.map(s => {
+    pc_dailyMainBaseMarkers = data.daily_buy_signals.map(s => {
       const display = pc_dailyMarkerMode === 'return'
         ? dailySignalReturnMarker(s, data.daily_candles)
         : { color: sigTierColor(s.tier, s.score), shape: 'arrowUp', text: s.score + '/4' };
@@ -2075,8 +2390,8 @@ function renderDailyMain(data) {
         size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1),
       };
     });
-    setSeriesMarkers(cs, markers);
   }
+  pc_applyMainChartMarkers();
 
   if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
   else pc_dailyMainInst.timeScale().fitContent();
@@ -2127,7 +2442,72 @@ async function pc_loadRS(ticker) {
 }
 
 // Insider transakcie + EPS beat/miss karta (Yahoo quoteSummary, 12h server cache)
+const PC_HIDE_SCHEDULED_INSIDER_KEY = 'td_hide_scheduled_insider_sales';
+let pc_hideScheduledInsider = localStorage.getItem(PC_HIDE_SCHEDULED_INSIDER_KEY) === '1';
+let pc_insiderTradesForRender = [];
 let _insightsForTicker = null;
+
+function pc_insiderTradesBlockHtml(trades) {
+  const scheduledCount = trades.filter(t => t.scheduled_likely).length;
+  const renderedTrades = pc_hideScheduledInsider
+    ? trades.filter(t => !t.scheduled_likely)
+    : trades;
+  const txHtml = t => {
+    const shares = t.shares == null ? NaN : Number(t.shares);
+    const price = t.price == null ? NaN : Number(t.price);
+    const value = t.value == null ? NaN : Number(t.value);
+    const shareTxt = Number.isFinite(shares)
+      ? Math.abs(shares).toLocaleString('sk-SK', { maximumFractionDigits: 2 })
+      : '—';
+    const priceTxt = Number.isFinite(price) ? `$${fmtPrice(price)}` : 'cena n/a';
+    const valueTxt = Number.isFinite(value) && value > 0
+      ? `$${Math.abs(value).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
+      : 'hodnota n/a';
+    const kind = t.type === 'buy' ? 'Nákup' : 'Predaj';
+    const scheduled = !!t.scheduled_likely;
+    const reason = t.scheduled_reason || 'opakujúci sa vzorec';
+    const tooltip = scheduled
+      ? `Pravdepodobne plánované podľa vzorca: ${reason}. Je to odhad, nie potvrdenie z Form 4.`
+      : '';
+    const badge = scheduled
+      ? '<span class="insider-scheduled-badge">pravdepodobne plánované</span>'
+      : '';
+    return `<div class="insider-trade ${t.type === 'buy' ? 'buy' : 'sell'}${scheduled ? ' scheduled-likely' : ''}"${tooltip ? ` title="${escHtml(tooltip)}"` : ''}>
+      <div class="insider-trade-head"><time>${escHtml(t.date || '—')}</time><strong>${kind}</strong></div>
+      <div class="insider-trade-person">${escHtml(t.name || 'Neznámy insider')}</div>
+      <div class="insider-trade-role">${escHtml(t.relation || 'Rola neuvedená')}</div>
+      <div class="insider-trade-numbers"><span>${shareTxt} ks</span><span>@ ${priceTxt}</span><span>${valueTxt}</span></div>
+      ${badge}
+    </div>`;
+  };
+  const visibleTrades = renderedTrades.slice(0, 5).map(txHtml).join('');
+  const hiddenTrades = renderedTrades.slice(5).map(txHtml).join('');
+  const more = hiddenTrades
+    ? `<details class="insider-trades-more"><summary>Ďalších ${renderedTrades.length - 5} obchodov</summary>${hiddenTrades}</details>`
+    : '';
+  const empty = !renderedTrades.length
+    ? '<div class="insider-filter-empty">Po skrytí pravdepodobne plánovaných predajov nezostali žiadne obchody.</div>'
+    : '';
+  const filter = scheduledCount
+    ? `<label class="insider-scheduled-filter" title="Odhad podľa opakujúceho sa objemu alebo kadencie; nejde o potvrdený údaj z Form 4.">
+        <input type="checkbox" ${pc_hideScheduledInsider ? 'checked' : ''} onchange="pc_setHideScheduledInsider(this.checked)">
+        <span>Skryť pravdepodobne plánované predaje (${scheduledCount})</span>
+      </label>`
+    : '';
+  return `<div class="insider-trades-block" id="pcInsiderTradesBlock">
+    <div class="insider-trades-title">Insider obchody · približne 2 roky</div>
+    ${filter}
+    <div class="insider-trades-list">${visibleTrades}${more}${empty}</div>
+  </div>`;
+}
+
+function pc_setHideScheduledInsider(hidden) {
+  pc_hideScheduledInsider = !!hidden;
+  try { localStorage.setItem(PC_HIDE_SCHEDULED_INSIDER_KEY, hidden ? '1' : '0'); } catch(e) {}
+  const block = document.getElementById('pcInsiderTradesBlock');
+  if (block) block.outerHTML = pc_insiderTradesBlockHtml(pc_insiderTradesForRender);
+}
+
 async function pc_loadInsights(ticker) {
   const card = document.getElementById('insightsCard');
   if (!card || !ticker) return;
@@ -2136,27 +2516,71 @@ async function pc_loadInsights(ticker) {
   card.style.display = 'none';
   try {
     const r = await fetch('/api/ticker/insights/' + encodeURIComponent(sym));
-    if (!r.ok || _insightsForTicker !== sym) return;
+    if (!r.ok || _insightsForTicker !== sym) {
+      if (_insightsForTicker === sym) pc_setEarningsHistory(sym, []);
+      return;
+    }
     const d = await r.json();
     if (_insightsForTicker !== sym) return;   // medzitým prepnutý ticker
+    // Cieľ analytikov ide aj na graf ako vodorovná čiara — tu je jediné miesto,
+    // kde hodnota vzniká, takže sa odtiaľto rovno prekreslí.
+    pc_analystTarget = { ticker: sym, value: Number(d?.price_target?.mean) || null };
+    pc_applyAnalystTargetLine();
+    pc_setEarningsHistory(sym, d.eps_history);
+    const fundamentals = d.roic_fundamentals || {};
+    const fiscalYear = fundamentals.fiscal_year ? `FY${fundamentals.fiscal_year}` : 'FY n/a';
+    const roicNumber = fundamentals.roic == null || fundamentals.roic === '' ? NaN : Number(fundamentals.roic);
+    const roicText = Number.isFinite(roicNumber) ? `${roicNumber.toFixed(1)} %` : 'n/a';
+    // D/E a debt/assets sú v PROCENTÁCH, ostatné v pomere — viď scanner.js.
+    const debtChoices = [
+      ['D/E', fundamentals.debt_to_equity, '%'],
+      ['net debt/EBITDA', fundamentals.net_debt_to_ebitda, '×'],
+      ['interest coverage', fundamentals.interest_coverage, '×'],
+      ['debt/assets', fundamentals.debt_to_assets, '%'],
+    ];
+    const debtMetric = debtChoices.find(([, value]) => value != null && value !== '' && Number.isFinite(Number(value)));
+    let debtText = 'n/a';
+    if (debtMetric) {
+      const [name, raw, unit] = debtMetric;
+      const num = Number(raw);
+      // Záporné D/E = záporné vlastné imanie, nie nízke zadlženie.
+      debtText = (name === 'D/E' && num < 0)
+        ? `záporné vlastné imanie (D/E ${num.toFixed(0)} %)`
+        : `${name} ${num.toFixed(2)}${unit}`;
+    }
+    const fundamentalsRow = `<div class="pred-row" title="roic.ai annual ratios; iba informačný kontext, bez vplyvu na skórovanie.">
+      <span class="key">ROIC &amp; dlh</span><span class="val">${roicText} · ${escHtml(debtText)} · <span style="color:var(--muted)">${escHtml(fiscalYear)}</span></span></div>`;
     if (d.error) {
       card.innerHTML = `<div class="card-title">Firma &amp; očakávania</div>
+        ${fundamentalsRow}
         <div class="earnings-unavailable-note">Zdroj nedostupný (${escHtml(String(d.error))})</div>`;
       card.style.display = '';
       return;
     }
-    const rows = [];
+    const rows = [fundamentalsRow];
     const ins = d.insider;
     if (ins && (ins.buys_90d || ins.sells_90d)) {
       const net = ins.net_value_90d || 0;
       const netTxt = Math.abs(net) >= 1e6 ? `${(net / 1e6).toFixed(1)} M$` : `${(net / 1e3).toFixed(0)} k$`;
       const cls = net > 0 ? 'var(--up)' : net < 0 ? 'var(--down)' : 'var(--muted)';
-      const tip = (ins.recent || []).map(t =>
-        `${t.date} ${t.type === 'buy' ? 'NÁKUP' : 'PREDAJ'} ${t.name || ''}${t.value ? ` (${(t.value / 1e3).toFixed(0)} k$)` : ''}`).join('\n');
-      rows.push(`<div class="pred-row" title="${escHtml(tip)}"><span class="key">Insideri 90 d</span>
+      rows.push(`<div class="pred-row"><span class="key">Insideri 90 d</span>
         <span class="val">${ins.buys_90d}× nákup / ${ins.sells_90d}× predaj · <span style="color:${cls}">${net >= 0 ? '+' : ''}${netTxt}</span></span></div>`);
     } else if (ins) {
       rows.push(`<div class="pred-row"><span class="key">Insideri 90 d</span><span class="val" style="color:var(--muted)">žiadne obchody</span></div>`);
+    }
+    const insiderTrades = Array.isArray(ins?.transactions_2y) ? ins.transactions_2y : [];
+    const avgBuyPrice = ins?.avg_buy_price_2y == null ? NaN : Number(ins.avg_buy_price_2y);
+    const avgGap = ins?.current_vs_avg_buy_pct == null ? NaN : Number(ins.current_vs_avg_buy_pct);
+    if (Number.isFinite(avgBuyPrice) && avgBuyPrice > 0) {
+      const gapHtml = Number.isFinite(avgGap)
+        ? ` · aktuálna cena <span style="color:${avgGap >= 0 ? 'var(--up)' : 'var(--down)'}">${avgGap >= 0 ? '+' : ''}${avgGap.toFixed(1)} %</span>`
+        : '';
+      rows.push(`<div class="pred-row insider-average-row" title="Hodnotou vážený priemer iba skutočných nákupov za približne 2 roky; granty, opcie a konverzie sú vylúčené.">
+        <span class="key">Priemer nákupov</span><span class="val">$${fmtPrice(avgBuyPrice)}${gapHtml}</span></div>`);
+    }
+    if (insiderTrades.length) {
+      pc_insiderTradesForRender = insiderTrades;
+      rows.push(pc_insiderTradesBlockHtml(insiderTrades));
     }
     const eh = (d.eps_history || []).filter(h => h.actual != null);
     if (eh.length) {
@@ -2203,7 +2627,9 @@ async function pc_loadInsights(ticker) {
     if (!rows.length) return;
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
     card.style.display = '';
-  } catch (e) { /* fail-soft */ }
+  } catch (e) {
+    if (_insightsForTicker === sym) pc_setEarningsHistory(sym, []);
+  }
 }
 
 // Free valuation is deliberately lazy: it costs three Finnhub requests, then stays cached 24 h server-side.
@@ -2704,6 +3130,8 @@ async function loadData(reoptimize = false) {
   const period = document.getElementById('periodSel').value;
   if (!ticker) return;
   rememberPredictiveTicker(ticker);
+  _insightsForTicker = ticker;
+  pc_resetEarningsMarkers(ticker);
 
   const btn = document.getElementById('loadBtn');
   const status = document.getElementById('statusMsg');
@@ -2792,4 +3220,65 @@ function exportSnapshot() {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => { btn.innerHTML = '&#128190; Export snapshot'; btn.disabled = false; }, 2000);
+}
+
+// ── ML drivers ───────────────────────────────────────────────────────────────
+// Importance je globálna (platí pre model, nie pre tento týždeň), z-skóre je
+// aktuálne. Až kombinácia oboch niečo hovorí: dôležitá feature s netypickou
+// hodnotou je to, čo reálne ťahá predikciu práve teraz.
+const ML_FEATURE_LABELS = {
+  ret_1: 'Návratnosť 1 sviečka', ret_3: 'Návratnosť 3 sviečky',
+  ret_5: 'Návratnosť 5 sviečok', body: 'Telo sviečky', range: 'Rozpätie sviečky',
+  volatility: 'Volatilita', ema20_dist: 'Vzdialenosť od EMA20', rsi: 'RSI',
+  macd_hist: 'MACD histogram', vol_ratio: 'Objem vs priemer',
+  roc_4: 'Rate of change (4)', pos_52w: 'Pozícia v 52-týž. rozsahu',
+};
+
+// ML accuracy sa nečíta voči 50 %, ale voči base rate tickera — podielu
+// rastových sviečok. Model, ktorý by vždy povedal "up", dosiahne base rate
+// zadarmo, takže vypovedá až rozdiel (edge). Merané na 20 tickeroch
+// (5y weekly, produkčná konfigurácia): priemerný edge +0.1 pp, t = +0.20,
+// 12/20 pod base rate — teda žiadna merateľná hrana. Preto sa base rate
+// zobrazuje vedľa accuracy a nie je skrytý v tooltipe.
+function mlAccuracyRow(data) {
+  if (data.ml_accuracy == null) return '';
+  const base = data.ml_base_rate;
+  const tip = base == null
+    ? 'Priemerná presnosť ML modelu cez walk-forward foldy. Čítaj ju voči base rate tickera (podiel rastových sviečok), nie voči 50 %.'
+    : `Presnosť ML modelu cez walk-forward foldy vs base rate tickera (${base} % sviečok rástlo). `
+      + 'Model, ktorý by vždy povedal "rast", dosiahne base rate zadarmo — vypovedá až rozdiel. '
+      + 'Merané na 20 tickeroch: priemerný edge +0.1 pp, teda ML nemá merateľnú hranu v smere.';
+
+  let valHtml = `<span style="color:var(--muted)">${data.ml_accuracy}%</span>`;
+  if (base != null) {
+    const edge = Math.round((data.ml_accuracy - base) * 10) / 10;
+    // Hranica 2 pp je pod rozptylom edge medzi tickermi (σ ≈ 4 pp), takže
+    // farba nesmie sľubovať viac než "v rámci šumu".
+    const color = Math.abs(edge) < 2 ? 'var(--muted)'
+      : (edge > 0 ? CHART_COLORS.up : CHART_COLORS.down);
+    valHtml += `<span style="color:var(--muted);margin-left:6px">/ base ${base}%</span>`
+      + `<span style="color:${color};margin-left:6px">${edge > 0 ? '+' : ''}${edge.toFixed(1)}pp</span>`;
+  }
+  return `<div class="pred-row"><span class="tt key" data-tip="${tip}">ML accuracy <span class="tt-icon">ⓘ</span></span><span class="val">${valHtml}</span></div>`;
+}
+
+function renderMlDrivers(drivers) {
+  if (!Array.isArray(drivers) || !drivers.length) return '';
+  const rows = drivers.map(d => {
+    const label = ML_FEATURE_LABELS[d.feature] || d.feature;
+    // |z| >= 1.5 = hodnota mimo bežného pásma → stojí za pozornosť
+    const odd = Math.abs(d.zscore) >= 1.5;
+    const zColor = odd ? (d.zscore > 0 ? CHART_COLORS.up : CHART_COLORS.down) : 'var(--muted)';
+    const zText = `${d.zscore > 0 ? '+' : ''}${d.zscore.toFixed(2)}σ`;
+    return `<div class="pred-row">
+      <span class="tt key" data-tip="Podiel na rozhodovaní modelu: ${d.importance}%. Aktuálna hodnota je ${zText} od historického priemeru.">
+        ${label}${odd ? ' ⚠' : ''} <span class="tt-icon">ⓘ</span></span>
+      <span class="val"><span style="color:var(--muted)">${d.importance}%</span>
+        <span style="color:${zColor};margin-left:8px">${zText}</span></span>
+    </div>`;
+  }).join('');
+  return `<div class="pred-row" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+      <span class="tt key" data-tip="Features s najväčším vplyvom na model, a ako netypická je ich súčasná hodnota (σ = smerodajné odchýlky od priemeru). ⚠ = hodnota mimo bežného pásma.">
+        Čo ženie predikciu <span class="tt-icon">ⓘ</span></span><span class="val"></span>
+    </div>${rows}`;
 }

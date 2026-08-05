@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Focused regression tests for cache and public portfolio contracts."""
 
+import io
+import sys
 import tempfile
 import unittest
 import json
+import re
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -14,6 +18,78 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import trading_backend as tb
+
+
+class ScannerTableSortRegressionTests(unittest.TestCase):
+    def test_missing_values_are_last_in_both_directions(self):
+        module_path = Path(__file__).parent / "frontend" / "js" / "scanner-table-sort.js"
+        script = """
+const sort = require(process.argv[1]);
+const rows = [
+  {id: 'missing-null', value: null},
+  {id: 'high', value: 20},
+  {id: 'missing-label', value: 'n/a'},
+  {id: 'low', value: 5},
+];
+const asc = sort.sortRows(rows, row => row.value, 'number', 'asc').map(row => row.id);
+const desc = sort.sortRows(rows, row => row.value, 'number', 'desc').map(row => row.id);
+process.stdout.write(JSON.stringify({asc, desc}));
+"""
+        completed = subprocess.run(
+            ["node", "-e", script, str(module_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["asc"], ["low", "high", "missing-null", "missing-label"])
+        self.assertEqual(result["desc"], ["high", "low", "missing-null", "missing-label"])
+
+
+class SignalScoringRegressionTests(unittest.TestCase):
+    """C2 (RSI<45) prekrýva C4 (z<=-1.5) na 100 % — zmerané na 1559 z 1559 dní.
+    Bez tejto poistky by sa dvojité počítanie mohlo ticho vrátiť."""
+
+    @staticmethod
+    def _row(close, ema20, kijun, rsi, ema10, open_):
+        return pd.Series({
+            "Close": close, "Open": open_, "ema20": ema20, "ichi_kijun": kijun,
+            "rsi": rsi, "Volume": 1.0, "vol_ma": 1.0, "ema10": ema10, "atr": 1.0,
+        })
+
+    def test_c2_not_counted_when_c4_fires(self):
+        score, details = tb.score_signal_day(
+            self._row(100, 130, 130, 30, 131, 101), -2.0)
+        # C4 páli, RSI je nízke — ale skóre musí byť 1, nie 2
+        self.assertTrue(details["zscore_dip"])
+        self.assertTrue(details["rsi_pullback"], "c2 sa má hlásiť pravdivo")
+        self.assertEqual(score, 1)
+
+    def test_c2_still_counts_without_c4(self):
+        # Odstrániť C2 úplne bolo MERANE horšie — smie sa len prestať dublovať.
+        score, details = tb.score_signal_day(
+            self._row(100, 100, 100, 30, 101, 101), 0.0)
+        self.assertTrue(details["ema_kijun_touch"])
+        self.assertTrue(details["rsi_pullback"])
+        self.assertFalse(details["zscore_dip"])
+        self.assertEqual(score, 2)
+
+    def test_c1_c3_without_oversold_is_not_a_signal(self):
+        # Jediná kombinácia so skóre 2 bez akejkoľvek prepredanosti: cena pri
+        # EMA20 + zelená sviečka s objemom. V pravidle na nákup prepadu to nie
+        # je dip, ale naháňanie momenta — zmerané n=97, win 45.4 %, medián −1.69 %.
+        details = {"ema_kijun_touch": True, "rsi_pullback": False,
+                   "bull_volume": True, "zscore_dip": False, "trend": "up"}
+        self.assertFalse(tb.signal_qualifies(2, details))
+
+    def test_score_two_with_oversold_still_qualifies(self):
+        for flag in ("rsi_pullback", "zscore_dip"):
+            details = {"ema_kijun_touch": True, "bull_volume": True,
+                       "rsi_pullback": False, "zscore_dip": False, "trend": "up"}
+            details[flag] = True
+            self.assertTrue(tb.signal_qualifies(2, details), flag)
+        # prah ostáva v platnosti
+        self.assertFalse(tb.signal_qualifies(1, {"zscore_dip": True}))
 
 
 class CacheRegressionTests(unittest.TestCase):
@@ -320,6 +396,134 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
 
 
+class RoicFundamentalsRegressionTests(unittest.TestCase):
+    class _Response:
+        def __init__(self, status_code, payload=None, headers=None):
+            self.status_code = status_code
+            self._payload = payload
+            self.headers = headers or {}
+
+        def json(self):
+            return self._payload
+
+    def setUp(self):
+        self.original_next_request_at = tb._roic_next_request_at
+        tb._roic_next_request_at = 0.0
+
+    def test_qualified_symbol_matches_bare_universe_symbol(self):
+        # roic.ai vracia "NASDAQ:CTSH", naše univerzum má "CTSH". Naivné
+        # porovnanie celého reťazca nesedelo nikdy a resolúcia ticho vracala
+        # None — obohacovanie potom neurobilo nič a fail-soft to skryl.
+        for raw, sym in (
+            ("NASDAQ:CTSH", "CTSH"), ("CTSH", "CTSH"), ("NYSE:BKNG", "BKNG"),
+            ("EPA:TEP", "TEP.PA"), ("XETR:VVSM", "VVSM.DE"),
+        ):
+            self.assertTrue(tb._roic_symbol_matches(raw, sym), f"{raw} vs {sym}")
+        for raw, sym in (("NASDAQ:AAPL", "CTSH"), ("", "CTSH"), (None, "CTSH")):
+            self.assertFalse(tb._roic_symbol_matches(raw, sym), f"{raw} vs {sym}")
+
+    def test_ticker_search_sends_bare_base_symbol_and_bounded_limit(self):
+        captured = {}
+
+        def fake_get(path, params=None, stop_event=None, **kwargs):
+            captured.update({"path": path, "params": params or {}, **kwargs})
+            return {"data": [{"symbol": "EPA:TEP", "id": "tkr_x"}]}
+
+        with (
+            patch.object(tb, "_roic_get_json", side_effect=fake_get),
+            patch.object(tb, "_roic_load_ticker_ids", return_value={}),
+            patch.object(tb, "_roic_save_ticker_id"),
+        ):
+            self.assertEqual(tb._roic_resolve_ticker_id("TEP.PA"), "tkr_x")
+        # Yahoo prípona sa do dotazu neposiela a limit nesmie ostať na 500.
+        self.assertEqual(captured["params"].get("query"), "TEP")
+        self.assertEqual(captured["params"].get("limit"), 25)
+        # Search vie vypršať na 20 s — musí mať dlhší timeout a jedno opakovanie.
+        self.assertGreaterEqual(captured.get("timeout") or 0, 45)
+        self.assertGreaterEqual(captured.get("retries") or 0, 1)
+
+    def tearDown(self):
+        tb._roic_next_request_at = self.original_next_request_at
+
+    def test_rate_limit_headers_override_floor_and_wait_until_reset(self):
+        with patch.object(tb._time_module, "time", return_value=1000.0):
+            tb._roic_apply_rate_headers({
+                "x-ratelimit-limit": "5",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "1040",
+            })
+            self.assertEqual(tb._roic_next_request_at, 1040.25)
+            with patch.object(tb._time_module, "sleep") as sleep:
+                self.assertTrue(tb._roic_wait_for_slot())
+        sleep.assert_called_once_with(40.25)
+
+    def test_http_400_and_429_are_fail_soft_and_429_waits_for_reset(self):
+        for status in (400, 429):
+            tb._roic_next_request_at = 0.0
+            headers = {
+                "x-ratelimit-remaining": "0" if status == 429 else "4",
+                "x-ratelimit-reset": "1060",
+            }
+            response = self._Response(status, {"error": "nope"}, headers)
+            with (
+                patch.object(tb, "_roic_api_key", return_value="secret"),
+                patch.object(tb.requests, "get", return_value=response),
+                patch.object(tb._time_module, "time", return_value=1000.0),
+                patch.object(tb._time_module, "sleep") as sleep,
+            ):
+                self.assertIsNone(tb._roic_get_json("/test"))
+            if status == 429:
+                sleep.assert_called_once_with(60.25)
+
+    def test_fresh_family_cache_skips_network_for_full_ttl(self):
+        now = datetime.now(timezone.utc)
+        fresh = {
+            family: {"fetched_at": now.isoformat(), "fiscal_year": 2025}
+            for family in tb.ROIC_RATIO_PATHS
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with (
+                patch.object(tb, "ROIC_FUNDAMENTALS_DIR", Path(tmp_dir)),
+                patch.object(tb, "_roic_get_json") as get_json,
+            ):
+                tb._roic_atomic_json_write(
+                    tb._roic_cache_path("CTSH"), {"symbol": "CTSH", **fresh}
+                )
+                self.assertTrue(tb._roic_enrich_symbol("CTSH"))
+        get_json.assert_not_called()
+        self.assertTrue(tb._roic_family_is_fresh(
+            fresh, "profitability", now=now.timestamp() + 29 * 24 * 60 * 60
+        ))
+        self.assertFalse(tb._roic_family_is_fresh(
+            fresh, "profitability", now=now.timestamp() + 31 * 24 * 60 * 60
+        ))
+
+    def test_ticker_id_map_is_persistent_and_reused_without_search(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "roic_ticker_ids.json"
+            with patch.object(tb, "ROIC_TICKER_IDS_FILE", path):
+                self.assertTrue(tb._roic_save_ticker_id("CTSH", 12345))
+                self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"CTSH": 12345})
+                with patch.object(tb, "_roic_get_json") as get_json:
+                    self.assertEqual(tb._roic_resolve_ticker_id("ctsh"), 12345)
+                get_json.assert_not_called()
+
+    def test_only_dip_100_and_above_is_enriched(self):
+        scores = {
+            "LOW": {"total": 99.99},
+            "EDGE": {"total": 100},
+            "HIGH": {"total": 121},
+            "_meta": {"count": 3},
+        }
+        self.assertEqual(tb._roic_top_dip_symbols(scores), ["EDGE", "HIGH"])
+        with patch.object(tb, "load_roic_fundamentals") as load:
+            low = tb.enrich_with_dip({"ticker": "LOW"}, scores)
+            edge = tb.enrich_with_dip({"ticker": "EDGE"}, scores)
+        self.assertIsNone(low["roic_fundamentals"])
+        self.assertIs(edge["roic_fundamentals"], load.return_value)
+        load.assert_called_once_with("EDGE")
+
+
 class ScannerSchedulingRegressionTests(unittest.TestCase):
     def setUp(self):
         with tb._scanner_lock:
@@ -388,6 +592,92 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                 raise tb.requests.exceptions.HTTPError(
                     f"HTTP {self.status_code}", response=self
                 )
+
+    def test_yahoo_insider_prices_include_sale_range_and_exclude_grant(self):
+        now = int(datetime.now(timezone.utc).timestamp())
+        qs = {
+            "insiderTransactions": {
+                "transactions": [
+                    {
+                        "filerName": "Jane Buyer",
+                        "filerRelation": "Chief Executive Officer",
+                        "shares": {"raw": 100},
+                        "value": {"raw": 17223},
+                        "startDate": {"raw": now - 86400},
+                        "transactionText": "Purchase at price 172.23 per share.",
+                    },
+                    {
+                        "filerName": "John Seller",
+                        "filerRelation": "Director",
+                        "shares": {"raw": 200},
+                        "value": {"raw": 29141},
+                        "startDate": {"raw": now - 172800},
+                        "transactionText": "Sale at price 144.45 - 146.96 per share.",
+                    },
+                    {
+                        "filerName": "Grant Recipient",
+                        "filerRelation": "Officer",
+                        "shares": {"raw": 500},
+                        "value": {"raw": 0},
+                        "startDate": {"raw": now - 259200},
+                        "transactionText": "Stock Award(Grant) at price 0.00 per share.",
+                    },
+                ],
+            },
+            "financialData": {"currentPrice": {"raw": 200}},
+        }
+
+        insider = tb._insights_parse(qs)["insider"]
+
+        self.assertEqual([t["type"] for t in insider["transactions_2y"]], ["buy", "sell"])
+        self.assertEqual(insider["transactions_2y"][0]["price"], 172.23)
+        self.assertEqual(insider["transactions_2y"][1]["price"], 145.705)
+        self.assertNotIn("Grant Recipient", [t["name"] for t in insider["transactions_2y"]])
+        self.assertEqual(insider["avg_buy_price_2y"], 172.23)
+        self.assertAlmostEqual(insider["current_vs_avg_buy_pct"], 16.12)
+
+    def test_insider_schedule_marks_repeated_share_count(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Same Size", "type": "sell", "shares": 32500},
+            {"date": "2026-01-03", "name": "Same Size", "type": "sell", "shares": 32500},
+            {"date": "2026-04-20", "name": "Same Size", "type": "sell", "shares": 32500},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(t["scheduled_likely"] for t in transactions))
+        self.assertEqual(
+            {t["scheduled_reason"] for t in transactions},
+            {"3× rovnaký objem"},
+        )
+
+    def test_insider_schedule_marks_regular_cadence_with_changing_sizes(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Monthly Seller", "type": "sell", "shares": 101},
+            {"date": "2026-01-01", "name": "Monthly Seller", "type": "sell", "shares": 202},
+            {"date": "2026-01-31", "name": "Monthly Seller", "type": "sell", "shares": 303},
+            {"date": "2026-03-02", "name": "Monthly Seller", "type": "sell", "shares": 404},
+            {"date": "2026-04-01", "name": "Monthly Seller", "type": "sell", "shares": 505},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(t["scheduled_likely"] for t in transactions))
+        self.assertEqual(
+            {t["scheduled_reason"] for t in transactions},
+            {"~30 dní"},
+        )
+
+    def test_insider_schedule_does_not_mark_two_transactions(self):
+        transactions = [
+            {"date": "2026-01-01", "name": "Too Few", "type": "sell", "shares": 100},
+            {"date": "2026-02-01", "name": "Too Few", "type": "sell", "shares": 100},
+        ]
+
+        tb._mark_likely_scheduled_insider_transactions(transactions)
+
+        self.assertTrue(all(not t["scheduled_likely"] for t in transactions))
+        self.assertTrue(all(t["scheduled_reason"] is None for t in transactions))
 
     def test_fmp_earnings_surprises_maps_stable_fields(self):
         response = self._Response(200, [{
@@ -1040,7 +1330,11 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
 
         def fake_score(row, _zscore):
             qualifies = bool(row["qualifies"])
-            return (2 if qualifies else 1), {"trend": "up"}
+            # signal_qualifies() od 2026-07-26 žiada aj podmienku prepredanosti
+            # (C2 alebo C4) — test overuje deduplikáciu epizód, nie kvalifikáciu.
+            return (2 if qualifies else 1), {
+                "trend": "up", "zscore_dip": qualifies, "rsi_pullback": False,
+            }
 
         with patch.object(tb, "score_signal_day", side_effect=fake_score):
             episodes = tb._signal_episode_rows(frame, warmup=0)
@@ -1070,5 +1364,184 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
         self.assertEqual(tb._signal_episode_rows(classic), expected)
 
 
+class MlBaseRateRegressionTests(unittest.TestCase):
+    """ML accuracy bez base rate pôsobí ako kvalita modelu, hoci ňou nie je."""
+
+    def _frame(self, n=120, up_ratio=0.8):
+        import numpy as np
+        rng = np.random.default_rng(7)
+        # up_ratio riadi, koľko sviečok rastie — base rate musí ísť za tým.
+        steps = np.where(rng.random(n) < up_ratio, 1.0, -1.0) * 0.02
+        close = 100 * np.cumprod(1 + steps)
+        idx = pd.date_range("2020-01-05", periods=n, freq="W")
+        frame = pd.DataFrame({
+            "Open": close * 0.99, "High": close * 1.02,
+            "Low": close * 0.98, "Close": close,
+            "Volume": np.full(n, 1_000_000.0),
+        }, index=idx)
+        return tb.add_indicators(frame)
+
+    def test_base_rate_tracks_the_share_of_rising_candles(self):
+        mostly_up = tb.ml_base_rate(self._frame(up_ratio=0.8))
+        mostly_down = tb.ml_base_rate(self._frame(up_ratio=0.2))
+        self.assertIsNotNone(mostly_up)
+        self.assertIsNotNone(mostly_down)
+        self.assertGreater(mostly_up, 60)
+        self.assertLess(mostly_down, 40)
+
+    def test_short_history_returns_none_instead_of_a_misleading_number(self):
+        self.assertIsNone(tb.ml_base_rate(self._frame(n=30)))
+
+    def test_broken_input_is_fail_soft(self):
+        self.assertIsNone(tb.ml_base_rate(None))
+        self.assertIsNone(tb.ml_base_rate(pd.DataFrame()))
+
+
+class LogEncodingRegressionTests(unittest.TestCase):
+    """Slovenský log nesmie zhodiť funkciu na konzole bez UTF-8.
+
+    Reálne pozorované na Windows (cp1252): print v except vetve vyhodil
+    UnicodeEncodeError, ten prepísal pôvodnú NOT_AUTHORIZED chybu a navonok
+    to vyzeralo ako problém s kódovaním, nie s autorizáciou.
+    """
+
+    def test_stdout_is_reconfigured_to_utf8(self):
+        encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+        self.assertIn(encoding.replace("-", ""), ("utf8", ""))
+
+    def test_diacritics_survive_a_cp1252_stream(self):
+        buffer = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="replace")
+        try:
+            buffer.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            self.skipTest("stream nepodporuje reconfigure")
+        # "kľúč" je presne ten reťazec, ktorý padal (ľ = ľ)
+        buffer.write("[massive] nie je pre tento API kľúč autorizovaný — vypínam")
+        buffer.flush()
+
+    def test_not_authorized_message_is_not_replaced_by_encoding_error(self):
+        response = CorporateActionsRegressionTests._Response(
+            {"status": "NOT_AUTHORIZED"}, status_code=401)
+        tb._massive_dividends_disabled = False
+        tb._massive_splits_disabled = False
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                with (
+                    patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+                    patch.object(tb, "CORP_ACTIONS_DIR", Path(tmp)),
+                    patch.object(tb.requests, "get", return_value=response),
+                ):
+                    payload = tb.get_ticker_corporate_actions("AAPL", refresh=1)
+            self.assertIn("autorizovaný", payload["error"])
+            self.assertNotIn("UnicodeEncodeError", payload["error"])
+        finally:
+            tb._massive_dividends_disabled = False
+            tb._massive_splits_disabled = False
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class OhlcvBatchCacheKeyRegressionTests(unittest.TestCase):
+    """Kľúč batch odpovede je protokol medzi backendom a charts.js.
+
+    Pôvodne bol 'sym|period|interval|ha', takže dva panely s rovnakým symbolom
+    a timeframe, ale rôznymi indikátormi, kolidovali: backend druhým výsledkom
+    prepísal prvý a panel sa vykreslil s cudzími indikátormi.
+    """
+
+    def test_indicators_and_account_change_the_key(self):
+        base = ("AAPL", "auto", "1d", 0, "ema,rsi", "1", 300, "")
+        other_inds = ("AAPL", "auto", "1d", 0, "macd", "1", 300, "")
+        other_acct = ("AAPL", "auto", "1d", 0, "ema,rsi", "2", 300, "")
+        self.assertNotEqual(tb.ohlcv_batch_key(*base), tb.ohlcv_batch_key(*other_inds))
+        self.assertNotEqual(tb.ohlcv_batch_key(*base), tb.ohlcv_batch_key(*other_acct))
+
+    def test_indicator_order_does_not_change_the_key(self):
+        self.assertEqual(
+            tb.ohlcv_batch_key("AAPL", "auto", "1d", 0, "ema,rsi", "1", 300, ""),
+            tb.ohlcv_batch_key("AAPL", "auto", "1d", 0, "rsi,ema", "1", 300, ""),
+        )
+
+    def test_python_and_javascript_agree(self):
+        """Ak sa tieto dve implementácie rozídu, batch cache prestane trafovať
+        a každý panel ticho spadne na fallback fetch — teda strata výkonu bez
+        jedinej chybovej hlášky."""
+        cases = [
+            dict(symbol="AAPL", period="auto", interval="1d", ha=0,
+                 indicators="ema,rsi", account="1", limit=300, before=""),
+            dict(symbol="AAPL", period="auto", interval="1d", ha=0,
+                 indicators="rsi,ema", account="1", limit=300, before=""),
+            dict(symbol="AAPL", period="auto", interval="1d", ha=1,
+                 indicators="", account="2", limit=0, before=""),
+            dict(symbol="MSFT", period="6mo", interval="1wk", ha=0,
+                 indicators="adx,bb,ema,ichimoku,macd,obv,rsi,stochrsi",
+                 account="1", limit=300, before="2024-01-01"),
+        ]
+        expected = [
+            tb.ohlcv_batch_key(c["symbol"], c["period"], c["interval"], c["ha"],
+                               c["indicators"], c["account"], c["limit"], c["before"])
+            for c in cases
+        ]
+        # Funkcia sa vyreže v Pythone a node dostane už hotový zdroj — inak by sa
+        # JS regex musel escapovať cez Python aj shell a ticho by sa rozbil.
+        charts_src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(
+            encoding="utf-8"
+        )
+        match = re.search(r"^function ohlcvBatchKey\(.*?^\}", charts_src, re.S | re.M)
+        self.assertIsNotNone(match, "ohlcvBatchKey() sa v charts.js nenašla")
+        script = match.group(0) + (
+            "\nprocess.stdout.write(JSON.stringify("
+            "JSON.parse(process.argv[1]).map(ohlcvBatchKey)));"
+        )
+        completed = subprocess.run(
+            ["node", "-e", script, json.dumps(cases)],
+            check=True, capture_output=True, text=True,
+        )
+        self.assertEqual(json.loads(completed.stdout), expected)
+
+
+class MlDriversRegressionTests(unittest.TestCase):
+    """train_ml_model vracia 4-tuple. Predtým vracalo 3 — rozbalenie na volajúcej
+    strane je tichý ValueError zachytený v except vetve, takže by sa ML len
+    prestalo počítať a UI by ukázalo prázdne hodnoty bez chybovej hlášky."""
+
+    @staticmethod
+    def _frame(seed=3, n=200):
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        close = 100 * np.exp(np.cumsum(rng.normal(0.001, 0.03, n)))
+        df = pd.DataFrame(
+            {"Close": close, "Open": close * 0.99, "High": close * 1.02,
+             "Low": close * 0.98, "Volume": rng.integers(1e5, 1e6, n)},
+            index=pd.date_range("2021-01-01", periods=n, freq="W"),
+        )
+        for feat in tb.ML_FEATURES:
+            df[feat] = rng.normal(0, 1, n)
+        # Signál do rsi, aby model mal čo nájsť a importance nebola náhodná
+        df["rsi"] = (df["Close"].shift(-1) > df["Close"]).astype(float)
+        return df
+
+    def test_returns_four_values_with_drivers(self):
+        model, acc, bull, drivers = tb.train_ml_model(self._frame(), cache_key=None)
+        self.assertIsNotNone(acc)
+        self.assertTrue(drivers, "drivers nesmú byť prázdne pri úspešnom fite")
+        top = drivers[0]
+        self.assertEqual(set(top), {"feature", "importance", "zscore"})
+        self.assertIn(top["feature"], tb.ML_FEATURES)
+        self.assertEqual(top["feature"], "rsi", "najsilnejšia feature má byť tá so signálom")
+
+    def test_short_frame_still_returns_four_values(self):
+        result = tb.train_ml_model(self._frame(n=30), cache_key=None)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[3], [])
+
+    def test_legacy_two_tuple_cache_entry_does_not_crash(self):
+        """Cache je in-memory, ale po deployi v nej môžu byť staré záznamy."""
+        tb._MODEL_CACHE[("ml", "LEGACY")] = (55.0, 0.6)
+        try:
+            model, acc, bull, drivers = tb.train_ml_model(self._frame(), cache_key="LEGACY")
+            self.assertEqual((acc, bull, drivers), (55.0, 0.6, []))
+        finally:
+            tb._MODEL_CACHE.pop(("ml", "LEGACY"), None)

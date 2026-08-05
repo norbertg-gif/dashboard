@@ -214,6 +214,86 @@ async function renderRatesView(force = false) {
   </div>`;
 }
 
+const HIST_TYPE_KEY = 'td_hist_type';
+// 'stock' zahŕňa aj ETF zámerne — pri dlhodobom investovaní je to tá istá
+// kategória rozhodovania; kto chce rozlíšiť, má samostatné 'etf'.
+const HIST_TYPES = [
+  ['all', 'Všetko'], ['stock', 'Akcie + ETF'], ['etf', 'Len ETF'],
+  ['crypto', 'Krypto'], ['other', 'Ostatné'],
+];
+
+function historyTypeMatches(t, filter) {
+  const type = t?.type || 'Other';
+  switch (filter) {
+    case 'stock':  return type === 'Stock' || type === 'ETF';
+    case 'etf':    return type === 'ETF';
+    case 'crypto': return type === 'Crypto';
+    case 'other':  return !['Stock', 'ETF', 'Crypto'].includes(type);
+    default:       return true;
+  }
+}
+
+const HIST_GROUP_KEY = 'td_hist_group';
+
+// Zoskupenie po tituloch. Pri čiastočných zatvoreniach a viacerých tranžiach je
+// riadok na obchod ťažko čitateľný — eToro to vo svojom pohľade robí rovnako.
+// Kľúče sa zámerne volajú ako pri jednotlivých obchodoch (`investment`,
+// `netProfit`, `openTimestamp`…), aby existujúce triedenie fungovalo bez zmien.
+function historyGroupBySymbol(rows) {
+  const by = new Map();
+  for (const t of rows) {
+    const sym = t.symbol || '?';
+    let g = by.get(sym);
+    if (!g) {
+      g = { symbol: sym, name: t.name || sym, trades: 0, investment: 0,
+            netProfit: 0, fees: 0, openTimestamp: t.openTimestamp || '',
+            closeTimestamp: t.closeTimestamp || '', _days: [], type: t.type };
+      by.set(sym, g);
+    }
+    g.trades += 1;
+    g.investment += Number(t.investment || 0);
+    g.netProfit += Number(t.netProfit || 0);
+    g.fees += Number(t.fees || 0);
+    // Prvý vstup a posledný výstup — okno, v ktorom si s titulom pracoval.
+    if (t.openTimestamp && (!g.openTimestamp || t.openTimestamp < g.openTimestamp)) g.openTimestamp = t.openTimestamp;
+    if (t.closeTimestamp && (!g.closeTimestamp || t.closeTimestamp > g.closeTimestamp)) g.closeTimestamp = t.closeTimestamp;
+    if (t.daysHeld != null) g._days.push(Number(t.daysHeld));
+  }
+  return [...by.values()].map(g => ({
+    ...g,
+    // Percento z celkovej investovanej sumy, nie priemer percent — inak by malá
+    // tranža s +200 % prebila veľkú s +2 % a číslo by nesedelo s dolármi.
+    profitPct: g.investment ? g.netProfit / g.investment * 100 : null,
+    daysHeld: g._days.length ? Math.round(g._days.reduce((a, b) => a + b, 0) / g._days.length) : null,
+  }));
+}
+
+function setHistoryGroup(v) {
+  localStorage.setItem(HIST_GROUP_KEY, v);
+  renderHistoryView(false);
+}
+
+function setHistoryType(v) {
+  localStorage.setItem(HIST_TYPE_KEY, v);
+  renderHistoryView(false);      // len prekreslenie, žiadny nový fetch
+}
+
+// KPI z filtrovanej množiny. `fallback` je serverový súhrn — použije sa len keď
+// filter nie je aktívny a nič sa nefiltrovalo, aby čísla sedeli s eToro.
+function historySummaryFor(rows, fallback) {
+  if (!rows.length) return { count: 0, winRate: 0, netProfit: 0, fees: 0 };
+  const wins = rows.filter(t => (t.netProfit || 0) > 0).length;
+  const net = rows.reduce((a, t) => a + (t.netProfit || 0), 0);
+  const inv = rows.reduce((a, t) => a + (t.investment || 0), 0);
+  return {
+    count: rows.length,
+    winRate: rows.length ? wins / rows.length * 100 : 0,
+    netProfit: net,
+    profitPct: inv ? net / inv * 100 : null,
+    fees: rows.reduce((a, t) => a + (t.fees || 0), 0),
+  };
+}
+
 async function renderHistoryView(force = false) {
   const el = document.getElementById('main-history');
   if (!el) return;
@@ -230,9 +310,28 @@ async function renderHistoryView(force = false) {
       return;
     }
   }
-  const s = historyData.summary || {};
-  const trades = [...(historyData.trades || [])].sort((a, b) => compareHistoryRows(a, b));
-  const histHeaders = [
+  // Filter podľa typu inštrumentu. Pri zmiešanom účte (akcie + krypto) je súhrn
+  // cez všetko málokedy to, čo človek chce vidieť — a KPI sa preto počítajú
+  // z FILTROVANEJ množiny, inak by hlavička protirečila tabuľke pod ňou.
+  const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
+  const grouped = localStorage.getItem(HIST_GROUP_KEY) === 'symbol';
+  const allTrades = historyData.trades || [];
+  const filtered = allTrades.filter(t => historyTypeMatches(t, typeFilter));
+  // KPI vždy z jednotlivých obchodov — zoskupenie mení pohľad na tabuľku, nie
+  // to, koľko obchodov si spravil a aký mali win rate.
+  const s = historySummaryFor(filtered, historyData.summary);
+  const trades = (grouped ? historyGroupBySymbol(filtered) : filtered)
+    .sort((a, b) => compareHistoryRows(a, b));
+  const histHeaders = grouped ? [
+    ['symbol', 'Symbol'],
+    ['trades', 'Obchodov'],
+    ['openTimestamp', 'Prvý vstup'],
+    ['closeTimestamp', 'Posledný výstup'],
+    ['investment', 'Investment'],
+    ['netProfit', 'P/L'],
+    ['profitPct', '%'],
+    ['daysHeld', 'Ø dní'],
+  ] : [
     ['symbol', 'Symbol'],
     ['openTimestamp', 'Open'],
     ['openRate', 'Vstup'],
@@ -260,6 +359,26 @@ async function renderHistoryView(force = false) {
       </div>
       <div class="tb-sep"></div>
       <div class="tb-group">
+        <span class="tb-label">Pohľad</span>
+        <div class="tb-items">
+          <button class="btn${grouped ? '' : ' primary'}" onclick="setHistoryGroup('trade')">Per obchod</button>
+          <button class="btn${grouped ? ' primary' : ''}" onclick="setHistoryGroup('symbol')">Per titul</button>
+        </div>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-group">
+        <span class="tb-label">Typ</span>
+        <div class="tb-items">
+          <select class="sel" onchange="setHistoryType(this.value)">
+            ${HIST_TYPES.map(([v, lbl]) =>
+              `<option value="${v}"${typeFilter === v ? ' selected' : ''}>${lbl}</option>`).join('')}
+          </select>
+          ${typeFilter !== 'all'
+            ? `<span style="color:var(--muted2);font-size:10.5px;">${trades.length} z ${allTrades.length}</span>` : ''}
+        </div>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="tb-group">
         <span class="tb-label">Export</span>
         <div class="tb-items"><button class="btn" onclick="exportHistoryCSV()">Export CSV</button></div>
       </div>
@@ -275,16 +394,24 @@ async function renderHistoryView(force = false) {
     </tr></thead><tbody>
       ${trades.map(t => {
         const pnl = Number(t.netProfit || 0);
-        return `<tr>
-          <td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>
+        const symCell = `<td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>`;
+        const tail = `<td>$${Number(t.investment || 0).toFixed(2)}</td>
+          <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
+          <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
+          <td>${t.daysHeld ?? '-'}</td>`;
+        return grouped ? `<tr>
+          ${symCell}
+          <td>${t.trades}</td>
+          <td>${escHtml((t.openTimestamp || '').slice(0,10))}</td>
+          <td>${escHtml((t.closeTimestamp || '').slice(0,10))}</td>
+          ${tail}
+        </tr>` : `<tr>
+          ${symCell}
           <td>${escHtml((t.openTimestamp || '').slice(0,10))}</td>
           <td class="r">${t.openRate != null ? fmtPrice(Number(t.openRate)) : '-'}</td>
           <td>${escHtml((t.closeTimestamp || '').slice(0,10))}</td>
           <td class="r">${t.closeRate != null ? fmtPrice(Number(t.closeRate)) : '-'}</td>
-          <td>$${Number(t.investment || 0).toFixed(2)}</td>
-          <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
-          <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
-          <td>${t.daysHeld ?? '-'}</td>
+          ${tail}
         </tr>`;
       }).join('')}
     </tbody></table>
@@ -321,7 +448,10 @@ function sortHistory(key) {
 }
 
 function exportHistoryCSV() {
-  const trades = historyData?.trades || [];
+  // Export ide z rovnakej filtrovanej množiny ako tabuľka — inak by človek
+  // vyfiltroval akcie, klikol Export a dostal aj krypto.
+  const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
+  const trades = (historyData?.trades || []).filter(t => historyTypeMatches(t, typeFilter));
   if (!trades.length) return;
   const cols = [
     ['symbol', 'Symbol'],
@@ -478,6 +608,99 @@ function renderDcaCard(data) {
 // Heatmapa korelácií denných výnosov držaných titulov (oba účty) z OHLCV cache.
 // Odhalí skrytú koncentráciu — tituly, ktoré sa hýbu spolu aj naprieč sektormi.
 // Interpretačná vrstva; nevstupuje do C1–C4, DCA ani účtovania.
+// ── Sektorová expozícia ───────────────────────────────────────────────────────
+// Kapitál a zisk vedľa seba: keď sektor berie 40 % kapitálu a robí 70 % zisku,
+// výsledok stojí na sektorovej stávke, aj keď ju používateľ vedome neurobil.
+// Úspešnosť sa počíta POČTOM titulov, nie váženým kapitálom — takto meria
+// stratégiu (rozhodnutie 2026-08-04). Interpretačná vrstva, nevstupuje nikam.
+let _sectorsCache = { data: null, ts: 0 };
+const SECTORS_CARD_TTL_MS = 15 * 60 * 1000;
+const PORT_SECTORS_COLLAPSED_KEY = 'td_portfolio_sectors_collapsed';
+
+function isPortfolioSectorsCollapsed() {
+  const v = localStorage.getItem(PORT_SECTORS_COLLAPSED_KEY);
+  return v == null ? true : v === '1';   // default zbalená — jeden riadok stačí
+}
+
+function togglePortfolioSectors() {
+  localStorage.setItem(PORT_SECTORS_COLLAPSED_KEY, isPortfolioSectorsCollapsed() ? '0' : '1');
+  renderSectorCard(_sectorsCache.data);
+  if (!isPortfolioSectorsCollapsed() && !_sectorsCache.data) loadSectorCard();
+}
+
+function sectorCardHead(data = null) {
+  const collapsed = isPortfolioSectorsCollapsed();
+  let sub = 'kam smerujú peniaze a odkiaľ pochádza zisk';
+  const top = (data?.sectors || [])[0];
+  if (top && top.amount_pct != null) {
+    // Zbalený stav nesie tú jednu vetu, kvôli ktorej karta existuje.
+    sub = `${escHtml(top.sector)} ${top.amount_pct} % kapitálu`
+        + (top.pnl_pct != null ? ` / ${top.pnl_pct} % zisku` : '');
+  }
+  const refresh = collapsed ? '' :
+    `<button class="btn" style="margin-left:auto;font-size:10px;padding:3px 9px;" onclick="loadSectorCard(true)">Refresh</button>`;
+  return `<div class="dca-head" style="display:flex;align-items:center;gap:8px;">
+    <button class="btn dca-toggle" onclick="togglePortfolioSectors()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <b style="font-size:12px;">Sektory</b>
+    <span style="color:var(--muted);font-size:10.5px;">${sub}</span>
+    ${refresh}
+  </div>`;
+}
+
+async function loadSectorCard(force = false) {
+  const wrap = document.getElementById('portfolio-sectors');
+  if (!wrap || isPortfolioSectorsCollapsed()) return;
+  if (!force && _sectorsCache.data && Date.now() - _sectorsCache.ts < SECTORS_CARD_TTL_MS) {
+    renderSectorCard(_sectorsCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/sectors`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _sectorsCache = { data: await r.json(), ts: Date.now() };
+    renderSectorCard(_sectorsCache.data);
+  } catch (e) {
+    wrap.innerHTML = `${sectorCardHead()}<div class="signal-outcome-note">Sektory sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderSectorCard(data) {
+  const wrap = document.getElementById('portfolio-sectors');
+  if (!wrap) return;
+  const head = sectorCardHead(data);
+  if (isPortfolioSectorsCollapsed()) { wrap.innerHTML = head; return; }
+  if (!data) { wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>`; return; }
+  const sectors = data.sectors || [];
+  if (!sectors.length) {
+    wrap.innerHTML = `${head}<div class="signal-outcome-note">Žiadne držané tituly.</div>`;
+    return;
+  }
+  let html = `${head}<table class="port-table" style="width:100%;font-size:11px;"><thead><tr>
+    <th style="text-align:left;">Sektor</th><th class="r">Titulov</th>
+    <th class="r">Kapitál</th><th class="r">Zisk</th><th class="r">V zisku</th></tr></thead><tbody>`;
+  for (const s of sectors) {
+    const unknown = s.sector === 'Nezaradené';
+    const pnlCls = s.pnl >= 0 ? 'port-pos' : 'port-neg';
+    // Podiel na zisku môže byť záporný (stratový sektor) — znamienko sa ukazuje,
+    // aby sa stratový sektor nedal zameniť s malým ziskovým.
+    const pnlPct = s.pnl_pct == null ? '—' : `${s.pnl_pct >= 0 ? '' : ''}${s.pnl_pct} %`;
+    html += `<tr title="${escHtml((s.symbols || []).join(', '))}"${unknown ? ' style="opacity:0.65;"' : ''}>
+      <td style="text-align:left;">${escHtml(s.sector)}</td>
+      <td class="r">${s.count}</td>
+      <td class="r">${s.amount_pct == null ? '—' : s.amount_pct + ' %'}</td>
+      <td class="r ${pnlCls}">${pnlPct}</td>
+      <td class="r">${s.green}/${s.count}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  const t = data.totals || {};
+  if (t.unmapped) {
+    html += `<div class="signal-outcome-note">${t.unmapped} ${t.unmapped === 1 ? 'titul sa nepodarilo zaradiť' : 'titulov sa nepodarilo zaradiť'} — mapovanie je odvodené z Finnhub odvetvia a spoľahlivo pokrýva US tituly. Percentá preto nepokrývajú celé portfólio.</div>`;
+  }
+  html += `<div class="signal-outcome-note">Kapitál = podiel na investovanom. Zisk = podiel na celkovom P/L. „V zisku" počíta tituly, nie sumy. Interpretácia — neovplyvňuje skóre ani DCA.</div>`;
+  wrap.innerHTML = html;
+}
+
 let _corrCache = { data: null, ts: 0 };
 const CORR_CARD_TTL_MS = 15 * 60 * 1000;
 const PORT_CORR_COLLAPSED_KEY = 'td_portfolio_corr_collapsed';
@@ -1779,10 +2002,12 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
+    html += `<div id="portfolio-sectors">${sectorCardHead(_sectorsCache.data)}</div>`;
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       html += `<div id="portfolio-corr" class="advanced-only">${corrCardHead(_corrCache.data)}</div>`;
     }
     setTimeout(() => loadDcaCandidates(), 0);
+    setTimeout(() => { if (!isPortfolioSectorsCollapsed()) loadSectorCard(); }, 0);
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
     }

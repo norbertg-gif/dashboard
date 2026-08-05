@@ -71,10 +71,11 @@
       <li><a href="#predictive">Analytika — ako čítať signály</a></li>
       <li><a href="#scanner">Scanner + DIP stratégia</a></li>
       <li><a href="#verdict">Investičný verdikt</a></li>
-      <li><a href="#memory">Prev?dzka a pam??ov? profil</a></li>
+      <li><a href="#memory">Prevádzka a pamäťový profil</a></li>
       <li><a href="#philosophy">Filozofia signálov</a></li>
       <li><a href="#presets">Presety, watchlist, eToro</a></li>
       <li><a href="#trouble">Troubleshooting</a></li>
+      <li><a href="#risks">Riziká a obmedzenia</a></li>
       <li><a href="#tech">Technická príloha</a></li>
     </ol>
   </nav>
@@ -137,8 +138,9 @@
     <tr><td><strong>Basic / Advanced</strong></td><td>Basic schová diagnostický šum a v Analytike načíta ľahší dátový balík; Advanced zobrazí a dopočíta všetky analytické vrstvy.</td></tr>
     <tr><td><strong>⚙</strong></td><td>Nastavenia prahov (DCA strata/DIP/váha, Pozornosť denný pohyb, earnings varovanie). Uložené na serveri — jedna hodnota pre DCA kartu, Investor Inbox aj Pozornosť; zmena nevyžaduje redeploy.</td></tr>
     <tr><td><strong>🌙</strong></td><td>Prepínač témy (tmavá/svetlá).</td></tr>
-    <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania.</td></tr>
+    <tr><td><strong>OK + čas</strong></td><td>Stav spojenia a čas posledného načítania. V tmavej téme sedí dole v ľavom paneli pod účtami, spolu s pamäťovým chipom.</td></tr>
   </table>
+  <p class="quick-note"><strong>Rozloženie (tmavá téma):</strong> navigácia je vo zvislom ľavom paneli, hneď vedľa neho watchlist. Na širokouhlom monitore je horizontálneho miesta dosť a vertikálneho málo, preto je hlavička otočená nabok — grafy tým získajú výšku. <strong>Pracovná lišta (Workspace / Dáta / Zobrazenie / Mriežka) sa zobrazuje len na záložke Grafy</strong>, keďže všetko v nej sa týka panelov s grafmi. Svetlá téma zatiaľ používa pôvodné vodorovné rozloženie.</p>
   <p><strong>📋 Tickery</strong> v hornej lište importuje zoznam tickerov zo schránky/promptu, zruší aktuálne grafové panely a otvorí ich ako denné 1d grafy. Limit je 20 tickerov. Graf titulu držaného v niektorom eToro portfóliu má jemnú zeleno-tyrkysovú obrubu.</p>
   <p><strong>Poznámka k denným percentám:</strong> Pozornosť a Top pohyby používajú denný cenový pohyb <code>currentRate vs previousClose</code>. Pri tituloch obchodovaných na eToro 24/5 môže eToro UI používať inú hranicu obchodného dňa alebo session, takže percento sa môže líšiť. Pri štandardne obchodovaných akciách by sa hodnoty mali správať konzistentne.</p>
   <p><strong>Týždenný plán</strong> (panel nad Investor Inboxom) je prioritizačná vrstva: jednou vetou povie, čo tento týždeň naozaj rieš („Tento týždeň rieš hlavne X, Y, Z."), a rozdelí obsah do sekcií <em>Pozri dnes</em> (3–7 titulov podľa počtu dôvodov), <em>Možný nákup</em> (len prienik buy signálu + DIP kvality + zdravého grafu, nedržané tituly), <em>Možné DCA</em> (kvalitný dip bez zlomeného grafu), <em>Riziko</em> a <em>Drž bez akcie</em>. Jeden ticker sa zobrazí iba raz, v prvej najdôležitejšej sekcii; kompletné dôvody ostávajú v Inboxe/Verdikte. Tlačidlo <strong>Hotovo</strong> stlmí už prejdený titul, počítadlo ukazuje zostávajúce položky a šípky otvárajú vo Verdikte prednostne neprejdené tituly. Tento pracovný stav je iba v danom prehliadači a každý deň sa začne nanovo. Deterministické šablónové vety, žiadny LLM. Tlačidlo +/− vľavo kartu zbalí na jeden riadok (rovnako ako DCA karta v Portfóliu); stav sa pamätá.</p>
@@ -179,7 +181,10 @@
     <li><strong>Ticker</strong> možno zmeniť priamo v paneli alebo klikom na watchlist/eToro pozíciu. Aktívny panel má zvýraznený okraj.</li>
     <li><strong>Timeframe</strong> je nezávislý od obdobia: vyberieš napríklad 15 min, 30 min, 4 h alebo 1 d a backend načíta primerané množstvo sviečok.</li>
     <li><strong>Refresh</strong> zachová uzavreté sviečky z cache a obnoví najmä poslednú rozpracovanú sviečku.</li>
-    <li>Zoom, viditeľný rozsah, timeframe a stav panelu sa ukladajú, aby sa graf po návrate otvoril podobne ako naposledy.</li>
+    <li>Zoom, viditeľný rozsah, timeframe a stav panelu sa ukladajú, aby sa graf po návrate otvoril podobne ako naposledy. Ukladá sa <em>len</em> priblíženie, ktoré si nastavil ty — nie to, ktoré si dopočíta knižnica pri načítaní dát alebo zmene šírky okna.</li>
+    <li><strong>⠿ vľavo v hlavičke</strong> mení ťahaním poradie grafov. Panel sa vsunie podľa toho, v ktorej polovici cieľového grafu pustíš myš; ostatné sa posunú. Poradie sa uloží aj do presetov.</li>
+    <li><strong>Výška</strong> sa ťahá za spodnú hranu panelu a mení sa <em>všetkým</em> grafom v mriežke naraz, nech mriežka ostane jednotná. Nový graf preberie aktuálnu výšku. Graf otvorený z Portfólia (vpravo, mimo mriežky) sa mení sám za seba.</li>
+    <li>Pri otvorení sa graf vykreslí <strong>okamžite z posledného uloženého stavu</strong> a čerstvé dáta ho ticho nahradia. Kým je zobrazený starý stav, graf je stlmený a v hlavičke svieti <code>z HH:MM · aktualizujem…</code>.</li>
     <li><strong>HA</strong> prepína Heikin-Ashi zobrazenie. Je vizuálne hladšie, ale jeho ceny nie sú skutočné obchodné OHLC hodnoty.</li>
     <li><strong>Trade</strong> otvorí stránku titulu na eToro; nejde o automatické zadanie pokynu.</li>
     <li><strong>🔬</strong> pošle aktuálny ticker panelu rovno do záložky <strong>Analytika</strong>.</li>
@@ -248,7 +253,7 @@
     <li><strong>Sektorová expozícia</strong> ukazuje, v ktorých sektoroch je viazaný kapitál. Veľká váha v jednom sektore znamená, že viac titulov môže reagovať na rovnakú správu alebo makro pohyb.</li>
     <li><strong>Top pozície</strong> ukazujú najväčšie váhy. Klik otvorí ticker v grafoch.</li>
     <li><strong>Heatmapa</strong>: veľkosť dlaždice = percento equity, farba = denný pohyb, riadok P/L = celkový zisk/strata pozície. Veľká červená dlaždica je dôležitejšie riziko než malá červená dlaždica.</li>
-    <li><strong>DCA kandid?ti</strong> sp?jaj? agregovan? P/L poz?cie s DIP rankingom ? pom?ha rozhodn??, ?i dokupova? stratov? titul. Uk??e len poz?cie v strate ? 15 % a oflaguje ich: ?? <strong>DCA</strong> (DIP ? 95, v?ha &lt; 10 % equity ? kvalitn? dip), ?? <strong>Ve?k? v?ha</strong> (DCA OK, ale poz?cia u? ? 10 % equity ? koncentr?cia), ?? <strong>Pozor</strong> (slab? DIP sk?re, mo?n? value trap), ? <strong>Mimo d?t</strong> (ticker nie je v DIP datasete). Rozhoduje agregovan? P/L celej poz?cie, nie jedna tran?a. Prahy s? zladen? s appkou (?15 % = hlb?ia strata, DIP 95 = p?smo STRONG). Karta ukazuje vek DIP d?t ? pri starom importe ber flag s rezervou. ?isto interpreta?n? pom?cka, nevstupuje do sk?re.</li>
+    <li><strong>DCA kandidáti</strong> spájajú agregované P/L pozície s DIP rankingom — pomáha rozhodnúť, či dokupovať stratový titul. Ukáže len pozície v strate ≤ 15 % a oflaguje ich: 🟢 <strong>DCA</strong> (DIP ≥ 95, váha &lt; 10 % equity → kvalitný dip), 🟡 <strong>Veľká váha</strong> (DCA OK, ale pozícia už ≥ 10 % equity → koncentrácia), 🔴 <strong>Pozor</strong> (slabé DIP skóre, možný value trap), ⚪ <strong>Mimo dát</strong> (ticker nie je v DIP datasete). Rozhoduje agregované P/L celej pozície, nie jedna tranža. Prahy sú zladené s appkou (−15 % = hlbšia strata, DIP 95 = pásmo STRONG). Karta ukazuje vek DIP dát — pri starom importe ber flag s rezervou. Čisto interpretačná pomôcka, nevstupuje do skóre.</li>
   </ul>
 
   <h2 id="predictive">4. Analytika — ako čítať signály</h2>
@@ -286,6 +291,7 @@
   <ul>
     <li><strong>Zobrazené sviečky sú rovnaké ako v Grafoch</strong> — obe záložky ukazujú eToro broker feed. Signály, backtest a predikcia sa naďalej počítajú z yfinance/Massive histórie; mení sa len vykreslenie, nie výpočet. Bez eToro dát pre daný ticker sa graf ticho vráti k pôvodným yfinance sviečkam.</li>
     <li>Hlavný graf prepína <strong>Weekly / Daily</strong>. V režime Daily možno markery prepnúť medzi <strong>Sila</strong> (2/4 až 4/4) a <strong>Výnos %</strong> voči aktuálnej cene.</li>
+    <li><strong>HA</strong> (v režime Daily) prekreslí sviečky ako Heikin Ashi, aby sa dal ten istý setup posúdiť dvoma pohľadmi. <strong>Mení sa výhradne zobrazenie sviečok</strong> — signály aj indikátory (EMA20, Kijun) zostávajú počítané z klasických sviečok, aby ostal spoločný referenčný bod; keby sa prepočítali aj ony, otázka „sedí to v oboch pohľadoch?" by stratila zmysel. Voľba prežije zmenu tickera. Pozor: vyhladený graf vyzerá pokojnejšie, než aká jazda reálne bola.</li>
     <li><strong>Buy signál markery</strong> (šípky pod sviečkami) — farba podľa tieru (viď nižšie).</li>
     <li><strong>eToro kolieska</strong> — ak má ticker otvorené pozície v eToro účtoch, zobrazia sa malé krúžky pod sviečkou, kde bola pozícia otvorená (zelená = v zisku, červená = v strate, odlíšené podľa účtu). Hover nad eToro kolieskom alebo buy šípkou zobrazí presný detail cez natívny LWC hit-testing.</li>
     <li><strong>Čakajúca objednávka</strong> — jemná bodkovaná žltá čiara na cieľovej cene, ak má ticker v niektorom účte čakajúcu objednávku (limitku alebo market order čakajúci na exekúciu). Zobrazí sa bez ohľadu na to, či titul aj držíš — rovnaká objednávka je vidieť aj v Portfóliu v sekcii Čakajúce objednávky. Market objednávka bez pevnej ceny čiaru nemá.</li>
@@ -423,6 +429,8 @@
     <li>Import je zámerne manuálny: najprv si mimo dashboardu skontroluješ, čo doň ide, a až potom nahráš súbor.</li>
     <li>Kontrolná tabuľka pod importom zobrazuje raw hodnoty aj výsledný ranking. XLSX import aktualizuje DIP cache pre scanner a DCA kartu. Tickery z importu zároveň určujú skenované univerzum vrátane titulov mimo Nasdaq-100. Bez importu scanner použije Nasdaq-100 fallback. Po scane zostane v hlavnej tabuľke každý úspešne spracovaný ticker s <strong>TOTAL ≥85</strong>, aj keď nemá čerstvý technický signál; nižšie skóre sa ukáže iba pri aktuálnom signále.</li>
     <li><strong>Spustiť scanner</strong> — paralelný sken importovaných DIP tickerov (progress bar, beží na pozadí).</li>
+    <li><strong>Rescan teraz</strong> — vynúti nový sken kedykoľvek. Počas behu je tlačidlo zablokované; nad výsledkami je čas posledného skenu a či bežal ručne alebo automaticky.</li>
+    <li><strong>Automatický rescan raz denne</strong> po zatvorení amerického trhu (23:30 UTC, víkendy a sviatky sa preskakujú). Dôvod: DIP skóre je z importu statické, ale technické podmienky C1–C4 sa menia <em>každý deň</em> — EMA20 sa posúva, RSI aj z-score sa prepočítavajú. Bez toho by ti pri týždennom importe unikol setup, ktorý vznikne v stredu. Stránka sa pod rukami nemení; nové výsledky uvidíš pri ďalšom otvorení.</li>
   </ul>
 
   <h3>Kompaktný status scanu</h3>
@@ -502,7 +510,9 @@
   <ul>
     <li><strong>Analytici</strong> — Buy / Hold / Sell konsenzus; priemerná cieľová cena je uvedená priamo za ním v zátvorke.</li>
     <li><strong>Short interest</strong> — podiel floatu predaný nakrátko: pod 5 % nízky, 5–10 % zvýšený, 10 %+ vysoký.</li>
-    <li><strong>Insideri a EPS</strong> — nákupy/predaje insiderov a história beat/miss zostávajú v rovnakej karte.</li>
+    <li><strong>Insideri a EPS</strong> — súhrn za 90 dní a história beat/miss.</li>
+    <li><strong>Insider obchody (~2 roky)</strong> — zoznam jednotlivých transakcií: dátum, meno, rola, nákup/predaj, počet akcií, cena za akciu a hodnota. Päť najnovších je otvorených, zvyšok za rozbaľovačom. Granty a uplatnenia opcií sa medzi nákupy nepočítajú (nie sú to nákupy za vlastné peniaze); pri predaji uvedenom rozsahom cien sa berie stred.</li>
+    <li><strong>Priemer nákupov</strong> — hodnotou vážená priemerná nákupná cena insiderov a odstup aktuálnej ceny od nej. Odpovedá na otázku, či kupuješ pod alebo nad tým, čo zaplatili oni. <span class="warn">Je to popisný údaj, nie prediktor — do <code>dip_score</code> zámerne nevstupuje. Insideri sa vedia v načasovaní mýliť: pri CHTR nakupovali za $140–274 a titul je na $123.</span></li>
   </ul>
   <p>V <strong>Portfóliu → Stĺpce</strong> je voliteľný stĺpec <strong>Cieľ</strong> pre akcie. Ukazuje cieľovú cenu a počty Buy/Hold/Sell. Zelená = prevaha Buy, červená = prevaha Sell, žltá = Hold alebo nerozhodný konsenzus. Dáta sa načítajú až po zapnutí stĺpca.</p>
   <p>Šírku každého stĺpca možno meniť samostatne potiahnutím úchytu v hlavičke. Ostatné stĺpce sa nemenia; nevyužité miesto zostane napravo a široká tabuľka sa posúva horizontálne.</p>
@@ -576,22 +586,22 @@
   <p>Výstup je zámerne krátky: najviac dva dôvody <strong>pre</strong>, dva dôvody <strong>proti</strong> a jedna podmienka, ktorá môže záver zmeniť. Tlačidlo na dôkazy otvorí detail v Analytike.</p>
   <blockquote><p>Verdikt nevytvára nový model ani tajné skóre. Len prekladá už existujúce dáta do ľudskej reči. Ak niektorý zdroj chýba, zobrazí sa jeho nedostupnosť a istota záveru sa zníži.</p></blockquote>
 
-  <h2 id="memory">6. Prev?dzka a pam??ov? profil</h2>
-  <p>Dashboard je nastaven? tak, aby sa zmestil do lacn?ho Render pl?nu s limitom pribli?ne <strong>512 MB RAM</strong>. Predvolen? backend re?im je <code>DASH_MEMORY_PROFILE=low</code>.</p>
-  <p>Zapnut? ost?va jadro: grafy, portf?lio, live P/L, C1?C4 sign?ly, Scanner, Verdikt, news/earnings a cache-first na??tavanie svie?ok.</p>
+  <h2 id="memory">6. Prevádzka a pamäťový profil</h2>
+  <p>Dashboard je nastavený tak, aby sa zmestil do lacného Render plánu s limitom približne <strong>512 MB RAM</strong>. Predvolený backend režim je <code>DASH_MEMORY_PROFILE=low</code>.</p>
+  <p>Zapnuté ostáva jadro: grafy, portfólio, live P/L, C1–C4 signály, Scanner, Verdikt, news/earnings a cache-first načítavanie sviečok.</p>
   <table>
-    <thead><tr><th>Prep?na?</th><th>Default</th><th>V?znam</th></tr></thead>
+    <thead><tr><th>Prepínač</th><th>Default</th><th>Význam</th></tr></thead>
     <tbody>
-      <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnos? v Analytike.</td></tr>
+      <tr><td><code>ENABLE_PREDICTIVE_ML</code></td><td>0</td><td>ML pravdepodobnosť v Analytike.</td></tr>
       <tr><td><code>ENABLE_PREDICTIVE_HMM</code></td><td>0</td><td>HMM regime diagnostika.</td></tr>
-      <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatick? dop??anie regime kontextu star??ch sign?lov.</td></tr>
-      <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika sign?lov.</td></tr>
-      <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth v?po?et.</td></tr>
-      <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 ?as? Massive market snapshotu.</td></tr>
+      <tr><td><code>ENABLE_SIGNAL_CONTEXT_BACKFILL</code></td><td>0</td><td>Automatické dopĺňanie regime kontextu starších signálov.</td></tr>
+      <tr><td><code>ENABLE_SIGNAL_ANALYTICS</code></td><td>1</td><td>90D+ analytika signálov.</td></tr>
+      <tr><td><code>ENABLE_MARKET_BREADTH</code></td><td>0</td><td>Background Nasdaq breadth výpočet.</td></tr>
+      <tr><td><code>ENABLE_MASSIVE_SP500</code></td><td>0</td><td>S&amp;P 500 časť Massive market snapshotu.</td></tr>
       <tr><td><code>ENABLE_MASSIVE_MARKET</code></td><td>1</td><td>Massive EOD kontext ako celok.</td></tr>
     </tbody>
   </table>
-  <p>Endpoint <code>/api/admin/memory</code> uk??e aktu?lny profil, stav prep?na?ov a ve?kos? hlavn?ch RAM cache. Virtu?lny paper-trading bot bol odstr?nen?; ak sa vr?ti, bude vhodnej?? ako samostatn? projekt/slu?ba.</p>
+  <p>Endpoint <code>/api/admin/memory</code> ukáže aktuálny profil, stav prepínačov a veľkosť hlavných RAM cache. Virtuálny paper-trading bot bol odstránený; ak sa vráti, bude vhodnejší ako samostatný projekt/služba.</p>
 
   <h2 id="philosophy">7. Filozofia signálov</h2>
 
@@ -643,7 +653,54 @@
     <tr><td>Staré signály majú zlú farbu</td><td>Log sa neprepisuje; prefarbia sa po novom vyhodnotení.</td></tr>
   </table>
 
-  <h2 id="tech">10. Technická príloha</h2>
+  <h2 id="risks">10. Riziká a obmedzenia</h2>
+  <blockquote><p>Čítaj skôr, než podľa dashboardu spravíš rozhodnutie. Nič z toho nie je hypotetické — všetko sú veci, ktoré sa už stali alebo sú namerané.</p></blockquote>
+
+  <h3>Dátové zdroje sú krehké</h3>
+  <p class="warn">Celý nástroj stojí na bezplatných tieroch, ktoré sa menia bez ohlásenia. <strong>25. 7. 2026</strong> prestal Finnhub vracať insider aj earnings dáta (HTTP 200 s prázdnymi poľami) a FMP začal na <code>earnings-surprises</code> odpovedať 403. Earnings preto majú reťaz štyroch zdrojov: Finnhub → FMP → Alpha Vantage → Yahoo.</p>
+  <ul>
+    <li><strong>Alpha Vantage</strong> má 25 volaní denne. Earnings majú preto vlastnú 30-dňovú cache — bez nej by limit vyčerpali a zablokovali aj fundamenty.</li>
+    <li><strong>Yahoo quoteSummary</strong> je neoficiálny endpoint bez SLA. Môže kedykoľvek zmeniť tvar alebo prestať odpovedať.</li>
+    <li><strong>eToro</strong> sa volá cez lokálny proxy na neverejné API. Nie je to podporovaná integrácia.</li>
+    <li>Podmienky väčšiny zdrojov <strong>zakazujú ďalšie šírenie dát</strong>. Pre osobné použitie to je iná situácia než pre čokoľvek zdieľané.</li>
+  </ul>
+
+  <h3>Zámerne sa zobrazujú staré dáta</h3>
+  <p>Grafy aj Prehľad sa kreslia z posledného uloženého stavu, kým dobehne čerstvé načítanie. Je to označené — stlmený graf a chip „z HH:MM · aktualizujem…", nad prehľadom pás s časom. <span class="bad">Ak by toto označenie zlyhalo, dá sa rozhodovať podľa starej ceny.</span> Scanner sa aktualizuje raz denne po zatvorení trhu a medzi behmi je statický zámerne.</p>
+
+  <h3>Čo signály NIE sú</h3>
+  <p>C1–C4 nie je obchodný systém. Merané na 23 tituloch z portfólia a watchlistu za dva roky, 90-dňový horizont, vstupy aj výstupy ocenené reálnymi cenami:</p>
+  <ul>
+    <li>medián výnosu <strong>+2,75 %</strong>, ale priemerný najhlbší prepad od vstupu <strong>−20,5 %</strong>,</li>
+    <li><strong>56 % obchodov</strong> ide niekedy viac než 15 % proti vstupu,</li>
+    <li>aj pri okamžitom vstupe je zhruba <strong>50:50</strong>, či skôr príde +3 % alebo −3 %.</li>
+  </ul>
+  <p class="warn">Prakticky: s tesným stopom sa toto pravidlo obchodovať nedá a rýchly presun stopu na nulu nie je realistické očakávanie. Riziko sa tu rieši veľkosťou pozície, nie presnosťou vstupu.</p>
+  <p>Testovali sa štyri potvrdzovacie pravidlá (vynechať signály na červenej HA sviečke, filter podľa trendového režimu, vstup až na prvej zelenej HA, buy-stop +2 % nad signálom). <strong>Žiadne neodstránilo chvost strát</strong> — 5. percentil zostáva okolo −40 % vo všetkých variantoch. Buy-stop +2 % ako jediný mierne pomohol (medián +3,1 % oproti +2,1 %) pri 30 % menej obchodoch.</p>
+  <p>Meranie prebehlo v období 2024–2026, ktoré bolo priaznivé pre nakupovanie prepadov, a na dosť volatilných tituloch. <strong>V inom režime trhu môžu čísla vyzerať úplne inak.</strong></p>
+
+  <h3>Známe interpretačné pasce</h3>
+  <table>
+    <tr><th>Vec</th><th>Ako sa dá zle prečítať</th></tr>
+    <tr><td><strong>História signálov</strong></td><td>Zapisuje každý deň so skóre ≥ 2 <em>bez ohľadu na trend</em> a úspešnosť meria voči aktuálnej cene po 10 dňoch. Mieša teda protitrendové setupy a rôzne dlhé obdobia. Údaj „0 % úspešnosť" (napr. NFLX) <strong>nie je verdikt nad stratégiou</strong>.</td></tr>
+    <tr><td><strong>DIP v3</strong></td><td>Spätne sa otestovať nedá. Finviz ranking je dnešný snímok; aplikovať ho na staré dátumy je look-ahead bias.</td></tr>
+    <tr><td><strong>Insider obchody</strong></td><td>Popisný údaj, nie prediktor — preto nevstupuje do <code>dip_score</code>. Pri CHTR insideri nakupovali za $140–274, titul je na $123. Signalizuje presvedčenie o hodnote, nie načasovanie.</td></tr>
+    <tr><td><strong>Heikin Ashi</strong></td><td>Mení aj vstupy indikátorov, nielen vzhľad sviečok. Prepínač v Analytike preto mení <em>výhradne sviečky</em> a indikátory necháva klasické, aby ostal spoločný referenčný rámec. Vyhladený graf vyzerá pokojnejšie, než aká jazda reálne bola.</td></tr>
+    <tr><td><strong>Earnings prekvapenie</strong></td><td>Pri niektorých tituloch sa GAAP výsledok porovnáva s non-GAAP konsenzom (GOOG: +216 %). Také riadky sa zobrazia, ale verdikt beat/miss sa zneplatní.</td></tr>
+  </table>
+
+  <h3>Prevádzkové obmedzenia</h3>
+  <ul>
+    <li>Predpokladá sa <strong>jeden backend proces</strong>. Denný rescan skenera používa zámok v pamäti a marker na disku; pri viacerých workeroch by bol potrebný medziprocesový zámok.</li>
+    <li>Marker sa zapisuje pri <em>začatí</em> skenu — ak proces spadne uprostred, automatický beh sa v ten deň nezopakuje. Manuálne tlačidlo funguje vždy.</li>
+    <li>Cache v prehliadači má limity: snapshoty grafov 24 grafov × 320 sviečok, prehľad 500 kB. Po prekročení sa zahadzujú najstaršie.</li>
+    <li>Na Renderi je basic auth <strong>fail-closed</strong> — bez <code>DASH_USER</code>/<code>DASH_PASS</code> sa služba odmietne spustiť. Verejný endpoint portfólia je za tokenom v hlavičke a rate-limitovaný. Kľúče sú v premenných prostredia, nie v repozitári.</li>
+  </ul>
+
+  <h3>Právne</h3>
+  <p class="bad"><strong>Toto nie je investičné poradenstvo.</strong> Nástroj je postavený pre jedného používateľa a jeho konkrétny spôsob rozhodovania. Signály, skóre ani verdikt nie sú odporúčaním na nákup či predaj.</p>
+
+  <h2 id="tech">11. Technická príloha</h2>
   <blockquote><p>Pre údržbu. Detailné pravidlá a pasce sú v <code>CLAUDE.md</code>.</p></blockquote>
 
   <h3>Stack</h3>
