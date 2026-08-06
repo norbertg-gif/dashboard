@@ -49,6 +49,10 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   isLightMode = localStorage.getItem('td_theme') === 'light';
   applyTheme();
   applyUiMode();
+  // Košík grafov prežíva reload — lišta sa musí obnoviť pri štarte, inak by
+  // vyklikané tickery ostali v localStorage bez viditeľného spôsobu, ako ich
+  // otvoriť alebo vyčistiť.
+  renderBasketBar();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   if (requestedTab === 'risk') {
     switchMainTab('portfolio');

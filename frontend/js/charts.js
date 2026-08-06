@@ -2302,6 +2302,16 @@ async function importChartsFromClipboard() {
   } else {
     setStatus(`Načítavam ${tickers.length} tickerov`, 'ok');
   }
+  openChartsForSymbols(tickers);
+}
+
+// Spoločné otvorenie zoznamu tickerov ako 1d grafov. Používa import zo schránky
+// aj košík grafov — bez tejto extrakcie by dva povrchy robili to isté dvoma
+// mierne odlišnými spôsobmi (a jeden by zabudol napr. applyAllChartPortfolioFlags).
+function openChartsForSymbols(symbols) {
+  const tickers = [...new Set((symbols || [])
+    .map(s => String(s || '').trim().toUpperCase()).filter(Boolean))].slice(0, 20);
+  if (!tickers.length) return;
   switchMainTab('charts');
   clearChartPanelsForImport();
   setActivePanel(null);
@@ -2314,6 +2324,7 @@ async function importChartsFromClipboard() {
   saveLayout();
   applyAllChartPortfolioFlags();
   ids.forEach(id => loadChart(id));
+  return ids;
 }
 // Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
 // z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.

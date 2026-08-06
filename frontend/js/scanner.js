@@ -306,7 +306,7 @@ function investorInboxRow(item) {
     <div class="inbox-actions">
       <button class="btn mini" onclick="openVerdictTicker('${ticker}', event)">Verdikt</button>
       <button class="btn mini" onclick="event.stopPropagation();openScannerTicker('${ticker}')">Analytika</button>
-      ${watchlistButtonHtml(item.ticker, 'inbox-wl-btn')}
+      ${watchlistButtonHtml(item.ticker, 'inbox-wl-btn')}${basketButtonHtml(item.ticker, 'inbox-basket-btn')}
     </div>
   </div>`;
 }
@@ -574,11 +574,15 @@ function renderEarningsCalendar(payload) {
         const urgent = Number(item.days) <= 1;
         const held = item.in_portfolio ? 'PORT' : 'watch';
         const pnl = Number.isFinite(Number(item.pnl_pct)) ? `${Number(item.pnl_pct) >= 0 ? '+' : ''}${Number(item.pnl_pct).toFixed(1)}%` : '';
-        return `<button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="event.stopPropagation();openScannerTicker('${escHtml(item.ticker)}')" title="Otvoriť ${escHtml(item.ticker)} v Analytike">
-          <b>${escHtml(item.ticker)}</b>
-          <span>${escHtml(held)}</span>
-          ${pnl ? `<em class="${Number(item.pnl_pct) >= 0 ? 'pos' : 'neg'}">${escHtml(pnl)}</em>` : ''}
-        </button>`;
+        // Košíkové tlačidlo NEMÔŽE byť vnorené v <button> (neplatné HTML,
+        // klik by sa správal nepredvídateľne) — preto obal so sesterským prvkom.
+        return `<span class="earncal-wrap">
+          <button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="event.stopPropagation();openScannerTicker('${escHtml(item.ticker)}')" title="Otvoriť ${escHtml(item.ticker)} v Analytike">
+            <b>${escHtml(item.ticker)}</b>
+            <span>${escHtml(held)}</span>
+            ${pnl ? `<em class="${Number(item.pnl_pct) >= 0 ? 'pos' : 'neg'}">${escHtml(pnl)}</em>` : ''}
+          </button>${basketButtonHtml(item.ticker, 'earncal-basket-btn')}
+        </span>`;
       }).join('')}</div>
     </div>`).join('');
 }
@@ -1148,7 +1152,7 @@ function renderNasdaqScanner(payload) {
         </span>`
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}<span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
+      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}${basketButtonHtml(r.ticker, 'scanner-basket-btn')}<span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
       <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Analytike" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Analytika</button></td>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>

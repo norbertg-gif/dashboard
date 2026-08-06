@@ -25,6 +25,101 @@ const CHART_COLORS = {
   analystTarget: '#7dd3fc',   // cieľ analytikov — svetlejšia
 };
 
+// ── KOŠÍK GRAFOV ─────────────────────────────────────────────────────────────
+// Tickery sa spomínajú na desiatkach miest (heatmapa, scanner, plán, earnings).
+// Košík ich zbiera naprieč tabmi a jedným tlačidlom otvorí ako grafy — inak si
+// človek musí mená pamätať alebo ich prepisovať do schránky.
+//
+// Vedome je to LEN výber, žiadna analytika: nič sa neposiela na server, nič sa
+// nepočíta, stav je v localStorage a prežije reload aj prepínanie tabov.
+// Vzor tlačidla aj hromadného prekreslenia je prevzatý z `watchlistButtonHtml`.
+const CHART_BASKET_KEY = 'td_chart_basket';
+const CHART_BASKET_MAX = 20;     // rovnaký strop ako import zo schránky
+
+function getChartBasket() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHART_BASKET_KEY) || '[]');
+    return Array.isArray(v) ? v.filter(Boolean).map(s => String(s).toUpperCase()) : [];
+  } catch (e) { return []; }
+}
+
+function setChartBasket(list) {
+  const uniq = [...new Set(list.map(s => String(s).toUpperCase()))].slice(0, CHART_BASKET_MAX);
+  try { localStorage.setItem(CHART_BASKET_KEY, JSON.stringify(uniq)); } catch (e) {}
+  refreshBasketButtons();
+  renderBasketBar();
+  return uniq;
+}
+
+function isInChartBasket(sym) {
+  return getChartBasket().includes(String(sym || '').trim().toUpperCase());
+}
+
+function toggleChartBasket(symbol, event) {
+  event?.stopPropagation();
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return;
+  const cur = getChartBasket();
+  if (cur.includes(sym)) {
+    setChartBasket(cur.filter(s => s !== sym));
+    setStatus?.(`${sym} odobraný z košíka`, 'ok');
+    return;
+  }
+  // Strop je tvrdý: 20 grafov naraz je hranica, za ktorou sa mriežka aj pamäť
+  // prehliadača stávajú nepoužiteľné (rovnaký limit má import zo schránky).
+  if (cur.length >= CHART_BASKET_MAX) {
+    setStatus?.(`Košík je plný (${CHART_BASKET_MAX}) — najprv otvor alebo vyčisti`, 'warn');
+    return;
+  }
+  setChartBasket([...cur, sym]);
+  setStatus?.(`${sym} v košíku (${cur.length + 1})`, 'ok');
+}
+
+function basketButtonHtml(symbol = '', extraClass = '') {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const inB = isInChartBasket(sym);
+  return `<button type="button" class="basket-btn ${extraClass} ${inB ? 'in-basket' : ''}"
+    data-basket-symbol="${escHtml(sym)}"
+    title="${escHtml(inB ? `${sym} je v košíku grafov — klikom odoberieš` : `Pridať ${sym} do košíka grafov`)}"
+    onclick="toggleChartBasket('${escHtml(sym)}', event)">${inB ? '✓' : '⊕'}</button>`;
+}
+
+function refreshBasketButtons() {
+  const basket = getChartBasket();
+  document.querySelectorAll('[data-basket-symbol]').forEach(btn => {
+    const sym = btn.getAttribute('data-basket-symbol') || '';
+    const inB = basket.includes(sym);
+    btn.classList.toggle('in-basket', inB);
+    btn.textContent = inB ? '✓' : '⊕';
+    btn.title = inB ? `${sym} je v košíku grafov — klikom odoberieš`
+                    : `Pridať ${sym} do košíka grafov`;
+  });
+}
+
+// Lišta je globálna (mimo tabov), aby košík naplnený v Scanneri bolo vidno aj
+// na Prehľade. Skrýva sa, keď je prázdny — nemá zaberať miesto zbytočne.
+function renderBasketBar() {
+  let el = document.getElementById('chart-basket-bar');
+  const basket = getChartBasket();
+  if (!basket.length) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'chart-basket-bar';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <span class="cb-count">${basket.length}</span>
+    <span class="cb-list" title="${escHtml(basket.join(', '))}">${escHtml(basket.slice(0, 6).join(' · '))}${basket.length > 6 ? ` +${basket.length - 6}` : ''}</span>
+    <button type="button" class="btn primary" onclick="openChartBasket()">Otvoriť grafy</button>
+    <button type="button" class="btn" onclick="setChartBasket([])" title="Vyprázdniť košík">✕</button>`;
+}
+
+function openChartBasket() {
+  const basket = getChartBasket();
+  if (!basket.length) return;
+  if (typeof openChartsForSymbols === 'function') openChartsForSymbols(basket);
+}
+
 // ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
 // Prázdny panel s "Načítava sa…" je horší než mierne staré sviečky zobrazené
 // okamžite. Posledný známy stav grafu preto prežíva v localStorage a vykreslí
