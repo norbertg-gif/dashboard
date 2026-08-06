@@ -101,6 +101,14 @@ function refreshBasketButtons() {
 function renderBasketBar() {
   let el = document.getElementById('chart-basket-bar');
   const basket = getChartBasket();
+  // Tlačidlo v lište Grafov je primárna cesta — tam ho človek hľadá, keď chce
+  // "zobraziť to, čo som naklikal". Plávajúca lišta je len skratka, aby sa
+  // nemusel prepínať na Grafy len kvôli tomu.
+  const btn = document.getElementById('basket-open-btn');
+  if (btn) {
+    btn.style.display = basket.length ? '' : 'none';
+    btn.textContent = `🧺 Košík (${basket.length})`;
+  }
   if (!basket.length) { el?.remove(); return; }
   if (!el) {
     el = document.createElement('div');

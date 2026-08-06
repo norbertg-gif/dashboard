@@ -5582,7 +5582,9 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   left: 50%;
   bottom: 14px;
   transform: translateX(-50%);
-  z-index: 60;
+  /* Nad bežným chrome (hlavička a panely idú do ~200), ale POD modálmi
+     (9000+), aby neprekrývala dialógy. */
+  z-index: 500;
   display: flex;
   align-items: center;
   gap: 9px;

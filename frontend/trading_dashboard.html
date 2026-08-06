@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260806-171917">
+<link rel="stylesheet" href="/dashboard.css?v=20260806-180704">
 </head>
 <body data-main-tab="home">
 
@@ -78,6 +78,7 @@
         <input type="checkbox" id="movers-portfolio-only" style="cursor:pointer;">Len z portfólia
       </label>
       <button class="btn" id="clipboard-charts-btn" onclick="importChartsFromClipboard()" title="Vloží tickery zo schránky (každý na samostatnom riadku), zruší aktuálne grafy a otvorí ich ako 1d grafy. Limit 20.">📋 Tickery</button>
+      <button class="btn" id="basket-open-btn" onclick="openChartBasket()" title="Otvorí tickery vyklikané cez ⊕ naprieč dashboardom" style="display:none;">🧺 Košík</button>
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -541,17 +542,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260806-171917"></script>
-  <script src="/js/live.js?v=20260806-171917"></script>
-  <script src="/js/portfolio.js?v=20260806-171917"></script>
-  <script src="/js/watchlist.js?v=20260806-171917"></script>
-  <script src="/js/scanner-table-sort.js?v=20260806-171917"></script>
-  <script src="/js/scanner.js?v=20260806-171917"></script>
-  <script src="/js/chart_patterns.js?v=20260806-171917"></script>
-  <script src="/js/predictive.js?v=20260806-171917"></script>
-  <script src="/js/verdict.js?v=20260806-171917"></script>
-  <script src="/js/home.js?v=20260806-171917"></script>
-  <script src="/js/charts.js?v=20260806-171917"></script>
-  <script src="/js/main.js?v=20260806-171917"></script>
+  <script src="/js/core.js?v=20260806-180704"></script>
+  <script src="/js/live.js?v=20260806-180704"></script>
+  <script src="/js/portfolio.js?v=20260806-180704"></script>
+  <script src="/js/watchlist.js?v=20260806-180704"></script>
+  <script src="/js/scanner-table-sort.js?v=20260806-180704"></script>
+  <script src="/js/scanner.js?v=20260806-180704"></script>
+  <script src="/js/chart_patterns.js?v=20260806-180704"></script>
+  <script src="/js/predictive.js?v=20260806-180704"></script>
+  <script src="/js/verdict.js?v=20260806-180704"></script>
+  <script src="/js/home.js?v=20260806-180704"></script>
+  <script src="/js/charts.js?v=20260806-180704"></script>
+  <script src="/js/main.js?v=20260806-180704"></script>
 </body>
 </html>
