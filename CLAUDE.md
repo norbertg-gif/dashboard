@@ -111,24 +111,26 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
--5. **BUG: equity v hlavičke je ~$31 nad eToro — ČIASTOČNE RIEŠENÉ 2026-08-07.**
-   **Server je v poriadku:** `/api/diagnostics/summary` dal equity 26 843,79 proti
-   eToro 26 843,81 — rozdiel **2 centy**. Vzorec `cash + invested + total_pnl`
-   teda sedí a Smart Portfolios (`mirror_closed_profit`) sa korektne vyrušia
-   (v `invested` so záporným znamienkom, v `total_pnl` s kladným).
-   **Chyba je vo frontende**, v extrapolácii súčtov z WS tickov
-   (`estimatePositionLivePnl`). Nameraná odchýlka bola +$37, po vynechaní krypta
-   a 5-minútovom resynchu (`PORTFOLIO_RESYNC_MS`) stále **~$31**.
-   **Kde hľadať ďalej** (v tomto poradí):
-   (a) posledné meranie: cash sedí ±$1, invested ±$1 (vyrušia sa), **celý rozdiel
-   je v P/L** — dashboard 9 928,38 vs eToro 9 896,95;
-   (b) overiť, či deploy s vynechaním krypta vôbec dobehol, kým sa meralo —
-   časy boli tesne pri sebe;
-   (c) ak áno, vinník NIE JE krypto: skúsiť dočasne vypnúť extrapoláciu úplne
-   (`positionSupportsLivePnl` → vždy false) a zmerať znova. Ak rozdiel zmizne,
-   je to WS spread na akciách; ak ostane, je chyba v `_snapshotPnl` baseline,
-   nie v tickoch.
-   **Netreba znovu overovať:** server, mirrors, kurzy európskych titulov.
+-5. **Equity v hlavičke vs eToro — VYRIEŠENÉ 2026-08-07, NEOTVÁRAŤ ZNOVA.**
+   Nebola to chyba výpočtu. `/api/diagnostics/summary` ukázal, že serverový
+   vzorec `cash + invested + total_pnl` sedí s eToro **na dva centy**, vrátane
+   korektného vyrušenia Smart Portfolios (`mirror_closed_profit` je záporný a
+   vstupuje do `invested` aj `total_pnl` s opačným znamienkom).
+   Pozorovaný rozdiel ($37 → $31 → nakoniec $5) bol **časový posun medzi dvoma
+   oknami**: eToro a dashboard neukazujú ten istý okamih. Dôkaz je v znamienkach
+   — per-pozíciu rozdiely išli oboma smermi (AMD +$2,02, ARM −$0,34) a nakoniec
+   sa prevrátil aj celkový (dashboard začal hlásiť MENEJ než eToro). Systematické
+   skreslenie odhadu by tlačilo vždy jedným smerom.
+   **Čo z toho ostalo v kóde a prečo to nechať:**
+   (a) `positionSupportsLivePnl()` — krypto sa neextrapoluje; pri ~35 900
+   jednotkách TRX robí tisícina centa $36, takže to je aj tak správne;
+   (b) `PORTFOLIO_RESYNC_MS` (5 min) — bráni kumulácii driftu;
+   (c) riadok `server $… · rozdiel · vek` pod Equity — objaví sa len pri
+   rozdiele nad $1 a robí z porovnania jeden pohľad namiesto workflowu;
+   (d) `GET /api/diagnostics/summary` — rozpad equity na členy.
+   **Netreba znovu overovať:** serverový vzorec, mirrors, kurzy európskych
+   titulov, WS spread. Ak by rozdiel niekedy narástol a bol STABILNE jedným
+   smerom, až potom ide o skutočný bug.
 
 -4. **BUG: subpanel oscilátora nelícuje s hlavným grafom v Analytike — HLÁSENÉ 2026-08-05.**
    Overené na RSI 14 aj MACD (AMD, weekly, 2 roky, 104 sviečok): spodný subpanel
