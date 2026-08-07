@@ -1407,6 +1407,42 @@ function fmtPortVal(val, fmt) {
   }
 }
 
+// ── Periodická resynchronizácia snapshotu ────────────────────────────────────
+// Živé súčty sú extrapolácia zo snapshotu, takže sa od reality postupne
+// vzďaľujú. Namiesto vylepšovania odhadu sa snapshot pravidelne obnoví —
+// odchýlka sa tým nemôže kumulovať a hlavička ostane zároveň živá.
+//
+// Beží LEN keď je karta viditeľná: refresh=1 obchádza 24h POSITIONS_CACHE_TTL
+// a ide na eToro, takže nemá zmysel volať to do prázdna na skrytej karte.
+const PORTFOLIO_RESYNC_MS = 5 * 60 * 1000;
+let _portfolioResyncTimer = null;
+
+async function resyncPortfolioSnapshots() {
+  if (document.visibilityState !== 'visible') return;
+  for (const acct of ['1', '2']) {
+    if (!portfolioAccountData[acct]) continue;   // účet sa ešte nenačítal
+    try {
+      const r = await fetch(`${API}/api/etoro/portfolio?account=${acct}&refresh=1`);
+      if (!r.ok) continue;
+      const data = await r.json();
+      // Pri výpadku proxy vracia backend staršie dáta s `stale: true` — tie by
+      // resync len "potvrdili" ako čerstvé, takže sa ignorujú (rovnaký dôvod
+      // ako pri manuálnom refreshi Portfólia).
+      if (data?.stale || !data?.positions || !data?.summary) continue;
+      preparePortfolioSnapshot(data);
+      portfolioAccountData[acct] = data;
+      if (typeof rememberLiveInstruments === 'function') rememberLiveInstruments(data.positions);
+    } catch (e) { /* fail-soft: ďalší pokus o 5 minút */ }
+  }
+  if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
+  if (typeof updateHomeKpiLive === 'function') updateHomeKpiLive();
+}
+
+function startPortfolioResync() {
+  if (_portfolioResyncTimer) return;
+  _portfolioResyncTimer = setInterval(resyncPortfolioSnapshots, PORTFOLIO_RESYNC_MS);
+}
+
 function preparePortfolioSnapshot(data) {
   if (!data || data.error) return;
   const sum = data.summary || {};
@@ -1423,10 +1459,25 @@ function preparePortfolioSnapshot(data) {
   });
 }
 
+// Odhad P/L z živej ceny. Je to EXTRAPOLÁCIA zo snapshotu, nie meraná hodnota —
+// `(cena − snapshot) × units`. Pri pozíciách s obrovským počtom jednotiek to
+// zosilní aj nepatrný rozdiel medzi WS kotáciou a tým, čím eToro pozíciu
+// oceňuje (spread): TRX má ~35 900 jednotiek, takže tisícina centa rozdielu =
+// $36 v hlavičke. Nameraný drift 2026-08-06 bol +$37 proti eToro, kým serverový
+// súčet sedel na dva centy.
+//
+// Preto sa krypto z odhadu vynecháva a drží si snapshot hodnotu až do ďalšej
+// synchronizácie. Cena v riadku sa aktualizuje ďalej — mení sa len to, či sa
+// z nej dopočítava P/L do súčtov.
+function positionSupportsLivePnl(pos) {
+  return (pos?.type || '') !== 'Crypto';
+}
+
 function estimatePositionLivePnl(pos, livePrice) {
   const snapshotPnl = Number(pos._snapshotPnl ?? pos.pnl ?? 0);
   const snapshotRate = Number(pos._snapshotCurrentRate || pos.currentRate || 0);
   const units = Number(pos.units || 0);
+  if (!positionSupportsLivePnl(pos)) return snapshotPnl;
   if (!Number.isFinite(livePrice) || livePrice <= 0 || !snapshotRate || !units) return snapshotPnl;
   const direction = pos.isBuy === false ? -1 : 1;
   return snapshotPnl + (livePrice - snapshotRate) * units * direction;

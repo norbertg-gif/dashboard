@@ -53,6 +53,9 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   // vyklikané tickery ostali v localStorage bez viditeľného spôsobu, ako ich
   // otvoriť alebo vyčistiť.
   renderBasketBar();
+  // Snapshot portfólia sa periodicky obnoví, aby sa živý odhad nemohol
+  // rozísť s eToro (nameraný drift +$37 pri extrapolácii bez resyncu).
+  startPortfolioResync();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   if (requestedTab === 'risk') {
     switchMainTab('portfolio');
