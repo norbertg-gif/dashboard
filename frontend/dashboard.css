@@ -5552,6 +5552,15 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .home-pos { color: var(--up); }
 .home-neg { color: var(--down); }
 
+/* Serverová hodnota pod živou equity — objaví sa len pri rozdiele nad $1. */
+.port-sum-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--muted3);
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
 /* Košík grafov — ⊕ tlačidlo pri tickeri a globálna lišta dole.
    Modrá zámerne: je to výber, nie stav pozície ani P/L. */
 .basket-btn {

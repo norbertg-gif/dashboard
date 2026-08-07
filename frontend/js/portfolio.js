@@ -1417,8 +1417,11 @@ function fmtPortVal(val, fmt) {
 const PORTFOLIO_RESYNC_MS = 5 * 60 * 1000;
 let _portfolioResyncTimer = null;
 
+let _lastResyncAt = 0;
+
 async function resyncPortfolioSnapshots() {
   if (document.visibilityState !== 'visible') return;
+  _lastResyncAt = Date.now();
   for (const acct of ['1', '2']) {
     if (!portfolioAccountData[acct]) continue;   // účet sa ešte nenačítal
     try {
@@ -2031,7 +2034,19 @@ function renderPortPanel(pid) {
     <div class="port-sum-item"><div class="port-sum-label">Invested</div><div class="port-sum-val">$${(sum.invested||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">P/L</div><div id="port-sum-${pid}-pnl" class="port-sum-val ${liveSummaryPnl>=0?'port-pos':'port-neg'}">${liveSummaryPnl>=0?'+':''}$${liveSummaryPnl.toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Dnes P/L</div><div id="port-sum-${pid}-daily" class="port-sum-val ${dailyPnlSum>=0?'port-pos':'port-neg'}">${dailyPnlSum>=0?'+':''}$${dailyPnlSum.toFixed(2)}</div></div>
-    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div></div>
+    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div>${
+      // Serverová (snapshot) hodnota vedľa živej. Živá je extrapolácia z WS
+      // tickov, serverová je to, čo naposledy povedalo eToro — keď sa rozídu,
+      // vidno to hneď a netreba otvárať /api/diagnostics/summary.
+      // Ukazuje sa len pri rozdiele nad $1, aby to bežne nerušilo.
+      (() => {
+        const snap = Number(sum._snapshotEquity ?? sum.equity ?? 0);
+        const diff = liveSummaryEquity - snap;
+        if (!snap || Math.abs(diff) < 1) return '';
+        const ageMin = _lastResyncAt ? Math.round((Date.now() - _lastResyncAt) / 60000) : null;
+        return `<div class="port-sum-sub" title="Živá hodnota je odhad z WebSocket tickov; serverová je posledný stav z eToro. Snapshot sa obnovuje každých 5 minút.">server $${snap.toFixed(2)} · ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}${ageMin != null ? ` · ${ageMin} min` : ''}</div>`;
+      })()
+    }</div>
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
     ${(sum.orders_count || (s.data.orders || []).length) ? `<div class="port-sum-item"><div class="port-sum-label">Objednávky</div><div class="port-sum-val" style="color:var(--yellow);">${sum.orders_count || s.data.orders.length}</div></div>` : ''}
