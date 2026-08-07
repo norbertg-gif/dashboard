@@ -3573,6 +3573,64 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+@app.get("/api/diagnostics/summary")
+def diagnostics_summary(account: str = Query("1")):
+    """Rozpad equity na jednotlivé členy — na porovnanie s eToro UI.
+
+    Equity si počítame sami (`cash + invested + total_pnl`), lebo pole `equity`
+    z eToro je nespoľahlivé. Keď sa výsledok rozíde s eToro UI, bez tohto
+    rozpadu sa nedá povedať KTORÝ člen za to môže. Read-only, žiadne ID účtov
+    ani kľúče — len čísla zo vzorca.
+    """
+    # Raw payload sa do cache neukladá (cachuje sa až spracovaný tvar), takže
+    # diagnostika ťahá čerstvo z proxy. Je to volanie na vyžiadanie, nie hot
+    # path — presnosť je tu dôležitejšia než ušetrený round-trip.
+    try:
+        resp = requests.get(f"{ETORO_PROXY}/pnl/real?account={account}",
+                            timeout=ETORO_PROXY_TIMEOUT)
+        resp.raise_for_status()
+        port = (resp.json() or {}).get("clientPortfolio") or {}
+    except Exception as e:
+        return {"available": False, "reason": _scrub_token(str(e))}
+    if not port:
+        return {"available": False, "reason": "clientPortfolio je prázdny"}
+
+    positions_raw = port.get("positions", []) or []
+    mirrors_raw = port.get("mirrors", []) or []
+    credit = port.get("credits", 0) or port.get("credit", 0) or 0
+    pend_open = sum(o.get("amount", 0) or 0 for o in port.get("ordersForOpen", []) if (o.get("mirrorID") or 0) == 0)
+    pend_orders = sum(o.get("amount", 0) or 0 for o in port.get("orders", []))
+    pos_inv = sum(p.get("amount", 0) or 0 for p in positions_raw)
+    mir_pos_inv = sum(p.get("amount", 0) or 0 for m in mirrors_raw for p in m.get("positions", []))
+    mir_avail = sum(m.get("availableAmount") or 0 for m in mirrors_raw)
+    mir_closed = sum(m.get("closedPositionsNetProfit") or 0 for m in mirrors_raw)
+    pos_pnl = sum((p.get("unrealizedPnL") or {}).get("pnL", 0) or 0 for p in positions_raw)
+    mir_pnl = sum((pp.get("unrealizedPnL") or {}).get("pnL", 0) or 0
+                  for m in mirrors_raw for pp in m.get("positions", []))
+    r = lambda v: round(float(v or 0), 2)
+    cash = credit - pend_open - pend_orders
+    invested = pos_inv + mir_pos_inv + (mir_avail - mir_closed) + pend_open + pend_orders
+    total_pnl = pos_pnl + mir_pnl + mir_closed
+    return {
+        "available": True,
+        "account": account,
+        "cash_parts": {"credit": r(credit), "pending_open": r(pend_open),
+                       "pending_orders": r(pend_orders), "cash": r(cash)},
+        "invested_parts": {"positions": r(pos_inv), "mirror_positions": r(mir_pos_inv),
+                           "mirror_available": r(mir_avail), "mirror_closed_profit": r(mir_closed),
+                           "mirror_adjustment": r(mir_avail - mir_closed),
+                           "invested": r(invested)},
+        "pnl_parts": {"positions_unrealized": r(pos_pnl), "mirror_unrealized": r(mir_pnl),
+                      "mirror_closed_profit": r(mir_closed), "total_pnl": r(total_pnl)},
+        "equity": r(cash + invested + total_pnl),
+        # Čo hlási samotné eToro — na priame porovnanie s naším výpočtom.
+        "etoro_reported": {"credit": r(credit), "equity_field": r(port.get("equity")),
+                           "mirrors": len(mirrors_raw), "positions": len(positions_raw)},
+        "hint": "Porovnaj s eToro UI. Ak sedí cash aj invested a líši sa len P/L, "
+                "pozri mirror_closed_profit — pravdepodobne ho eToro do P/L neráta.",
+    }
+
+
 # ── Benchmark: porovnanie výberov proti indexu za ZHODNÉ obdobia ──────────────
 # Odpovedá na otázku "zarobili moje výbery viac, než keby som v tých istých
 # momentoch kupoval index?" — teda meria kvalitu výberu titulov, nie načasovanie
