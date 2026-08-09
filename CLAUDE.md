@@ -111,6 +111,66 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-7. **PORTFOLIO BUILD — nový modul, ZÁMER (2026-08-09). Blokovaný položkou -6.**
+   Používateľov problém nie je málo nápadov, ale priveľa titulov (~56 na účte 1)
+   a kapitál, ktorý ide stále do nových. Klasické DCA má vstavanú chybu: dokupuje
+   len pri poklese, takže nový kapitál tečie prednostne do HORŠÍCH pozícií.
+   Dôkaz z dát 2026-08-09: HLNE má DIP 107 a váhu 1,4 %, kým FOUR má DIP 51
+   a váhu 3,0 %.
+   **Dohodnutá hierarchia kapitálu** (zapísaná aj v `CLAUDE_investicna_analyza.md`):
+   1. DCA (stratová pozícia spĺňajúca DIP podmienky) → 2. BUILD (kvalitná pozícia
+   pod cieľovou váhou, **aj zisková**) → 3. NEW (nový titul, musí sa obhájiť).
+   **Fáza 1 — postaviť:** `position_class` (CORE / STANDARD / SPECULATIVE) +
+   `target_weight` + `max_weight` na ticker. Potom sa deterministicky odpovie
+   „ktorá kvalitná pozícia je najviac pod cieľom" BEZ akéhokoľvek nového skóre.
+   Toto je ~80 % úžitku a nepotrebuje to žiadne nové dáta.
+   **Fáza 2 — odložiť:** kompozitné „Add Score" 0–100. Odložiť, kým nie je
+   hotová -6 a dátové pokrytie (viď nižšie).
+   **POZOR pri návrhu skóre — overený fakt:** `dip_score == fa_score + ta_score`
+   presne (ADBE 95=84+11, ASML 101=82+19, MU 110=89+21). Návrh z externej analýzy
+   dával body za FA (30) + technický stav (20) + DIP (15) — to je dvojité
+   započítanie tých istých vstupov. Do kompozitu patrí BUĎ FA a TA, ALEBO DIP.
+   Nikdy oboje.
+   **Bariéra pre nové tituly** (najhodnotnejšia časť návrhu): nový kandidát musí
+   prekonať najlepšiu existujúcu BUILD príležitosť + rezervu. Mení to úlohu DIP
+   scanneru z „nájdi čo kúpiť" na „nájdi niečo natoľko dobré, že to ospravedlní
+   ďalší ticker".
+   **Zámerne NErobiť:** 8 stavov (BUILD/ADD ON PULLBACK/DCA/FULL/OVERWEIGHT/
+   WATCH/FREEZE/SPECULATIVE) je na začiatok priveľa — pôvodný problém bola
+   manažovateľnosť, nie málo kategórií. Začať s 3–4.
+
+-6. **AI export a investičné analýzy = VÝHRADNE ÚČET 1 — 2026-08-09.**
+   `trading_backend.py:8786` robí `snapshots = {account: _assistant_snapshot(account)
+   for account in ("1", "2")}` a potom zlučuje oba účty do `positions_by_symbol`
+   **kľúčovaného podľa tickeru**, bez značky účtu. `portfolio_summary` je súčet
+   oboch snapshotov.
+   **Prečo je to chyba, nie vlastnosť:** účet 2 je Nelkin, horizont ~15 rokov,
+   pasívne ETF — iná stratégia s inými pravidlami. `CLAUDE_investicna_analyza.md`
+   sekcia 5 miešanie účtov explicitne ZAKAZUJE, takže export porušuje zapísané
+   pravidlo.
+   **Rozsah kontaminácie (overené proti eToro CSV):** +$10 300,00 investovaných,
+   6 tickerov, 13 lotov. BMI a VWRD.L sú v exporte celé cudzie; META, VVSM.DE,
+   VWCG.L a CNDX.L majú zlúčené loty z oboch účtov. Zlúčenie je **stratové** —
+   bez CSV sa už nedá zistiť, ktorý lot je čí.
+   **Nezávislé potvrdenie:** `/api/diagnostics/summary?account=1` z 2026-08-07
+   hlási equity $26 843,79 a invested $15 966,34; export z 2026-08-09 hlási
+   $38 264,78 / $26 326,31. Rozdiel investovaného je $10 359,97, čiže tých
+   $10 300 + tranža TTD za $60 kúpená 8. 8. Sedí.
+   **Dôsledok pre analýzy:** všetky `market_value_weight_pct` sú posunuté.
+   Pre tickery výhradne z účtu 1 stačí násobiť ~1,43; pre tú šesticu sa musí
+   počítať odznova. Externá analýza na tom postavila záver „ETF jadro absorbuje
+   straty" — v skutočnosti to absorboval Nelkin účet (VVSM.DE: $200 na účte 1
+   proti $4 000 na účte 2).
+   **Oprava:** export defaultne len účet 1. `?account=2` nechať existovať pre
+   samostatný pohľad, ale NIE ako default a NIE zlúčené. Parameter s dvoma
+   hodnotami sa nedá omylom použiť zle, zlúčenie áno.
+   **Súvisiace dátové diery, ktoré blokujú -7** (opraviť pri tom istom prechode):
+   (a) `dip_score` chýba pri 32 z 58 pozícií, `daily_state`/`weekly_state` pri
+   41 z 58 — modul, ktorý má alokovať kapitál, vráti pri väčšine portfólia
+   „neviem"; (b) earnings feed zmeškal CELH aj FOUR (obe hlásili 2026-08-06,
+   obe mali v exporte `earnings.confirmed: false`) — earnings sú najväčší
+   jednotlivý zdroj pohybu ceny.
+
 -5. **Equity v hlavičke vs eToro — VYRIEŠENÉ 2026-08-07, NEOTVÁRAŤ ZNOVA.**
    Nebola to chyba výpočtu. `/api/diagnostics/summary` ukázal, že serverový
    vzorec `cash + invested + total_pnl` sedí s eToro **na dva centy**, vrátane
