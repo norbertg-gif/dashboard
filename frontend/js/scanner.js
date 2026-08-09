@@ -916,6 +916,16 @@ async function renderScannerView() {
             </div>
             <div class="tb-sep"></div>
             <div class="tb-group">
+              <span class="tb-label">Pohľad</span>
+              <div class="tb-items">
+                <button class="btn${scannerMode() === 'new' ? ' primary' : ''}" onclick="setScannerMode('new')"
+                  title="Klasický scanner — nové kandidáti z DIP univerza">Nové</button>
+                <button class="btn${scannerMode() === 'mine' ? ' primary' : ''}" onclick="setScannerMode('mine')"
+                  title="Ignoruj nové tituly a vyhodnoť, kam pridať v tom, čo už držíš">Kam pridať</button>
+              </div>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-group">
               <span class="tb-label">AI konzultácia</span>
               <div class="tb-items">
                 <button class="btn" id="assistantExportBtn" onclick="downloadAssistantExport()" title="Stiahne read-only JSON pre manuálne vloženie do ChatGPT alebo inej AI. Nič nikam neodosiela.">AI export</button>
@@ -1011,7 +1021,102 @@ async function renderScannerView() {
   refreshOpportunities(false);
 }
 
+// ── Režim scanneru: nové kandidáti vs "kam pridať do toho, čo už mám" ────────
+// Hierarchia kapitálu (docs/CLAUDE_investicna_analyza.md, §4): DCA → BUILD →
+// NEW. Klasický scanner odpovedá len na tretí bod, hoci default má byť prvý
+// alebo druhý. Tento režim ho otočí: ignoruje nové tituly a zoradí DRŽANÉ podľa
+// toho, kam sa oplatí pridať.
+//
+// Žiadny nový backend ani nové skóre — dáta sú z /api/home/heatmap (blok
+// `held`), ktorý už nesie DIP, signál, chart health, váhu aj P/L.
+const SCANNER_MODE_KEY = 'td_scanner_mode';
+// Nový titul musí prekonať najlepšiu domácu príležitosť o toľko bodov DIP,
+// aby sa oplatilo pridať ďalší ticker do portfólia (~56 titulov = limitom je
+// pozornosť, nie nápady).
+const NEW_TICKER_DIP_MARGIN = 15;
+let _scannerMineCache = { data: null, ts: 0 };
+
+function scannerMode() {
+  return localStorage.getItem(SCANNER_MODE_KEY) === 'mine' ? 'mine' : 'new';
+}
+
+function setScannerMode(mode) {
+  localStorage.setItem(SCANNER_MODE_KEY, mode === 'mine' ? 'mine' : 'new');
+  renderScannerView();
+  if (mode === 'mine') loadScannerMine(true);
+}
+
+async function loadScannerMine(force = false) {
+  const box = document.getElementById('nasdaqScannerInfo');
+  if (!box || scannerMode() !== 'mine') return;
+  if (!force && _scannerMineCache.data && Date.now() - _scannerMineCache.ts < 15 * 60 * 1000) {
+    renderScannerMine(_scannerMineCache.data);
+    return;
+  }
+  box.innerHTML = '<div class="earncal-empty"><span class="cl-spinner"></span>Vyhodnocujem držané tituly…</div>';
+  try {
+    const r = await fetch(`${API}/api/home/heatmap`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _scannerMineCache = { data: await r.json(), ts: Date.now() };
+    renderScannerMine(_scannerMineCache.data);
+  } catch (e) {
+    box.innerHTML = `<div class="error-msg">Nepodarilo sa načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderScannerMine(data) {
+  const box = document.getElementById('nasdaqScannerInfo');
+  if (!box) return;
+  const held = (data?.held || []).filter(r => Number.isFinite(Number(r.dip)));
+  const watch = (data?.watch || []).filter(r => Number.isFinite(Number(r.dip)));
+  const heldTotal = (data?.held || []).length;
+  if (!held.length) {
+    box.innerHTML = `<div class="earncal-empty">Pre držané tituly nie je k dispozícii DIP skóre — scanner ich nepokrýva.
+      (${heldTotal} držaných, 0 s DIP)</div>`;
+    return;
+  }
+  held.sort((a, b) => Number(b.dip) - Number(a.dip));
+  const bestHome = held[0];
+  const bestNew = watch.sort((a, b) => Number(b.dip) - Number(a.dip))[0] || null;
+
+  // Verdikt: nový titul vyhrá len s rezervou. Default je domáca príležitosť.
+  const homeDip = Number(bestHome.dip);
+  const newDip = bestNew ? Number(bestNew.dip) : null;
+  const beats = newDip != null && (newDip - homeDip) >= NEW_TICKER_DIP_MARGIN;
+  const verdict = beats
+    ? `<b class="scanner-label buy">NOVÝ TITUL</b> ${escHtml(bestNew.symbol)} má DIP ${newDip} proti tvojmu najlepšiemu ${homeDip} — rozdiel ${newDip - homeDip} b. prekonáva latku ${NEW_TICKER_DIP_MARGIN}.`
+    : newDip != null
+      ? `<b class="scanner-label strong">DOMA</b> ${escHtml(bestHome.symbol)} (DIP ${homeDip}). Najlepší nový je ${escHtml(bestNew.symbol)} s ${newDip} — o ${homeDip - newDip >= 0 ? homeDip - newDip : newDip - homeDip} b. ${newDip > homeDip ? 'vyššie, ale latka je ' + NEW_TICKER_DIP_MARGIN : 'nižšie'}.`
+      : `<b class="scanner-label strong">DOMA</b> ${escHtml(bestHome.symbol)} (DIP ${homeDip}). Scanner teraz neponúka žiadneho nového kandidáta.`;
+
+  box.innerHTML = `
+    <div class="scanner-mine-verdict">${verdict}</div>
+    <table class="tool-table scanner-mine-table"><thead><tr>
+      <th>Ticker</th><th class="r">DIP</th><th>Signál</th><th>Graf</th>
+      <th class="r">Váha</th><th class="r">P/L</th><th></th>
+    </tr></thead><tbody>
+      ${held.slice(0, 15).map(r => {
+        const pnl = Number(r.pnl_pct);
+        return `<tr onclick="openScannerTicker('${escHtml(r.symbol)}')" title="Otvoriť ${escHtml(r.symbol)} v Analytike">
+          <td><b class="scanner-ticker">${escHtml(r.symbol)}</b>${basketButtonHtml(r.symbol, 'scanner-basket-btn')}</td>
+          <td class="r">${Math.round(Number(r.dip))}</td>
+          <td>${r.signal_score != null ? `${r.signal_score}/4` : r.scanned ? '0/4' : '<span class="muted">-</span>'}</td>
+          <td>${r.chart_health ? escHtml(r.chart_health) : '<span class="muted">-</span>'}</td>
+          <td class="r">${r.weight_pct != null ? Number(r.weight_pct).toFixed(1) + ' %' : '-'}</td>
+          <td class="r ${Number.isFinite(pnl) ? (pnl >= 0 ? 'port-pos' : 'port-neg') : ''}">${Number.isFinite(pnl) ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)} %` : '-'}</td>
+          <td><button class="scanner-verdict-btn" onclick="openVerdictTicker('${escHtml(r.symbol)}', event)">Verdikt</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>
+    <div class="signal-outcome-note">Zoradené podľa DIP — kam sa oplatí pridať do toho, čo už držíš.
+      Počítané z <b>${held.length} z ${heldTotal}</b> držaných titulov; zvyšok scanner nepokrýva, takže latka môže byť nižšia, než by mala byť.
+      Nový titul sa oplatí, len ak prekoná najlepšiu domácu príležitosť o ${NEW_TICKER_DIP_MARGIN} bodov DIP.</div>`;
+}
+
 function renderNasdaqScanner(payload) {
+  // V režime "kam pridať" sa klasická tabuľka kandidátov nevykresľuje —
+  // prepínač ju nahrádza, nie dopĺňa.
+  if (scannerMode() === 'mine') { loadScannerMine(); return; }
   const el = document.getElementById('nasdaqScannerInfo');
   if (!el) return;
   _scannerLastPayload = payload;

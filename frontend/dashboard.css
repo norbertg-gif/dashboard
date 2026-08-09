@@ -5552,6 +5552,22 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .home-pos { color: var(--up); }
 .home-neg { color: var(--down); }
 
+/* Scanner režim "Kam pridať" — verdikt nad tabuľkou držaných titulov. */
+.scanner-mine-verdict {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm);
+  background: var(--bg3);
+}
+.scanner-mine-verdict .scanner-label { margin-right: 6px; }
+.scanner-mine-table td { cursor: pointer; }
+
 /* Serverová hodnota pod živou equity — objaví sa len pri rozdiele nad $1. */
 .port-sum-sub {
   font-family: var(--font-mono);
