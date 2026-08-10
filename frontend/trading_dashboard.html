@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260809-201145">
+<link rel="stylesheet" href="/dashboard.css?v=20260810-151146">
 </head>
 <body data-main-tab="home">
 
@@ -169,6 +169,12 @@
       <div id="verdictContent" class="verdict-content">
         <div class="verdict-empty">Zadaj ticker alebo otvor verdikt zo Scannera.</div>
       </div>
+    </div>
+    <!-- Graf vedľa verdiktu — štandardný panel (rovnaký ako Grafy/chart dock),
+         nie analytický z Analytiky. Vypĺňa prázdne miesto vpravo a šetrí
+         preklikávanie medzi tabmi. -->
+    <div id="verdict-chart" class="verdict-chart">
+      <div id="verdict-grid" class="dock-grid"></div>
     </div>
   </div>
 
@@ -542,17 +548,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260809-201145"></script>
-  <script src="/js/live.js?v=20260809-201145"></script>
-  <script src="/js/portfolio.js?v=20260809-201145"></script>
-  <script src="/js/watchlist.js?v=20260809-201145"></script>
-  <script src="/js/scanner-table-sort.js?v=20260809-201145"></script>
-  <script src="/js/scanner.js?v=20260809-201145"></script>
-  <script src="/js/chart_patterns.js?v=20260809-201145"></script>
-  <script src="/js/predictive.js?v=20260809-201145"></script>
-  <script src="/js/verdict.js?v=20260809-201145"></script>
-  <script src="/js/home.js?v=20260809-201145"></script>
-  <script src="/js/charts.js?v=20260809-201145"></script>
-  <script src="/js/main.js?v=20260809-201145"></script>
+  <script src="/js/core.js?v=20260810-151146"></script>
+  <script src="/js/live.js?v=20260810-151146"></script>
+  <script src="/js/portfolio.js?v=20260810-151146"></script>
+  <script src="/js/watchlist.js?v=20260810-151146"></script>
+  <script src="/js/scanner-table-sort.js?v=20260810-151146"></script>
+  <script src="/js/scanner.js?v=20260810-151146"></script>
+  <script src="/js/chart_patterns.js?v=20260810-151146"></script>
+  <script src="/js/predictive.js?v=20260810-151146"></script>
+  <script src="/js/verdict.js?v=20260810-151146"></script>
+  <script src="/js/home.js?v=20260810-151146"></script>
+  <script src="/js/charts.js?v=20260810-151146"></script>
+  <script src="/js/main.js?v=20260810-151146"></script>
 </body>
 </html>

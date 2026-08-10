@@ -2345,7 +2345,7 @@ function portRowClick(pid, sym) {
   if (!sym) return;
   // Prepni na grafy tab a otvor ticker
   switchMainTab('charts');
-  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.id !== dockPanelId && p.querySelector('.p-sym'));
+  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.id !== dockPanelId && p.id !== verdictPanelId && p.querySelector('.p-sym'));
   if (chartPanel) {
     chartPanel.querySelector('.p-sym').value = sym;
     loadChart(chartPanel.id);

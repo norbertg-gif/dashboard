@@ -113,7 +113,7 @@ function onSbTickerClick(symbol) {
   // Nájdi aktívny CHART panel (nie portfolio)
   let chartPanelId = activePanelId;
   if (chartPanelId?.startsWith('port-panel-')) {
-    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.id !== dockPanelId && p.querySelector('.p-sym'))?.id || null;
+    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.id !== dockPanelId && p.id !== verdictPanelId && p.querySelector('.p-sym'))?.id || null;
   }
   if (chartPanelId && document.getElementById(chartPanelId)) {
     const panel = document.getElementById(chartPanelId);
@@ -177,7 +177,7 @@ async function loadPreset() {
   if (String(name).startsWith('__')) return;
   const presets = await fetchPresets();
   const cfg = presets[name]; if (!cfg?.length) return;
-  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
   setActivePanel(null);
   cfg.forEach(c => createPanel(c));
   saveLayout(); loadAll();
@@ -214,7 +214,7 @@ async function confirmSave() {
 function getCurrentConfig() {
   try {
     return [...document.querySelectorAll('.panel')].map(p => {
-      if (p.id === dockPanelId) return null;
+      if (p.id === dockPanelId || p.id === verdictPanelId) return null;
       if (p.id.startsWith('port-panel-')) return { type: 'portfolio' };
       const symEl = p.querySelector('.p-sym');
       if (!symEl) return null;
@@ -286,6 +286,10 @@ async function ensureHoldingsForChartFlags() {
 // getCurrentConfig/saveLayout, onSbTickerClick) — má vlastný ✕ close.
 // Zámerne ZAHRNUTÝ v loadAll() bulk refreshi a v applyAllChartPortfolioFlags.
 let dockPanelId = null;
+// Panel s grafom vedľa Verdiktu. Rovnako ako chart dock MUSÍ byť vylúčený zo
+// všetkých hromadných operácií nad `.panel` (clearAllPanels, loadMovers,
+// saveLayout, import…) — inak by ho tie funkcie uniesli alebo zmazali.
+let verdictPanelId = null;
 
 function syncChartDockVisibilityForTab() {
   const dock = document.getElementById('chart-dock');
@@ -363,6 +367,31 @@ function openChartDock(symbol) {
   dockPanelId = createPanel(cfg);
   setActivePanel(dockPanelId);
   loadChart(dockPanelId);
+}
+
+// Graf vedľa Verdiktu — ten istý `createPanel` factory ako Grafy a chart dock,
+// takže funguje aj s indikátormi, markermi a eToro čiarami. Zámerne NIE
+// analytický graf z Analytiky: na Verdikte ide o rýchly vizuálny súhlas s
+// rozhodnutím, nie o ďalšiu analytickú vrstvu.
+function openVerdictChart(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const host = document.getElementById('verdict-grid');
+  if (!sym || !host) return;
+
+  if (verdictPanelId && document.getElementById(verdictPanelId)) {
+    const panel = document.getElementById(verdictPanelId);
+    const symEl = panel.querySelector('.p-sym');
+    if (symEl && symEl.value.trim().toUpperCase() === sym) return;   // už ten istý
+    if (symEl) symEl.value = sym;
+    loadChart(verdictPanelId);
+    return;
+  }
+  verdictPanelId = createPanel({
+    symbol: sym, period: 'auto', interval: '1d',
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+    container: 'verdict-grid',
+  });
+  loadChart(verdictPanelId);
 }
 
 function closeChartDock() {
@@ -2257,7 +2286,7 @@ function removePanel(id) {
 
 function clearAllPanels() {
   if (!confirm('Vymazať všetky grafy?')) return;
-  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
   setActivePanel(null);
   saveLayout();
   setStatus('Grafy vymazané', '');
@@ -2279,7 +2308,7 @@ function parseTickerClipboardText(text) {
 
 function clearChartPanelsForImport() {
   [...document.querySelectorAll('.panel')]
-    .filter(panel => !panel.id.startsWith('port-panel-') && panel.id !== dockPanelId && panel.querySelector('.p-sym'))
+    .filter(panel => !panel.id.startsWith('port-panel-') && panel.id !== dockPanelId && panel.id !== verdictPanelId && panel.querySelector('.p-sym'))
     .forEach(panel => removePanel(panel.id));
 }
 
@@ -2359,7 +2388,7 @@ async function loadMovers() {
       setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
       return;
     }
-    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
     setActivePanel(null);
     movers.forEach(m => createPanel({
       symbol: m.symbol,

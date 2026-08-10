@@ -4812,9 +4812,32 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     radial-gradient(900px 420px at 18% 0%, color-mix(in oklch, var(--accent) 16%, transparent), transparent 60%),
     radial-gradient(720px 380px at 92% 18%, color-mix(in oklch, var(--purple) 11%, transparent), transparent 65%);
 }
+/* Verdikt je dvojstĺpcový: obsah vľavo, graf vpravo. Pod 1280px sa graf
+   presunie pod obsah — pri užšom okne je čitateľnosť verdiktu prednejšia. */
+.verdict-view {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.verdict-chart {
+  flex: 1 1 480px;
+  min-width: 420px;
+  position: sticky;
+  top: 12px;
+  height: calc(100vh - 150px);
+  min-height: 420px;
+}
+.verdict-chart .dock-grid { height: 100%; }
+@media (max-width: 1280px) {
+  .verdict-view { flex-direction: column; }
+  .verdict-chart { width: 100%; min-width: 0; position: static; height: 420px; }
+}
+
 .verdict-shell {
   width: min(1080px, 100%);
-  margin: 0 auto;
+  flex: 1 1 560px;
+  min-width: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;

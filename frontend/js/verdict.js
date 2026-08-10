@@ -352,6 +352,8 @@ async function loadVerdict(force = false) {
   input.value = ticker;
   verdictLastTicker = ticker;
   localStorage.setItem(VERDICT_TICKER_KEY, ticker);
+  // Graf vpravo — mimo hlavného toku, aby verdikt nečakal na sviečky.
+  if (typeof openVerdictChart === 'function') setTimeout(() => openVerdictChart(ticker), 0);
   const seq = ++verdictLoadSeq;
   button && (button.disabled = true);
   content.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
