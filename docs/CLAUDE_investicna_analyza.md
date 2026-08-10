@@ -185,9 +185,9 @@ Dôležité: **štyri nezávislé AI kanály nedokázali povedať, či je ten kl
 
 **Priorita 4 — earnings feed.** Zmeškal CELH aj FOUR (obe hlásili 6. 8., obe mali `earnings.confirmed: false`). Earnings sú najväčší jednotlivý zdroj pohybu ceny.
 
-**Priorita 5 — position_class a target_weight.** Jednorazové ručné priradenie triedy (CORE / STANDARD / SPECULATIVE) ~56 titulom. Bez toho je pojem „pod cieľovou váhou" nedefinovaný a modul BUILD sa nedá postaviť.
+**Priorita 5 — position_class a target_weight — NÁSTROJ HOTOVÝ 10. 8. 2026, ČAKÁ NA VYPLNENIE.** Karta „Dobudovanie pozícií" v Portfóliu, ukladá sa na server (`position_classes.json`). Ostáva jednorazovo prejsť ~56 titulov a priradiť triedu a cieľovú váhu — to je definícia stratégie, nedá sa odvodiť z dát.
 
-*Otvorená otázka k tomu:* cez ktorý menovateľ počítať váhy — celú equity účtu 1 (~$26,8 tis., obsahuje veľké krypto), alebo len akciovú/ETF knihu ($9 462,79)? Keďže krypto je zo stratégie vylúčené, druhá možnosť dáva väčší zmysel, ale treba to rozhodnúť vedome.
+*Menovateľ rozhodnutý 10. 8. 2026:* váha sa počíta **z akciovej/ETF knihy účtu 1** (~$9 463), nie z celej equity. Krypto je zo stratégie vylúčené, takže nepatrí ani do menovateľa; pri celej equity by každá akciová pozícia vyšla „hlboko pod cieľom" len preto, že krypto berie dve tretiny účtu.
 
 **Priorita 6 — solventnostné metriky** (Net Debt/EBITDA, interest coverage) — **HOTOVÉ 10. 8. 2026.** Insights ťahajú Finnhub `metric=all` už dávno, len sa z odpovede brala výhradne short interest; solventnostné polia sa teraz z tej istej odpovede uložia (nula nových API volaní), prenášajú sa medzi obnovami ako price_target a export ich číta z cache. Ostáva pokrytie: ticker bez otvorenej insights karty blok nemá.
 

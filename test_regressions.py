@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused regression tests for cache and public portfolio contracts."""
 
+import asyncio
 import io
 import sys
 import tempfile
@@ -263,6 +264,70 @@ class PublicRateLimitRegressionTests(unittest.TestCase):
             tb._check_public_rate_limit(self._request("new-client"))
         # Nový kľúč nad stropom vyčistí tabuľku a zaeviduje iba seba.
         self.assertEqual(set(tb._public_rate), {"new-client"})
+
+
+class PortfolioBuildRegressionTests(unittest.TestCase):
+    """Fáza 1 modulu BUILD: gap = cieľ − váha, žiadne skóre."""
+
+    PORTFOLIO = {
+        "summary": {"equity": 30000},
+        "positions": [
+            {"symbol": "AAPL", "name": "Apple", "type": "Stock", "amount": 1000, "pnl": 100},
+            {"symbol": "AAPL", "name": "Apple", "type": "Stock", "amount": 1000, "pnl": -50},
+            {"symbol": "VWCE", "name": "ETF", "type": "ETF", "amount": 2000, "pnl": 0},
+            {"symbol": "BTC", "name": "Bitcoin", "type": "Crypto", "amount": 6000, "pnl": 500},
+        ],
+    }
+
+    def _build(self, classes):
+        with (
+            patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            patch.object(tb, "_load_position_classes", return_value=classes),
+        ):
+            return tb.get_build_candidates(account="1")
+
+    def test_weight_uses_stock_etf_book_not_account_equity(self):
+        data = self._build({"AAPL": {"position_class": "CORE", "target_weight": 60}})
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Kniha je 2000 + 2000 = 4000, nie equity 30000, a krypto v nej nie je.
+        self.assertEqual(data["book_value"], 4000)
+        self.assertNotIn("BTC", rows)
+        self.assertEqual(rows["AAPL"]["weight_pct"], 50.0)   # 2000/4000, nie 2000/30000
+        self.assertEqual(rows["AAPL"]["gap_pct"], 10.0)
+        self.assertEqual(rows["AAPL"]["gap_amount"], 400.0)
+        self.assertEqual(rows["AAPL"]["state"], "build")
+
+    def test_position_over_max_weight_is_not_a_build_candidate(self):
+        data = self._build({"AAPL": {"position_class": "CORE", "target_weight": 60, "max_weight": 40}})
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Strop prebíja cieľ — inak by karta odporúčala dokupovať cez vlastný limit.
+        self.assertEqual(rows["AAPL"]["state"], "over_max")
+        self.assertEqual(rows["VWCE"]["state"], "unclassified")
+        self.assertEqual(data["counts"]["unclassified"], 1)
+
+    def test_classes_round_trip_and_reject_unknown_class(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with patch.object(tb, "POSITION_CLASSES_FILE", path):
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"aapl": {"position_class": "core", "target_weight": 5}}})))
+                stored = tb._load_position_classes()
+                self.assertEqual(stored["AAPL"]["position_class"], "CORE")
+                self.assertIn("updated_at", stored["AAPL"])
+                with self.assertRaises(tb.HTTPException):
+                    asyncio.run(tb.save_position_classes(_JsonRequest(
+                        {"classes": {"MSFT": {"position_class": "GROWTH"}}})))
+                # Zmazanie musí ísť z UI, inak sa preklep opravuje ručne v súbore.
+                asyncio.run(tb.save_position_classes(_JsonRequest({"classes": {"AAPL": None}})))
+                self.assertEqual(tb._load_position_classes(), {})
+
+
+class _JsonRequest:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
 
 
 class AssistantExportRegressionTests(unittest.TestCase):

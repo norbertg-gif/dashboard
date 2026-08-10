@@ -604,6 +604,153 @@ function renderDcaCard(data) {
     <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu.</div>`;
 }
 
+// ── PORTFOLIO BUILD — ktorá pozícia je najviac pod cieľovou váhou ────────────
+// Hierarchia kapitálu: DCA (stratová, spĺňa DIP) → BUILD (kvalitná pod cieľom,
+// aj zisková) → NEW. Klasické DCA dokupuje len pri poklese, takže nový kapitál
+// tečie prednostne do horších pozícií; BUILD je odpoveď na to.
+// Fáza 1 zámerne NEMÁ žiadne skóre — gap = cieľ − aktuálna váha, nič viac.
+// Trieda a cieľová váha sú RUČNÝ vstup (definícia stratégie, nie odvodený údaj).
+let _buildCache = { account: null, data: null };
+const PORT_BUILD_COLLAPSED_KEY = 'td_portfolio_build_collapsed';
+const BUILD_STATE_META = {
+  build:        { cls: 'good',    label: 'Dokúpiť',    tip: 'Pozícia je pod cieľovou váhou — kandidát na BUILD, aj keď je v zisku' },
+  at_target:    { cls: 'neutral', label: 'Na cieli',   tip: 'Váha zodpovedá cieľu alebo ho presahuje' },
+  over_max:     { cls: 'bad',     label: 'Nad stropom',tip: 'Váha dosiahla max_weight — nedokupovať' },
+  no_target:    { cls: 'warn',    label: 'Bez cieľa',  tip: 'Trieda priradená, ale cieľová váha chýba' },
+  unclassified: { cls: 'neutral', label: 'Nezaradené', tip: 'Bez triedy a cieľa — BUILD o tejto pozícii nevie rozhodnúť' },
+};
+
+function isPortfolioBuildCollapsed() {
+  const v = localStorage.getItem(PORT_BUILD_COLLAPSED_KEY);
+  return v == null ? true : v === '1';
+}
+
+function togglePortfolioBuild() {
+  localStorage.setItem(PORT_BUILD_COLLAPSED_KEY, isPortfolioBuildCollapsed() ? '0' : '1');
+  if (_buildCache.data) renderBuildCard(_buildCache.data);
+  else if (!isPortfolioBuildCollapsed()) loadBuildCard();
+}
+
+function buildCardHead(data = null) {
+  const collapsed = isPortfolioBuildCollapsed();
+  const c = data?.counts || {};
+  const sub = data
+    ? `${c.classified || 0}/${c.total || 0} zaradených · základ váh: akciová/ETF kniha $${Number(data.book_value || 0).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
+    : 'kde chýba kapitál oproti cieľu';
+  const refresh = collapsed ? '' : `<button class="btn" onclick="loadBuildCard(true)" style="font-size:10px;">Refresh</button>`;
+  return `<div class="risk-corr-head dca-head">
+    <button class="btn dca-toggle" onclick="togglePortfolioBuild()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <div class="tool-title" style="margin:0;">Dobudovanie pozícií
+      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${sub}</span>
+    </div>${refresh}
+  </div>`;
+}
+
+async function loadBuildCard(force = false) {
+  const account = String(portState?.main?.account || activeAccount || '1');
+  const wrap = document.getElementById('portfolio-build');
+  if (!wrap) return;
+  if (!force && _buildCache.account === account && _buildCache.data) {
+    renderBuildCard(_buildCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/build?account=${account}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    _buildCache = { account, data };
+    renderBuildCard(data);
+  } catch (e) {
+    wrap.innerHTML = `${buildCardHead()}<div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function saveBuildClass(symbol, field, rawValue) {
+  const sym = String(symbol || '').toUpperCase();
+  const row = (_buildCache.data?.positions || []).find(p => p.symbol === sym);
+  if (!row) return;
+  const entry = {
+    position_class: row.position_class,
+    target_weight: row.target_weight,
+    max_weight: row.max_weight,
+  };
+  if (field === 'position_class') {
+    entry.position_class = rawValue || null;
+  } else {
+    const n = rawValue === '' ? null : Number(rawValue);
+    entry[field] = Number.isFinite(n) ? n : null;
+  }
+  // Bez triedy nemá cieľová váha kam patriť — server by to aj tak odmietol.
+  if (!entry.position_class) {
+    setStatus?.(`${sym}: najprv vyber triedu`, 'error');
+    renderBuildCard(_buildCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/classes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ classes: { [sym]: entry } }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    Object.assign(row, entry);
+    await loadBuildCard(true);
+    setStatus?.(`${sym} uložené`, 'ok');
+  } catch (e) {
+    setStatus?.(`Uloženie ${sym} zlyhalo: ${e.message}`, 'error');
+  }
+}
+
+function renderBuildCard(data) {
+  const wrap = document.getElementById('portfolio-build');
+  if (!wrap || !data) return;
+  const head = buildCardHead(data);
+  const c = data.counts || {};
+  if (isPortfolioBuildCollapsed()) {
+    const parts = [
+      c.build ? `${c.build} na dokúpenie` : '',
+      c.over_max ? `${c.over_max} nad stropom` : '',
+      c.unclassified ? `${c.unclassified} nezaradených` : '',
+    ].filter(Boolean).join(' · ') || 'nič na dokúpenie';
+    wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
+    return;
+  }
+  const rows = (data.positions || []).map(x => {
+    const meta = BUILD_STATE_META[x.state] || BUILD_STATE_META.unclassified;
+    const opts = ['', 'CORE', 'STANDARD', 'SPECULATIVE'].map(v =>
+      `<option value="${v}"${v === (x.position_class || '') ? ' selected' : ''}>${v || '—'}</option>`).join('');
+    const gapTxt = x.gap_pct == null ? '—'
+      : `<span style="color:${x.gap_pct > 0 ? 'var(--up)' : 'var(--muted)'}">${x.gap_pct > 0 ? '+' : ''}${x.gap_pct.toFixed(1)}%</span>`;
+    const addTxt = x.gap_amount ? `$${x.gap_amount.toLocaleString('sk-SK', { maximumFractionDigits: 0 })}` : '—';
+    return `<tr title="${escHtml(meta.tip)}">
+      <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
+      <td><span class="port-sym" style="cursor:pointer;" onclick="onSbTickerClick('${escHtml(x.symbol)}')">${escHtml(x.symbol)}</span></td>
+      <td class="r">${x.weight_pct == null ? '—' : x.weight_pct.toFixed(1) + '%'}</td>
+      <td><select class="build-input" onchange="saveBuildClass('${escHtml(x.symbol)}','position_class',this.value)">${opts}</select></td>
+      <td class="r"><input class="build-input" type="number" step="0.1" min="0" max="100" value="${x.target_weight ?? ''}"
+        onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
+      <td class="r"><input class="build-input" type="number" step="0.1" min="0" max="100" value="${x.max_weight ?? ''}"
+        onchange="saveBuildClass('${escHtml(x.symbol)}','max_weight',this.value)"></td>
+      <td class="r">${gapTxt}</td>
+      <td class="r" style="color:var(--muted);">${addTxt}</td>
+    </tr>`;
+  }).join('');
+  // Súčet cieľov je kontrola konzistencie, nie pravidlo — 100 % nie je povinnosť,
+  // ale výrazný odklon znamená, že cieľové váhy nedávajú spolu zmysel.
+  const sum = Number(data.target_weight_sum || 0);
+  const sumColor = sum > 105 ? 'var(--down)' : sum && sum < 60 ? 'var(--yellow)' : 'var(--muted)';
+  wrap.innerHTML = `${head}
+    <table class="tool-table"><thead><tr>
+      <th>Stav</th><th>Ticker</th><th class="r">Váha</th><th>Trieda</th>
+      <th class="r">Cieľ %</th><th class="r">Max %</th><th class="r">Odstup</th><th class="r">Dokúpiť</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <div class="signal-outcome-note" style="margin-top:6px;">
+      Súčet cieľových váh: <span style="color:${sumColor}">${sum.toFixed(1)} %</span>.
+      Váha sa počíta z akciovej/ETF knihy účtu, nie z celej equity — krypto je zo stratégie vylúčené.
+      Odstup je odčítanie, nie skóre; poradie nehovorí, že dokúpiť treba.
+    </div>`;
+}
+
 // ── KORELAČNÁ MAPA PORTFÓLIA ─────────────────────────────────────────────────
 // Heatmapa korelácií denných výnosov držaných titulov (oba účty) z OHLCV cache.
 // Odhalí skrytú koncentráciu — tituly, ktoré sa hýbu spolu aj naprieč sektormi.
@@ -2068,11 +2215,13 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
+    html += `<div id="portfolio-build">${buildCardHead(_buildCache.data)}</div>`;
     html += `<div id="portfolio-sectors">${sectorCardHead(_sectorsCache.data)}</div>`;
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       html += `<div id="portfolio-corr" class="advanced-only">${corrCardHead(_corrCache.data)}</div>`;
     }
     setTimeout(() => loadDcaCandidates(), 0);
+    setTimeout(() => { if (!isPortfolioBuildCollapsed()) loadBuildCard(); else renderBuildCard(_buildCache.data); }, 0);
     setTimeout(() => { if (!isPortfolioSectorsCollapsed()) loadSectorCard(); }, 0);
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);

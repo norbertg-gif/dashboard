@@ -111,7 +111,22 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
--7. **PORTFOLIO BUILD — nový modul, ZÁMER (2026-08-09). Blokovaný položkou -6.**
+-7. **PORTFOLIO BUILD — FÁZA 1 HOTOVÁ 2026-08-10.**
+   `GET/POST /api/portfolio/classes` (ručné `position_class` CORE/STANDARD/
+   SPECULATIVE + `target_weight` + `max_weight`, ukladá `DATA_ROOT/position_classes.json`,
+   atomický zápis, gitignored) a `GET /api/portfolio/build` (gap = cieľ − váha).
+   Karta „Dobudovanie pozícií" v Portfóliu pod DCA, default zbalená, triedy sa
+   vypĺňajú priamo v tabuľke.
+   **Menovateľ váh je Stock/ETF kniha účtu, NIE equity** (`BUILD_WEIGHT_BASIS`,
+   rozhodnutie 2026-08-10) — krypto je zo stratégie vylúčené, takže v menovateli
+   nemá čo robiť; inak by každá akciová pozícia vyšla „hlboko pod cieľom", lebo
+   krypto berie dve tretiny účtu. Regresný test to stráži.
+   `max_weight` prebíja `target_weight` (stav `over_max`), inak by karta
+   odporúčala dokupovať cez vlastný limit.
+   **Fáza 2 (kompozitné Add Score) ostáva odložená** — a nezabudni na overený
+   fakt nižšie o dvojitom započítaní. Blokujú ju dátové diery z položky -6,
+   nie fáza 1; fáza 1 ich nepotrebuje, lebo počíta len z investovanej sumy.
+   Pôvodný zámer (stále platný pre fázu 2):
    Používateľov problém nie je málo nápadov, ale priveľa titulov (~56 na účte 1)
    a kapitál, ktorý ide stále do nových. Klasické DCA má vstavanú chybu: dokupuje
    len pri poklese, takže nový kapitál tečie prednostne do HORŠÍCH pozícií.

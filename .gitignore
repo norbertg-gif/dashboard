@@ -12,6 +12,7 @@ finviz_screeners.json
 yahoo_insights/
 massive_market/
 dashboard_settings.json
+position_classes.json
 watchlist.json
 company_profiles/
 predictive_signals_log.json

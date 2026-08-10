@@ -1693,6 +1693,23 @@ def get_watchlist():
 def put_watchlist(body: dict):
     return _write_watchlist_file(body.get("items", []))
 
+def _atomic_write_json(path: _Path, data) -> None:
+    """Plain (non-gzip) JSON write via temp file + os.replace.
+
+    Same reason as cache_write: a reader must never see a half-written file,
+    and a crash mid-write must not destroy the previous contents."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp")
+    try:
+        tmp.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def cache_write(path: _Path, data: dict):
     """Ulož JSON.gz atómovo; čitateľ nikdy neuvidí rozpracovaný gzip."""
     target = _Path(str(path) + ".gz")
@@ -2525,6 +2542,155 @@ def _position_dip_metrics(symbol: str, amount: float, denominator: float,
     dip_total = _num_or_none(dip.get("total")) if isinstance(dip, dict) else None
     weight_pct = amount / denominator * 100 if denominator else None
     return dip_total, weight_pct
+
+
+POSITION_CLASSES_FILE = DATA_ROOT / "position_classes.json"
+_position_classes_lock = threading.Lock()
+POSITION_CLASS_VALUES = ("CORE", "STANDARD", "SPECULATIVE")
+# Menovateľ váh je ZÁMERNE len Stock/ETF kniha, nie equity účtu (rozhodnutie
+# 2026-08-10). Krypto je zo stratégie vylúčené, takže ho nemá zmysel držať v
+# menovateli — inak by každá akciová pozícia vyšla "hlboko pod cieľom" len
+# preto, že krypto zaberá dve tretiny účtu.
+BUILD_WEIGHT_BASIS = "stock_etf_book"
+
+
+def _load_position_classes() -> dict:
+    with _position_classes_lock:
+        try:
+            data = json.loads(POSITION_CLASSES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _position_class_entry(raw) -> dict | None:
+    """Normalise one stored record; unknown class or bad numbers are dropped."""
+    if not isinstance(raw, dict):
+        return None
+    klass = str(raw.get("position_class") or "").strip().upper()
+    if klass not in POSITION_CLASS_VALUES:
+        return None
+    out = {"position_class": klass}
+    for key in ("target_weight", "max_weight"):
+        value = _num_or_none(raw.get(key))
+        if value is not None and 0 <= float(value) <= 100:
+            out[key] = round(float(value), 2)
+    if raw.get("note"):
+        out["note"] = str(raw["note"])[:200]
+    if raw.get("updated_at"):
+        out["updated_at"] = str(raw["updated_at"])
+    return out
+
+
+@app.get("/api/portfolio/classes")
+def get_position_classes():
+    """Ručne priradená trieda a cieľová váha na ticker — definícia stratégie,
+    nie odvodený údaj. Preto sa nikdy neprepočítava, len číta a zapisuje."""
+    stored = _load_position_classes()
+    items = {sym: entry for sym, raw in stored.items()
+             if (entry := _position_class_entry(raw)) is not None}
+    return {"classes": items, "allowed": list(POSITION_CLASS_VALUES),
+            "weight_basis": BUILD_WEIGHT_BASIS}
+
+
+@app.post("/api/portfolio/classes")
+async def save_position_classes(request: Request):
+    """Čiastočný zápis: prídu len zmenené tickery. `null` hodnota triedu zmaže,
+    aby sa dala oprava vrátiť bez ručného zásahu do súboru."""
+    body = await request.json()
+    updates = body.get("classes") if isinstance(body, dict) else None
+    if not isinstance(updates, dict):
+        raise HTTPException(400, "classes musí byť objekt {ticker: {...}}")
+    stored = _load_position_classes()
+    for symbol, raw in updates.items():
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            continue
+        if raw is None:
+            stored.pop(sym, None)
+            continue
+        entry = _position_class_entry(raw)
+        if entry is None:
+            raise HTTPException(400, f"{sym}: position_class musí byť jedna z {', '.join(POSITION_CLASS_VALUES)}")
+        entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+        stored[sym] = entry
+    with _position_classes_lock:
+        _atomic_write_json(POSITION_CLASSES_FILE, stored)
+    return {"ok": True, "count": len(stored)}
+
+
+@app.get("/api/portfolio/build")
+def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
+    """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
+
+    Deterministické odčítanie, ZÁMERNE žiadne nové skóre: gap = target − aktuálna
+    váha. Kompozitné Add Score je fáza 2 a čaká na dátové pokrytie. Kapitál má
+    hierarchiu DCA → BUILD → NEW, takže toto je druhý stupeň, nie náhrada DCA.
+
+    Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
+    nie voči equity účtu — krypto je zo stratégie vylúčené."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    by_sym: dict[str, dict] = {}
+    for pos in portfolio.get("positions", []):
+        if str(pos.get("type") or "").lower() not in ("stock", "etf"):
+            continue
+        sym = (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
+        entry = by_sym.setdefault(sym, {"symbol": sym, "name": pos.get("name"),
+                                        "amount": 0.0, "pnl": 0.0, "trades": 0})
+        entry["amount"] += pos.get("amount") or 0
+        entry["pnl"] += pos.get("pnl") or 0
+        entry["trades"] += 1
+
+    book_value = sum(e["amount"] for e in by_sym.values())
+    classes = _load_position_classes()
+    rows = []
+    for sym, e in sorted(by_sym.items()):
+        entry = _position_class_entry(classes.get(sym)) or {}
+        weight = (e["amount"] / book_value * 100) if book_value else None
+        target = entry.get("target_weight")
+        gap = round(target - weight, 2) if target is not None and weight is not None else None
+        max_weight = entry.get("max_weight")
+        if not entry:
+            state = "unclassified"
+        elif gap is None:
+            state = "no_target"
+        elif max_weight is not None and weight is not None and weight >= max_weight:
+            state = "over_max"
+        elif gap > 0:
+            state = "build"
+        else:
+            state = "at_target"
+        rows.append({
+            "symbol": sym, "name": e["name"],
+            "amount": round(e["amount"], 2), "pnl": round(e["pnl"], 2),
+            "pnl_pct": round(e["pnl"] / e["amount"] * 100, 2) if e["amount"] else None,
+            "trades": e["trades"],
+            "weight_pct": round(weight, 2) if weight is not None else None,
+            "position_class": entry.get("position_class"),
+            "target_weight": target, "max_weight": max_weight,
+            "gap_pct": gap,
+            # Koľko dokúpiť, aby pozícia sedela na cieli — v peniazoch, lebo v
+            # percentách sa to zle prekladá na objednávku.
+            "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
+            "state": state,
+        })
+    # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
+    state_order = {"build": 0, "at_target": 1, "over_max": 2, "no_target": 3, "unclassified": 4}
+    rows.sort(key=lambda r: (state_order.get(r["state"], 9), -(r["gap_pct"] or 0), r["symbol"]))
+    classified = [r for r in rows if r["position_class"]]
+    return {
+        "account": account,
+        "weight_basis": BUILD_WEIGHT_BASIS,
+        "book_value": round(book_value, 2),
+        "positions": rows,
+        "counts": {
+            "total": len(rows), "classified": len(classified),
+            "unclassified": len(rows) - len(classified),
+            "build": sum(1 for r in rows if r["state"] == "build"),
+            "over_max": sum(1 for r in rows if r["state"] == "over_max"),
+        },
+        "target_weight_sum": round(sum(r["target_weight"] or 0 for r in rows), 2),
+    }
 
 
 @app.get("/api/portfolio/dca")
