@@ -305,6 +305,43 @@ class PortfolioBuildRegressionTests(unittest.TestCase):
         self.assertEqual(rows["VWCE"]["state"], "unclassified")
         self.assertEqual(data["counts"]["unclassified"], 1)
 
+    def test_seed_fills_evenly_and_never_overwrites_manual_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with (
+                patch.object(tb, "POSITION_CLASSES_FILE", path),
+                patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            ):
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"AAPL": {"position_class": "SPECULATIVE", "target_weight": 12}}})))
+                out = tb.seed_position_classes(account="1")
+                stored = tb._load_position_classes()
+                # Dva Stock/ETF tickery (krypto sa neráta) → 50 % každý.
+                self.assertEqual(out["target_weight"], 50.0)
+                self.assertEqual((out["seeded"], out["kept"]), (1, 1))
+                # Ručné rozhodnutie musí prežiť; seed dopĺňa, neprepisuje.
+                self.assertEqual(stored["AAPL"]["position_class"], "SPECULATIVE")
+                self.assertEqual(stored["AAPL"]["target_weight"], 12)
+                self.assertEqual(stored["VWCE"]["position_class"], "CORE")
+                self.assertEqual(stored["VWCE"]["note"], "seed")
+                tb.seed_position_classes(account="1", overwrite=1)
+                self.assertEqual(tb._load_position_classes()["AAPL"]["target_weight"], 50.0)
+
+    def test_seed_flag_clears_once_the_value_is_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with (
+                patch.object(tb, "POSITION_CLASSES_FILE", path),
+                patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            ):
+                tb.seed_position_classes(account="1")
+                self.assertTrue({r["symbol"]: r for r in tb.get_build_candidates(account="1")["positions"]}["AAPL"]["is_seed"])
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"AAPL": {"position_class": "CORE", "target_weight": 8}}})))
+                rows = {r["symbol"]: r for r in tb.get_build_candidates(account="1")["positions"]}
+                # Ručná úprava zahodí značku seed — inak by "čo ešte prejsť" nikdy neubúdalo.
+                self.assertFalse(rows["AAPL"]["is_seed"])
+
     def test_classes_round_trip_and_reject_unknown_class(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "position_classes.json"

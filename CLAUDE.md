@@ -117,6 +117,13 @@ These were already in the codebase and need to stay fixed:
    atomický zápis, gitignored) a `GET /api/portfolio/build` (gap = cieľ − váha).
    Karta „Dobudovanie pozícií" v Portfóliu pod DCA, default zbalená, triedy sa
    vypĺňajú priamo v tabuľke.
+   `POST /api/portfolio/classes/seed` (tlačidlo „Predvyplniť") označí VŠETKY
+   držané Stock/ETF ako CORE s rovnomerným cieľom `100/N`. Zaradené tickery
+   NEPREPISUJE (bez `overwrite=1`), lebo jedno kliknutie by inak zmazalo ručnú
+   prácu. Seedované záznamy nesú `note:"seed"` → `is_seed` v `/build` → bledé
+   prerušované pole v UI; ručná úprava značku zahodí, takže „čo ešte prejsť"
+   ubúda. **Rovnomerné váhy znamenajú „zatiaľ nerozhodnuté", nie názor na
+   stratégiu** — odstup pri nich hovorí len, ktorá pozícia je pod priemerom.
    **Menovateľ váh je Stock/ETF kniha účtu, NIE equity** (`BUILD_WEIGHT_BASIS`,
    rozhodnutie 2026-08-10) — krypto je zo stratégie vylúčené, takže v menovateli
    nemá čo robiť; inak by každá akciová pozícia vyšla „hlboko pod cieľom", lebo

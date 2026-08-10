@@ -2619,6 +2619,44 @@ async def save_position_classes(request: Request):
     return {"ok": True, "count": len(stored)}
 
 
+@app.post("/api/portfolio/classes/seed")
+def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
+    """Predvyplní všetky držané Stock/ETF pozície ako CORE s rovnomerným cieľom.
+
+    Východiskový bod na ručnú úpravu, nie názor na stratégiu: rovnomerné váhy
+    znamenajú "zatiaľ nerozhodnuté", takže odstup od cieľa hovorí iba to, ktorá
+    pozícia je menšia než priemer. Skutočná hodnota vznikne až prepísaním.
+
+    Už zaradené tickery sa NEPREPISUJÚ (bez `overwrite=1`) — inak by jedno
+    kliknutie zmazalo ručnú prácu bez možnosti vrátenia."""
+    # Pri priamom volaní (nie cez HTTP) je default stále objekt Query(0), ktorý je
+    # PRAVDIVÝ — bez tohto by taký volajúci ticho prepísal ručne vyplnené triedy.
+    overwrite = overwrite if isinstance(overwrite, (int, bool)) else 0
+    portfolio = get_portfolio(account=account, refresh=0)
+    symbols = sorted({
+        (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
+        for pos in portfolio.get("positions", [])
+        if str(pos.get("type") or "").lower() in ("stock", "etf")
+    })
+    if not symbols:
+        raise HTTPException(400, "Účet nemá žiadne Stock/ETF pozície")
+    target = round(100.0 / len(symbols), 2)
+    stored = _load_position_classes()
+    now = datetime.now(timezone.utc).isoformat()
+    seeded, kept = 0, 0
+    for sym in symbols:
+        if not overwrite and _position_class_entry(stored.get(sym)) is not None:
+            kept += 1
+            continue
+        stored[sym] = {"position_class": "CORE", "target_weight": target,
+                       "updated_at": now, "note": "seed"}
+        seeded += 1
+    with _position_classes_lock:
+        _atomic_write_json(POSITION_CLASSES_FILE, stored)
+    return {"ok": True, "account": account, "seeded": seeded, "kept": kept,
+            "target_weight": target, "positions": len(symbols)}
+
+
 @app.get("/api/portfolio/build")
 def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
     """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
@@ -2669,6 +2707,9 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
             "position_class": entry.get("position_class"),
             "target_weight": target, "max_weight": max_weight,
             "gap_pct": gap,
+            # Rozlíši predvyplnenú hodnotu od vedomého rozhodnutia — bez toho
+            # nevidno, čo je ešte na prejdenie.
+            "is_seed": entry.get("note") == "seed",
             # Koľko dokúpiť, aby pozícia sedela na cieli — v peniazoch, lebo v
             # percentách sa to zle prekladá na objednávku.
             "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
@@ -2688,6 +2729,7 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
             "unclassified": len(rows) - len(classified),
             "build": sum(1 for r in rows if r["state"] == "build"),
             "over_max": sum(1 for r in rows if r["state"] == "over_max"),
+            "seeded": sum(1 for r in rows if r["is_seed"]),
         },
         "target_weight_sum": round(sum(r["target_weight"] or 0 for r in rows), 2),
     }

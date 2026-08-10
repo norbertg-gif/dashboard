@@ -2029,6 +2029,9 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 }
 .build-input[type="number"] { width: 52px; text-align: right; }
 .build-input:focus { border-color: var(--blue); outline: none; }
+/* Predvyplnená rovnomerná váha = "zatiaľ nerozhodnuté". Musí sa dať odlíšiť od
+   vedomého rozhodnutia, inak nevidno, čo ešte treba prejsť. */
+.build-input.seed { color: var(--muted); border-style: dashed; }
 
 /* ── Shared card head (DCA) ─────────────────────────────────── */
 .risk-corr-head {
