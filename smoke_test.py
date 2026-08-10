@@ -82,7 +82,7 @@ CORE = [
     ("/api/ticker/exchanges?tickers=AAPL&limit=0", "exchanges", lambda b: isinstance(_json(b)["exchanges"], dict)),
     ("/api/investor/inbox", "investor inbox", lambda b: isinstance(_json(b)["items"], list)),
     ("/api/investor/plan", "týždenný plán", lambda b: isinstance(_json(b)["headline"], str)),
-    ("/api/assistant/export", "AI export", lambda b: _json(b)["schema_version"] == "1.2"),
+    ("/api/assistant/export", "AI export", lambda b: _json(b)["schema_version"] == "1.3" and _json(b)["analysis_scope"]["account"] == "1"),
     ("/api/prefetch/status", "prefetch status", lambda b: isinstance(_json(b), dict)),
 ]
 

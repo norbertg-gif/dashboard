@@ -254,14 +254,15 @@ async function downloadAssistantExport() {
     button.textContent = 'Pripravujem…';
   }
   try {
-    const response = await fetch(`${API}/api/assistant/export`);
+    const response = await fetch(`${API}/api/assistant/export?account=1`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     const day = String(payload.generated_at || new Date().toISOString()).slice(0, 10);
+    const acct = String(payload.analysis_scope?.account || '1');
     link.href = URL.createObjectURL(blob);
-    link.download = `dashboard-ai-export-${day}.json`;
+    link.download = `dashboard-ai-export-ucet${acct}-${day}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
     setStatus?.('AI export pripravený na vloženie do konzultácie', 'ok');

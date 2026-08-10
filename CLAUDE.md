@@ -82,7 +82,7 @@ These were already in the codebase and need to stay fixed:
 - **Bump verzie schémy cache je pri nespoľahlivých zdrojoch DEŠTRUKTÍVNA operácia.** `INSIGHTS_SCHEMA_VERSION` 16→17 (2026-08-04) zneplatnil všetky uložené insights payloady, aby sa prejavila nová FMP vetva pri `price_target`. Lenže časť tickerov nový fetch nedokázala obnoviť — Finnhub free tier cieľ pre veľa titulov nedá, Yahoo z Render IP prejde len občas, FMP má vlastné limity. GOOG mal hodinu predtým platných 421,79 zo zdroja `yahoo+av` a po bumpe ostal prázdny; zmizol z karty, z čiary na grafe aj zo stĺpca `Cieľ` v Portfóliu. **Správne poradie je: najprv doplniť prenos poľa zo starého záznamu, až potom bumpnúť verziu.** Insights write path teraz cieľ prenáša (`carried_from` drží pôvodný čas), takže jedna neúspešná obnova ho už nezmaže — rovnaký vzor treba použiť pre každé pole z fail-soft zdroja, ktoré sa nedá spoľahlivo zopakovať. Platí všeobecne: „teraz sa nepodarilo" NIE JE „neexistuje".
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise. The public portfolio endpoint reuses the same processed snapshot as the Portfolio tab; do not add a parallel raw-cache calculation path.
 - **Cache identity and writes matter.** Backtest cache identity includes an OHLCV fingerprint, not only the last date/row count. Disk JSON/gzip cache writes must remain temp-file + `os.replace()` atomic and use the striped file lock shared with reads.
-- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). Schema `1.2` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
+- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). **Exportuje sa VŽDY len jeden účet, default `?account=1`; zlúčenie účtov je zakázané** — účet 2 (Nelkin, ~15 rokov, pasívne ETF) má inú stratégiu a zlúčenie podľa tickeru je stratové (loty sa už nedajú rozlíšiť). Parameter prijíma iba `1`/`2`, inak 400. `analysis_scope.account` + `accounts_merged:false` nesú túto identitu v payloade. Schema `1.3` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
 - **Don't duplicate `/api/search`.** There were two routes with the same path returning different shapes (`list` vs `{results: [...]}`). FastAPI keeps the first; the second is dead, and clients expecting the other shape silently break (predictive autocomplete).
 - **Don't redefine `calc_adx` / `calc_rsi` / `calc_macd` / `calc_ichimoku` / `calc_stoch_rsi`.** The file had two sets — the second `calc_adx` returns a DataFrame, the first returns a tuple. Anything unpacking `_adx, _di, _di2 = calc_adx(df)` will silently get column-name strings → NaN columns → ADX disabled. Keep one definition each, near the top, used by both predictive and `/api/ohlcv`.
 - **Profit/loss colouring uses `pos.pnl >= 0`, not rate comparison.** `pos.openRate <= lastClose` is wrong for short positions, leveraged trades, and ignores fees. The `pos.pnl` field from eToro is the source of truth.
@@ -139,10 +139,16 @@ These were already in the codebase and need to stay fixed:
    WATCH/FREEZE/SPECULATIVE) je na začiatok priveľa — pôvodný problém bola
    manažovateľnosť, nie málo kategórií. Začať s 3–4.
 
--6. **AI export a investičné analýzy = VÝHRADNE ÚČET 1 — 2026-08-09.**
-   `trading_backend.py:8786` robí `snapshots = {account: _assistant_snapshot(account)
-   for account in ("1", "2")}` a potom zlučuje oba účty do `positions_by_symbol`
-   **kľúčovaného podľa tickeru**, bez značky účtu. `portfolio_summary` je súčet
+-6. **AI export a investičné analýzy = VÝHRADNE ÚČET 1 — OPRAVENÉ 2026-08-10.**
+   Export berie jeden účet (`?account=1` default, povolené len `1`/`2`, inak 400),
+   schema bumpnutá na `1.3`, payload nesie `analysis_scope.account` +
+   `accounts_merged:false`, frontend sťahuje súbor s názvom `…-ucet1-…json`.
+   Regresný test overuje, že `_assistant_snapshot` sa volá výhradne pre účet 1.
+   **Dátové diery nižšie (dip_score/daily_state pokrytie, earnings) ostávajú
+   otvorené a stále blokujú -7.**
+   Pôvodný popis chyby: `snapshots = {account: _assistant_snapshot(account)
+   for account in ("1", "2")}` zlučoval oba účty do `positions_by_symbol`
+   **kľúčovaného podľa tickeru**, bez značky účtu. `portfolio_summary` bol súčet
    oboch snapshotov.
    **Prečo je to chyba, nie vlastnosť:** účet 2 je Nelkin, horizont ~15 rokov,
    pasívne ETF — iná stratégia s inými pravidlami. `CLAUDE_investicna_analyza.md`
@@ -529,7 +535,12 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - **Frontend:** karta `#insightsCard` v Predictive sidebar
   (`pc_loadInsights`) má názov **Firma & očakávania**: insider 90d, EPS
   beat/miss, Buy/Hold/Sell s priemerným targetom v zátvorke a short interest
-  klasifikovaný ako nízky / zvýšený / vysoký.
+  klasifikovaný ako nízky / zvýšený / vysoký, plus riadok **Solventnosť**
+  (Net Debt/EBITDA + krytie úrokov). Solventnostné polia idú z TEJ ISTEJ
+  Finnhub `metric=all` odpovede ako short interest — žiadne nové volanie — a
+  medzi obnovami sa prenášajú rovnako ako `price_target` (schéma sa preto
+  NEBUMPOVALA). AI export ich číta iba z disk cache (`_assistant_solvency`),
+  nikdy nefetchuje: chýbajúci blok znamená „nevieme", nie „zdravá súvaha".
   Tieto polia sú interpretačné a NEVSTUPUJÚ do C1–C4 ani ML.
 - **Portfolio target column:** `PORT_COLS.analystTarget`, default hidden and
   stocks-only. Lazy-loads `/api/ticker/insights/{symbol}` only when visible,

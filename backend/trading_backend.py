@@ -8639,7 +8639,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.2"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.3"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -8648,6 +8648,31 @@ def _assistant_snapshot(account: str) -> dict:
         return _positions_cache.get(account) or cache_read(_portfolio_disk_path(account)) or {}
     except Exception:
         return {}
+
+
+def _assistant_solvency(symbol: str) -> dict:
+    """Solventnostné polia z insights DISK cache — nikdy nefetchuje.
+
+    Export beží nad ~60 tickermi; per-ticker fetch by z read-only handoffu spravil
+    minútový sieťový beh a vypálil Finnhub limit. Chýbajúci alebo starý záznam je
+    legitímna odpoveď 'zatiaľ neviem', nesie ju `data_age_days`."""
+    try:
+        cached = json.loads((YAHOO_INSIGHTS_DIR / f"{symbol}.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    solvency = cached.get("solvency")
+    if not isinstance(solvency, dict):
+        return {}
+    stamp = solvency.get("carried_from") or cached.get("fetched_at")
+    return _assistant_compact({
+        "net_debt_to_ebitda": _assistant_number(solvency.get("net_debt_to_ebitda")),
+        "interest_coverage": _assistant_number(solvency.get("interest_coverage")),
+        "current_ratio": _assistant_number(solvency.get("current_ratio")),
+        "quick_ratio": _assistant_number(solvency.get("quick_ratio")),
+        "debt_to_equity": _assistant_number(solvency.get("debt_to_equity")),
+        "total_debt_to_ebitda": _assistant_number(solvency.get("total_debt_to_ebitda")),
+        "data_age_days": _assistant_days_since(stamp),
+    })
 
 
 def _assistant_iso_timestamp(value) -> str | None:
@@ -8762,6 +8787,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "days_remaining": (earnings or {}).get("days"),
             "confirmed": bool((earnings or {}).get("date")),
         }),
+        "solvency": _assistant_solvency(symbol),
         "dca_context": {
             "status": dca_status,
             "portfolio_pnl_pct": total_pnl_pct,
@@ -8778,12 +8804,19 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
 
 
 @app.get("/api/assistant/export")
-def get_assistant_export():
+def get_assistant_export(account: str = "1"):
     """Read-only AI handoff. Protected by normal Basic Auth, never public-token auth.
-    It reuses dashboard snapshots and scanner/DIP cache; it never explicitly requests refresh=1."""
+    It reuses dashboard snapshots and scanner/DIP cache; it never explicitly requests refresh=1.
+
+    One account per export, never merged: account 1 and account 2 follow different
+    strategies (see docs/CLAUDE_investicna_analyza.md), so merging them by ticker
+    silently mixes lots and distorts every weight."""
+    account = str(account or "1")
+    if account not in ("1", "2"):
+        raise HTTPException(status_code=400, detail="account must be '1' or '2'")
     now = datetime.now(timezone.utc)
     settings = _dash_settings()
-    snapshots = {account: _assistant_snapshot(account) for account in ("1", "2")}
+    snapshots = {account: _assistant_snapshot(account)}
     positions_by_symbol: dict[str, list[dict]] = {}
     all_position_symbols: set[str] = set()
     excluded_crypto_symbols: set[str] = set()
@@ -9001,6 +9034,7 @@ def get_assistant_export():
         "dca_context": "Explicit DCA evidence. eligible means current conditions pass; conditional means positive conditions exist but chart blockers require manual review.",
         "change_from_last_entry_pct": "Signed price change from the latest open lot entry. Positive means current price is above that entry; negative means below it.",
         "dca_drawdown_from_last_entry_pct": "Negative-only price change from the latest open lot entry. Omitted when the current price is at or above that entry.",
+        "solvency": "Balance-sheet risk from the Finnhub metric snapshot: net_debt_to_ebitda and interest_coverage are the two that decide whether a loss is a dip or a solvency problem. Read only from cached insights, so it is absent for tickers whose insights card was never opened; data_age_days says how old the numbers are. Absent means unknown, never healthy.",
         "attention_items": "One normalized list of held tickers that need review. It replaces duplicated weekly-plan and inbox text in this export.",
         "passes_dip_threshold": "Whether the imported DIP score meets the configured DCA minimum. It separates priority candidates from scanner-only watch candidates.",
     }
@@ -9017,6 +9051,9 @@ def get_assistant_export():
             "notes": ["DIP signal is not an automatic buy.", "Verify weekly and daily chart before DCA."],
         },
         "analysis_scope": {
+            "account": account,
+            "accounts_merged": False,
+            "account_note": "Single account only. Accounts follow different strategies and must never be analyzed as one portfolio.",
             "include_asset_types": ["Stock", "ETF"],
             "exclude_crypto_from_dip_analysis": True,
             "exclude_crypto_from_export": True,
@@ -9029,6 +9066,7 @@ def get_assistant_export():
                 "Daily P/L is a dashboard approximation based on live price and previous market close.",
                 "Scanner and DIP data can be older than the portfolio snapshot; inspect source_timestamps.",
                 "Dashboard recommendations are interpretive aids, not trading instructions.",
+                "Solvency fields come from cached ticker insights and are missing for tickers not yet fetched; treat a missing solvency block as unknown, not as a clean balance sheet.",
             ],
         },
         "portfolio_summary": {
@@ -10359,6 +10397,19 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                 "short_ratio": short_ratio,
                 "source": "finnhub",
             }
+        # Solventnosť z TEJ ISTEJ odpovede — žiadne nové API volanie. Bez týchto
+        # polí je pravidlo o zatváraní pozícií pri riziku bankrotu neoveriteľné
+        # (docs/CLAUDE_investicna_analyza.md, sekcia 3 + Priorita 6).
+        solvency = _assistant_compact({
+            "net_debt_to_ebitda": _first_number(metric, "netDebtToEBITDAAnnual", "netDebtToEBITDATTM", "netDebtToTotalCapitalAnnual"),
+            "interest_coverage": _first_number(metric, "netInterestCoverageAnnual", "netInterestCoverageTTM"),
+            "current_ratio": _first_number(metric, "currentRatioAnnual", "currentRatioQuarterly"),
+            "quick_ratio": _first_number(metric, "quickRatioAnnual", "quickRatioQuarterly"),
+            "debt_to_equity": _first_number(metric, "totalDebtToEquityAnnual", "totalDebt/totalEquityAnnual", "totalDebtToEquityQuarterly"),
+            "total_debt_to_ebitda": _first_number(metric, "totalDebtToEBITDAAnnual", "totalDebt/ebitdaAnnual"),
+        })
+        if solvency:
+            out["solvency"] = {**solvency, "source": "finnhub"}
     except Exception as e:
         print(f"[insights] short interest {sym} failed: {_scrub_token(e)}")
     if not (buys or sells or eps_hist):
@@ -11502,6 +11553,14 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         carried.setdefault("carried_from", cached.get("fetched_at"))
         payload["price_target"] = carried
         print(f"[insights] price target {sym}: prenesený z predošlej cache")
+    # Rovnaký dôvod aj rovnaký vzor pre solventnosť: Finnhub free tier tieto
+    # polia pre časť tickerov nevráti, takže neúspešná obnova nesmie zmazať
+    # platný údaj. Schéma sa ZÁMERNE nebumpuje — bump by zahodil celú cache a
+    # nový fetch by ju pre časť tickerov nevedel zopakovať (pitfall 16→17).
+    if not payload.get("solvency") and cached and cached.get("solvency"):
+        carried_solv = dict(cached["solvency"])
+        carried_solv.setdefault("carried_from", cached.get("fetched_at"))
+        payload["solvency"] = carried_solv
     try:
         YAHOO_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         fpath.write_text(json.dumps(payload), encoding="utf-8")

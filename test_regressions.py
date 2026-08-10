@@ -277,8 +277,14 @@ class AssistantExportRegressionTests(unittest.TestCase):
             }, {"symbol": "BTC", "name": "Bitcoin", "type": "Crypto", "amount": 50, "pnl": 5}],
             "orders": [{"orderId": 555, "symbol": "MSFT", "type": "Stock", "kind": "limit", "isBuy": True, "rate": 400, "amount": 50}],
         }
+        requested_accounts: list[str] = []
+
+        def _snapshot(account):
+            requested_accounts.append(account)
+            return snapshot if account == "1" else {}
+
         with (
-            patch.object(tb, "_assistant_snapshot", side_effect=lambda account: snapshot if account == "1" else {}),
+            patch.object(tb, "_assistant_snapshot", side_effect=_snapshot),
             patch.object(tb, "load_dip_scores", return_value={
                 "AAPL": {"rank": 1, "total": 105, "fa": 70, "ta": 35, "label": "VERY STRONG"},
                 "MSFT": {"rank": 2, "total": 95, "fa": 65, "ta": 30, "label": "STRONG"},
@@ -294,7 +300,11 @@ class AssistantExportRegressionTests(unittest.TestCase):
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.2")
+        self.assertEqual(payload["schema_version"], "1.3")
+        # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
+        self.assertEqual(requested_accounts, ["1"])
+        self.assertEqual(payload["analysis_scope"]["account"], "1")
+        self.assertFalse(payload["analysis_scope"]["accounts_merged"])
         self.assertEqual(payload["positions"][0]["ticker"], "AAPL")
         self.assertEqual(payload["positions"][0]["earnings"]["date"], "2026-07-15")
         self.assertEqual(payload["positions"][0]["dca_context"]["change_from_last_entry_pct"], 10.0)
@@ -316,6 +326,23 @@ class AssistantExportRegressionTests(unittest.TestCase):
         rendered = json.dumps(payload)
         self.assertNotIn("positionId", rendered)
         self.assertNotIn("orderId", rendered)
+
+    def test_solvency_comes_from_insights_cache_and_never_fetches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            (cache_dir / "AAPL.json").write_text(json.dumps({
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "solvency": {"net_debt_to_ebitda": 1.4, "interest_coverage": 22.5,
+                             "current_ratio": 0.95, "source": "finnhub"},
+            }), encoding="utf-8")
+            with patch.object(tb, "YAHOO_INSIGHTS_DIR", cache_dir):
+                found = tb._assistant_solvency("AAPL")
+                # Ticker bez cache je "neviem", nie prázdny zdravý súvahový list.
+                missing = tb._assistant_solvency("NVDA")
+        self.assertEqual(found["net_debt_to_ebitda"], 1.4)
+        self.assertEqual(found["interest_coverage"], 22.5)
+        self.assertEqual(found["data_age_days"], 0)
+        self.assertEqual(missing, {})
 
     def test_dca_context_can_be_eligible_without_chart_blockers(self):
         position = tb._assistant_export_position(

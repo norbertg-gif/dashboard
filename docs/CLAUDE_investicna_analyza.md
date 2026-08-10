@@ -66,7 +66,7 @@ Marvin je **buy-and-hold investor s dlhým horizontom a vysokou toleranciou papi
 
 Zatvorenie pozície je namieste len pri: reálnom riziku trvalej straty kapitálu (bankrot, delisting), rozpade investičnej tézy, alebo keď treba kapitál a je to najslabšia pozícia bez optionality.
 
-**Známa slabina tohto pravidla:** export neobsahuje **žiadne solventnostné pole** (Net Debt/EBITDA, interest coverage), takže riziko bankrotu sa nedá preukázať a výnimka je v praxi neaplikovateľná. Buď doplniť dáta, alebo priznať, že pravidlo reálne znie „nikdy nezatváram".
+**Doplnené 10. 8. 2026:** export už solventnostné pole má — `positions[].solvency` (`net_debt_to_ebitda`, `interest_coverage`, `current_ratio`, `quick_ratio`, `debt_to_equity`, `data_age_days`). Výnimka „reálne riziko trvalej straty kapitálu" je tým preukázateľná. **Zostávajúce obmedzenie:** dáta sa čítajú iba z insights disk cache, takže ticker, ktorého karta sa v Analytike nikdy neotvorila, blok `solvency` v exporte NEMÁ. Chýbajúci blok znamená „nevieme", nie „zdravá súvaha" — na tom pravidlo o zatváraní nesmie stáť.
 
 ---
 
@@ -187,7 +187,7 @@ Dôležité: **štyri nezávislé AI kanály nedokázali povedať, či je ten kl
 
 *Otvorená otázka k tomu:* cez ktorý menovateľ počítať váhy — celú equity účtu 1 (~$26,8 tis., obsahuje veľké krypto), alebo len akciovú/ETF knihu ($9 462,79)? Keďže krypto je zo stratégie vylúčené, druhá možnosť dáva väčší zmysel, ale treba to rozhodnúť vedome.
 
-**Priorita 6 — solventnostné metriky** (Net Debt/EBITDA, interest coverage). Bez nich je pravidlo o zatváraní pozícií neoveriteľné, viď sekcia 3.
+**Priorita 6 — solventnostné metriky** (Net Debt/EBITDA, interest coverage) — **HOTOVÉ 10. 8. 2026.** Insights ťahajú Finnhub `metric=all` už dávno, len sa z odpovede brala výhradne short interest; solventnostné polia sa teraz z tej istej odpovede uložia (nula nových API volaní), prenášajú sa medzi obnovami ako price_target a export ich číta z cache. Ostáva pokrytie: ticker bez otvorenej insights karty blok nemá.
 
 **Priorita 7 — endpointy** `/api/public/dip-ranking` a `/api/public/scanner` analogicky k portfolio endpointu, aby odpadli manuálne exporty.
 

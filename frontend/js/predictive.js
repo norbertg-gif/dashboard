@@ -2624,6 +2624,24 @@ async function pc_loadInsights(ticker) {
       rows.push(`<div class="pred-row" title="Podiel voľne obchodovaných akcií predaných nakrátko. Vysoká hodnota môže zosilniť odraz aj riziko; sama osebe nie je Buy signál.">
         <span class="key">Short interest</span><span class="val"><span style="color:${color}">${level}</span> · ${shortPct.toFixed(1)} % float${ratio}</span></div>`);
     }
+    // Solventnosť: odlišuje "lacné po prepade" od "má problém so súvahou".
+    // Rovnaké polia idú do AI exportu — karta a export musia ukazovať to isté.
+    const sv = d.solvency;
+    const nd = Number(sv?.net_debt_to_ebitda);
+    const cov = Number(sv?.interest_coverage);
+    if (Number.isFinite(nd) || Number.isFinite(cov)) {
+      const parts = [];
+      if (Number.isFinite(nd)) {
+        const color = nd >= 4 ? 'var(--down)' : nd >= 2.5 ? 'var(--yellow)' : 'var(--up)';
+        parts.push(`<span style="color:${color}">dlh/EBITDA ${nd.toFixed(1)}×</span>`);
+      }
+      if (Number.isFinite(cov)) {
+        const color = cov < 2 ? 'var(--down)' : cov < 5 ? 'var(--yellow)' : 'var(--up)';
+        parts.push(`<span style="color:${color}">krytie úrokov ${cov.toFixed(1)}×</span>`);
+      }
+      rows.push(`<div class="pred-row" title="Net Debt/EBITDA a krytie úrokov z Finnhub. Odpovedá na otázku, či je strata dip alebo problém so súvahou. Kontext, nevstupuje do C1–C4 ani ML.">
+        <span class="key">Solventnosť</span><span class="val">${parts.join(' · ')}</span></div>`);
+    }
     if (!rows.length) return;
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
     card.style.display = '';
