@@ -60,7 +60,9 @@ Token je v env premennej `PUBLIC_API_TOKEN` na Render. Parameter `account=2` na 
 
 Marvin je **buy-and-hold investor s dlhým horizontom a vysokou toleranciou papierovej straty**. Doslovná citácia: „pokojne akceptujem aj 90 % stratu... nemám problém pár rokov si počkať."
 
-**Horizont: do 5 rokov** (potvrdené 9. 8. 2026). Pozor — `strategy.holding_horizon` v exporte hlási `1-3 years`, čo je nesúlad; platí 5 rokov a v dashboarde sa to má zjednotiť.
+**Horizont: do 5 rokov** (potvrdené 9. 8. 2026; export zjednotený 10. 8. 2026 na `up to 5 years`).
+
+Kratšie ukončenie je prípustné, ale len pri splnení oboch podmienok naraz: lot **prešiel ročným časovým testom v zisku** (SR daňové oslobodenie) **a** ukáže sa, že je rozumné sa ho zbaviť. Vek pozície sám osebe nie je dôvod na predaj a **nesmie vstupovať do žiadneho algoritmu** — hviezdičku si používateľ dáva ručne (viď zamietnuté nápady v CLAUDE.md, položka 0).
 
 **Default pre stratovú pozíciu je DRŽAŤ, nie zatvárať.** Toto je tvrdé pravidlo. Vzniklo po konkrétnej chybe: CHTR bol opakovane odporúčaný na zatvorenie ako „value trap" a následne vyskočil +27 % za jeden deň na správe o akvizícii Cox. Optionalita (M&A, turnaround, sektorová rotácia) sa nedá vyčísliť skóringom, ale existuje.
 

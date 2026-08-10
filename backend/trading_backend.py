@@ -9046,9 +9046,14 @@ def get_assistant_export(account: str = "1"):
             "name": "DIP Strategy v3",
             "dca_trigger_pct": -float(settings["dca_loss_pct"]),
             "dca_min_dip_score": settings["dca_dip_min"],
-            "holding_horizon": "1-3 years",
+            "holding_horizon": "up to 5 years",
             "buy_only": True,
-            "notes": ["DIP signal is not an automatic buy.", "Verify weekly and daily chart before DCA."],
+            "notes": [
+                "DIP signal is not an automatic buy.",
+                "Verify weekly and daily chart before DCA.",
+                "Default for a losing position is HOLD, not close.",
+                "Earlier exit is allowed only once a lot has passed the 1-year Slovak tax test in profit and the case for holding it has weakened; position age itself is never an exit reason.",
+            ],
         },
         "analysis_scope": {
             "account": account,
