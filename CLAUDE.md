@@ -114,6 +114,17 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-10. **Časový test hviezdička (★) v Portfóliu — teraz aj per ticker, HOTOVO 2026-08-11.**
+   `tradePassedYearTest(row)` (per trade, existovalo) + nové
+   `tickerPassedYearTest(row)` — pri agregovanom per-ticker riadku vyžaduje
+   `_trades.every(tradePassedYearTest)`, nie "aspoň jedna". Jedna nedávno
+   dokúpená tranža celý titul ešte nerobí voľným na predaj bez dane, takže
+   "aspoň jedna prešla" by bolo zavádzajúce — zámerne prísnejšie ako by sa
+   dalo čakať. Fallback na `tradePassedYearTest(row)` priamo, keď `_trades`
+   chýba (row nie je z agregácie). Overené priamo v prehliadači na
+   syntetických tranžiach: všetky staré → true, zmiešané (jedna čerstvá) →
+   false, single-trade bez `_trades` → fallback funguje.
+
 -9. **Right-click context menu — watchlist HOTOVO 2026-08-11, chart panel HOTOVO 2026-08-11.**
    `showContextMenu(x, y, items)` / `hideContextMenu()` v `core.js` — jedna
    zdieľaná DOM inštancia (`#ctx-menu`), `items:[{label, action, disabled?,

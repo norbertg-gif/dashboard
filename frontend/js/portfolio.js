@@ -1610,6 +1610,15 @@ function tradePassedYearTest(row) {
   return opened <= cutoff;
 }
 
+// Per ticker pohľad: hviezdička len keď VŠETKY tranže titulu prešli časovým
+// testom — jedna nedávno dokúpená tranža celý titul ešte nerobí voľným na
+// predaj bez dane, takže "aspoň jedna" by bolo zavádzajúce.
+function tickerPassedYearTest(row) {
+  const trades = row?._trades;
+  if (!trades || !trades.length) return tradePassedYearTest(row);
+  return trades.every(tradePassedYearTest);
+}
+
 async function ensurePortfolioAnalystTargets(pid) {
   const state = getPortState(pid);
   if (!state?.data?.positions || !state.colVisible.analystTarget) return;
@@ -2382,8 +2391,12 @@ function renderPortPanel(pid) {
         } else if (col.key === 'trade') {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
         } else if (col.key === 'openDateTime') {
-          const star = (s.view !== 'ticker' && tradePassedYearTest(row))
-            ? ' <span class="port-year-test" title="Časový test splnený — akcia/ETF držaná dlhšie než rok (oslobodenie od dane z príjmu pri predaji)">★</span>'
+          const passedTest = s.view === 'ticker' ? tickerPassedYearTest(row) : tradePassedYearTest(row);
+          const starTitle = s.view === 'ticker'
+            ? 'Časový test splnený — VŠETKY tranže tohto titulu držané dlhšie než rok (oslobodenie od dane z príjmu pri predaji)'
+            : 'Časový test splnený — akcia/ETF držaná dlhšie než rok (oslobodenie od dane z príjmu pri predaji)';
+          const star = passedTest
+            ? ` <span class="port-year-test" title="${starTitle}">★</span>`
             : '';
           html += `<td>${fmtPortVal(row.openDateTime, 'date')}${star}</td>`;
         } else if (col.key === 'analystTarget') {
