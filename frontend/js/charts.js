@@ -143,6 +143,50 @@ function onSbTickerContextMenu(event, symbol) {
   ]);
 }
 
+// Duplikát všetkých ikoniek z hlavičky chart panela do right-click menu —
+// ikonky ostávajú (netreba sa učiť nové miesto), toto je len rýchlejšia
+// cesta k tej istej funkcii pre toho, kto vie, čo chce.
+function onChartPanelContextMenu(event, id) {
+  const panel = document.getElementById(id);
+  const r = registry[id];
+  if (!panel || !r) return;
+  event.preventDefault();
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase() || '';
+  const inds = r.indicators || {};
+  const inWl = typeof isInWatchlist === 'function' && sym ? isInWatchlist(sym) : false;
+  const tradeBtn = document.getElementById('trade-btn-' + id);
+  const tradeAvailable = sym && tradeBtn && tradeBtn.style.display !== 'none';
+  const items = [
+    { label: 'Otvoriť v Analytike', action: () => openPanelInAnalytika(id) },
+    { label: inWl ? 'Vo watchliste' : 'Pridať do watchlistu', checked: inWl,
+      action: () => sym && addCurrentToWatchlist(sym) },
+    tradeAvailable
+      ? { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') }
+      : { label: 'Trade na eToro ↗ (titul nie je v portfóliu)', disabled: true },
+    { sep: true },
+    { label: 'Obnoviť graf', action: () => loadChart(id) },
+    { label: 'Heikin Ashi', checked: !!inds.ha, action: () => toggleHA(id) },
+    { sep: true },
+    { label: 'EMA', checked: !!inds.ema, action: () => toggleIndicator(id, 'ema') },
+    { label: 'Ichimoku', checked: !!inds.ichimoku, action: () => toggleIndicator(id, 'ichimoku') },
+    { label: 'RSI', checked: !!inds.rsi, action: () => toggleIndicator(id, 'rsi') },
+    { label: 'ADX', checked: !!inds.adx, action: () => toggleIndicator(id, 'adx') },
+    { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
+    { sep: true },
+    { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
+    { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
+  ];
+  // Dock a Verdikt panel majú vlastný uzatvárací tok (closeChartDock,
+  // resetuje dockPanelId) — priamy removePanel(id) by ho obišiel a nechal
+  // dockPanelId ukazovať na už zmazaný panel.
+  if (id === dockPanelId) {
+    items.push({ sep: true }, { label: '✕ Zavrieť graf', action: () => closeChartDock() });
+  } else if (id !== verdictPanelId) {
+    items.push({ sep: true }, { label: '✕ Zavrieť graf', action: () => removePanel(id) });
+  }
+  showContextMenu(event.clientX, event.clientY, items);
+}
+
 function applyThemeToAllCharts() {
   // Panel grafy (registry)
   for (const r of Object.values(registry)) {
@@ -862,6 +906,12 @@ function createPanel(cfg) {
     <div class="p-resize-handle" id="rh-${id}" title="Potiahnite pre zmenu výšky grafu"></div>
   `;
   document.getElementById(cfg.container || 'grid').appendChild(panel);
+  // Nespúšťaj vlastné menu nad textovým poľom/selectom — nech ostane natívne
+  // kopírovanie/vkladanie funkčné pri hľadaní tickeru.
+  panel.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.p-sym, .p-sel, select, input')) return;
+    onChartPanelContextMenu(e, id);
+  });
   applyChartPortfolioFlag(id);
   ensureHoldingsForChartFlags();
 

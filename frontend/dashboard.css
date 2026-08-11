@@ -2082,6 +2082,8 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 .ctx-menu-item:hover { background: var(--bg-input); }
 .ctx-menu-item.disabled { color: var(--muted2); cursor: default; }
 .ctx-menu-item.disabled:hover { background: transparent; }
+.ctx-menu-item.checked { color: var(--blue); }
+.ctx-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* ── Shared card head (DCA) ─────────────────────────────────── */
 .risk-corr-head {

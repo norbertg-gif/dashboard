@@ -114,30 +114,45 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
--9. **Right-click context menu — ZÁKLAD HOTOVÝ 2026-08-11, zámerne minimálny.**
+-9. **Right-click context menu — watchlist HOTOVO 2026-08-11, chart panel HOTOVO 2026-08-11.**
    `showContextMenu(x, y, items)` / `hideContextMenu()` v `core.js` — jedna
-   zdieľaná DOM inštancia (`#ctx-menu`), `items:[{label, action, disabled?}]`.
-   Prvé použitie: right-click na ticker vo watchliste (`onSbTickerContextMenu`
-   v `charts.js`) ponúka "Nový graf" — na rozdiel od ľavého klikú
-   (`onSbTickerClick`), ktorý pri existujúcom aktívnom paneli PREPÍŠE jeho
-   ticker, right-click cez `openNewChartPanel(symbol)` VŽDY vytvorí nový
-   panel, nikdy nič neprepíše. Bola to reálna frustrácia — aktívny panel je
-   "sticky" naprieč session (`activePanelId`) bez jasného vizuálneho
-   upozornenia, takže klik na watchlist vedel prepísať graf, o ktorom
-   používateľ ani nevedel, že je aktívny.
-   **Pasca, na ktorú prišiel priamy test v prehliadači (nie čítanie kódu):**
+   zdieľaná DOM inštancia (`#ctx-menu`), `items:[{label, action, disabled?,
+   checked?}]` alebo `{sep:true}` na oddeľovač. `checked` vykreslí ✓ a modrú
+   farbu — zrkadlí LIVE stav (napr. `registry[id].indicators`), nie stav pri
+   vytvorení panela.
+   **Pasca, na ktorú prišiel priamy test v prehliadači, nie čítanie kódu:**
    globálny `document.addEventListener('contextmenu', ...)` na zatváranie
    "cudzieho" menu by sa spustil V TOM ISTOM TIKU ako `showContextMenu()`
    nového menu (bublanie toho istého eventu), takže by novo otvorené menu
-   hneď zavrel samo seba pri right-clicku na iný ticker. Rovnaký event teda
-   NEMÁ vlastný globálny closer — spolieha sa na to, že `showContextMenu()`
+   hneď zavrel samo seba pri right-clicku na iný cieľ. Preto NEMÁ vlastný
+   globálny closer na `contextmenu` — spolieha sa na to, že `showContextMenu()`
    už aj tak volá `hideContextMenu()` pred vytvorením nového menu. Zatváranie
-   ostáva len na ľavý klik mimo, Escape a scroll.
-   **Zámerne NEIMPLEMENTOVANÉ:** podmenu, ikonky, klávesové skratky — žiadne
-   iné miesto v appke zatiaľ right-click nepoužíva. Používateľ avizoval
-   rozšírenie na ďalšie miesta ("často je right click rýchlejší než hľadanie
-   ikonky") — pri ďalšom mieste znovupoužiť `showContextMenu()`, nie stavať
-   nový mechanizmus.
+   ide len cez ľavý klik mimo, Escape a scroll.
+   **Watchlist ticker** (`onSbTickerContextMenu` v `charts.js`): "Nový graf"
+   — na rozdiel od ľavého kliku (`onSbTickerClick`), ktorý pri existujúcom
+   aktívnom paneli PREPÍŠE jeho ticker, right-click cez `openNewChartPanel(symbol)`
+   VŽDY vytvorí nový panel. Bola to reálna frustrácia — aktívny panel je
+   "sticky" naprieč session (`activePanelId`) bez jasného vizuálneho
+   upozornenia, takže klik na watchlist vedel prepísať graf, o ktorom
+   používateľ ani nevedel, že je aktívny.
+   **Chart panel** (`onChartPanelContextMenu` v `charts.js`, viazané na celý
+   `.panel` cez `addEventListener('contextmenu', ...)`) duplikuje VŠETKÝCH 13
+   akcií z hlavičky: Analytika, watchlist, Trade (disabled s dôvodom, keď
+   titul nie je v portfóliu), refresh, HA, 5× indikátor, Wizard, Správy,
+   zavrieť. Right-click na `.p-sym`/`select`/`input` vlastné menu NEOTVÁRA —
+   necháva natívne kopírovanie/vkladanie pri hľadaní tickeru funkčné.
+   **Zavretie je podmienené typom panela** — dock (`id === dockPanelId`)
+   volá `closeChartDock()`, Verdikt panel (`id === verdictPanelId`) položku
+   zavrieť vôbec nemá, ostatné `removePanel(id)` priamo. Priamy `removePanel`
+   na dock paneli by obišiel `closeChartDock()` a nechal `dockPanelId`
+   ukazovať na už zmazaný panel — rovnaký vzor vylučovania dock/verdikt z
+   bulk operácií, aký už tento súbor popisuje pri chart docku vyššie.
+   Overené naživo v prehliadači: 13 položiek + 4 oddeľovače, klik na EMA
+   prepol tlačidlo aj graf, opätovné otvorenie menu ukázalo ✓ EMA.
+   **Ďalšie miesta zatiaľ NEROBENÉ** (Portfolio riadok, Scanner riadok,
+   Analytika sidebar) — používateľ avizoval postupné rozšírenie ("často je
+   right click rýchlejší než hľadanie ikonky"); pri ďalšom mieste
+   znovupoužiť `showContextMenu()`, nie stavať nový mechanizmus.
 
 -8. **UI polish naprieč tabuľkami — HOTOVÉ 2026-08-11.** Sticky hlavičky
    stĺpcov v Histórii, Scanneri (DIP univerzum) a Portfóliu — mechanizmus

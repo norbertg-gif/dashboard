@@ -504,9 +504,10 @@ async function saveSettingsModal() {
 
 // ── CONTEXT MENU (right-click) ───────────────────────────────────────────────
 // Zdieľaný jednoduchý helper — jedna DOM inštancia, znovupoužitá odkiaľkoľvek.
-// `items`: [{label, action, disabled?}]. Zámerne bez podmenu/ikoniek/klávesových
-// skratiek — tento dashboard nemá zatiaľ dosť right-click akcií na to, aby to
-// bolo treba; pridá sa, až keď na to bude reálny prípad použitia.
+// `items`: [{label, action, disabled?, checked?}] alebo `{sep:true}` na
+// oddelenie skupín (chart panel menu duplikuje ~13 ikoniek naraz, bez skupín
+// by bol nečitateľný zoznam). `checked` vykreslí ✓ pred labelom — zrkadlí
+// stav tlačidla v hlavičke panela (aktívny indikátor, HA, atď.).
 let _ctxMenuCloseHandlerBound = false;
 
 function showContextMenu(x, y, items) {
@@ -514,10 +515,13 @@ function showContextMenu(x, y, items) {
   const menu = document.createElement('div');
   menu.id = 'ctx-menu';
   menu.className = 'ctx-menu';
-  menu.innerHTML = items.map((it, i) => it.disabled
-    ? `<div class="ctx-menu-item disabled">${escHtml(it.label)}</div>`
-    : `<div class="ctx-menu-item" data-i="${i}">${escHtml(it.label)}</div>`
-  ).join('');
+  menu.innerHTML = items.map((it, i) => {
+    if (it.sep) return `<div class="ctx-menu-sep"></div>`;
+    const mark = it.checked ? '✓ ' : '';
+    return it.disabled
+      ? `<div class="ctx-menu-item disabled">${mark}${escHtml(it.label)}</div>`
+      : `<div class="ctx-menu-item${it.checked ? ' checked' : ''}" data-i="${i}">${mark}${escHtml(it.label)}</div>`;
+  }).join('');
   document.body.appendChild(menu);
   // Najprv vlož mimo obrazovky, zmeraj a až potom pozicionuj — inak menu
   // pri kliku blízko pravého/dolného okraja odreže časť položiek.
