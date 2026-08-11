@@ -676,7 +676,7 @@ async function seedBuildClasses() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const out = await r.json();
     await loadBuildCard(true);
-    setStatus?.(`Predvyplnené: ${out.seeded} pozícií po ${out.target_weight} %`
+    setStatus?.(`Predvyplnené: ${out.seeded} pozícií ako CORE`
       + (out.kept ? `, ${out.kept} ponechaných` : ''), 'ok');
   } catch (e) {
     setStatus?.(`Predvyplnenie zlyhalo: ${e.message}`, 'error');
@@ -729,7 +729,6 @@ function renderBuildCard(data) {
       c.build ? `${c.build} na dokúpenie` : '',
       c.over_max ? `${c.over_max} nad stropom` : '',
       c.unclassified ? `${c.unclassified} nezaradených` : '',
-      c.seeded ? `${c.seeded} predvyplnených` : '',
     ].filter(Boolean).join(' · ') || 'nič na dokúpenie';
     wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
     return;
@@ -746,8 +745,10 @@ function renderBuildCard(data) {
       <td><span class="port-sym" style="cursor:pointer;" onclick="onSbTickerClick('${escHtml(x.symbol)}')">${escHtml(x.symbol)}</span></td>
       <td class="r">${x.weight_pct == null ? '—' : x.weight_pct.toFixed(1) + '%'}</td>
       <td><select class="build-input" onchange="saveBuildClass('${escHtml(x.symbol)}','position_class',this.value)">${opts}</select></td>
-      <td class="r"><input class="build-input${x.is_seed ? ' seed' : ''}" type="number" step="0.1" min="0" max="100" value="${x.target_weight ?? ''}"
-        title="${x.is_seed ? 'Predvyplnená rovnomerná váha — zatiaľ nerozhodnuté' : 'Nastavené ručne'}"
+      <td class="r"><input class="build-input${x.target_source === 'class' ? ' derived' : ''}" type="number" step="0.1" min="0" max="100"
+        value="${x.target_source === 'manual' ? x.target_weight : ''}"
+        placeholder="${x.target_source === 'class' ? x.target_weight.toFixed(1) : '—'}"
+        title="${x.target_source === 'class' ? 'Odvodené z pomeru tried v ⚙ — napíš vlastné číslo, ak chceš prebiť.' : x.target_source === 'manual' ? 'Nastavené ručne — zmaž pole a odvodí sa znova z triedy.' : 'Bez triedy sa cieľ nedá odvodiť.'}"
         onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
       <td class="r"><input class="build-input" type="number" step="0.1" min="0" max="100" value="${x.max_weight ?? ''}"
         onchange="saveBuildClass('${escHtml(x.symbol)}','max_weight',this.value)"></td>
@@ -766,7 +767,7 @@ function renderBuildCard(data) {
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="signal-outcome-note" style="margin-top:6px;">
       Súčet cieľových váh: <span style="color:${sumColor}">${sum.toFixed(1)} %</span>.
-      ${c.seeded ? `Bledé cieľové váhy (${c.seeded}) sú rovnomerné predvyplnenie, čiže „zatiaľ nerozhodnuté" — odstup pri nich hovorí len to, ktorá pozícia je menšia než priemer. Prepísaním sa označia ako vyriešené.` : ''}
+      Bledé cieľové váhy sú odvodené z pomeru tried v ⚙ (${data.class_ratios ? `CORE ${data.class_ratios.CORE}:STANDARD ${data.class_ratios.STANDARD}:SPECULATIVE ${data.class_ratios.SPECULATIVE}` : '4:2:1'}), nie manuálny vstup — napíš vlastné číslo do poľa, ak chceš konkrétny titul prebiť.
       Váha sa počíta z akciovej/ETF knihy účtu, nie z celej equity — krypto je zo stratégie vylúčené.
       Odstup je odčítanie, nie skóre; poradie nehovorí, že dokúpiť treba.
     </div>`;

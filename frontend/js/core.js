@@ -422,6 +422,9 @@ let dashSettings = {
   earnings_warn_days: 7,
   risk_per_trade_pct: 1,
   atr_stop_mult: 1.5,
+  class_ratio_core: 4,
+  class_ratio_standard: 2,
+  class_ratio_speculative: 1,
 };
 
 async function loadDashSettings() {
@@ -443,6 +446,9 @@ const _SETTINGS_INPUTS = [
   ['set-earnings-days', 'earnings_warn_days'],
   ['set-risk-per-trade', 'risk_per_trade_pct'],
   ['set-atr-stop-mult', 'atr_stop_mult'],
+  ['set-class-ratio-core', 'class_ratio_core'],
+  ['set-class-ratio-standard', 'class_ratio_standard'],
+  ['set-class-ratio-speculative', 'class_ratio_speculative'],
 ];
 
 function openSettingsModal() {
@@ -486,6 +492,7 @@ async function saveSettingsModal() {
     closeSettingsModal();
     // Prahy sa zmenili → invaliduj odvodené cache a prekresli, čo je otvorené
     _dcaCache = { account: null, data: null };
+    _buildCache = { account: null, data: null };
     portfolioAttentionLoadedAt = 0;
     if (portState.main?.data) renderPortPanel('main');
     applyScannerBadges();

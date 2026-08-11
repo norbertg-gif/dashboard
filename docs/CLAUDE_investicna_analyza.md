@@ -185,7 +185,9 @@ Dôležité: **štyri nezávislé AI kanály nedokázali povedať, či je ten kl
 
 **Priorita 4 — earnings feed.** Zmeškal CELH aj FOUR (obe hlásili 6. 8., obe mali `earnings.confirmed: false`). Earnings sú najväčší jednotlivý zdroj pohybu ceny.
 
-**Priorita 5 — position_class a target_weight — NÁSTROJ HOTOVÝ 10. 8. 2026, ČAKÁ NA VYPLNENIE.** Karta „Dobudovanie pozícií" v Portfóliu, ukladá sa na server (`position_classes.json`). Ostáva jednorazovo prejsť ~56 titulov a priradiť triedu a cieľovú váhu — to je definícia stratégie, nedá sa odvodiť z dát.
+**Priorita 5 — position_class a target_weight — HOTOVO 11. 8. 2026.** Karta „Dobudovanie pozícií" v Portfóliu, ukladá sa na server (`position_classes.json`). Ostáva jednorazovo prejsť ~56 titulov a priradiť triedu (CORE/STANDARD/SPECULATIVE) — to je definícia stratégie, nedá sa odvodiť z dát.
+
+**Cieľová váha sa NEZADÁVA po tickeroch.** Potvrdené 10. 8.: používateľ nemá preferenciu, koľko % má mať konkrétny titul. Cieľ sa preto odvodzuje z pomeru tried (⚙ `class_ratio_core/standard/speculative`, default 4:2:1), normalizovaného na 100 % cez zaradené pozície — pribudnutie pozície prepočíta ciele samo. Konkrétny titul sa dá prebiť ručným číslom, ktoré má vždy prednosť.
 
 *Menovateľ rozhodnutý 10. 8. 2026:* váha sa počíta **z akciovej/ETF knihy účtu 1** (~$9 463), nie z celej equity. Krypto je zo stratégie vylúčené, takže nepatrí ani do menovateľa; pri celej equity by každá akciová pozícia vyšla „hlboko pod cieľom" len preto, že krypto berie dve tretiny účtu.
 

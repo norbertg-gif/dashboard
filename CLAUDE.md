@@ -111,25 +111,34 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
--7. **PORTFOLIO BUILD — FÁZA 1 HOTOVÁ 2026-08-10.**
+-7. **PORTFOLIO BUILD — FÁZA 1 HOTOVÁ 2026-08-10, cieľové váhy odvodené 2026-08-11.**
    `GET/POST /api/portfolio/classes` (ručné `position_class` CORE/STANDARD/
-   SPECULATIVE + `target_weight` + `max_weight`, ukladá `DATA_ROOT/position_classes.json`,
-   atomický zápis, gitignored) a `GET /api/portfolio/build` (gap = cieľ − váha).
-   Karta „Dobudovanie pozícií" v Portfóliu pod DCA, default zbalená, triedy sa
-   vypĺňajú priamo v tabuľke.
+   SPECULATIVE + voliteľný `target_weight` override + `max_weight`, ukladá
+   `DATA_ROOT/position_classes.json`, atomický zápis, gitignored) a
+   `GET /api/portfolio/build` (gap = cieľ − váha). Karta „Dobudovanie pozícií"
+   v Portfóliu pod DCA, default zbalená, triedy sa vypĺňajú priamo v tabuľke.
    `POST /api/portfolio/classes/seed` (tlačidlo „Predvyplniť") označí VŠETKY
-   držané Stock/ETF ako CORE s rovnomerným cieľom `100/N`. Zaradené tickery
-   NEPREPISUJE (bez `overwrite=1`), lebo jedno kliknutie by inak zmazalo ručnú
-   prácu. Seedované záznamy nesú `note:"seed"` → `is_seed` v `/build` → bledé
-   prerušované pole v UI; ručná úprava značku zahodí, takže „čo ešte prejsť"
-   ubúda. **Rovnomerné váhy znamenajú „zatiaľ nerozhodnuté", nie názor na
-   stratégiu** — odstup pri nich hovorí len, ktorá pozícia je pod priemerom.
+   držané Stock/ETF ako CORE, cieľ nezapisuje. Zaradené tickery NEPREPISUJE
+   (bez `overwrite=1`), lebo jedno kliknutie by inak zmazalo ručnú prácu.
+   **Cieľová váha sa ODVODZUJE z pomeru tried, nezadáva sa po tickeroch**
+   (rozhodnutie 2026-08-11 — používateľ nemá preferenciu na konkrétne %, ale
+   trieda je rozhodnutie, ktoré má). Tri ⚙ prahy `class_ratio_core/standard/
+   speculative` (default 4:2:1) sa v `/api/portfolio/build` normalizujú na
+   100 % cez zaradené pozície — pribudnutie pozície prepočíta ciele samo.
+   Ručne zadaný `target_weight` má VŽDY prednosť pred odvodeným (payload nesie
+   `target_source: manual|class`); zmazanie poľa v UI cieľ vráti späť na
+   odvodený. Odvodené hodnoty sú v UI bledé/prerušované (`.build-input.derived`,
+   zobrazené ako `placeholder`, nie `value`) — nesmú vyzerať rovnako ako ručný
+   vstup, inak sa nedá po mesiacoch zistiť, čo bolo naozaj premyslené.
    **Menovateľ váh je Stock/ETF kniha účtu, NIE equity** (`BUILD_WEIGHT_BASIS`,
    rozhodnutie 2026-08-10) — krypto je zo stratégie vylúčené, takže v menovateli
    nemá čo robiť; inak by každá akciová pozícia vyšla „hlboko pod cieľom", lebo
    krypto berie dve tretiny účtu. Regresný test to stráži.
    `max_weight` prebíja `target_weight` (stav `over_max`), inak by karta
-   odporúčala dokupovať cez vlastný limit.
+   odporúčala dokupovať cez vlastný limit. `max_weight` je ZÁMERNE
+   nepodviazaný na globálny `dca_max_weight` (10 %) vo Verdikte/DCA brzdách —
+   používateľ to k 2026-08-11 odmietol s „zatiaľ nie", ostáva čisto
+   informačné pole, kým nepríde ďalší podnet.
    **Fáza 2 (kompozitné Add Score) ostáva odložená** — a nezabudni na overený
    fakt nižšie o dvojitom započítaní. Blokujú ju dátové diery z položky -6,
    nie fáza 1; fáza 1 ich nepotrebuje, lebo počíta len z investovanej sumy.

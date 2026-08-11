@@ -2486,6 +2486,12 @@ DASH_SETTINGS_DEFAULTS = {
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
     "risk_per_trade_pct": 1.0,   # riziko na obchod ako % equity — Verdikt kalkulátor
     "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
+    # Pomer cieľových váh medzi triedami pozícií. Nie percentá — relatívne diely,
+    # ktoré sa normalizujú na 100 % cez držané pozície, takže cieľ sa prepočíta
+    # sám pri každej novej pozícii a nič netreba prepisovať ručne.
+    "class_ratio_core": 4.0,
+    "class_ratio_standard": 2.0,
+    "class_ratio_speculative": 1.0,
 }
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
@@ -2495,6 +2501,9 @@ _DASH_SETTINGS_LIMITS = {
     "earnings_warn_days": (1, 60),
     "risk_per_trade_pct": (0.1, 10),
     "atr_stop_mult": (0.5, 5),
+    "class_ratio_core": (0, 20),
+    "class_ratio_standard": (0, 20),
+    "class_ratio_speculative": (0, 20),
 }
 
 
@@ -2640,7 +2649,6 @@ def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
     })
     if not symbols:
         raise HTTPException(400, "Účet nemá žiadne Stock/ETF pozície")
-    target = round(100.0 / len(symbols), 2)
     stored = _load_position_classes()
     now = datetime.now(timezone.utc).isoformat()
     seeded, kept = 0, 0
@@ -2648,13 +2656,14 @@ def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
         if not overwrite and _position_class_entry(stored.get(sym)) is not None:
             kept += 1
             continue
-        stored[sym] = {"position_class": "CORE", "target_weight": target,
-                       "updated_at": now, "note": "seed"}
+        # ZÁMERNE bez `target_weight` — cieľ sa odvodzuje z triedy, takže uložené
+        # číslo by sa tvárilo ako vedomé rozhodnutie a prebilo by odvodenie.
+        stored[sym] = {"position_class": "CORE", "updated_at": now, "note": "seed"}
         seeded += 1
     with _position_classes_lock:
         _atomic_write_json(POSITION_CLASSES_FILE, stored)
     return {"ok": True, "account": account, "seeded": seeded, "kept": kept,
-            "target_weight": target, "positions": len(symbols)}
+            "positions": len(symbols)}
 
 
 @app.get("/api/portfolio/build")
@@ -2681,11 +2690,35 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
 
     book_value = sum(e["amount"] for e in by_sym.values())
     classes = _load_position_classes()
+    entries = {sym: (_position_class_entry(classes.get(sym)) or {}) for sym in by_sym}
+
+    # Cieľ sa ODVODZUJE z triedy, nezadáva sa po tickeroch. Používateľ má názor
+    # na to, či je titul jadro alebo pokus; nemá názor na to, či má mať 1,8 %
+    # alebo 2,1 %. Diely tried sa normalizujú na 100 % cez zaradené pozície,
+    # takže pribudnutie pozície prepočíta ciele samo.
+    settings = _dash_settings()
+    class_ratios = {
+        "CORE": float(settings["class_ratio_core"]),
+        "STANDARD": float(settings["class_ratio_standard"]),
+        "SPECULATIVE": float(settings["class_ratio_speculative"]),
+    }
+    ratio_sum = sum(class_ratios.get(e.get("position_class"), 0.0) for e in entries.values())
+    derived_targets = {
+        sym: round(class_ratios.get(e.get("position_class"), 0.0) / ratio_sum * 100, 2)
+        for sym, e in entries.items()
+        if ratio_sum > 0 and e.get("position_class")
+    }
+
     rows = []
     for sym, e in sorted(by_sym.items()):
-        entry = _position_class_entry(classes.get(sym)) or {}
+        entry = entries[sym]
         weight = (e["amount"] / book_value * 100) if book_value else None
+        # Ručne zadaný cieľ má vždy prednosť pred odvodeným.
         target = entry.get("target_weight")
+        target_source = "manual" if target is not None else None
+        if target is None:
+            target = derived_targets.get(sym)
+            target_source = "class" if target is not None else None
         gap = round(target - weight, 2) if target is not None and weight is not None else None
         max_weight = entry.get("max_weight")
         if not entry:
@@ -2705,7 +2738,7 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
             "trades": e["trades"],
             "weight_pct": round(weight, 2) if weight is not None else None,
             "position_class": entry.get("position_class"),
-            "target_weight": target, "max_weight": max_weight,
+            "target_weight": target, "target_source": target_source, "max_weight": max_weight,
             "gap_pct": gap,
             # Rozlíši predvyplnenú hodnotu od vedomého rozhodnutia — bez toho
             # nevidno, čo je ešte na prejdenie.
@@ -2732,6 +2765,8 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
             "seeded": sum(1 for r in rows if r["is_seed"]),
         },
         "target_weight_sum": round(sum(r["target_weight"] or 0 for r in rows), 2),
+        "class_ratios": class_ratios,
+        "manual_targets": sum(1 for r in rows if r["target_source"] == "manual"),
     }
 
 

@@ -305,6 +305,42 @@ class PortfolioBuildRegressionTests(unittest.TestCase):
         self.assertEqual(rows["VWCE"]["state"], "unclassified")
         self.assertEqual(data["counts"]["unclassified"], 1)
 
+    def test_targets_are_derived_from_class_ratio_and_sum_to_100(self):
+        data = self._build({
+            "AAPL": {"position_class": "CORE"},
+            "VWCE": {"position_class": "SPECULATIVE"},
+        })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Pomer 4:1 → 80/20, normalizované na 100 % cez zaradené pozície.
+        self.assertEqual(rows["AAPL"]["target_weight"], 80.0)
+        self.assertEqual(rows["VWCE"]["target_weight"], 20.0)
+        self.assertEqual(rows["AAPL"]["target_source"], "class")
+        self.assertEqual(data["target_weight_sum"], 100.0)
+
+    def test_manual_target_beats_derived_one(self):
+        data = self._build({
+            "AAPL": {"position_class": "CORE", "target_weight": 12},
+            "VWCE": {"position_class": "CORE"},
+        })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Ručné číslo sa nesmie prepísať odvodením, inak sa názor stratí.
+        self.assertEqual(rows["AAPL"]["target_weight"], 12)
+        self.assertEqual(rows["AAPL"]["target_source"], "manual")
+        self.assertEqual(rows["VWCE"]["target_weight"], 50.0)
+        self.assertEqual(data["manual_targets"], 1)
+
+    def test_zero_ratio_class_gets_zero_target_not_a_crash(self):
+        with patch.object(tb, "_dash_settings", return_value={
+            **tb.DASH_SETTINGS_DEFAULTS, "class_ratio_speculative": 0}):
+            data = self._build({
+                "AAPL": {"position_class": "CORE"},
+                "VWCE": {"position_class": "SPECULATIVE"},
+            })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        self.assertEqual(rows["AAPL"]["target_weight"], 100.0)
+        self.assertEqual(rows["VWCE"]["target_weight"], 0.0)
+        self.assertEqual(rows["VWCE"]["state"], "at_target")
+
     def test_seed_fills_evenly_and_never_overwrites_manual_work(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "position_classes.json"
@@ -316,16 +352,20 @@ class PortfolioBuildRegressionTests(unittest.TestCase):
                     {"classes": {"AAPL": {"position_class": "SPECULATIVE", "target_weight": 12}}})))
                 out = tb.seed_position_classes(account="1")
                 stored = tb._load_position_classes()
-                # Dva Stock/ETF tickery (krypto sa neráta) → 50 % každý.
-                self.assertEqual(out["target_weight"], 50.0)
+                # Dva Stock/ETF tickery (krypto sa neráta), jeden už zaradený.
+                self.assertEqual(out["positions"], 2)
                 self.assertEqual((out["seeded"], out["kept"]), (1, 1))
+                # Seed NEUKLADÁ cieľ — ten sa odvodzuje z triedy.
+                self.assertNotIn("target_weight", stored["VWCE"])
                 # Ručné rozhodnutie musí prežiť; seed dopĺňa, neprepisuje.
                 self.assertEqual(stored["AAPL"]["position_class"], "SPECULATIVE")
                 self.assertEqual(stored["AAPL"]["target_weight"], 12)
                 self.assertEqual(stored["VWCE"]["position_class"], "CORE")
                 self.assertEqual(stored["VWCE"]["note"], "seed")
                 tb.seed_position_classes(account="1", overwrite=1)
-                self.assertEqual(tb._load_position_classes()["AAPL"]["target_weight"], 50.0)
+                reseeded = tb._load_position_classes()["AAPL"]
+                self.assertEqual(reseeded["position_class"], "CORE")
+                self.assertNotIn("target_weight", reseeded)
 
     def test_seed_flag_clears_once_the_value_is_edited(self):
         with tempfile.TemporaryDirectory() as tmp:
