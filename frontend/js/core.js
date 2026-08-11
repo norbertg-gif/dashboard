@@ -502,6 +502,54 @@ async function saveSettingsModal() {
   }
 }
 
+// ── CONTEXT MENU (right-click) ───────────────────────────────────────────────
+// Zdieľaný jednoduchý helper — jedna DOM inštancia, znovupoužitá odkiaľkoľvek.
+// `items`: [{label, action, disabled?}]. Zámerne bez podmenu/ikoniek/klávesových
+// skratiek — tento dashboard nemá zatiaľ dosť right-click akcií na to, aby to
+// bolo treba; pridá sa, až keď na to bude reálny prípad použitia.
+let _ctxMenuCloseHandlerBound = false;
+
+function showContextMenu(x, y, items) {
+  hideContextMenu();
+  const menu = document.createElement('div');
+  menu.id = 'ctx-menu';
+  menu.className = 'ctx-menu';
+  menu.innerHTML = items.map((it, i) => it.disabled
+    ? `<div class="ctx-menu-item disabled">${escHtml(it.label)}</div>`
+    : `<div class="ctx-menu-item" data-i="${i}">${escHtml(it.label)}</div>`
+  ).join('');
+  document.body.appendChild(menu);
+  // Najprv vlož mimo obrazovky, zmeraj a až potom pozicionuj — inak menu
+  // pri kliku blízko pravého/dolného okraja odreže časť položiek.
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 6);
+  const top = Math.min(y, window.innerHeight - rect.height - 6);
+  menu.style.left = `${Math.max(4, left)}px`;
+  menu.style.top = `${Math.max(4, top)}px`;
+  menu.querySelectorAll('.ctx-menu-item[data-i]').forEach(el => {
+    el.addEventListener('click', () => {
+      hideContextMenu();
+      items[Number(el.dataset.i)].action?.();
+    });
+  });
+  if (!_ctxMenuCloseHandlerBound) {
+    _ctxMenuCloseHandlerBound = true;
+    document.addEventListener('click', hideContextMenu);
+    // Zámerne ŽIADEN globálny 'contextmenu' listener na zatvorenie: right-click
+    // na iný ticker by bubloval do tohto listenera V TOM ISTOM TIKU ako
+    // showContextMenu() novo otváraného menu, takže by ho hneď zavrel sám seba.
+    // showContextMenu() už aj tak volá hideContextMenu() pred vytvorením
+    // nového menu, takže prepnutie medzi cieľmi funguje aj bez tohto listenera.
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
+    window.addEventListener('scroll', hideContextMenu, true);
+    window.addEventListener('blur', hideContextMenu);
+  }
+}
+
+function hideContextMenu() {
+  document.getElementById('ctx-menu')?.remove();
+}
+
 // ── DARK / LIGHT MODE ────────────────────────────────────────────────────────
 let isLightMode = localStorage.getItem('td_theme') === 'light';
 

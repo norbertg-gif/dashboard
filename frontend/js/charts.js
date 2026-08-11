@@ -121,12 +121,26 @@ function onSbTickerClick(symbol) {
     loadChart(chartPanelId);
   } else {
     // Žiadny aktívny panel — vytvor nový
-    const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
-    const newId = createPanel(cfg);
-    setActivePanel(newId);
-    loadChart(newId);
-    saveLayout();
+    openNewChartPanel(symbol);
   }
+}
+
+// Vždy vytvorí nový panel, nikdy neprepíše existujúci — na rozdiel od
+// onSbTickerClick, ktorý pri aktívnom paneli prepisuje jeho ticker. Right-click
+// akcia "Nový graf" túto reuse-logiku zámerne obchádza.
+function openNewChartPanel(symbol) {
+  const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
+  const newId = createPanel(cfg);
+  setActivePanel(newId);
+  loadChart(newId);
+  saveLayout();
+}
+
+function onSbTickerContextMenu(event, symbol) {
+  event.preventDefault();
+  showContextMenu(event.clientX, event.clientY, [
+    { label: `🗺 Nový graf — ${symbol}`, action: () => openNewChartPanel(symbol) },
+  ]);
 }
 
 function applyThemeToAllCharts() {
