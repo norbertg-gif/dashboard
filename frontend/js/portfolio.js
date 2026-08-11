@@ -750,8 +750,6 @@ function renderBuildCard(data) {
         placeholder="${x.target_source === 'class' ? x.target_weight.toFixed(1) : '—'}"
         title="${x.target_source === 'class' ? 'Odvodené z pomeru tried v ⚙ — napíš vlastné číslo, ak chceš prebiť.' : x.target_source === 'manual' ? 'Nastavené ručne — zmaž pole a odvodí sa znova z triedy.' : 'Bez triedy sa cieľ nedá odvodiť.'}"
         onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
-      <td class="r"><input class="build-input" type="number" step="0.1" min="0" max="100" value="${x.max_weight ?? ''}"
-        onchange="saveBuildClass('${escHtml(x.symbol)}','max_weight',this.value)"></td>
       <td class="r">${gapTxt}</td>
       <td class="r" style="color:var(--muted);">${addTxt}</td>
     </tr>`;
@@ -763,7 +761,7 @@ function renderBuildCard(data) {
   wrap.innerHTML = `${head}
     <table class="tool-table"><thead><tr>
       <th>Stav</th><th>Ticker</th><th class="r">Váha</th><th>Trieda</th>
-      <th class="r">Cieľ %</th><th class="r">Max %</th><th class="r">Odstup</th><th class="r">Dokúpiť</th>
+      <th class="r">Cieľ %</th><th class="r">Odstup</th><th class="r">Dokúpiť</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="signal-outcome-note" style="margin-top:6px;">
       Súčet cieľových váh: <span style="color:${sumColor}">${sum.toFixed(1)} %</span>.

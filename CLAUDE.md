@@ -138,7 +138,10 @@ These were already in the codebase and need to stay fixed:
    odporúčala dokupovať cez vlastný limit. `max_weight` je ZÁMERNE
    nepodviazaný na globálny `dca_max_weight` (10 %) vo Verdikte/DCA brzdách —
    používateľ to k 2026-08-11 odmietol s „zatiaľ nie", ostáva čisto
-   informačné pole, kým nepríde ďalší podnet.
+   informačné pole, kým nepríde ďalší podnet. **Stĺpec Max % odstránený z UI
+   2026-08-11** (nepoužívaný, zbytočný šum) — pole `max_weight` a stav
+   `over_max` v `/api/portfolio/build` zostávajú funkčné pre prípadné staré
+   dáta nastavené priamo cez API, len sa už nedá zadať z karty.
    **Fáza 2 (kompozitné Add Score) ostáva odložená** — a nezabudni na overený
    fakt nižšie o dvojitom započítaní. Blokujú ju dátové diery z položky -6,
    nie fáza 1; fáza 1 ich nepotrebuje, lebo počíta len z investovanej sumy.
