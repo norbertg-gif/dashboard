@@ -149,10 +149,22 @@ These were already in the codebase and need to stay fixed:
    bulk operácií, aký už tento súbor popisuje pri chart docku vyššie.
    Overené naživo v prehliadači: 13 položiek + 4 oddeľovače, klik na EMA
    prepol tlačidlo aj graf, opätovné otvorenie menu ukázalo ✓ EMA.
-   **Ďalšie miesta zatiaľ NEROBENÉ** (Portfolio riadok, Scanner riadok,
-   Analytika sidebar) — používateľ avizoval postupné rozšírenie ("často je
-   right click rýchlejší než hľadanie ikonky"); pri ďalšom mieste
-   znovupoužiť `showContextMenu()`, nie stavať nový mechanizmus.
+   **Portfolio riadok HOTOVO 2026-08-11** (`onPortRowContextMenu` v
+   `portfolio.js`, viazané na hlavnú tabuľku pozícií v oboch pohľadoch aj na
+   riadky čakajúcich objednávok) — duplikuje presne to, čo už bolo na riadku
+   klikateľné, nič navyše: dock ("Zobraziť v bočnom paneli" →
+   `openChartDock`), Google Finance (rovnaká fallback logika ako `gfLinkHtml`
+   — `_gfExchange` cache, bez nej Google search namiesto priamej kotácie),
+   Trade na eToro, a samotný klik na riadok (`isTickerView` parameter
+   rozlišuje "Zobraziť tranže"/`portDrillDown` v ticker pohľade od "Otvoriť
+   v Grafoch"/`portRowClick` v trade pohľade a objednávkach). Mirrors tabuľka
+   (Smart/Copy) vynechaná zámerne — `m.name` tam nie je ticker, na riadku
+   dnes nie je ani dock, ani G, ani Trade odkaz, takže "všetko čo tam takto
+   je" je prázdna množina.
+   **Ďalšie miesta zatiaľ NEROBENÉ** (Scanner riadok, Analytika sidebar) —
+   používateľ avizoval postupné rozšírenie ("často je right click rýchlejší
+   než hľadanie ikonky"); pri ďalšom mieste znovupoužiť `showContextMenu()`,
+   nie stavať nový mechanizmus.
 
 -8. **UI polish naprieč tabuľkami — HOTOVÉ 2026-08-11.** Sticky hlavičky
    stĺpcov v Histórii, Scanneri (DIP univerzum) a Portfóliu — mechanizmus

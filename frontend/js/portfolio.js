@@ -2366,7 +2366,8 @@ function renderPortPanel(pid) {
       const sym = row.symbol || '';
       const isTickerView = s.view === 'ticker';
       const rowKey = row.positionId || sym;
-      html += `<tr data-port-row="${pid}-${rowKey}" onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}" style="cursor:pointer;">`;
+      html += `<tr data-port-row="${pid}-${rowKey}" onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}"
+        oncontextmenu="onPortRowContextMenu(event,'${pid}','${sym}',${isTickerView})" style="cursor:pointer;">`;
       for (const col of cols) {
         if (col.key === 'symbol') {
           const count = row._count > 1 ? ` <span style="color:var(--muted);font-size:9px;">(${row._count})</span>` : '';
@@ -2476,7 +2477,8 @@ function renderPortPanel(pid) {
           : null;
         const slTp = [o.stopLoss ? `SL ${o.stopLoss}${o.isTsl ? ' (TSL)' : ''}` : null,
                       o.takeProfit ? `TP ${o.takeProfit}` : null].filter(Boolean).join(' · ') || '—';
-        html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')" style="cursor:pointer;">
+        html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')"
+          oncontextmenu="onPortRowContextMenu(event,'${pid}','${o.symbol}',false)" style="cursor:pointer;">
           <td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
             ${getLogoWrapper(o.symbol, 22)}
             <div style="display:flex;flex-direction:column;gap:1px;">
@@ -2593,6 +2595,28 @@ function portClearDrillDown(pid) {
   s.view = 'ticker';
   savePortState(pid);
   renderPortPanel(pid);
+}
+
+// Duplikuje presne to, čo je na riadku Portfólia už klikateľné — dock ikonka,
+// "G" odkaz na Google Finance, Trade odkaz na eToro a samotný klik na riadok.
+// `isTickerView` rozlišuje, čo robí klik na riadok (drill-down na tranže
+// vs. otvorenie v Grafoch) — objednávky posielajú `false`, majú len jedno.
+function onPortRowContextMenu(event, pid, sym, isTickerView) {
+  if (!sym) return;
+  event.preventDefault();
+  const t = gfNormSym(sym);
+  const gfExch = _gfExchange[t];
+  const gfHref = gfExch ? googleFinanceQuoteUrl(t, gfExch) : googleFinanceSearchUrl(t);
+  const items = [
+    { label: 'Zobraziť v bočnom paneli', action: () => openChartDock(sym) },
+    isTickerView
+      ? { label: 'Zobraziť tranže', action: () => portDrillDown(pid, sym) }
+      : { label: 'Otvoriť v Grafoch', action: () => portRowClick(pid, sym) },
+    { sep: true },
+    { label: 'Google Finance ↗', action: () => window.open(gfHref, '_blank', 'noopener') },
+    { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') },
+  ];
+  showContextMenu(event.clientX, event.clientY, items);
 }
 
 function portDrillDown(pid, sym) {
