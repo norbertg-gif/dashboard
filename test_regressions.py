@@ -21,6 +21,48 @@ from starlette.requests import Request
 from backend import trading_backend as tb
 
 
+class IchimokuFutureRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _frame(n=100, freq="D"):
+        index = pd.date_range("2025-01-01", periods=n, freq=freq)
+        close = pd.Series(range(n), index=index, dtype=float) + 100.0
+        return pd.DataFrame({
+            "Open": close - 0.5,
+            "High": close + 2.0,
+            "Low": close - 2.0,
+            "Close": close,
+            "Volume": 1000,
+        }, index=index)
+
+    def test_projects_raw_tail_26_periods_past_last_candle(self):
+        df = self._frame()
+        points = tb._ichimoku_future_points(df)
+        self.assertEqual(len(points), 26)
+        self.assertEqual(points[0][0], df.index[-1] + pd.Timedelta(days=1))
+        self.assertEqual(points[-1][0], df.index[-1] + pd.Timedelta(days=26))
+        self.assertTrue(all(ts > df.index[-1] for ts, _sa, _sb in points))
+
+        _tenkan, _kijun, raw_a, raw_b = tb._ichimoku_raw_spans(df)
+        self.assertAlmostEqual(points[0][1], float(raw_a.iloc[-26]))
+        self.assertAlmostEqual(points[0][2], float(raw_b.iloc[-26]))
+        self.assertAlmostEqual(points[-1][1], float(raw_a.iloc[-1]))
+        self.assertAlmostEqual(points[-1][2], float(raw_b.iloc[-1]))
+
+        _t, _k, shifted_a, shifted_b, _chikou = tb.calc_ichimoku(df)
+        pd.testing.assert_series_equal(shifted_a, raw_a.shift(26))
+        pd.testing.assert_series_equal(shifted_b, raw_b.shift(26))
+
+    def test_too_short_frame_returns_empty_list(self):
+        self.assertEqual(tb._ichimoku_future_points(self._frame(n=20)), [])
+
+    def test_infers_weekly_spacing_from_index(self):
+        df = self._frame(freq="W-MON")
+        points = tb._ichimoku_future_points(df)
+        self.assertEqual(len(points), 26)
+        self.assertEqual(points[0][0], df.index[-1] + pd.Timedelta(weeks=1))
+        self.assertEqual(points[-1][0], df.index[-1] + pd.Timedelta(weeks=26))
+
+
 class ScannerTableSortRegressionTests(unittest.TestCase):
     def test_missing_values_are_last_in_both_directions(self):
         module_path = Path(__file__).parent / "frontend" / "js" / "scanner-table-sort.js"

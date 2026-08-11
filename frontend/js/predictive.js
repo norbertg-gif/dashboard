@@ -2027,8 +2027,8 @@ function pc_applyOverlays() {
   if (!pc_lastData || !pc_lastData.indicators) return;
   // Rovnaký nesúlad zdrojov ako v buildSubpanel (eToro sviečky vs yfinance
   // indikátory) — orež overlaye na rozsah sviečok, nech nerozťahujú os.
-  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: Senkou A/B sú zámerne posunuté dopredu,
-  // takže mrak pred poslednou sviečkou je funkcia, nie chyba.
+  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: backend k historickým posunutým hodnotám
+  // pridáva 26 reálnych budúcich bodov, takže mrak pokračuje za poslednú sviečku.
   const candles = pc_lastData.candles;
   const rawInd = pc_lastData.indicators;
   const ind = { ...rawInd };

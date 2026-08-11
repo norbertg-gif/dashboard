@@ -5370,6 +5370,7 @@ def get_ohlcv(
         stoch_k, stoch_d = calc_stoch_rsi(df["Close"])
 
     ichi = None
+    ichimoku_future = []
     if "ichimoku" in ind_set:
         _ichi = calc_ichimoku(df)
         # calc_ichimoku vracia tuple (tenkan, kijun, span_a, span_b, chikou)
@@ -5393,6 +5394,12 @@ def get_ohlcv(
                 return int(d.timestamp())
             return d.strftime("%Y-%m-%d")
         except: return str(ts)
+
+    if ichi is not None:
+        ichimoku_future = [
+            {"time": to_date_str(ts), "span_a": safe(span_a), "span_b": safe(span_b)}
+            for ts, span_a, span_b in _ichimoku_future_points(df)
+        ]
 
     result = []
     for i in range(len(df)):
@@ -5452,6 +5459,7 @@ def get_ohlcv(
     return {"symbol": sym, "name": sym, "interval": interval,
             "count": len(result), "data": result, "instrumentId": iid,
             "hasMore": has_more,
+            "ichimoku_future": ichimoku_future,
             "patterns": patterns}
 
 
@@ -5605,16 +5613,54 @@ def calc_bollinger(series: pd.Series, period: int = 20, std: float = 2.0):
     lower = sma - std * sigma
     return upper, sma, lower
 
-def calc_ichimoku(df: pd.DataFrame):
+def _ichimoku_raw_spans(df: pd.DataFrame):
     high, low = df["High"], df["Low"]
 
     tenkan  = (high.rolling(9).max()  + low.rolling(9).min())  / 2
     kijun   = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a  = ((tenkan + kijun) / 2).shift(26)
-    span_b  = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    span_a  = (tenkan + kijun) / 2
+    span_b  = (high.rolling(52).max() + low.rolling(52).min()) / 2
+    return tenkan, kijun, span_a, span_b
+
+
+def calc_ichimoku(df: pd.DataFrame):
+    tenkan, kijun, raw_span_a, raw_span_b = _ichimoku_raw_spans(df)
+    span_a  = raw_span_a.shift(26)
+    span_b  = raw_span_b.shift(26)
     chikou  = df["Close"].shift(-26)
 
     return tenkan, kijun, span_a, span_b, chikou
+
+
+def _ichimoku_future_points(df: pd.DataFrame, n: int = 26):
+    """Return the raw Senkou tail projected beyond the final real candle."""
+    try:
+        if n <= 0 or df is None or len(df.index) < 2:
+            return []
+        _, _, raw_span_a, raw_span_b = _ichimoku_raw_spans(df)
+        tail = pd.concat(
+            [raw_span_a.rename("span_a"), raw_span_b.rename("span_b")], axis=1
+        ).iloc[-n:].dropna()
+        if tail.empty:
+            return []
+
+        index = pd.DatetimeIndex(pd.to_datetime(df.index))
+        deltas = index.to_series().diff().dropna()
+        deltas = deltas[deltas > pd.Timedelta(0)].iloc[-min(len(deltas), n * 2):]
+        if deltas.empty:
+            return []
+        step = deltas.median()
+        if pd.isna(step) or step <= pd.Timedelta(0):
+            return []
+
+        last_time = pd.Timestamp(index[-1])
+        first_offset = n - len(tail) + 1
+        return [
+            (last_time + step * offset, float(row.span_a), float(row.span_b))
+            for offset, row in enumerate(tail.itertuples(index=False), first_offset)
+        ]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return []
 
 # ── OHLCV + INDIKÁTORY ────────────────────────────────────────────────────────
 
@@ -5940,13 +5986,23 @@ def get_chart(
                 out.append({"time": int(pd.Timestamp(ts).timestamp()), "value": v})
             return out
 
+        ichi_future = _ichimoku_future_points(df)
+        ichi_future_sa = [
+            {"time": int(pd.Timestamp(ts).timestamp()), "value": span_a}
+            for ts, span_a, _span_b in ichi_future
+        ]
+        ichi_future_sb = [
+            {"time": int(pd.Timestamp(ts).timestamp()), "value": span_b}
+            for ts, _span_a, span_b in ichi_future
+        ]
+
         indicators = {
             "ema10":      ind_series("ema10"),
             "ema20":      ind_series("ema20"),
             "ichi_tenkan":ind_series("ichi_tenkan"),
             "ichi_kijun": ind_series("ichi_kijun"),
-            "ichi_sa":    ind_series("ichi_sa"),
-            "ichi_sb":    ind_series("ichi_sb"),
+            "ichi_sa":    ind_series("ichi_sa") + ichi_future_sa,
+            "ichi_sb":    ind_series("ichi_sb") + ichi_future_sb,
             "rsi":        ind_series("rsi"),
             "macd":       ind_series("macd"),
             "macd_sig":   ind_series("macd_sig"),
@@ -6131,12 +6187,22 @@ def get_chart(
                             out.append({"time": int(pd.Timestamp(ts).timestamp()), "value": v})
                     return out
 
+                daily_ichi_future = _ichimoku_future_points(df_d)
+                daily_ichi_future_sa = [
+                    {"time": int(pd.Timestamp(ts).timestamp()), "value": span_a}
+                    for ts, span_a, _span_b in daily_ichi_future
+                ]
+                daily_ichi_future_sb = [
+                    {"time": int(pd.Timestamp(ts).timestamp()), "value": span_b}
+                    for ts, _span_a, span_b in daily_ichi_future
+                ]
+
                 daily_indicators = {
                     "ema20":       daily_ind("ema20"),
                     "ema50":       daily_ind("ema10"),   # use ema10 as proxy for ema50-like
                     "ichi_kijun":  daily_ind("ichi_kijun"),
-                    "ichi_sa":     daily_ind("ichi_sa"),
-                    "ichi_sb":     daily_ind("ichi_sb"),
+                    "ichi_sa":     daily_ind("ichi_sa") + daily_ichi_future_sa,
+                    "ichi_sb":     daily_ind("ichi_sb") + daily_ichi_future_sb,
                 }
 
                 # Mini chart: last 10 candles (for left panel)

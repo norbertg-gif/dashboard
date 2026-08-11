@@ -1253,7 +1253,10 @@ function applyOverlays(id, data, r) {
     r.overlaySeries['chikou'] = null;
 
     // Span A (zelená prerušovaná) + Span B (červená prerušovaná) + canvas výplň medzi nimi
-    const allCloud = data.filter(d => d.span_a != null && d.span_b != null);
+    const allCloud = mergeChartRows(
+      data.filter(d => d.span_a != null && d.span_b != null),
+      (r.ichimokuFuture || []).filter(d => d.span_a != null && d.span_b != null),
+    );
     const sAB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#2d9e6b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
     const sBB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#c0392b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
     const sABr = mc.addSeries(LightweightCharts.LineSeries, {color:'transparent', lineWidth:0, ...OPT});
@@ -2154,12 +2157,13 @@ async function loadChart(id, opts = {}) {
       symbol: sym, period, interval, ha: haParam, indicators: allInds,
       account: acct, limit: CHART_INITIAL_BARS, before: '',
     });
-    let name, data, instrumentId;
+    let name, data, instrumentId, ichimokuFuture;
     const cached = opts.refresh !== 1 ? ohlcvBatchTake(batchKey) : null;
     if (cached) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
+      ichimokuFuture = cached.ichimoku_future;
       r.hasMoreHistory = !!cached.hasMore;
     } else {
       const refreshParam = opts.refresh === 1 ? 1 : 0;
@@ -2168,6 +2172,7 @@ async function loadChart(id, opts = {}) {
       if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail); }
       const payload = await resp.json();
       ({ name, data, instrumentId } = payload);
+      ichimokuFuture = payload.ichimoku_future;
       r.hasMoreHistory = !!payload.hasMore;
     }
     if (instrumentId) {
@@ -2178,6 +2183,7 @@ async function loadChart(id, opts = {}) {
     }
     if (loadSeq !== r.loadSeq) return;
     if (!data?.length) throw new Error('Žiadne dáta');
+    r.ichimokuFuture = Array.isArray(ichimokuFuture) ? ichimokuFuture : [];
 
     // Tichý tail refresh nesmie znovu posielať celú sériu do chart enginu.
     // Aktualizuj iba poslednú sviečku; plný setData patrí prvému loadu,

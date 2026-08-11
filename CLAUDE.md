@@ -450,8 +450,14 @@ These were already in the codebase and need to stay fixed:
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
 5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
 6. **Chart Pattern overlay.** V1 hotovo — samostatný modul `frontend/js/chart_patterns.js` s registry + detektormi + LWC primitive rendererom. Checkbox `chk_patterns` (`pc_patterns_enabled` v localStorage) kreslí vizuálne patterny nad Predictive Weekly/Daily grafom: `Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`, `Descending Triangle`. Filtre `chk_patterns_bullish`, `chk_patterns_bearish`, `chk_patterns_neutral` (`pc_pattern_filters` v localStorage) iba filtrujú render a sidebar kartu podľa biasu, detekčnú logiku nemenia. Sidebar karta `#chartPatternCard` vysvetľuje stav (`forming`/`confirmed`/`failed`), kvalitu, trigger a invalidáciu. V1.1 doplnky: (a) **objemové potvrdenie breakoutu** — `cpBreakoutVolumeBoost()` nájde prvú sviečku breakout runu a porovná objem s priemerom ~20 sviečok pred ňou; ratio ≥ 1.2× → +5 confidence, ≥ 1.5× → +8, bez volume dát fail-soft 0 (kvôli tomu `daily_candles` v `/api/chart` payloade nesú aditívne pole `volume`); (b) **measured-move cieľ** — `levels.target` (projekcia výšky patternu od breakout úrovne, pri neutrálnom Rectangle až po breakoute), renderer kreslí bodkovanú čiaru `Ciel` v pravej časti patternu, info karta pridáva tretí level. Je to výlučne vizuálna pomôcka; NESMIE meniť C1–C4, scanner tier, ML predikciu, Verdikt ani portfolio logiku.
-7. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
-   until LWC finishes layout; manual drag uses a double animation frame.
+7. **Kumo canvas + projekcia.** Resize fixed 2026-06-12 — redraw is deferred
+   until LWC finishes layout; manual drag uses a double animation frame. Senkou
+   A/B od 2026-08-11 reálne pokračujú 26 periód za poslednú sviečku vo všetkých
+   troch response cestách (`/api/ohlcv`, `/api/chart` weekly aj daily) cez
+   `_ichimoku_future_points()`. Bol to skutočný 3-call-site bug, nie display
+   quirk: syntetický pandas test potvrdil, že `.shift(26)` historické dátumy
+   nekazí; chýbal iba nikdy nezobrazený raw future tail, pretože bounded index
+   nemal budúce riadky. Historická `.shift(26)` matematika ostáva nezmenená.
 8. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
