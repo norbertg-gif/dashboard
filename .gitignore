@@ -15,6 +15,7 @@ dashboard_settings.json
 position_classes.json
 watchlist.json
 company_profiles/
+institutional_13f/
 predictive_signals_log.json
 predictive_signals_archive.json
 predictive_weights_log.json

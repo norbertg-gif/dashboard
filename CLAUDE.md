@@ -691,6 +691,42 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   CSS line-clamp + `pc_toggleCompanyDesc()` viac/menej. Fail-soft: pri chybe
   sa karta jednoducho nezobrazí. Interpretačná vrstva — NEVSTUPUJE do C1–C4,
   ML ani Verdiktu.
+- **Inštitucionálne držby / SEC 13F** (`GET /api/ticker/institutional/{symbol}`):
+  interpretačná karta `#institutionalCard` v Analytika sidebare
+  (`pc_loadInstitutional`). Universe je striktne union watchlistu a Stock/ETF
+  pozícií z oboch účtov cez existujúce `_read_watchlist_file()` +
+  `_get_portfolio_symbols()`/`_get_portfolio_holdings()`; DIP scanner universe
+  sa sem NIKDY nepridáva. Request je neblokujúci: okamžite vráti poslednú disk
+  cache alebo explicitný `available:false` stav a iba spustí single-flight
+  daemon worker. Prvá návšteva nového/cold tickeru preto ukáže „dáta sa
+  pripravujú“; ďalšia návšteva po dokončení číta hotovú cache.
+  Worker najviac raz za 7 dní objaví najnovší ZIP automaticky zo SEC stránky
+  (povinný identifikačný `User-Agent`), pričom 99 MB archív znovu sťahuje a
+  parsuje iba keď sa zmení URL obdobia. ZIP existuje len ako dočasný súbor a vo
+  `finally` sa zmaže; `INFOTABLE.tsv` sa NIKDY celý nerozbaľuje ani nenačíta do
+  RAM — `ZipFile.open()` → `TextIOWrapper` → `csv.reader`, okamžitý filter na
+  malú množinu CUSIPov. Agregácia na ticker drží unikátne
+  `ACCESSION_NUMBER`, počet filerov a súčet `SSHPRNAMT`; posledné dve obdobia
+  dávajú delta filerov a percentuálnu q/q delta akcií.
+  CUSIP gotcha: SEC 13F nemá ticker a **overené priamo 2026-08-11** — OpenFIGI
+  forward `TICKER` mapping NIKDY nevracia CUSIP (odpoveď má len figi/name/
+  ticker/exchCode metadata), takže vetva na explicitné CUSIP pole je mŕtvy kód
+  ponechaný ako budúcoodolná poistka, nie aktívna cesta. Jediná reálne
+  fungujúca cesta je učenie CUSIPu z unikátnej presnej normalizovanej zhody
+  OpenFIGI issuer name s equity riadkom SEC (ambiguita zostane `unresolved`,
+  nikdy falošná nula) — **funkčnosť potvrdená end-to-end behom proti živému
+  SEC/OpenFIGI** (AAPL→037833100, MSFT→594918104, NVDA→67066G104, zhoda so
+  známymi CUSIPmi; 42 s na stiahnutie 99 MB + spracovanie 3,8M riadkov na 3
+  tickery). Stabilná mapa je v
+  `DATA_ROOT/institutional_13f/cusip_map.json` (180d), agregáty/stav v
+  `state.json`; oba zápisy idú cez `_atomic_write_json`, adresár je v
+  `.gitignore`. Výpadok SEC/OpenFIGI zachová starú úspešnú cache a skúsi sa
+  znovu po 1 h — „teraz sa nepodarilo“ NIE JE „nula držiteľov“. Skutočná nula
+  je dostupný výsledok pre bezpečne vyriešený CUSIP bez matching riadka.
+  Limity: Form 13F je US-only a prirodzene oneskorený približne 45 dní;
+  európske tickery typicky nemajú 13F záznam. Táto vrstva NEVSTUPUJE do C1–C4,
+  DCA, scanner tier, Verdikt/BUILD ani ML a nesmie sa bez explicitného
+  rozhodnutia zmeniť na buy/sell signál.
 - **Chart panel → Analytika button:** `.p-btn-an` (🔬) v hlavičke každého
   panelu (aj chart dock — rovnaký `createPanel` factory) volá
   `openPanelInAnalytika(id)` → číta aktuálnu hodnotu `.p-sym` (nie

@@ -5,11 +5,11 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import asyncio
-import gc, json, os, math, sys, threading
+import csv, gc, json, os, math, sys, tempfile, threading, zipfile
 import re
 import hashlib
 import hmac
-from io import BytesIO
+from io import BytesIO, TextIOWrapper
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -11950,6 +11950,521 @@ def get_ticker_profile(symbol: str, refresh: int = Query(0)):
     except Exception:
         pass
     return payload
+
+
+# ── Institutional 13F holdings — interpretation-only Analytika layer ────────
+# This data NEVER feeds C1-C4 scoring, DCA, scanner tier, Verdikt/BUILD or ML.
+# It is deliberately a slow, fail-soft context layer served from disk cache.
+INSTITUTIONAL_13F_DIR = DATA_ROOT / "institutional_13f"
+INSTITUTIONAL_13F_STATE_FILE = INSTITUTIONAL_13F_DIR / "state.json"
+INSTITUTIONAL_13F_CUSIP_FILE = INSTITUTIONAL_13F_DIR / "cusip_map.json"
+INSTITUTIONAL_13F_SCHEMA_VERSION = 1
+INSTITUTIONAL_13F_RECHECK_SECONDS = 7 * 24 * 3600
+INSTITUTIONAL_13F_FAILURE_RETRY_SECONDS = 3600
+INSTITUTIONAL_13F_CUSIP_TTL_SECONDS = 180 * 24 * 3600
+INSTITUTIONAL_13F_LISTING_URL = (
+    "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets"
+)
+INSTITUTIONAL_13F_USER_AGENT = (
+    "TradingDashboard research (contact: norbert.garaj@gmail.com)"
+)
+OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping"
+_institutional_13f_refresh_lock = threading.Lock()
+
+
+def _institutional_json_read(path: Path, default):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, type(default)) else default
+    except Exception:
+        return default
+
+
+def _discover_latest_13f_zip_url() -> str | None:
+    """Return the first SEC 13F ZIP link (the listing is newest-first).
+
+    Discovery is intentionally fail-soft because an SEC outage must not turn a
+    cached interpretation card into an HTTP 500.
+    """
+    try:
+        response = requests.get(
+            INSTITUTIONAL_13F_LISTING_URL,
+            headers={"User-Agent": INSTITUTIONAL_13F_USER_AGENT},
+            timeout=25,
+        )
+        response.raise_for_status()
+        hrefs = re.findall(
+            r'''href\s*=\s*["']([^"']+\.zip(?:\?[^"']*)?)["']''',
+            response.text,
+            flags=re.IGNORECASE,
+        )
+        for href in hrefs:
+            url = urllib.parse.urljoin("https://www.sec.gov", href)
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme == "https" and parsed.netloc.lower().endswith("sec.gov"):
+                return url
+    except Exception as e:
+        print(f"[13f] SEC listing unavailable: {_scrub_token(e)}")
+    return None
+
+
+def _normalize_13f_cusip(value) -> str | None:
+    cusip = re.sub(r"\s+", "", str(value or "")).upper()
+    return cusip if re.fullmatch(r"[0-9A-Z*@#]{9}", cusip) else None
+
+
+_INSTITUTIONAL_NAME_SUFFIXES = {
+    "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY", "LTD",
+    "LIMITED", "PLC", "LLC", "LP", "L P", "NV", "N V", "SA", "AG",
+}
+
+
+def _normalize_13f_issuer_name(value) -> str:
+    name = str(value or "").upper().replace("&", " AND ")
+    tokens = re.sub(r"[^A-Z0-9]+", " ", name).split()
+    while tokens and tokens[-1] in _INSTITUTIONAL_NAME_SUFFIXES:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _13f_name_inference_class(title) -> bool:
+    """Conservative guard for learning a CUSIP from an exact issuer-name hit."""
+    value = re.sub(r"[^A-Z0-9]+", " ", str(title or "").upper())
+    return any(marker in f" {value} " for marker in (
+        " COM ", " COMMON ", " ORD ", " SHS ", " STOCK ", " CAP STK ",
+        " BEN INT ", " CL A ", " CL B ", " CLASS A ", " CLASS B ",
+    ))
+
+
+def _openfigi_result_cusip(result: dict) -> str | None:
+    """Accept a CUSIP only when OpenFIGI explicitly returns one.
+
+    The current unauthenticated mapping response normally exposes FIGI/name/
+    ticker metadata but no licensed CUSIP field. Keeping this extractor strict
+    prevents a FIGI or securityDescription from being mistaken for a CUSIP.
+    """
+    for key in ("cusip", "CUSIP"):
+        cusip = _normalize_13f_cusip(result.get(key))
+        if cusip:
+            return cusip
+    identifiers = result.get("identifiers")
+    if isinstance(identifiers, dict):
+        for key in ("cusip", "CUSIP", "ID_CUSIP"):
+            cusip = _normalize_13f_cusip(identifiers.get(key))
+            if cusip:
+                return cusip
+    return None
+
+
+def _openfigi_ticker_metadata(symbols: list[str]) -> dict[str, dict]:
+    """Resolve ticker metadata in <=10-job unauthenticated OpenFIGI batches.
+
+    A failed batch affects only its tickers and never raises to the caller.
+    OPENFIGI_API_KEY is optional; no key is required for this small universe.
+    """
+    out: dict[str, dict] = {}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": INSTITUTIONAL_13F_USER_AGENT,
+    }
+    api_key = os.getenv("OPENFIGI_API_KEY", "").strip()
+    if api_key:
+        headers["X-OPENFIGI-APIKEY"] = api_key
+    for start in range(0, len(symbols), 10):
+        batch = symbols[start:start + 10]
+        jobs = [{"idType": "TICKER", "idValue": sym, "exchCode": "US"}
+                for sym in batch]
+        try:
+            response = requests.post(
+                OPENFIGI_MAPPING_URL, json=jobs, headers=headers, timeout=25,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list) or len(payload) != len(batch):
+                raise ValueError("unexpected OpenFIGI response shape")
+            for sym, item in zip(batch, payload):
+                rows = item.get("data") if isinstance(item, dict) else None
+                if not isinstance(rows, list) or not rows:
+                    out[sym] = {"status": "unresolved", "error": "no mapping"}
+                    continue
+                preferred = next(
+                    (row for row in rows if str(row.get("ticker") or "").upper() == sym
+                     and str(row.get("exchCode") or "").upper() in ("US", "UN", "UW", "UQ")),
+                    rows[0],
+                )
+                out[sym] = {
+                    "status": "resolved" if _openfigi_result_cusip(preferred) else "name_only",
+                    "cusip": _openfigi_result_cusip(preferred),
+                    "name": preferred.get("name"),
+                    "figi": preferred.get("figi"),
+                    "ticker": preferred.get("ticker"),
+                    "exchange": preferred.get("exchCode"),
+                }
+        except Exception as e:
+            message = _scrub_token(e)
+            print(f"[13f] OpenFIGI batch unavailable: {message}")
+            for sym in batch:
+                out[sym] = {"status": "unavailable", "error": str(message)}
+    return out
+
+
+def _institutional_target_symbols() -> list[str]:
+    """Portfolio Stock/ETF (both accounts) plus the persisted watchlist.
+
+    _get_portfolio_symbols() remains the shared portfolio-symbol source; the
+    intersection applies the already-established Stock/ETF holdings filter.
+    The DIP scanner universe is deliberately not consulted.
+    """
+    portfolio = _get_portfolio_symbols() & set(_get_portfolio_holdings())
+    watchlist = {
+        str(item.get("symbol") or "").strip().upper()
+        for item in _read_watchlist_file()
+        if isinstance(item, dict)
+    }
+    return sorted(
+        sym for sym in (portfolio | watchlist)
+        if sym and re.fullmatch(r"[A-Z0-9.\-]{1,20}", sym)
+    )
+
+
+def _resolve_institutional_cusips(symbols: list[str]) -> dict[str, dict]:
+    """Return long-lived per-ticker OpenFIGI metadata/CUSIP cache."""
+    now = datetime.now(timezone.utc)
+    cache = _institutional_json_read(INSTITUTIONAL_13F_CUSIP_FILE, {})
+    resolved: dict[str, dict] = {}
+    misses = []
+    for sym in symbols:
+        entry = cache.get(sym)
+        fresh = False
+        if isinstance(entry, dict):
+            try:
+                age = (now - datetime.fromisoformat(entry["fetched_at"])).total_seconds()
+                fresh = age < INSTITUTIONAL_13F_CUSIP_TTL_SECONDS
+            except Exception:
+                fresh = False
+        if fresh and entry.get("status") in ("resolved", "name_only", "unresolved"):
+            resolved[sym] = entry
+        else:
+            misses.append(sym)
+    if misses:
+        fetched = _openfigi_ticker_metadata(misses)
+        stamp = now.isoformat()
+        for sym in misses:
+            got = fetched.get(sym) or {"status": "unavailable"}
+            previous = cache.get(sym) if isinstance(cache.get(sym), dict) else None
+            # A temporary provider failure must not erase a previously useful
+            # name/CUSIP ("failed now" is not "does not exist").
+            if got.get("status") == "unavailable" and previous and (
+                previous.get("cusip") or previous.get("name")
+            ):
+                entry = dict(previous)
+                entry["last_error"] = got.get("error")
+            else:
+                entry = {**got, "fetched_at": stamp, "source": "openfigi"}
+            cache[sym] = entry
+            resolved[sym] = entry
+        try:
+            _atomic_write_json(INSTITUTIONAL_13F_CUSIP_FILE, cache)
+        except Exception as e:
+            print(f"[13f] CUSIP cache write failed: {e}")
+    return resolved
+
+
+def _aggregate_13f_stream(stream, cusip_to_tickers: dict[str, set[str]],
+                          issuer_to_tickers: dict[str, set[str]] | None = None) -> tuple[dict, dict]:
+    """Stream/filter INFOTABLE.tsv; never materialize the multi-GB table.
+
+    `stream` is a text file-like object to keep this helper independently
+    regression-testable with StringIO. Returns compact aggregates and CUSIPs
+    conservatively learned from unique exact OpenFIGI issuer-name matches.
+    """
+    reader = csv.reader(stream, delimiter="\t")
+    try:
+        header = next(reader)
+    except StopIteration:
+        raise ValueError("INFOTABLE.tsv is empty")
+    columns = {str(name).strip().upper(): idx for idx, name in enumerate(header)}
+    required = ("ACCESSION_NUMBER", "NAMEOFISSUER", "TITLEOFCLASS", "CUSIP", "SSHPRNAMT")
+    missing = [name for name in required if name not in columns]
+    if missing:
+        raise ValueError(f"INFOTABLE.tsv missing columns: {', '.join(missing)}")
+
+    issuer_to_tickers = issuer_to_tickers or {}
+    learned: dict[str, str] = {}
+    filer_sets: dict[str, set[str]] = {}
+    share_totals: dict[str, float] = {}
+    max_idx = max(columns[name] for name in required)
+    for row in reader:
+        if len(row) <= max_idx:
+            continue
+        cusip = _normalize_13f_cusip(row[columns["CUSIP"]])
+        if not cusip:
+            continue
+        tickers = cusip_to_tickers.get(cusip)
+        if not tickers and issuer_to_tickers and _13f_name_inference_class(
+            row[columns["TITLEOFCLASS"]]
+        ):
+            issuer = _normalize_13f_issuer_name(row[columns["NAMEOFISSUER"]])
+            candidates = issuer_to_tickers.get(issuer) or set()
+            unlearned = {sym for sym in candidates if sym not in learned}
+            if len(unlearned) == 1:
+                sym = next(iter(unlearned))
+                learned[sym] = cusip
+                cusip_to_tickers.setdefault(cusip, set()).add(sym)
+                tickers = {sym}
+        if not tickers:
+            continue
+        accession = str(row[columns["ACCESSION_NUMBER"]]).strip()
+        try:
+            shares = float(str(row[columns["SSHPRNAMT"]]).replace(",", ""))
+        except (TypeError, ValueError):
+            shares = 0.0
+        for sym in tickers:
+            if accession:
+                filer_sets.setdefault(sym, set()).add(accession)
+            share_totals[sym] = share_totals.get(sym, 0.0) + shares
+
+    aggregates = {}
+    for sym in set(filer_sets) | set(share_totals):
+        total = share_totals.get(sym, 0.0)
+        aggregates[sym] = {
+            "holder_count": len(filer_sets.get(sym, set())),
+            "total_shares": int(total) if total.is_integer() else round(total, 4),
+        }
+    return aggregates, learned
+
+
+def _download_and_parse_13f(zip_url: str, mappings: dict[str, dict]) -> tuple[dict, dict]:
+    """Download to one temporary ZIP, stream INFOTABLE.tsv, always delete ZIP."""
+    direct: dict[str, set[str]] = {}
+    names: dict[str, set[str]] = {}
+    for sym, entry in mappings.items():
+        cusip = _normalize_13f_cusip(entry.get("cusip"))
+        if cusip:
+            direct.setdefault(cusip, set()).add(sym)
+        issuer = _normalize_13f_issuer_name(entry.get("name"))
+        if issuer and not cusip:
+            names.setdefault(issuer, set()).add(sym)
+
+    INSTITUTIONAL_13F_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="13f_", suffix=".zip", dir=INSTITUTIONAL_13F_DIR, delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            response = requests.get(
+                zip_url,
+                headers={"User-Agent": INSTITUTIONAL_13F_USER_AGENT},
+                timeout=(30, 180),
+                stream=True,
+            )
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    tmp.write(chunk)
+        with zipfile.ZipFile(tmp_path) as archive:
+            entry_name = next(
+                (name for name in archive.namelist()
+                 if Path(name).name.upper() == "INFOTABLE.TSV"),
+                None,
+            )
+            if not entry_name:
+                raise ValueError("SEC ZIP does not contain INFOTABLE.tsv")
+            with archive.open(entry_name) as raw:
+                with TextIOWrapper(raw, encoding="utf-8-sig", errors="replace", newline="") as text:
+                    return _aggregate_13f_stream(text, direct, names)
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception as e:
+                print(f"[13f] temporary ZIP cleanup failed: {e}")
+
+
+def _institutional_period_label(zip_url: str) -> str:
+    name = Path(urllib.parse.urlparse(zip_url).path).name
+    return re.sub(r"_form13f\.zip$", "", name, flags=re.IGNORECASE)
+
+
+def _institutional_apply_comparison(current: dict, previous: dict | None) -> None:
+    previous_aggregates = (previous or {}).get("aggregates") or {}
+    for sym, item in (current.get("aggregates") or {}).items():
+        old = previous_aggregates.get(sym)
+        item["holder_count_delta"] = (
+            item["holder_count"] - old["holder_count"] if old else None
+        )
+        old_shares = float(old.get("total_shares") or 0) if old else 0.0
+        if old and old_shares:
+            item["share_count_delta_pct"] = round(
+                (float(item.get("total_shares") or 0) - old_shares) / old_shares * 100,
+                2,
+            )
+        else:
+            item["share_count_delta_pct"] = None
+
+
+def _institutional_refresh_worker() -> None:
+    """Single-flight background refresh; request handlers never wait for it."""
+    now = datetime.now(timezone.utc)
+    state = _institutional_json_read(INSTITUTIONAL_13F_STATE_FILE, {})
+    try:
+        latest_url = _discover_latest_13f_zip_url()
+        if not latest_url:
+            raise RuntimeError("SEC listing is temporarily unavailable")
+        if latest_url == state.get("latest_url") and state.get("periods"):
+            state["checked_at"] = now.isoformat()
+            state.pop("last_error", None)
+            _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+            return
+
+        symbols = _institutional_target_symbols()
+        if not symbols:
+            raise RuntimeError("portfolio/watchlist universe is empty")
+        mappings = _resolve_institutional_cusips(symbols)
+        if not any(entry.get("cusip") or entry.get("name") for entry in mappings.values()):
+            raise RuntimeError("OpenFIGI mapping is temporarily unavailable")
+        aggregates, learned = _download_and_parse_13f(latest_url, mappings)
+
+        mapping_cache = _institutional_json_read(INSTITUTIONAL_13F_CUSIP_FILE, {})
+        learned_at = datetime.now(timezone.utc).isoformat()
+        for sym, cusip in learned.items():
+            entry = dict(mapping_cache.get(sym) or mappings.get(sym) or {})
+            entry.update({
+                "cusip": cusip,
+                "status": "resolved",
+                "cusip_source": "sec_issuer_name_exact",
+                "fetched_at": learned_at,
+            })
+            mapping_cache[sym] = entry
+            mappings[sym] = entry
+        if learned:
+            _atomic_write_json(INSTITUTIONAL_13F_CUSIP_FILE, mapping_cache)
+
+        resolved_tickers = []
+        unavailable = {}
+        for sym in symbols:
+            cusip = _normalize_13f_cusip((mappings.get(sym) or {}).get("cusip"))
+            if cusip:
+                resolved_tickers.append(sym)
+                aggregates.setdefault(sym, {"holder_count": 0, "total_shares": 0})
+                aggregates[sym]["cusip"] = cusip
+            else:
+                unavailable[sym] = (mappings.get(sym) or {}).get("status") or "unresolved"
+
+        period = {
+            "url": latest_url,
+            "period": _institutional_period_label(latest_url),
+            "parsed_at": datetime.now(timezone.utc).isoformat(),
+            "universe": symbols,
+            "resolved_tickers": sorted(resolved_tickers),
+            "unavailable": unavailable,
+            "aggregates": aggregates,
+        }
+        old_periods = state.get("periods") if isinstance(state.get("periods"), list) else []
+        previous = next((p for p in old_periods if p.get("url") != latest_url), None)
+        _institutional_apply_comparison(period, previous)
+        state = {
+            "schema_version": INSTITUTIONAL_13F_SCHEMA_VERSION,
+            "latest_url": latest_url,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "periods": [period] + ([previous] if previous else []),
+        }
+        _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+        print(f"[13f] {period['period']}: {len(aggregates)} tickerov, ZIP odstránený")
+    except Exception as e:
+        # Preserve every previous successful period. Only diagnostics/backoff
+        # change; temporary failure never becomes a fabricated zero holding.
+        state["schema_version"] = INSTITUTIONAL_13F_SCHEMA_VERSION
+        state["last_attempt_at"] = now.isoformat()
+        state["last_error"] = str(_scrub_token(e))
+        try:
+            _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+        except Exception:
+            pass
+        print(f"[13f] refresh failed: {_scrub_token(e)}")
+    finally:
+        _institutional_13f_refresh_lock.release()
+
+
+def _institutional_refresh_due(state: dict) -> bool:
+    now = datetime.now(timezone.utc)
+    stamp = state.get("checked_at")
+    threshold = INSTITUTIONAL_13F_RECHECK_SECONDS
+    if state.get("last_error"):
+        stamp = state.get("last_attempt_at") or stamp
+        threshold = INSTITUTIONAL_13F_FAILURE_RETRY_SECONDS
+    if not stamp:
+        return True
+    try:
+        return (now - datetime.fromisoformat(stamp)).total_seconds() >= threshold
+    except Exception:
+        return True
+
+
+def _kickoff_institutional_refresh(state: dict | None = None) -> bool:
+    state = state if isinstance(state, dict) else _institutional_json_read(
+        INSTITUTIONAL_13F_STATE_FILE, {}
+    )
+    if not _institutional_refresh_due(state):
+        return False
+    if not _institutional_13f_refresh_lock.acquire(blocking=False):
+        return False
+    threading.Thread(target=_institutional_refresh_worker, daemon=True).start()
+    return True
+
+
+@app.get("/api/ticker/institutional/{symbol}")
+def get_ticker_institutional(symbol: str):
+    """Serve cached quarterly 13F context and kick a non-blocking refresh.
+
+    Explicit `available`/`status` fields distinguish a real zero-holder result
+    from data that has not been resolved or fetched yet.
+    """
+    sym = re.sub(r"[^A-Za-z0-9.\-]", "", symbol.upper())
+    if not sym:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    state = _institutional_json_read(INSTITUTIONAL_13F_STATE_FILE, {})
+    started = _kickoff_institutional_refresh(state)
+    running = started or _institutional_13f_refresh_lock.locked()
+    periods = state.get("periods") if isinstance(state.get("periods"), list) else []
+    current = periods[0] if periods else None
+    item = ((current or {}).get("aggregates") or {}).get(sym)
+    base = {
+        "ticker": sym,
+        "interpretation_only": True,
+        "refresh_running": running,
+        "checked_at": state.get("checked_at"),
+    }
+    if item is not None:
+        return {
+            **base,
+            "available": True,
+            "status": "ok",
+            "period": current.get("period"),
+            "parsed_at": current.get("parsed_at"),
+            **item,
+        }
+    if not current and state.get("last_error"):
+        status = "unavailable"
+        message = "SEC/OpenFIGI zdroj je dočasne nedostupný; nejde o nulový počet držiteľov."
+    elif not current:
+        status = "pending"
+        message = "13F dáta sa pripravujú na pozadí."
+    elif sym not in (current.get("universe") or []):
+        status = "not_in_snapshot"
+        message = "Ticker pribudol po poslednom 13F spracovaní; zaradí sa pri ďalšom období."
+    else:
+        status = "unresolved"
+        message = "Ticker sa zatiaľ nepodarilo bezpečne priradiť ku CUSIP."
+    return {
+        **base,
+        "available": False,
+        "status": status,
+        "period": current.get("period") if current else None,
+        "message": message,
+        "error": state.get("last_error") if not current else None,
+    }
 
 
 EARNINGS_SYMBOL_DIR = DATA_ROOT / "earnings_symbol"

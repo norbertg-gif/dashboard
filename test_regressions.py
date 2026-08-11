@@ -156,6 +156,57 @@ class CacheRegressionTests(unittest.TestCase):
         self.assertEqual(payload["order_symbols"], ["AAPL", "MSFT"])
 
 
+class Institutional13FRegressionTests(unittest.TestCase):
+    def test_stream_parser_aggregates_targets_and_ignores_other_cusips(self):
+        header = (
+            "ACCESSION_NUMBER\tINFOTABLE_SK\tNAMEOFISSUER\tTITLEOFCLASS\tCUSIP\tFIGI\t"
+            "VALUE\tSSHPRNAMT\tSSHPRNAMTTYPE\tPUTCALL\tINVESTMENTDISCRETION\t"
+            "OTHERMANAGER\tVOTING_AUTH_SOLE\tVOTING_AUTH_SHARED\tVOTING_AUTH_NONE\n"
+        )
+        rows = (
+            "0001\t1\tAPPLE INC\tCOM\t037833100\t\t1\t10\tSH\t\tSOLE\t\t0\t0\t10\n"
+            "0001\t2\tAPPLE INC\tCOM\t037833100\t\t2\t20\tSH\t\tSOLE\t\t0\t0\t20\n"
+            "0002\t3\tAPPLE INC\tCOM\t037833100\t\t3\t25\tSH\t\tSOLE\t\t0\t0\t25\n"
+            "9999\t4\tOTHER CO\tCOM\t999999999\t\t999\t999\tSH\t\tSOLE\t\t0\t0\t999\n"
+        )
+        aggregates, learned = tb._aggregate_13f_stream(
+            io.StringIO(header + rows), {"037833100": {"AAPL"}},
+        )
+        self.assertEqual(aggregates, {
+            "AAPL": {"holder_count": 2, "total_shares": 55},
+        })
+        self.assertEqual(learned, {})
+        self.assertNotIn("999999999", str(aggregates))
+
+    def test_sec_discovery_failure_is_fail_soft(self):
+        with patch.object(tb.requests, "get", side_effect=OSError("offline")):
+            self.assertIsNone(tb._discover_latest_13f_zip_url())
+
+    def test_resolved_zero_holders_is_available_not_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_path = Path(tmp_dir) / "state.json"
+            state_path.write_text(json.dumps({
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "periods": [{
+                    "period": "01jan2026-31mar2026",
+                    "parsed_at": "2026-05-15T00:00:00+00:00",
+                    "universe": ["ZERO"],
+                    "aggregates": {"ZERO": {
+                        "holder_count": 0,
+                        "total_shares": 0,
+                        "holder_count_delta": 0,
+                        "share_count_delta_pct": 0.0,
+                    }},
+                }],
+            }), encoding="utf-8")
+            with patch.object(tb, "INSTITUTIONAL_13F_STATE_FILE", state_path), \
+                    patch.object(tb, "_kickoff_institutional_refresh", return_value=False):
+                payload = tb.get_ticker_institutional("zero")
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["holder_count"], 0)
+
+
 class PublicPortfolioRegressionTests(unittest.TestCase):
     @staticmethod
     def _request():

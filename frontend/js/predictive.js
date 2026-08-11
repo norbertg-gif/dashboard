@@ -1667,6 +1667,7 @@ function pc_renderSidebar(data) {
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
+  pc_loadInstitutional(data.ticker);
   pc_prepareFundAnalysisCard(data.ticker);
   pc_prepareCorpActionsCard(data.ticker);
   pc_prepareFairValueCard(data.ticker);
@@ -2404,6 +2405,73 @@ function renderDailyMain(data) {
   });
   setDailyMarkerModeButtons();
   setDailyHaButton();
+}
+
+// SEC 13F inštitucionálne držby — interpretačná karta, NIKDY neovplyvňuje
+// C1-C4, DCA, scanner tier, Verdikt/BUILD ani ML.
+let _institutionalForTicker = null;
+
+function pc_institutionalCount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString('sk-SK') : '—';
+}
+
+function pc_institutionalInterpretation(data) {
+  const holders = data.holder_count_delta == null ? NaN : Number(data.holder_count_delta);
+  const shares = data.share_count_delta_pct == null ? NaN : Number(data.share_count_delta_pct);
+  if (!Number.isFinite(holders) || !Number.isFinite(shares))
+    return 'Prvé dostupné obdobie — medzištvrťročné porovnanie ešte nie je možné.';
+  if (holders > 0 && shares > 0)
+    return 'Rástol počet filerov aj súhrnný počet akcií — široká akumulácia.';
+  if (holders < 0 && shares < 0)
+    return 'Klesol počet filerov aj súhrnný počet akcií — široká distribúcia.';
+  if (holders === 0 && shares === 0)
+    return 'Počet filerov aj súhrnná pozícia ostali stabilné.';
+  return 'Zmiešaný obraz: počet filerov a veľkosť súhrnnej pozície sa nevyvíjali rovnako.';
+}
+
+async function pc_loadInstitutional(ticker) {
+  const card = document.getElementById('institutionalCard');
+  if (!card || !ticker) return;
+  const sym = String(ticker).toUpperCase();
+  _institutionalForTicker = sym;
+  card.style.display = '';
+  card.innerHTML = `<div class="card-title" title="Štvrťročný kontext zo SEC Form 13F. Je oneskorený približne 45 dní a nevstupuje do C1–C4, DCA, Scannera ani Verdiktu.">Inštitucionálne držby · 13F</div>
+    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Kontrolujem posledné spracované obdobie…</div>`;
+  try {
+    const r = await fetch('/api/ticker/institutional/' + encodeURIComponent(sym));
+    if (!r.ok || _institutionalForTicker !== sym) return;
+    const d = await r.json();
+    if (_institutionalForTicker !== sym) return;
+    const title = `<div class="card-title" title="Počet unikátnych SEC 13F filingov a súčet nahlásených akcií. Kontext je oneskorený a nevstupuje do C1–C4, DCA, Scannera ani Verdiktu.">Inštitucionálne držby · 13F</div>`;
+    if (!d.available) {
+      const pending = d.status === 'pending' || d.refresh_running;
+      card.innerHTML = title + `<div class="earnings-unavailable">${pending ? 'Dáta sa pripravujú' : 'Zatiaľ nedostupné'}</div>
+        <div class="earnings-unavailable-note">${escHtml(d.message || 'Inštitucionálne dáta sa nepodarilo načítať.')}${pending ? ' Obnova beží na pozadí; ostatné karty fungujú bez čakania.' : ''}</div>`;
+      return;
+    }
+    const holderDelta = d.holder_count_delta == null ? NaN : Number(d.holder_count_delta);
+    const shareDelta = d.share_count_delta_pct == null ? NaN : Number(d.share_count_delta_pct);
+    const holderDeltaText = Number.isFinite(holderDelta)
+      ? `${holderDelta > 0 ? '+' : ''}${pc_institutionalCount(holderDelta)}` : '—';
+    const shareDeltaText = Number.isFinite(shareDelta)
+      ? `${shareDelta > 0 ? '+' : ''}${shareDelta.toLocaleString('sk-SK', {maximumFractionDigits: 1})} %` : '—';
+    const zeroNote = Number(d.holder_count) === 0
+      ? '<div class="earnings-unavailable-note">Nula znamená, že sa pre bezpečne priradený CUSIP v tomto období nenašiel žiadny filer — nie že dáta chýbajú.</div>' : '';
+    card.innerHTML = title + `
+      <div class="pred-row"><span class="key">13F fileri</span><span class="val">${pc_institutionalCount(d.holder_count)}</span></div>
+      <div class="pred-row"><span class="key">Zmena filerov</span><span class="val">${holderDeltaText}</span></div>
+      <div class="pred-row"><span class="key">Súhrn akcií</span><span class="val">${pc_institutionalCount(d.total_shares)}</span></div>
+      <div class="pred-row"><span class="key">Zmena akcií q/q</span><span class="val">${shareDeltaText}</span></div>
+      <div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px;line-height:1.45;color:var(--muted);">${escHtml(pc_institutionalInterpretation(d))}</div>
+      ${zeroNote}
+      <div class="fair-value-foot">SEC obdobie ${escHtml(d.period || '—')} · 13F má prirodzené oneskorenie</div>`;
+  } catch (e) {
+    if (_institutionalForTicker === sym) {
+      card.innerHTML = `<div class="card-title">Inštitucionálne držby · 13F</div>
+        <div class="earnings-unavailable-note">Vrstva je dočasne nedostupná; nejde o nulový počet držiteľov.</div>`;
+    }
+  }
 }
 
 // Relatívna sila voči QQQ/SPY (1M/3M) — interpretačná karta, neovplyvňuje skóre
