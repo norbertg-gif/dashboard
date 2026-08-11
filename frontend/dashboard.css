@@ -2675,6 +2675,30 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   text-transform: uppercase;
   margin-bottom: 10px;
 }
+/* Použité RS/insights/inštitucionálnou kartou pre riadky "popisok: hodnota" —
+   chýbalo úplne, takže sa label a hodnota lepili bez medzery ("13F fileri3 437"). */
+#predictiveTab .pred-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-size: 12px;
+}
+#predictiveTab .pred-row:last-of-type {
+  border-bottom: none;
+}
+#predictiveTab .pred-row .key {
+  color: var(--muted);
+  white-space: nowrap;
+}
+#predictiveTab .pred-row .val {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: right;
+}
 #predictiveTab .fair-value-beta {
   margin-left: 4px;
   color: var(--accent);

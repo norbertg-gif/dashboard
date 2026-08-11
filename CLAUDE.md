@@ -727,6 +727,16 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   európske tickery typicky nemajú 13F záznam. Táto vrstva NEVSTUPUJE do C1–C4,
   DCA, scanner tier, Verdikt/BUILD ani ML a nesmie sa bez explicitného
   rozhodnutia zmeniť na buy/sell signál.
+- **`#predictiveTab .pred-row` CSS chýbalo úplne — OPRAVENÉ 2026-08-11.** RS,
+  insights aj inštitucionálna karta v Analytika sidebare renderujú riadky
+  `<div class="pred-row"><span class="key">…</span><span class="val">…</span></div>`,
+  ale `.pred-row`/`.key`/`.val` nemali žiadny CSS predpis — popisok a hodnota
+  sa lepili bez medzery ("13F fileri3 437"). Objavené až na živom screenshote
+  novej karty, hoci diera bola v kóde od skoršej session (predtým si to nikto
+  nevšimol). Pridané pod `#predictiveTab .card-title` — `display:flex;
+  justify-content:space-between`, `.key` tlmená farba, `.val` mono/tučné.
+  Pri pridávaní ďalšej `.pred-row` karty netreba nový CSS, tento už pokrýva
+  všetky.
 - **Chart panel → Analytika button:** `.p-btn-an` (🔬) v hlavičke každého
   panelu (aj chart dock — rovnaký `createPanel` factory) volá
   `openPanelInAnalytika(id)` → číta aktuálnu hodnotu `.p-sym` (nie
