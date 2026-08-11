@@ -109,7 +109,33 @@ These were already in the codebase and need to stay fixed:
 - **Scanner memory limits.** In the low-memory profile `SCANNER_MAX_WORKERS` defaults to 2 (normal profile 3); 8 concurrent workers caused OOM restarts on Render free tier. `_CACHE_MEM_MAX` is 50. Scanner workers explicitly `del` DataFrames before returning, do not retain their downloaded OHLCV in `_YF_CACHE`, and run `gc.collect()` every `SCANNER_GC_INTERVAL` completions plus after the full scan. Scanner state records RSS start/peak for diagnostics; this is a high-water mark, not a live memory reading.
 - **`dailyPnL` does not exist in eToro API.** `/pnl/real` positions schema has no `dailyPnL` field — `pos.get("dailyPnL")` always returns `None`. Portfolio Stock/ETF Daily P/L is computed via `_get_market_prev_close(sym, type)`: current eToro `currentRate` minus market previous close from Massive/yfinance daily bars, then `× units × direction`. Non-Stock/ETF falls back to `_get_prev_close(sym)` from eToro OHLCV cache. This is still an approximation; eToro's own calculation includes spread/internal factors and their own day boundary. The market-close cache lives under `cache/market_close` with a 6h TTL.
 
+- **`overflow-x:auto; overflow-y:visible` sa NESPRÁVA tak, ako znie — CSS spec núti "visible" os na "auto", keď je druhá os auto/scroll/hidden.** Overené priamo v prehliadači (2026-08-11): takto zapísaný pár sa spočíta ako `overflowY:"auto"`, nie `"visible"`, takže box stále láme `position:sticky` (sticky sa viaže na najbližšieho predka s NEviditeľným overflow — a "auto" nie je viditeľný, hoci vyzerá neškodne). Jediný spoľahlivý spôsob, ako dať elementu horizontálny scroll bez toho, aby blokoval sticky vo vertikálnom smere niektorého potomka, je NEDÁVAŤ mu žiadny vertikálny overflow vôbec (`overflow: visible` ako JEDNU hodnotu) a horizontálny scroll presunúť o úroveň vyššie, na predka, ktorý má aj tak `overflow:auto` na oboch osiach.
+- **Sticky hlavička (`.tool-table th{position:sticky;top:0}`) potrebuje OHRANIČENÉHO, skutočne scrollujúceho predka — nie len `overflow:auto`/`hidden` na krabici, ktorá voľne rastie s obsahom.** Ak najbližší predok s neviditeľným overflow nemá vlastnú definitívnu výšku (napr. `.tool-panel{overflow:hidden}` bez `flex:1`+ohraničeného rodiča), box sa nikdy sám neposunie — len sa posúva CELÝ spolu so stránkou, takže sticky vyzerá "rozbité" (hlavička uteká preč), hoci CSS vyzerá správne. `#main-history .tool-panel.fill{height:100%}` (nie `min-height`) je scoped fix presne na toto pre Históriu; Scanner namiesto toho necháva `.scanner-page{overflow:auto}` scrollovať CELÚ voľne rastúcu stránku a všetky vnorené `overflow` na `.scanner-table-wrap`/`.scanner-output` musia byť `visible`, inak preberú sticky containing block bez toho, aby samy scrollovali. Overovanie vyžaduje reálne meranie v prehliadači (viacnásobné scroll pozície + porovnanie `getBoundingClientRect().top`), nie len čítanie CSS — statická analýza dvakrát viedla k nesprávnemu záveru "už to funguje".
+
 ## Backlog (priority order)
+
+-8. **UI polish naprieč tabuľkami — HOTOVÉ 2026-08-11.** Sticky hlavičky
+   stĺpcov v Histórii, Scanneri (DIP univerzum) a Portfóliu — mechanizmus
+   a jeho pasce popísané v pitfalls vyššie. Klikacie triedenie stĺpcov
+   (zdieľaný `compareSortableRows()` v `portfolio.js`, poradie `key:null` =
+   backendové predvolené poradie, nie abecedné) doplnené do DCA karty,
+   Build karty a Sektorovej karty; História a hlavná Portfolio tabuľka aj
+   Scanner hlavná tabuľka mali vlastné triedenie už predtým (`sortHistory`,
+   `portSort`, `setScannerSort`) — zámerne NEZJEDNotené do jedného helpera,
+   každá karta má svoj malý, nezávislý stav (zavedený vzor v tomto súbore).
+   Build karta pridala filter podľa triedy (Všetky/CORE/STANDARD/
+   SPECULATIVE/Nezaradené, `buildClassFilter`) — filtruje LEN zobrazené
+   riadky, súčet cieľových váh a počty v hlavičke/zbalenom zhrnutí sa
+   počítajú vždy z celého portfólia, inak by filter menil číslo, ktoré má
+   byť nezávislou kontrolou konzistencie. Verdikt graf (`.verdict-chart`)
+   dostal `align-self:stretch` namiesto `height:calc(100vh - 150px)` — výška
+   teraz sedí s ľavým stĺpcom namiesto fixného podielu viewportu (overené
+   v prehliadači: 864px = 864px pri širokom okne).
+   Zámerne vynechané: Rates tabuľka (`renderRatesView`/`#main-rates`) —
+   `#main-rates` v HTML neexistuje, je to mŕtvy kód, netreba doň investovať.
+   Orders/Mirrors tabuľky v Portfóliu — typicky pod 10 riadkov, triedenie by
+   pridalo zložitosť bez úžitku. Correlation matrix — heatmapa, nie zoznam,
+   triedenie nedáva zmysel.
 
 -7. **PORTFOLIO BUILD — FÁZA 1 HOTOVÁ 2026-08-10, cieľové váhy odvodené 2026-08-11.**
    `GET/POST /api/portfolio/classes` (ručné `position_class` CORE/STANDARD/

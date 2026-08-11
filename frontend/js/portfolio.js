@@ -342,7 +342,7 @@ async function renderHistoryView(force = false) {
     ['profitPct', '%'],
     ['daysHeld', 'Days'],
   ];
-  el.innerHTML = `<div class="tool-panel">
+  el.innerHTML = `<div class="tool-panel fill">
     <div class="tool-toolbar">
       <div class="tool-title">Historia obchodov</div>
       <div class="tb-group">
@@ -389,6 +389,7 @@ async function renderHistoryView(force = false) {
       <div class="tool-kpi"><div class="tool-kpi-label">Net P/L</div><div class="tool-kpi-val ${(s.netProfit||0)>=0?'port-pos':'port-neg'}">${fmtMoney(s.netProfit)}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Fees</div><div class="tool-kpi-val">$${(s.fees || 0).toFixed(2)}</div></div>
     </div>
+    <div class="tool-table-scroll">
     <table class="tool-table"><thead><tr>
       ${histHeaders.map(([key, label]) => `<th onclick="sortHistory('${key}')" style="cursor:pointer;">${label}${historySort.key === key ? (historySort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>`).join('')}
     </tr></thead><tbody>
@@ -415,6 +416,7 @@ async function renderHistoryView(force = false) {
         </tr>`;
       }).join('')}
     </tbody></table>
+    </div>
   </div>`;
 }
 
@@ -549,6 +551,33 @@ async function loadDcaCandidates(force = false) {
   }
 }
 
+// Zdieľaný komparátor pre klikacie stĺpce (DCA aj Build karta). Typ hodnoty
+// namiesto zoznamu kľúčov — funguje pre akýkoľvek stĺpec bez rizika, že sa
+// kľúč v triediacej funkcii a v dátach jedného dňa rozíde (napr. `ticker` vs
+// skutočné pole `symbol`).
+function compareSortableRows(sortState, a, b) {
+  const key = sortState.key;
+  const dir = sortState.dir;
+  const va = a[key] ?? '';
+  const vb = b[key] ?? '';
+  if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+  // Chýbajúce hodnoty vždy na konci, nezávisle od smeru triedenia.
+  if (va === '' && vb !== '') return 1;
+  if (va !== '' && vb === '') return -1;
+  if (va === '' && vb === '') return 0;
+  return String(va).localeCompare(String(vb)) * dir;
+}
+
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (flag priorita, potom najväčšia strata), nie abecedné.
+let dcaSort = { key: null, dir: 1 };
+
+function sortDca(key) {
+  if (dcaSort.key === key) dcaSort.dir *= -1;
+  else dcaSort = { key, dir: (key === 'flag' || key === 'symbol') ? 1 : -1 };
+  renderDcaCard(_dcaCache.data);
+}
+
 const DCA_FLAG_META = {
   dca:          { cls: 'good',    label: 'DCA',          tip: 'Kvalitný dip — strata ≥ prah, DIP ≥ prah, váha pod limitom' },
   concentrated: { cls: 'warn',    label: 'Veľká váha',   tip: 'DCA podmienky OK, ale pozícia je už veľká časť equity — koncentračné riziko' },
@@ -584,7 +613,10 @@ function renderDcaCard(data) {
     c.value_trap ? `<span class="dca-pill bad">${c.value_trap}× pozor</span>` : '',
     c.no_data ? `<span class="dca-pill neutral">${c.no_data}× mimo dát</span>` : '',
   ].filter(Boolean).join('');
-  const rows = list.map(x => {
+  // Bez kliknutia ostáva backendové poradie (flag priorita, potom strata);
+  // triedenie sa aktivuje až explicitným klikom na hlavičku.
+  const sortedList = dcaSort.key ? [...list].sort((a, b) => compareSortableRows(dcaSort, a, b)) : list;
+  const rows = sortedList.map(x => {
     const meta = DCA_FLAG_META[x.flag] || DCA_FLAG_META.no_data;
     const dipTxt = x.dip_total != null ? `${x.dip_total} ${x.dip_label}` : '—';
     return `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;" title="${escHtml(meta.tip)}">
@@ -596,10 +628,15 @@ function renderDcaCard(data) {
       <td class="r" style="color:var(--muted);">${x.trades}×</td>
     </tr>`;
   }).join('');
+  const dcaTh = (key, label, cls = '') => {
+    const active = dcaSort.key === key;
+    const arrow = active ? (dcaSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortDca('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
+  };
   wrap.innerHTML = `${head}
     <div class="dca-summary">${summary}</div>
     <table class="tool-table"><thead><tr>
-      <th>Flag</th><th>Ticker</th><th class="r">Strata</th><th class="r">Váha</th><th class="r">DIP</th><th class="r">Tranže</th>
+      ${dcaTh('flag', 'Flag')}${dcaTh('symbol', 'Ticker')}${dcaTh('pnl_pct', 'Strata', 'r')}${dcaTh('weight_pct', 'Váha', 'r')}${dcaTh('dip_total', 'DIP', 'r')}${dcaTh('trades', 'Tranže', 'r')}
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu.</div>`;
 }
@@ -612,6 +649,24 @@ function renderDcaCard(data) {
 // Trieda a cieľová váha sú RUČNÝ vstup (definícia stratégie, nie odvodený údaj).
 let _buildCache = { account: null, data: null };
 const PORT_BUILD_COLLAPSED_KEY = 'td_portfolio_build_collapsed';
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (build/over_max/no_target/unclassified priorita, potom najväčší odstup).
+let buildSort = { key: null, dir: 1 };
+// 'all' = bez filtra. Filtruje LEN zobrazené riadky, nie počty v hlavičke
+// karty ani v zbalenom zhrnutí — tie musia ukazovať celé portfólio.
+let buildClassFilter = 'all';
+
+function sortBuild(key) {
+  if (buildSort.key === key) buildSort.dir *= -1;
+  else buildSort = { key, dir: (key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
+  renderBuildCard(_buildCache.data);
+}
+
+function setBuildClassFilter(value) {
+  buildClassFilter = value;
+  renderBuildCard(_buildCache.data);
+}
+
 const BUILD_STATE_META = {
   build:        { cls: 'good',    label: 'Dokúpiť',    tip: 'Pozícia je pod cieľovou váhou — kandidát na BUILD, aj keď je v zisku' },
   at_target:    { cls: 'neutral', label: 'Na cieli',   tip: 'Váha zodpovedá cieľu alebo ho presahuje' },
@@ -733,7 +788,15 @@ function renderBuildCard(data) {
     wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
     return;
   }
-  const rows = (data.positions || []).map(x => {
+  const allPositions = data.positions || [];
+  const filtered = buildClassFilter === 'all' ? allPositions
+    : buildClassFilter === 'unclassified' ? allPositions.filter(x => !x.position_class)
+    : allPositions.filter(x => x.position_class === buildClassFilter);
+  // Bez kliknutia ostáva backendové poradie (stav priorita, potom odstup);
+  // triedenie sa aktivuje až explicitným klikom na hlavičku.
+  const sortedPositions = buildSort.key
+    ? [...filtered].sort((a, b) => compareSortableRows(buildSort, a, b)) : filtered;
+  const rows = sortedPositions.map(x => {
     const meta = BUILD_STATE_META[x.state] || BUILD_STATE_META.unclassified;
     const opts = ['', 'CORE', 'STANDARD', 'SPECULATIVE'].map(v =>
       `<option value="${v}"${v === (x.position_class || '') ? ' selected' : ''}>${v || '—'}</option>`).join('');
@@ -754,15 +817,29 @@ function renderBuildCard(data) {
       <td class="r" style="color:var(--muted);">${addTxt}</td>
     </tr>`;
   }).join('');
+  const buildTh = (key, label, cls = '') => {
+    const active = buildSort.key === key;
+    const arrow = active ? (buildSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortBuild('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
+  };
+  const filterBtn = (value, label) =>
+    `<button class="btn${buildClassFilter === value ? ' primary' : ''}" onclick="setBuildClassFilter('${value}')" style="font-size:10px;">${label}</button>`;
+  const filterBar = `<div style="display:flex;gap:4px;margin:6px 0;flex-wrap:wrap;">
+    ${filterBtn('all', 'Všetky')}${filterBtn('CORE', 'CORE')}${filterBtn('STANDARD', 'STANDARD')}${filterBtn('SPECULATIVE', 'SPECULATIVE')}${filterBtn('unclassified', 'Nezaradené')}
+  </div>`;
   // Súčet cieľov je kontrola konzistencie, nie pravidlo — 100 % nie je povinnosť,
   // ale výrazný odklon znamená, že cieľové váhy nedávajú spolu zmysel.
+  // Počíta sa VŽDY z celého portfólia, nie z filtrovaného pohľadu — inak by
+  // filter menil číslo, ktoré má byť nezávislou kontrolou konzistencie.
   const sum = Number(data.target_weight_sum || 0);
   const sumColor = sum > 105 ? 'var(--down)' : sum && sum < 60 ? 'var(--yellow)' : 'var(--muted)';
   wrap.innerHTML = `${head}
+    ${filterBar}
     <table class="tool-table"><thead><tr>
-      <th>Stav</th><th>Ticker</th><th class="r">Váha</th><th>Trieda</th>
-      <th class="r">Cieľ %</th><th class="r">Odstup</th><th class="r">Dokúpiť</th>
+      ${buildTh('state', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
+      ${buildTh('target_weight', 'Cieľ %', 'r')}${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
     </tr></thead><tbody>${rows}</tbody></table>
+    ${!sortedPositions.length ? `<div style="color:var(--muted);font-size:11px;padding:6px 0;">Filtru nezodpovedá žiadna pozícia.</div>` : ''}
     <div class="signal-outcome-note" style="margin-top:6px;">
       Súčet cieľových váh: <span style="color:${sumColor}">${sum.toFixed(1)} %</span>.
       Bledé cieľové váhy sú odvodené z pomeru tried v ⚙ (${data.class_ratios ? `CORE ${data.class_ratios.CORE}:STANDARD ${data.class_ratios.STANDARD}:SPECULATIVE ${data.class_ratios.SPECULATIVE}` : '4:2:1'}), nie manuálny vstup — napíš vlastné číslo do poľa, ak chceš konkrétny titul prebiť.
@@ -831,20 +908,37 @@ async function loadSectorCard(force = false) {
   }
 }
 
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (zoradené podľa kapitálu, najväčší sektor hore).
+let sectorSort = { key: null, dir: 1 };
+
+function sortSectors(key) {
+  if (sectorSort.key === key) sectorSort.dir *= -1;
+  else sectorSort = { key, dir: key === 'sector' ? 1 : -1 };
+  renderSectorCard(_sectorsCache.data);
+}
+
 function renderSectorCard(data) {
   const wrap = document.getElementById('portfolio-sectors');
   if (!wrap) return;
   const head = sectorCardHead(data);
   if (isPortfolioSectorsCollapsed()) { wrap.innerHTML = head; return; }
   if (!data) { wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>`; return; }
-  const sectors = data.sectors || [];
-  if (!sectors.length) {
+  const rawSectors = data.sectors || [];
+  if (!rawSectors.length) {
     wrap.innerHTML = `${head}<div class="signal-outcome-note">Žiadne držané tituly.</div>`;
     return;
   }
+  const sectors = sectorSort.key
+    ? [...rawSectors].sort((a, b) => compareSortableRows(sectorSort, a, b)) : rawSectors;
+  const sTh = (key, label, cls = '') => {
+    const active = sectorSort.key === key;
+    const arrow = active ? (sectorSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortSectors('${key}')" style="cursor:pointer;${cls === '' ? 'text-align:left;' : ''}">${label}${arrow}</th>`;
+  };
   let html = `${head}<table class="port-table" style="width:100%;font-size:11px;"><thead><tr>
-    <th style="text-align:left;">Sektor</th><th class="r">Titulov</th>
-    <th class="r">Kapitál</th><th class="r">Zisk</th><th class="r">V zisku</th></tr></thead><tbody>`;
+    ${sTh('sector', 'Sektor')}${sTh('count', 'Titulov', 'r')}
+    ${sTh('amount_pct', 'Kapitál', 'r')}${sTh('pnl_pct', 'Zisk', 'r')}${sTh('green', 'V zisku', 'r')}</tr></thead><tbody>`;
   for (const s of sectors) {
     const unknown = s.sector === 'Nezaradené';
     const pnlCls = s.pnl >= 0 ? 'port-pos' : 'port-neg';
