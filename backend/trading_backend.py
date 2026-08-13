@@ -5739,6 +5739,79 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
     return out if len(out) >= 2 else None
 
 
+def _indicators_from_display_candles(candles: list, include_stoch: bool = True) -> dict:
+    """Compute chart indicators from the exact candles returned to the client.
+
+    The predictive endpoint deliberately keeps its scoring/backtest data on the
+    yfinance/Massive path.  The visible chart, however, uses the eToro broker
+    feed.  Keeping this display-only calculation separate makes overlays and
+    subpanels numerically consistent with the candles without changing signal
+    generation.
+    """
+    if not isinstance(candles, list) or len(candles) < 2:
+        return {}
+    records = []
+    for candle in candles:
+        try:
+            ts = pd.Timestamp(candle["time"], unit="s")
+            records.append({
+                "time": ts,
+                "Open": float(candle["open"]),
+                "High": float(candle["high"]),
+                "Low": float(candle["low"]),
+                "Close": float(candle["close"]),
+                "Volume": float(candle.get("volume") or 0),
+            })
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    if len(records) < 2:
+        return {}
+    frame = pd.DataFrame(records).set_index("time").sort_index()
+    frame = frame[~frame.index.duplicated(keep="last")]
+    if len(frame) < 2:
+        return {}
+    enriched = add_indicators(frame)
+
+    def series(column: str) -> list:
+        out = []
+        for ts, row in enriched.iterrows():
+            value = safe_float(row.get(column))
+            if value is not None:
+                out.append({"time": int(pd.Timestamp(ts).timestamp()), "value": value})
+        return out
+
+    ichi_future = _ichimoku_future_points(enriched)
+    future_sa = [
+        {"time": int(pd.Timestamp(ts).timestamp()), "value": span_a}
+        for ts, span_a, _span_b in ichi_future
+    ]
+    future_sb = [
+        {"time": int(pd.Timestamp(ts).timestamp()), "value": span_b}
+        for ts, _span_a, span_b in ichi_future
+    ]
+    result = {
+        "ema10": series("ema10"),
+        "ema20": series("ema20"),
+        "ema50": series("ema50"),
+        "ema200": series("ema200"),
+        "ichi_tenkan": series("ichi_tenkan"),
+        "ichi_kijun": series("ichi_kijun"),
+        "ichi_sa": series("ichi_sa") + future_sa,
+        "ichi_sb": series("ichi_sb") + future_sb,
+        "rsi": series("rsi"),
+        "macd": series("macd"),
+        "macd_sig": series("macd_sig"),
+        "macd_hist": series("macd_hist"),
+        "adx": series("adx"),
+        "di_plus": series("di_plus"),
+        "di_minus": series("di_minus"),
+    }
+    if include_stoch:
+        result["stoch_k"] = series("stoch_k")
+        result["stoch_d"] = series("stoch_d")
+    return result
+
+
 @app.get("/api/chart")
 def get_chart(
     ticker: str = "AAPL",
@@ -6264,7 +6337,23 @@ def get_chart(
         # nedostupný) ostáva pôvodná yfinance sada.
         display_candles = _etoro_display_candles(
             ticker, "1wk", _CHART_WEEKLY_PERIOD_TO_COUNT.get(period, 104)) or candles
-        display_daily_candles = _etoro_display_candles(ticker, "1d", 90) or daily_candles
+        # Use a wider broker history for indicator warm-up, but keep the
+        # visible daily chart compact. This avoids calculating EMA200 from
+        # only the 90 displayed candles while preserving source consistency.
+        display_daily_source = _etoro_display_candles(ticker, "1d", 300) or daily_candles
+        display_daily_candles = display_daily_source[-90:]
+        # Keep the visible overlays/subpanels and the values consumed by
+        # Verdict on the same broker candle source as the rendered charts.
+        # Scoring/backtesting above intentionally remains on the longer
+        # yfinance/Massive history.
+        display_indicators = _indicators_from_display_candles(display_candles)
+        display_daily_indicators = _indicators_from_display_candles(
+            display_daily_source, include_stoch=False
+        )
+        if display_indicators:
+            indicators = display_indicators
+        if display_daily_indicators:
+            daily_indicators = display_daily_indicators
 
         response = {
             "detail":              detail_mode,
