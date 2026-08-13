@@ -4862,7 +4862,19 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-height: 420px;
   align-self: stretch;
 }
-.verdict-chart .dock-grid { height: 100%; }
+/* `height:100%` samo osebe nestačí — bez display:flex sa táto výška
+   nikam neprenáša na .panel vo vnútri (ten by si vzal len svoju prirodzenú
+   výšku, cca 250px z .p-chart flex-basis). flex + panel flex:1 natiahne
+   celý reťazec až po samotný chart canvas. */
+.verdict-chart .dock-grid {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.verdict-chart .dock-grid .panel {
+  flex: 1;
+  min-height: 0;
+}
 @media (max-width: 1280px) {
   .verdict-view { flex-direction: column; }
   .verdict-chart { width: 100%; min-width: 0; position: static; height: 420px; }

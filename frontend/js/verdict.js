@@ -229,18 +229,21 @@ function buildTrendVerdict(ticker, data, insights, market) {
   const ema50Breakout = pc_detectEmaBreakout(candles, ind.ema50 || []);
   const structuralConfirmed = ema200Above || ema200Bounce || ema50Breakout;
 
-  if (ema200Above) verdictPush(positives, 'Cena drží nad EMA200.');
-  if (ema200Bounce) verdictPush(positives, 'Cena sa odrazila od EMA200 a vrátila sa nad ňu.');
-  if (ema50Breakout) verdictPush(positives, 'Cena prerazila EMA50 a drží sa nad ňou.');
+  // Celý štrukturálny aj RSI blok počíta výhradne z daily_indicators — preto
+  // to hlásenia hovoria explicitne, na akom grafe (nech si to nikto nemýli
+  // s týždenným EMA10/20 zo základnej podmienky vyššie).
+  if (ema200Above) verdictPush(positives, 'Cena drží nad EMA200 (denný graf).');
+  if (ema200Bounce) verdictPush(positives, 'Cena sa odrazila od EMA200 a vrátila sa nad ňu (denný graf).');
+  if (ema50Breakout) verdictPush(positives, 'Cena prerazila EMA50 a drží sa nad ňou (denný graf).');
   if (!structuralConfirmed && baseTrendConfirmed) {
-    verdictPush(risks, 'Chýba štrukturálne potvrdenie cez EMA — trend je rastový, ale bez čistého signálu na vstup.');
+    verdictPush(risks, 'Chýba štrukturálne potvrdenie cez EMA na dennom grafe — trend je rastový, ale bez čistého signálu na vstup.');
   }
 
   const rsiValue = Number(ind.rsi?.at(-1)?.value);
   const rsiSupportive = Number.isFinite(rsiValue) && rsiValue >= 50 && rsiValue <= 70;
-  if (rsiSupportive) verdictPush(positives, `RSI ${rsiValue.toFixed(1)} je v zdravom pásme momentum (50–70).`);
-  else if (Number.isFinite(rsiValue) && rsiValue > 70) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} — prekúpené, vstup môže byť nevýhodný.`);
-  else if (Number.isFinite(rsiValue) && rsiValue < 50) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} — momentum zatiaľ nie je potvrdené.`);
+  if (rsiSupportive) verdictPush(positives, `RSI ${rsiValue.toFixed(1)} (denný) je v zdravom pásme momentum (50–70).`);
+  else if (Number.isFinite(rsiValue) && rsiValue > 70) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} (denný) — prekúpené, vstup môže byť nevýhodný.`);
+  else if (Number.isFinite(rsiValue) && rsiValue < 50) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} (denný) — momentum zatiaľ nie je potvrdené.`);
 
   const earnings = (data?.earnings_dates || [])
     .map(value => Number(value) * 1000)

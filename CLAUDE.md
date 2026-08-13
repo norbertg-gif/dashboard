@@ -192,8 +192,18 @@ These were already in the codebase and need to stay fixed:
    počítajú vždy z celého portfólia, inak by filter menil číslo, ktoré má
    byť nezávislou kontrolou konzistencie. Verdikt graf (`.verdict-chart`)
    dostal `align-self:stretch` namiesto `height:calc(100vh - 150px)` — výška
-   teraz sedí s ľavým stĺpcom namiesto fixného podielu viewportu (overené
-   v prehliadači: 864px = 864px pri širokom okne).
+   teraz sedí s ľavým stĺpcom namiesto fixného podielu viewportu.
+   **Doplnené 2026-08-13:** samotné `align-self:stretch`/`height:100%` na
+   `.verdict-chart`/`#verdict-grid` NESTAČILO — `#verdict-grid` (trieda
+   `dock-grid`) nemal `display:flex`, takže výška sa nikam neprenášala na
+   `.panel` vo vnútri; ten si bral len prirodzenú výšku ~250px z `.p-chart`
+   flex-basis. Graf teda vyzeral úzky napriek "opravenej" výške kontajnera —
+   statické čítanie CSS to neodhalilo, až meranie `getBoundingClientRect()`
+   naprieč celým reťazcom (shell→verdict-chart→verdict-grid→panel→p-chart).
+   Pridané `.verdict-chart .dock-grid{display:flex;flex-direction:column}` +
+   `.panel{flex:1;min-height:0}` — teraz sa výška reálne prenáša až po canvas
+   (overené: shell 864px = verdict-chart = verdict-grid = panel 864px,
+   p-chart 747px po odčítaní hlavičky/indikátorového riadku panela).
    Zámerne vynechané: Rates tabuľka (`renderRatesView`/`#main-rates`) —
    `#main-rates` v HTML neexistuje, je to mŕtvy kód, netreba doň investovať.
    Orders/Mirrors tabuľky v Portfóliu — typicky pod 10 riadkov, triedenie by
