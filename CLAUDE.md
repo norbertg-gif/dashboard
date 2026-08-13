@@ -331,11 +331,49 @@ These were already in the codebase and need to stay fixed:
    titulov, WS spread. Ak by rozdiel niekedy narástol a bol STABILNE jedným
    smerom, až potom ide o skutočný bug.
 
--4. **Subpanel oscilátora nelícoval s hlavným grafom — OPRAVENÉ 2026-08-13.**
-   Starý single-select `buildSubpanel()` bol nahradený šiestimi nezávislými
-   RSI/ADX/MACD kontajnermi. Každý dostáva whitespace anchor z presných časov
-   vlastných hlavných sviečok, indikátorové body sa orezávajú cez
-   `pc_clipToCandles()` a range handlery sa pri recreate odhlasujú.
+-4. **Subpanel oscilátora sa po zapnutí EMA rozišiel s hlavným grafom — SKUTOČNE OPRAVENÉ 2026-08-13 (predchádzajúci záznam nižšie bol predčasný, pokrýval len unsubscribe/cleanup, nie skutočnú príčinu).**
+   Koreňová príčina, nájdená priamym meraním v prehliadači (nie čítaním kódu —
+   statická analýza vyzerala korektne): `entry.anchor` v `pc_buildSubpanel()`
+   bol whitespace-only séria (`{time}` bez `value`). LWC v5.2.0 takúto sériu
+   NEZAPOČÍTA do bar-indexovej domény chartu — overené priamo: izolovaný chart
+   len s whitespace anchorom mal `getVisibleLogicalRange()` degenerovaný na
+   prakticky nulový rozsah, kým ten istý anchor s `value:0` na KAŽDOM bode
+   správne dal doménu 0..(N-1) sviečok. Bez skutočnej domény subpanel odvodzoval
+   svoj bar-index 0 od PRVÉHO REÁLNEHO bodu RSI/ADX/MACD série — a keďže RSI-14
+   má ~14 sviečok warmup (91 z 105 týždňov), subpanel bol systematicky posunutý
+   o presne toľko periód, koľko chýbalo na začiatku indikátora. EMA toggle sám
+   o sebe posun nespôsoboval (rozdiel bol identický pred aj po ňom) — iba
+   spúšťal `pc_applyOverlays()` → `pc_renderSubpanels()` full rebuild, ktorý
+   posun sprístupnil pri každom prekreslení.
+   **Fix:** `entry.anchor` dostáva `value:0` na každom bode (nie whitespace) a
+   vlastný `priceScaleId:'pc_anchor_scale'` — oddelená price scale zabraňuje,
+   aby fiktívna nula ťahala dole viditeľnú Y os RSI/ADX/MACD (overené: RSI
+   scale ostal 43,57–85,07, nie stiahnutý k nule).
+   **Druhá, súvisiaca príčina:** keď je zapnutý Ichimoku, Senkou A/B na
+   hlavnom grafe pokračujú 26 periód do budúcnosti (`_ichimoku_future_points`,
+   položka 7 nižšie) — hlavný graf má teda širšiu doménu než čisté sviečky
+   (116 vs 90 na dennom grafe, overené). `pc_subpanelAnchorPoints(candles, ind,
+   includeIchimoku)` preto zjednocuje časy sviečok s `ichi_sa`/`ichi_sb`, ale
+   LEN keď je Ichimoku pre daný view skutočne zapnutý (`pc_weeklyIndicators.
+   ichimoku`/`pc_dailyIndicators.ichimoku`) — bezpodmienečné rozšírenie by
+   naopak rozišlo subpanel od hlavného grafu VŽDY, keď je Ichimoku vypnutý
+   (chybu som si sám spôsobil v medzikroku, chytené pred commitom).
+   **Tretia príčina, len denný graf:** `renderDailyMain()` volal
+   `pc_renderSubpanels()` PRED obnovením `previousRange` (zachovanie scroll
+   pozície pri re-renderi rovnakého tickeru) — subpanely sa teda stihli
+   synchronizovať na predbežný/nerestorovaný rozsah hlavného grafu. Presunuté
+   za `previousRange`/`fitContent()` blok.
+   **Metodologická poznámka pre budúce ladenie LWC v tomto prostredí:**
+   `chart.timeScale().setVisibleLogicalRange()` sa v tejto automatizovanej
+   browser-pane session ukázal ako nespoľahlivý na meranie — `computer
+   {action:"screenshot"}` vrátil "Browser pane is not displayed, so the page
+   is not compositing frames" a explicitné `setVisibleLogicalRange()` volania
+   (aj na HLAVNOM grafe, nielen subpaneloch) boli ticho ignorované, kým
+   rendering pipeline nekompozituje frames. Spoľahlivé boli len READ-ONLY,
+   rendering-nezávislé kontroly: `.data().length` po `setData()` a
+   prirodzený (fitContent) rozsah hneď po vytvorení série — obe reflektujú
+   vnútorný model synchrónne, nie cez rAF/paint. Skutočnú vizuálnu zhodu po
+   paneli/zoome treba overiť naživo v reálnom (foregrounded) prehliadači.
 
 -3. **Benchmark — HOTOVÉ 2026-08-05, ale INAK než sa plánovalo.**
    `GET /api/portfolio/benchmark` porovnáva každú otvorenú Stock/ETF pozíciu

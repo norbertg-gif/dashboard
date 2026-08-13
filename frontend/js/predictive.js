@@ -2143,6 +2143,21 @@ function pc_clearAllSubpanels(view = null) {
     for (const type of PC_SUBPANEL_KEYS) pc_clearSubpanel(target, type);
 }
 
+// Subpanel anchor musí pokryť CELÚ doménu hlavného grafu, nielen sviečky —
+// keď je zapnutý Ichimoku, Senkou A/B na hlavnom grafe pokračujú 26 periód
+// do budúcnosti (viď _ichimoku_future_points), takže hlavný graf má širší
+// bar-index rozsah než čisté sviečky. Bez tohto by sync po zapnutí Ichimoku
+// požadoval rozsah mimo domény subpanelu a LWC by ho odmietol/skrátil.
+function pc_subpanelAnchorPoints(candles, ind, includeIchimoku) {
+  const times = new Set((candles || []).map(d => d.time));
+  if (includeIchimoku) {
+    for (const key of ['ichi_sa', 'ichi_sb']) {
+      for (const p of (ind?.[key] || [])) if (p && Number.isFinite(p.time)) times.add(p.time);
+    }
+  }
+  return Array.from(times).sort((a, b) => a - b).map(time => ({ time, value: 0 }));
+}
+
 function pc_buildSubpanel(view, type, ind, candles, mainChart) {
   const manager = pc_subpanels[view];
   const block = document.getElementById(`pc-${view}-${type}-sub`);
@@ -2160,8 +2175,10 @@ function pc_buildSubpanel(view, type, ind, candles, mainChart) {
   entry.ro.observe(el);
   entry.anchor = chart.addSeries(LightweightCharts.LineSeries, {
     color:'rgba(0,0,0,0)',lineWidth:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+    priceScaleId:'pc_anchor_scale',
   });
-  entry.anchor.setData((candles || []).map(d => ({time:d.time})));
+  const ichimokuOn = (view === 'weekly' ? pc_weeklyIndicators : pc_dailyIndicators).ichimoku;
+  entry.anchor.setData(pc_subpanelAnchorPoints(candles, ind, ichimokuOn));
 
   if (type === 'rsi') {
     const line=chart.addSeries(LightweightCharts.LineSeries,{color:'#a78bfa',lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'RSI'});
@@ -2385,8 +2402,6 @@ function renderDailyMain(data) {
     spanA.setData(ind.ichi_sa || []); spanB.setData(ind.ichi_sb || []);
     createKumoPlugin(pc_dailyMainInst, pc_dailyMainSeries, ind.ichi_sa || [], ind.ichi_sb || []);
   }
-  pc_renderSubpanels('daily', ind, data.daily_candles, pc_dailyMainInst);
-
   pc_dailyMainBaseMarkers = [];
   if (data.daily_buy_signals && data.daily_buy_signals.length) {
     pc_dailyMainBaseMarkers = data.daily_buy_signals.map(s => {
@@ -2407,6 +2422,12 @@ function renderDailyMain(data) {
 
   if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
   else pc_dailyMainInst.timeScale().fitContent();
+  // Subpanely sa stavajú AŽ TU, po obnovení rozsahu — ich vlastný rAF sync
+  // (v pc_buildSubpanel) číta rozsah hlavného grafu v momente stavby, takže
+  // keby sa stavali skôr (ako predtým), zachytili by predbežný/nerestorovaný
+  // rozsah a zostali by rozídené aj po tom, čo sa hlavný graf posunul na
+  // previousRange.
+  pc_renderSubpanels('daily', ind, data.daily_candles, pc_dailyMainInst);
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
     pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
