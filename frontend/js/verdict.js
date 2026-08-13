@@ -160,6 +160,143 @@ function buildInvestorVerdict(ticker, data, insights, market) {
     sources, evaluatedAt: new Date() };
 }
 
+// ── TREND VERDIKT — momentum vstup do potvrdeného trendu ─────────────────────
+// Druhá, ZÁMERNE nezávislá filozofia vedľa DIP verdiktu vyššie: DIP hľadá
+// slabosť v silnom titule (mean-reversion, C1-C4), toto hľadá potvrdenú silu
+// (trend-following). Odpovedajú na inú otázku, preto sa nezlučujú do jedného
+// čísla — vedomé rozhodnutie 2026-08-13, pozri CLAUDE.md.
+// Nepoužíva today_raw_score/C1-C4 vôbec, počíta výhradne z EMA10/20/50/200 a
+// RSI. Dáta už sú v `data.daily_indicators` (doplnené pri Analytika prestavbe
+// v ten istý deň) — žiadny nový fetch.
+
+// Zhodu candles×EMA série robíme cez `time`, nie index — polia nemusia mať
+// rovnakú dĺžku (indikátor sa "rozbieha" neskôr než candles).
+function pc_isAboveEma(candles, emaSeries) {
+  const lastCandle = candles.at(-1);
+  const lastEma = emaSeries.at(-1);
+  if (!lastCandle || !lastEma) return false;
+  return lastCandle.close > lastEma.value;
+}
+
+// Odraz od EMA: niektorá z posledných `lookback` sviečok sa low-om priblížila
+// k EMA na danú DÁTUM (nie k aktuálnej hodnote EMA) a cena je teraz nad ňou —
+// teda EMA podržala ako podpora, nie že sa práve testuje/láme.
+function pc_detectEmaBounce(candles, emaSeries, lookback = 10, tolerancePct = 0.03) {
+  const emaMap = new Map((emaSeries || []).map(item => [item.time, item.value]));
+  if (!emaMap.size) return false;
+  const lastCandle = candles.at(-1);
+  const lastEmaValue = emaMap.get(lastCandle?.time);
+  if (!lastCandle || lastEmaValue == null || lastCandle.close <= lastEmaValue) return false;
+  return candles.slice(-lookback).some(candle => {
+    const emaValue = emaMap.get(candle.time);
+    if (emaValue == null || !emaValue) return false;
+    return Math.abs(candle.low - emaValue) / emaValue <= tolerancePct;
+  });
+}
+
+// Prienik zdola nahor v okne `lookback` dní, s podmienkou že cena teraz STÁLE
+// drží nad EMA — inak by to bol už zlyhaný breakout (fakeout), nie potvrdenie.
+function pc_detectEmaBreakout(candles, emaSeries, lookback = 10) {
+  const emaMap = new Map((emaSeries || []).map(item => [item.time, item.value]));
+  if (!emaMap.size) return false;
+  const lastCandle = candles.at(-1);
+  const lastEmaValue = emaMap.get(lastCandle?.time);
+  if (!lastCandle || lastEmaValue == null || lastCandle.close <= lastEmaValue) return false;
+  const window = candles.slice(-lookback - 1);
+  for (let i = 1; i < window.length; i++) {
+    const prev = window[i - 1], cur = window[i];
+    const prevEma = emaMap.get(prev.time), curEma = emaMap.get(cur.time);
+    if (prevEma == null || curEma == null) continue;
+    if (prev.close <= prevEma && cur.close > curEma) return true;
+  }
+  return false;
+}
+
+function buildTrendVerdict(ticker, data, insights, market) {
+  const positives = [];
+  const risks = [];
+  const weeklyBullish = !!data?.weekly_bias?.bullish;
+  const dailyTrendUp = (data?.today_details || {}).trend === 'up';
+  const candles = data?.daily_candles || [];
+  const ind = data?.daily_indicators || {};
+  const baseTrendConfirmed = weeklyBullish && dailyTrendUp;
+
+  if (baseTrendConfirmed) verdictPush(positives, 'Týždenný aj denný trend sú potvrdené rastovým smerom.');
+  else verdictPush(risks, 'Trend nie je potvrdený na oboch časových rámcoch — chýba hlavná podmienka pre trend-following vstup.');
+
+  const ema200Above = pc_isAboveEma(candles, ind.ema200 || []);
+  const ema200Bounce = !ema200Above && pc_detectEmaBounce(candles, ind.ema200 || []);
+  const ema50Breakout = pc_detectEmaBreakout(candles, ind.ema50 || []);
+  const structuralConfirmed = ema200Above || ema200Bounce || ema50Breakout;
+
+  // Celý štrukturálny aj RSI blok počíta výhradne z daily_indicators — preto
+  // to hlásenia hovoria explicitne, na akom grafe (nech si to nikto nemýli
+  // s týždenným EMA10/20 zo základnej podmienky vyššie).
+  if (ema200Above) verdictPush(positives, 'Cena drží nad EMA200 (denný graf).');
+  if (ema200Bounce) verdictPush(positives, 'Cena sa odrazila od EMA200 a vrátila sa nad ňu (denný graf).');
+  if (ema50Breakout) verdictPush(positives, 'Cena prerazila EMA50 a drží sa nad ňou (denný graf).');
+  if (!structuralConfirmed && baseTrendConfirmed) {
+    verdictPush(risks, 'Chýba štrukturálne potvrdenie cez EMA na dennom grafe — trend je rastový, ale bez čistého signálu na vstup.');
+  }
+
+  const rsiValue = Number(ind.rsi?.at(-1)?.value);
+  const rsiSupportive = Number.isFinite(rsiValue) && rsiValue >= 50 && rsiValue <= 70;
+  if (rsiSupportive) verdictPush(positives, `RSI ${rsiValue.toFixed(1)} (denný) je v zdravom pásme momentum (50–70).`);
+  else if (Number.isFinite(rsiValue) && rsiValue > 70) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} (denný) — prekúpené, vstup môže byť nevýhodný.`);
+  else if (Number.isFinite(rsiValue) && rsiValue < 50) verdictPush(risks, `RSI ${rsiValue.toFixed(1)} (denný) — momentum zatiaľ nie je potvrdené.`);
+
+  const earnings = (data?.earnings_dates || [])
+    .map(value => Number(value) * 1000)
+    .filter(value => Number.isFinite(value) && value >= Date.now())
+    .sort((a, b) => a - b);
+  const earningsDays = earnings.length ? Math.ceil((earnings[0] - Date.now()) / 86400000) : null;
+  const earningsRisk = earningsDays != null && earningsDays <= dashSettings.earnings_warn_days;
+  if (earningsRisk) verdictPush(risks, `Earnings sú o ${earningsDays} dní; trend sa môže rýchlo zmeniť.`);
+
+  const qqqTrend = market?.qqq?.trend;
+  const spyTrend = market?.spy?.trend;
+  const breadth = Number(market?.breadth?.above_ema50_pct);
+  const vix = Number(market?.vix?.value);
+  const marketSupportive = qqqTrend === 'up' && (!Number.isFinite(breadth) || breadth >= 50);
+  const marketAdverse = qqqTrend === 'down' && Number.isFinite(breadth) && breadth < 40;
+  if (marketSupportive) verdictPush(positives, 'Nasdaq trend a šírka trhu podporujú rast.');
+  if (marketAdverse) verdictPush(risks, 'Nasdaq aj šírka trhu sú momentálne nepriaznivé.');
+  if (spyTrend === 'down' && qqqTrend !== 'up') verdictPush(risks, 'Širší trh je v klesajúcom režime.');
+  if (Number.isFinite(vix) && vix >= 30) verdictPush(risks, `Volatilita trhu je vysoká (VIX ${vix.toFixed(1)}).`);
+
+  let verdict = 'wait';
+  if (!baseTrendConfirmed) verdict = 'no';
+  else if (structuralConfirmed && rsiSupportive && !earningsRisk && !marketAdverse) verdict = 'yes';
+
+  const labels = {
+    yes: ['ÁNO', 'Trend je potvrdený na oboch časových rámcoch aj štrukturálne — momentum vstup je opodstatnený.'],
+    wait: ['POČKAŤ', 'Trend je čiastočne potvrdený, ale chýbajú ďalšie potvrdzujúce faktory pre čistý momentum vstup.'],
+    no: ['NIE', 'Trend nie je potvrdený — systém nehľadá protitrendové vstupy.'],
+  };
+  return { ticker, verdict, label: labels[verdict][0], summary: labels[verdict][1],
+    positives: positives.slice(0, 2), risks: risks.slice(0, 2), evaluatedAt: new Date() };
+}
+
+function renderTrendVerdict(result) {
+  const el = document.getElementById('trendVerdictContent');
+  if (!el) return;
+  const bullets = (items, empty) => items.length
+    ? items.map(text => `<li>${escHtml(text)}</li>`).join('')
+    : `<li class="muted">${empty}</li>`;
+  el.innerHTML = `
+    <section class="verdict-hero verdict-${result.verdict}">
+      <div class="verdict-mode-tag">TREND VSTUP</div>
+      <div class="verdict-symbol">${escHtml(result.ticker)}</div>
+      <div class="verdict-label">${result.label}</div>
+      <div class="verdict-summary">${escHtml(result.summary)}</div>
+    </section>
+    <div class="verdict-evidence">
+      <section><h3>Pre</h3><ul>${bullets(result.positives, 'Žiadne silné potvrdenie navyše.')}</ul></section>
+      <section><h3>Proti</h3><ul>${bullets(result.risks, 'Nebolo zistené významné varovanie.')}</ul></section>
+    </div>
+  `;
+}
+
 // ── ATR pozičný kalkulátor "Koľko kúpiť" ─────────────────────────────────────
 // Deterministický risk-based sizing: risk_per_trade_pct × equity / (atr_stop_mult × ATR14)
 // = počet akcií a kapitál. Cap na dca_max_weight (koncentrácia). Žiadne nové dáta —
@@ -313,12 +450,14 @@ function renderInvestorVerdict(result) {
     : `<li class="muted">${empty}</li>`;
   el.innerHTML = `
     <section class="verdict-hero verdict-${result.verdict}">
+      <div class="verdict-mode-tag">DIP VSTUP</div>
       <div class="verdict-symbol">${escHtml(result.ticker)}</div>
       <div class="verdict-label">${result.label}</div>
       <div class="verdict-summary">${escHtml(result.summary)}</div>
       <div class="verdict-confidence">Istota: <strong>${escHtml(result.confidence)}</strong> · horizont 30–90 dní</div>
+      <div class="verdict-sources-label" title="Toto hovorí len o tom, či máme dáta na vyhodnotenie — nie či sú priaznivé.">Dostupnosť dát pre vyhodnotenie:</div>
       <div class="verdict-sources">
-        ${result.sources.map(source => `<span class="${source.available ? 'ok' : 'missing'}">${source.available ? '✓' : '–'} ${escHtml(source.label)}</span>`).join('')}
+        ${result.sources.map(source => `<span class="${source.available ? 'ok' : 'missing'}" title="${source.available ? 'Dáta pre túto kategóriu sú k dispozícii — nehovorí to, či sú priaznivé.' : 'Dáta pre túto kategóriu chýbajú; verdikt s nimi nepočítal.'}">${source.available ? '✓' : '–'} ${escHtml(source.label)}</span>`).join('')}
       </div>
     </section>
     <div class="verdict-evidence">
@@ -347,20 +486,25 @@ async function loadVerdict(force = false) {
   const input = document.getElementById('verdictTickerInput');
   const button = document.getElementById('verdictLoadBtn');
   const content = document.getElementById('verdictContent');
+  const trendContent = document.getElementById('trendVerdictContent');
   const ticker = String(input?.value || '').trim().toUpperCase();
   if (!ticker || !content) return;
   input.value = ticker;
   verdictLastTicker = ticker;
   localStorage.setItem(VERDICT_TICKER_KEY, ticker);
+  // Graf vpravo — mimo hlavného toku, aby verdikt nečakal na sviečky.
+  if (typeof openVerdictChart === 'function') setTimeout(() => openVerdictChart(ticker), 0);
   const seq = ++verdictLoadSeq;
   button && (button.disabled = true);
   content.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
+  if (trendContent) trendContent.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
   try {
     const cached = verdictCache.get(ticker);
     if (!force && cached && Date.now() - cached.at < VERDICT_CACHE_TTL_MS) {
       if (seq !== verdictLoadSeq) return;
       verdictLastData = cached.data;
       renderInvestorVerdict(buildInvestorVerdict(ticker, cached.data, cached.insights, cached.market));
+      renderTrendVerdict(buildTrendVerdict(ticker, cached.data, cached.insights, cached.market));
       return;
     }
     const chartPromise = (pc_lastData && document.getElementById('tickerInput')?.value?.toUpperCase() === ticker)
@@ -375,9 +519,11 @@ async function loadVerdict(force = false) {
     verdictCache.set(ticker, { at: Date.now(), data, insights, market });
     verdictLastData = data;
     renderInvestorVerdict(buildInvestorVerdict(ticker, data, insights, market));
+    renderTrendVerdict(buildTrendVerdict(ticker, data, insights, market));
   } catch (error) {
     if (seq !== verdictLoadSeq) return;
     content.innerHTML = `<div class="verdict-empty verdict-error">Ticker sa nepodarilo vyhodnotiť: ${escHtml(error.message)}</div>`;
+    if (trendContent) trendContent.innerHTML = `<div class="verdict-empty verdict-error">Ticker sa nepodarilo vyhodnotiť: ${escHtml(error.message)}</div>`;
   } finally {
     if (seq === verdictLoadSeq) button && (button.disabled = false);
   }

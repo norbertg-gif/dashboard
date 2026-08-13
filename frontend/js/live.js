@@ -149,7 +149,10 @@ function updatePositionRowsWithLive(rows, sym, livePrice) {
     pos._livePnl = estimatePositionLivePnl(pos, livePrice);
     const previousClose = Number(pos._previousClose ?? pos.previousClose ?? 0);
     const units = Number(pos.units || 0);
-    if (Number.isFinite(previousClose) && previousClose > 0 && Number.isFinite(units) && units > 0) {
+    // Denný P/L má rovnaký problém s extrapoláciou ako celkový — pri krypte sa
+    // preto tiež nechá snapshot hodnota (viď positionSupportsLivePnl).
+    if (positionSupportsLivePnl(pos) &&
+        Number.isFinite(previousClose) && previousClose > 0 && Number.isFinite(units) && units > 0) {
       const direction = pos.isBuy === false ? -1 : 1;
       pos._liveDailyPnl = (livePrice - previousClose) * units * direction;
       pos.dailyPnl = pos._liveDailyPnl;

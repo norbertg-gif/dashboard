@@ -25,6 +25,109 @@ const CHART_COLORS = {
   analystTarget: '#7dd3fc',   // cieľ analytikov — svetlejšia
 };
 
+// ── KOŠÍK GRAFOV ─────────────────────────────────────────────────────────────
+// Tickery sa spomínajú na desiatkach miest (heatmapa, scanner, plán, earnings).
+// Košík ich zbiera naprieč tabmi a jedným tlačidlom otvorí ako grafy — inak si
+// človek musí mená pamätať alebo ich prepisovať do schránky.
+//
+// Vedome je to LEN výber, žiadna analytika: nič sa neposiela na server, nič sa
+// nepočíta, stav je v localStorage a prežije reload aj prepínanie tabov.
+// Vzor tlačidla aj hromadného prekreslenia je prevzatý z `watchlistButtonHtml`.
+const CHART_BASKET_KEY = 'td_chart_basket';
+const CHART_BASKET_MAX = 20;     // rovnaký strop ako import zo schránky
+
+function getChartBasket() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHART_BASKET_KEY) || '[]');
+    return Array.isArray(v) ? v.filter(Boolean).map(s => String(s).toUpperCase()) : [];
+  } catch (e) { return []; }
+}
+
+function setChartBasket(list) {
+  const uniq = [...new Set(list.map(s => String(s).toUpperCase()))].slice(0, CHART_BASKET_MAX);
+  try { localStorage.setItem(CHART_BASKET_KEY, JSON.stringify(uniq)); } catch (e) {}
+  refreshBasketButtons();
+  renderBasketBar();
+  return uniq;
+}
+
+function isInChartBasket(sym) {
+  return getChartBasket().includes(String(sym || '').trim().toUpperCase());
+}
+
+function toggleChartBasket(symbol, event) {
+  event?.stopPropagation();
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return;
+  const cur = getChartBasket();
+  if (cur.includes(sym)) {
+    setChartBasket(cur.filter(s => s !== sym));
+    setStatus?.(`${sym} odobraný z košíka`, 'ok');
+    return;
+  }
+  // Strop je tvrdý: 20 grafov naraz je hranica, za ktorou sa mriežka aj pamäť
+  // prehliadača stávajú nepoužiteľné (rovnaký limit má import zo schránky).
+  if (cur.length >= CHART_BASKET_MAX) {
+    setStatus?.(`Košík je plný (${CHART_BASKET_MAX}) — najprv otvor alebo vyčisti`, 'warn');
+    return;
+  }
+  setChartBasket([...cur, sym]);
+  setStatus?.(`${sym} v košíku (${cur.length + 1})`, 'ok');
+}
+
+function basketButtonHtml(symbol = '', extraClass = '') {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const inB = isInChartBasket(sym);
+  return `<button type="button" class="basket-btn ${extraClass} ${inB ? 'in-basket' : ''}"
+    data-basket-symbol="${escHtml(sym)}"
+    title="${escHtml(inB ? `${sym} je v košíku grafov — klikom odoberieš` : `Pridať ${sym} do košíka grafov`)}"
+    onclick="toggleChartBasket('${escHtml(sym)}', event)">${inB ? '✓' : '⊕'}</button>`;
+}
+
+function refreshBasketButtons() {
+  const basket = getChartBasket();
+  document.querySelectorAll('[data-basket-symbol]').forEach(btn => {
+    const sym = btn.getAttribute('data-basket-symbol') || '';
+    const inB = basket.includes(sym);
+    btn.classList.toggle('in-basket', inB);
+    btn.textContent = inB ? '✓' : '⊕';
+    btn.title = inB ? `${sym} je v košíku grafov — klikom odoberieš`
+                    : `Pridať ${sym} do košíka grafov`;
+  });
+}
+
+// Lišta je globálna (mimo tabov), aby košík naplnený v Scanneri bolo vidno aj
+// na Prehľade. Skrýva sa, keď je prázdny — nemá zaberať miesto zbytočne.
+function renderBasketBar() {
+  let el = document.getElementById('chart-basket-bar');
+  const basket = getChartBasket();
+  // Tlačidlo v lište Grafov je primárna cesta — tam ho človek hľadá, keď chce
+  // "zobraziť to, čo som naklikal". Plávajúca lišta je len skratka, aby sa
+  // nemusel prepínať na Grafy len kvôli tomu.
+  const btn = document.getElementById('basket-open-btn');
+  if (btn) {
+    btn.style.display = basket.length ? '' : 'none';
+    btn.textContent = `🧺 Košík (${basket.length})`;
+  }
+  if (!basket.length) { el?.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'chart-basket-bar';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <span class="cb-count">${basket.length}</span>
+    <span class="cb-list" title="${escHtml(basket.join(', '))}">${escHtml(basket.slice(0, 6).join(' · '))}${basket.length > 6 ? ` +${basket.length - 6}` : ''}</span>
+    <button type="button" class="btn primary" onclick="openChartBasket()">Otvoriť grafy</button>
+    <button type="button" class="btn" onclick="setChartBasket([])" title="Vyprázdniť košík">✕</button>`;
+}
+
+function openChartBasket() {
+  const basket = getChartBasket();
+  if (!basket.length) return;
+  if (typeof openChartsForSymbols === 'function') openChartsForSymbols(basket);
+}
+
 // ── OHLCV SNAPSHOT CACHE (stale-while-revalidate) ────────────────────────────
 // Prázdny panel s "Načítava sa…" je horší než mierne staré sviečky zobrazené
 // okamžite. Posledný známy stav grafu preto prežíva v localStorage a vykreslí
@@ -319,6 +422,9 @@ let dashSettings = {
   earnings_warn_days: 7,
   risk_per_trade_pct: 1,
   atr_stop_mult: 1.5,
+  class_ratio_core: 4,
+  class_ratio_standard: 2,
+  class_ratio_speculative: 1,
 };
 
 async function loadDashSettings() {
@@ -340,6 +446,9 @@ const _SETTINGS_INPUTS = [
   ['set-earnings-days', 'earnings_warn_days'],
   ['set-risk-per-trade', 'risk_per_trade_pct'],
   ['set-atr-stop-mult', 'atr_stop_mult'],
+  ['set-class-ratio-core', 'class_ratio_core'],
+  ['set-class-ratio-standard', 'class_ratio_standard'],
+  ['set-class-ratio-speculative', 'class_ratio_speculative'],
 ];
 
 function openSettingsModal() {
@@ -383,6 +492,7 @@ async function saveSettingsModal() {
     closeSettingsModal();
     // Prahy sa zmenili → invaliduj odvodené cache a prekresli, čo je otvorené
     _dcaCache = { account: null, data: null };
+    _buildCache = { account: null, data: null };
     portfolioAttentionLoadedAt = 0;
     if (portState.main?.data) renderPortPanel('main');
     applyScannerBadges();
@@ -390,6 +500,58 @@ async function saveSettingsModal() {
   } catch(e) {
     setStatus(`Nastavenia sa nepodarilo uložiť: ${e.message}`, 'err');
   }
+}
+
+// ── CONTEXT MENU (right-click) ───────────────────────────────────────────────
+// Zdieľaný jednoduchý helper — jedna DOM inštancia, znovupoužitá odkiaľkoľvek.
+// `items`: [{label, action, disabled?, checked?}] alebo `{sep:true}` na
+// oddelenie skupín (chart panel menu duplikuje ~13 ikoniek naraz, bez skupín
+// by bol nečitateľný zoznam). `checked` vykreslí ✓ pred labelom — zrkadlí
+// stav tlačidla v hlavičke panela (aktívny indikátor, HA, atď.).
+let _ctxMenuCloseHandlerBound = false;
+
+function showContextMenu(x, y, items) {
+  hideContextMenu();
+  const menu = document.createElement('div');
+  menu.id = 'ctx-menu';
+  menu.className = 'ctx-menu';
+  menu.innerHTML = items.map((it, i) => {
+    if (it.sep) return `<div class="ctx-menu-sep"></div>`;
+    const mark = it.checked ? '✓ ' : '';
+    return it.disabled
+      ? `<div class="ctx-menu-item disabled">${mark}${escHtml(it.label)}</div>`
+      : `<div class="ctx-menu-item${it.checked ? ' checked' : ''}" data-i="${i}">${mark}${escHtml(it.label)}</div>`;
+  }).join('');
+  document.body.appendChild(menu);
+  // Najprv vlož mimo obrazovky, zmeraj a až potom pozicionuj — inak menu
+  // pri kliku blízko pravého/dolného okraja odreže časť položiek.
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 6);
+  const top = Math.min(y, window.innerHeight - rect.height - 6);
+  menu.style.left = `${Math.max(4, left)}px`;
+  menu.style.top = `${Math.max(4, top)}px`;
+  menu.querySelectorAll('.ctx-menu-item[data-i]').forEach(el => {
+    el.addEventListener('click', () => {
+      hideContextMenu();
+      items[Number(el.dataset.i)].action?.();
+    });
+  });
+  if (!_ctxMenuCloseHandlerBound) {
+    _ctxMenuCloseHandlerBound = true;
+    document.addEventListener('click', hideContextMenu);
+    // Zámerne ŽIADEN globálny 'contextmenu' listener na zatvorenie: right-click
+    // na iný ticker by bubloval do tohto listenera V TOM ISTOM TIKU ako
+    // showContextMenu() novo otváraného menu, takže by ho hneď zavrel sám seba.
+    // showContextMenu() už aj tak volá hideContextMenu() pred vytvorením
+    // nového menu, takže prepnutie medzi cieľmi funguje aj bez tohto listenera.
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
+    window.addEventListener('scroll', hideContextMenu, true);
+    window.addEventListener('blur', hideContextMenu);
+  }
+}
+
+function hideContextMenu() {
+  document.getElementById('ctx-menu')?.remove();
 }
 
 // ── DARK / LIGHT MODE ────────────────────────────────────────────────────────

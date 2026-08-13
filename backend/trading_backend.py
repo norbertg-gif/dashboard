@@ -5,11 +5,11 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import asyncio
-import gc, json, os, math, sys, threading
+import csv, gc, json, os, math, sys, tempfile, threading, zipfile
 import re
 import hashlib
 import hmac
-from io import BytesIO
+from io import BytesIO, TextIOWrapper
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -183,6 +183,8 @@ def add_indicators(df):
     df = df.copy()
     df["ema10"]      = calc_ema(df["Close"], 10)
     df["ema20"]      = calc_ema(df["Close"], 20)
+    df["ema50"]      = df["Close"].ewm(span=50, adjust=False).mean()
+    df["ema200"]     = df["Close"].ewm(span=200, adjust=False).mean()
     df["rsi"]        = calc_rsi(df["Close"])
     df["atr"]        = calc_atr(df)
     df["macd"], df["macd_sig"], df["macd_hist"] = calc_macd(df["Close"])
@@ -1693,6 +1695,23 @@ def get_watchlist():
 def put_watchlist(body: dict):
     return _write_watchlist_file(body.get("items", []))
 
+def _atomic_write_json(path: _Path, data) -> None:
+    """Plain (non-gzip) JSON write via temp file + os.replace.
+
+    Same reason as cache_write: a reader must never see a half-written file,
+    and a crash mid-write must not destroy the previous contents."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp")
+    try:
+        tmp.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def cache_write(path: _Path, data: dict):
     """Ulož JSON.gz atómovo; čitateľ nikdy neuvidí rozpracovaný gzip."""
     target = _Path(str(path) + ".gz")
@@ -2469,6 +2488,12 @@ DASH_SETTINGS_DEFAULTS = {
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
     "risk_per_trade_pct": 1.0,   # riziko na obchod ako % equity — Verdikt kalkulátor
     "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
+    # Pomer cieľových váh medzi triedami pozícií. Nie percentá — relatívne diely,
+    # ktoré sa normalizujú na 100 % cez držané pozície, takže cieľ sa prepočíta
+    # sám pri každej novej pozícii a nič netreba prepisovať ručne.
+    "class_ratio_core": 4.0,
+    "class_ratio_standard": 2.0,
+    "class_ratio_speculative": 1.0,
 }
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
@@ -2478,6 +2503,9 @@ _DASH_SETTINGS_LIMITS = {
     "earnings_warn_days": (1, 60),
     "risk_per_trade_pct": (0.1, 10),
     "atr_stop_mult": (0.5, 5),
+    "class_ratio_core": (0, 20),
+    "class_ratio_standard": (0, 20),
+    "class_ratio_speculative": (0, 20),
 }
 
 
@@ -2525,6 +2553,223 @@ def _position_dip_metrics(symbol: str, amount: float, denominator: float,
     dip_total = _num_or_none(dip.get("total")) if isinstance(dip, dict) else None
     weight_pct = amount / denominator * 100 if denominator else None
     return dip_total, weight_pct
+
+
+POSITION_CLASSES_FILE = DATA_ROOT / "position_classes.json"
+_position_classes_lock = threading.Lock()
+POSITION_CLASS_VALUES = ("CORE", "STANDARD", "SPECULATIVE")
+# Menovateľ váh je ZÁMERNE len Stock/ETF kniha, nie equity účtu (rozhodnutie
+# 2026-08-10). Krypto je zo stratégie vylúčené, takže ho nemá zmysel držať v
+# menovateli — inak by každá akciová pozícia vyšla "hlboko pod cieľom" len
+# preto, že krypto zaberá dve tretiny účtu.
+BUILD_WEIGHT_BASIS = "stock_etf_book"
+
+
+def _load_position_classes() -> dict:
+    with _position_classes_lock:
+        try:
+            data = json.loads(POSITION_CLASSES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _position_class_entry(raw) -> dict | None:
+    """Normalise one stored record; unknown class or bad numbers are dropped."""
+    if not isinstance(raw, dict):
+        return None
+    klass = str(raw.get("position_class") or "").strip().upper()
+    if klass not in POSITION_CLASS_VALUES:
+        return None
+    out = {"position_class": klass}
+    for key in ("target_weight", "max_weight"):
+        value = _num_or_none(raw.get(key))
+        if value is not None and 0 <= float(value) <= 100:
+            out[key] = round(float(value), 2)
+    if raw.get("note"):
+        out["note"] = str(raw["note"])[:200]
+    if raw.get("updated_at"):
+        out["updated_at"] = str(raw["updated_at"])
+    return out
+
+
+@app.get("/api/portfolio/classes")
+def get_position_classes():
+    """Ručne priradená trieda a cieľová váha na ticker — definícia stratégie,
+    nie odvodený údaj. Preto sa nikdy neprepočítava, len číta a zapisuje."""
+    stored = _load_position_classes()
+    items = {sym: entry for sym, raw in stored.items()
+             if (entry := _position_class_entry(raw)) is not None}
+    return {"classes": items, "allowed": list(POSITION_CLASS_VALUES),
+            "weight_basis": BUILD_WEIGHT_BASIS}
+
+
+@app.post("/api/portfolio/classes")
+async def save_position_classes(request: Request):
+    """Čiastočný zápis: prídu len zmenené tickery. `null` hodnota triedu zmaže,
+    aby sa dala oprava vrátiť bez ručného zásahu do súboru."""
+    body = await request.json()
+    updates = body.get("classes") if isinstance(body, dict) else None
+    if not isinstance(updates, dict):
+        raise HTTPException(400, "classes musí byť objekt {ticker: {...}}")
+    stored = _load_position_classes()
+    for symbol, raw in updates.items():
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            continue
+        if raw is None:
+            stored.pop(sym, None)
+            continue
+        entry = _position_class_entry(raw)
+        if entry is None:
+            raise HTTPException(400, f"{sym}: position_class musí byť jedna z {', '.join(POSITION_CLASS_VALUES)}")
+        entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+        stored[sym] = entry
+    with _position_classes_lock:
+        _atomic_write_json(POSITION_CLASSES_FILE, stored)
+    return {"ok": True, "count": len(stored)}
+
+
+@app.post("/api/portfolio/classes/seed")
+def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
+    """Predvyplní všetky držané Stock/ETF pozície ako CORE s rovnomerným cieľom.
+
+    Východiskový bod na ručnú úpravu, nie názor na stratégiu: rovnomerné váhy
+    znamenajú "zatiaľ nerozhodnuté", takže odstup od cieľa hovorí iba to, ktorá
+    pozícia je menšia než priemer. Skutočná hodnota vznikne až prepísaním.
+
+    Už zaradené tickery sa NEPREPISUJÚ (bez `overwrite=1`) — inak by jedno
+    kliknutie zmazalo ručnú prácu bez možnosti vrátenia."""
+    # Pri priamom volaní (nie cez HTTP) je default stále objekt Query(0), ktorý je
+    # PRAVDIVÝ — bez tohto by taký volajúci ticho prepísal ručne vyplnené triedy.
+    overwrite = overwrite if isinstance(overwrite, (int, bool)) else 0
+    portfolio = get_portfolio(account=account, refresh=0)
+    symbols = sorted({
+        (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
+        for pos in portfolio.get("positions", [])
+        if str(pos.get("type") or "").lower() in ("stock", "etf")
+    })
+    if not symbols:
+        raise HTTPException(400, "Účet nemá žiadne Stock/ETF pozície")
+    stored = _load_position_classes()
+    now = datetime.now(timezone.utc).isoformat()
+    seeded, kept = 0, 0
+    for sym in symbols:
+        if not overwrite and _position_class_entry(stored.get(sym)) is not None:
+            kept += 1
+            continue
+        # ZÁMERNE bez `target_weight` — cieľ sa odvodzuje z triedy, takže uložené
+        # číslo by sa tvárilo ako vedomé rozhodnutie a prebilo by odvodenie.
+        stored[sym] = {"position_class": "CORE", "updated_at": now, "note": "seed"}
+        seeded += 1
+    with _position_classes_lock:
+        _atomic_write_json(POSITION_CLASSES_FILE, stored)
+    return {"ok": True, "account": account, "seeded": seeded, "kept": kept,
+            "positions": len(symbols)}
+
+
+@app.get("/api/portfolio/build")
+def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
+    """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
+
+    Deterministické odčítanie, ZÁMERNE žiadne nové skóre: gap = target − aktuálna
+    váha. Kompozitné Add Score je fáza 2 a čaká na dátové pokrytie. Kapitál má
+    hierarchiu DCA → BUILD → NEW, takže toto je druhý stupeň, nie náhrada DCA.
+
+    Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
+    nie voči equity účtu — krypto je zo stratégie vylúčené."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    by_sym: dict[str, dict] = {}
+    for pos in portfolio.get("positions", []):
+        if str(pos.get("type") or "").lower() not in ("stock", "etf"):
+            continue
+        sym = (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
+        entry = by_sym.setdefault(sym, {"symbol": sym, "name": pos.get("name"),
+                                        "amount": 0.0, "pnl": 0.0, "trades": 0})
+        entry["amount"] += pos.get("amount") or 0
+        entry["pnl"] += pos.get("pnl") or 0
+        entry["trades"] += 1
+
+    book_value = sum(e["amount"] for e in by_sym.values())
+    classes = _load_position_classes()
+    entries = {sym: (_position_class_entry(classes.get(sym)) or {}) for sym in by_sym}
+
+    # Cieľ sa ODVODZUJE z triedy, nezadáva sa po tickeroch. Používateľ má názor
+    # na to, či je titul jadro alebo pokus; nemá názor na to, či má mať 1,8 %
+    # alebo 2,1 %. Diely tried sa normalizujú na 100 % cez zaradené pozície,
+    # takže pribudnutie pozície prepočíta ciele samo.
+    settings = _dash_settings()
+    class_ratios = {
+        "CORE": float(settings["class_ratio_core"]),
+        "STANDARD": float(settings["class_ratio_standard"]),
+        "SPECULATIVE": float(settings["class_ratio_speculative"]),
+    }
+    ratio_sum = sum(class_ratios.get(e.get("position_class"), 0.0) for e in entries.values())
+    derived_targets = {
+        sym: round(class_ratios.get(e.get("position_class"), 0.0) / ratio_sum * 100, 2)
+        for sym, e in entries.items()
+        if ratio_sum > 0 and e.get("position_class")
+    }
+
+    rows = []
+    for sym, e in sorted(by_sym.items()):
+        entry = entries[sym]
+        weight = (e["amount"] / book_value * 100) if book_value else None
+        # Ručne zadaný cieľ má vždy prednosť pred odvodeným.
+        target = entry.get("target_weight")
+        target_source = "manual" if target is not None else None
+        if target is None:
+            target = derived_targets.get(sym)
+            target_source = "class" if target is not None else None
+        gap = round(target - weight, 2) if target is not None and weight is not None else None
+        max_weight = entry.get("max_weight")
+        if not entry:
+            state = "unclassified"
+        elif gap is None:
+            state = "no_target"
+        elif max_weight is not None and weight is not None and weight >= max_weight:
+            state = "over_max"
+        elif gap > 0:
+            state = "build"
+        else:
+            state = "at_target"
+        rows.append({
+            "symbol": sym, "name": e["name"],
+            "amount": round(e["amount"], 2), "pnl": round(e["pnl"], 2),
+            "pnl_pct": round(e["pnl"] / e["amount"] * 100, 2) if e["amount"] else None,
+            "trades": e["trades"],
+            "weight_pct": round(weight, 2) if weight is not None else None,
+            "position_class": entry.get("position_class"),
+            "target_weight": target, "target_source": target_source, "max_weight": max_weight,
+            "gap_pct": gap,
+            # Rozlíši predvyplnenú hodnotu od vedomého rozhodnutia — bez toho
+            # nevidno, čo je ešte na prejdenie.
+            "is_seed": entry.get("note") == "seed",
+            # Koľko dokúpiť, aby pozícia sedela na cieli — v peniazoch, lebo v
+            # percentách sa to zle prekladá na objednávku.
+            "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
+            "state": state,
+        })
+    # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
+    state_order = {"build": 0, "at_target": 1, "over_max": 2, "no_target": 3, "unclassified": 4}
+    rows.sort(key=lambda r: (state_order.get(r["state"], 9), -(r["gap_pct"] or 0), r["symbol"]))
+    classified = [r for r in rows if r["position_class"]]
+    return {
+        "account": account,
+        "weight_basis": BUILD_WEIGHT_BASIS,
+        "book_value": round(book_value, 2),
+        "positions": rows,
+        "counts": {
+            "total": len(rows), "classified": len(classified),
+            "unclassified": len(rows) - len(classified),
+            "build": sum(1 for r in rows if r["state"] == "build"),
+            "over_max": sum(1 for r in rows if r["state"] == "over_max"),
+            "seeded": sum(1 for r in rows if r["is_seed"]),
+        },
+        "target_weight_sum": round(sum(r["target_weight"] or 0 for r in rows), 2),
+        "class_ratios": class_ratios,
+        "manual_targets": sum(1 for r in rows if r["target_source"] == "manual"),
+    }
 
 
 @app.get("/api/portfolio/dca")
@@ -3571,6 +3816,64 @@ def get_portfolio_holdings():
         except Exception:
             pass
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
+
+
+@app.get("/api/diagnostics/summary")
+def diagnostics_summary(account: str = Query("1")):
+    """Rozpad equity na jednotlivé členy — na porovnanie s eToro UI.
+
+    Equity si počítame sami (`cash + invested + total_pnl`), lebo pole `equity`
+    z eToro je nespoľahlivé. Keď sa výsledok rozíde s eToro UI, bez tohto
+    rozpadu sa nedá povedať KTORÝ člen za to môže. Read-only, žiadne ID účtov
+    ani kľúče — len čísla zo vzorca.
+    """
+    # Raw payload sa do cache neukladá (cachuje sa až spracovaný tvar), takže
+    # diagnostika ťahá čerstvo z proxy. Je to volanie na vyžiadanie, nie hot
+    # path — presnosť je tu dôležitejšia než ušetrený round-trip.
+    try:
+        resp = requests.get(f"{ETORO_PROXY}/pnl/real?account={account}",
+                            timeout=ETORO_PROXY_TIMEOUT)
+        resp.raise_for_status()
+        port = (resp.json() or {}).get("clientPortfolio") or {}
+    except Exception as e:
+        return {"available": False, "reason": _scrub_token(str(e))}
+    if not port:
+        return {"available": False, "reason": "clientPortfolio je prázdny"}
+
+    positions_raw = port.get("positions", []) or []
+    mirrors_raw = port.get("mirrors", []) or []
+    credit = port.get("credits", 0) or port.get("credit", 0) or 0
+    pend_open = sum(o.get("amount", 0) or 0 for o in port.get("ordersForOpen", []) if (o.get("mirrorID") or 0) == 0)
+    pend_orders = sum(o.get("amount", 0) or 0 for o in port.get("orders", []))
+    pos_inv = sum(p.get("amount", 0) or 0 for p in positions_raw)
+    mir_pos_inv = sum(p.get("amount", 0) or 0 for m in mirrors_raw for p in m.get("positions", []))
+    mir_avail = sum(m.get("availableAmount") or 0 for m in mirrors_raw)
+    mir_closed = sum(m.get("closedPositionsNetProfit") or 0 for m in mirrors_raw)
+    pos_pnl = sum((p.get("unrealizedPnL") or {}).get("pnL", 0) or 0 for p in positions_raw)
+    mir_pnl = sum((pp.get("unrealizedPnL") or {}).get("pnL", 0) or 0
+                  for m in mirrors_raw for pp in m.get("positions", []))
+    r = lambda v: round(float(v or 0), 2)
+    cash = credit - pend_open - pend_orders
+    invested = pos_inv + mir_pos_inv + (mir_avail - mir_closed) + pend_open + pend_orders
+    total_pnl = pos_pnl + mir_pnl + mir_closed
+    return {
+        "available": True,
+        "account": account,
+        "cash_parts": {"credit": r(credit), "pending_open": r(pend_open),
+                       "pending_orders": r(pend_orders), "cash": r(cash)},
+        "invested_parts": {"positions": r(pos_inv), "mirror_positions": r(mir_pos_inv),
+                           "mirror_available": r(mir_avail), "mirror_closed_profit": r(mir_closed),
+                           "mirror_adjustment": r(mir_avail - mir_closed),
+                           "invested": r(invested)},
+        "pnl_parts": {"positions_unrealized": r(pos_pnl), "mirror_unrealized": r(mir_pnl),
+                      "mirror_closed_profit": r(mir_closed), "total_pnl": r(total_pnl)},
+        "equity": r(cash + invested + total_pnl),
+        # Čo hlási samotné eToro — na priame porovnanie s naším výpočtom.
+        "etoro_reported": {"credit": r(credit), "equity_field": r(port.get("equity")),
+                           "mirrors": len(mirrors_raw), "positions": len(positions_raw)},
+        "hint": "Porovnaj s eToro UI. Ak sedí cash aj invested a líši sa len P/L, "
+                "pozri mirror_closed_profit — pravdepodobne ho eToro do P/L neráta.",
+    }
 
 
 # ── Benchmark: porovnanie výberov proti indexu za ZHODNÉ obdobia ──────────────
@@ -5069,6 +5372,7 @@ def get_ohlcv(
         stoch_k, stoch_d = calc_stoch_rsi(df["Close"])
 
     ichi = None
+    ichimoku_future = []
     if "ichimoku" in ind_set:
         _ichi = calc_ichimoku(df)
         # calc_ichimoku vracia tuple (tenkan, kijun, span_a, span_b, chikou)
@@ -5092,6 +5396,12 @@ def get_ohlcv(
                 return int(d.timestamp())
             return d.strftime("%Y-%m-%d")
         except: return str(ts)
+
+    if ichi is not None:
+        ichimoku_future = [
+            {"time": to_date_str(ts), "span_a": safe(span_a), "span_b": safe(span_b)}
+            for ts, span_a, span_b in _ichimoku_future_points(df)
+        ]
 
     result = []
     for i in range(len(df)):
@@ -5151,6 +5461,7 @@ def get_ohlcv(
     return {"symbol": sym, "name": sym, "interval": interval,
             "count": len(result), "data": result, "instrumentId": iid,
             "hasMore": has_more,
+            "ichimoku_future": ichimoku_future,
             "patterns": patterns}
 
 
@@ -5304,16 +5615,54 @@ def calc_bollinger(series: pd.Series, period: int = 20, std: float = 2.0):
     lower = sma - std * sigma
     return upper, sma, lower
 
-def calc_ichimoku(df: pd.DataFrame):
+def _ichimoku_raw_spans(df: pd.DataFrame):
     high, low = df["High"], df["Low"]
 
     tenkan  = (high.rolling(9).max()  + low.rolling(9).min())  / 2
     kijun   = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a  = ((tenkan + kijun) / 2).shift(26)
-    span_b  = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    span_a  = (tenkan + kijun) / 2
+    span_b  = (high.rolling(52).max() + low.rolling(52).min()) / 2
+    return tenkan, kijun, span_a, span_b
+
+
+def calc_ichimoku(df: pd.DataFrame):
+    tenkan, kijun, raw_span_a, raw_span_b = _ichimoku_raw_spans(df)
+    span_a  = raw_span_a.shift(26)
+    span_b  = raw_span_b.shift(26)
     chikou  = df["Close"].shift(-26)
 
     return tenkan, kijun, span_a, span_b, chikou
+
+
+def _ichimoku_future_points(df: pd.DataFrame, n: int = 26):
+    """Return the raw Senkou tail projected beyond the final real candle."""
+    try:
+        if n <= 0 or df is None or len(df.index) < 2:
+            return []
+        _, _, raw_span_a, raw_span_b = _ichimoku_raw_spans(df)
+        tail = pd.concat(
+            [raw_span_a.rename("span_a"), raw_span_b.rename("span_b")], axis=1
+        ).iloc[-n:].dropna()
+        if tail.empty:
+            return []
+
+        index = pd.DatetimeIndex(pd.to_datetime(df.index))
+        deltas = index.to_series().diff().dropna()
+        deltas = deltas[deltas > pd.Timedelta(0)].iloc[-min(len(deltas), n * 2):]
+        if deltas.empty:
+            return []
+        step = deltas.median()
+        if pd.isna(step) or step <= pd.Timedelta(0):
+            return []
+
+        last_time = pd.Timestamp(index[-1])
+        first_offset = n - len(tail) + 1
+        return [
+            (last_time + step * offset, float(row.span_a), float(row.span_b))
+            for offset, row in enumerate(tail.itertuples(index=False), first_offset)
+        ]
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return []
 
 # ── OHLCV + INDIKÁTORY ────────────────────────────────────────────────────────
 
@@ -5639,13 +5988,25 @@ def get_chart(
                 out.append({"time": int(pd.Timestamp(ts).timestamp()), "value": v})
             return out
 
+        ichi_future = _ichimoku_future_points(df)
+        ichi_future_sa = [
+            {"time": int(pd.Timestamp(ts).timestamp()), "value": span_a}
+            for ts, span_a, _span_b in ichi_future
+        ]
+        ichi_future_sb = [
+            {"time": int(pd.Timestamp(ts).timestamp()), "value": span_b}
+            for ts, _span_a, span_b in ichi_future
+        ]
+
         indicators = {
             "ema10":      ind_series("ema10"),
             "ema20":      ind_series("ema20"),
+            "ema50":      ind_series("ema50"),
+            "ema200":     ind_series("ema200"),
             "ichi_tenkan":ind_series("ichi_tenkan"),
             "ichi_kijun": ind_series("ichi_kijun"),
-            "ichi_sa":    ind_series("ichi_sa"),
-            "ichi_sb":    ind_series("ichi_sb"),
+            "ichi_sa":    ind_series("ichi_sa") + ichi_future_sa,
+            "ichi_sb":    ind_series("ichi_sb") + ichi_future_sb,
             "rsi":        ind_series("rsi"),
             "macd":       ind_series("macd"),
             "macd_sig":   ind_series("macd_sig"),
@@ -5816,8 +6177,8 @@ def get_chart(
                         daily_candles.append({
                             "time":  int(pd.Timestamp(ts).timestamp()),
                             "open": o, "high": h, "low": l, "close": c,
-                            # volume: pattern overlay potrebuje objemové potvrdenie breakoutu;
-                            # LWC candlestick series extra pole ignoruje (aditívne, fail-soft)
+                            # Volume ostáva aditívnou súčasťou OHLCV payloadu;
+                            # LWC candlestick series extra pole ignoruje (fail-soft).
                             "volume": safe_float(row.get("Volume")),
                         })
 
@@ -5830,12 +6191,32 @@ def get_chart(
                             out.append({"time": int(pd.Timestamp(ts).timestamp()), "value": v})
                     return out
 
+                daily_ichi_future = _ichimoku_future_points(df_d)
+                daily_ichi_future_sa = [
+                    {"time": int(pd.Timestamp(ts).timestamp()), "value": span_a}
+                    for ts, span_a, _span_b in daily_ichi_future
+                ]
+                daily_ichi_future_sb = [
+                    {"time": int(pd.Timestamp(ts).timestamp()), "value": span_b}
+                    for ts, _span_a, span_b in daily_ichi_future
+                ]
+
                 daily_indicators = {
+                    "ema10":       daily_ind("ema10"),
                     "ema20":       daily_ind("ema20"),
-                    "ema50":       daily_ind("ema10"),   # use ema10 as proxy for ema50-like
+                    "ema50":       daily_ind("ema50"),
+                    "ema200":      daily_ind("ema200"),
+                    "ichi_tenkan": daily_ind("ichi_tenkan"),
                     "ichi_kijun":  daily_ind("ichi_kijun"),
-                    "ichi_sa":     daily_ind("ichi_sa"),
-                    "ichi_sb":     daily_ind("ichi_sb"),
+                    "ichi_sa":     daily_ind("ichi_sa") + daily_ichi_future_sa,
+                    "ichi_sb":     daily_ind("ichi_sb") + daily_ichi_future_sb,
+                    "rsi":         daily_ind("rsi"),
+                    "macd":        daily_ind("macd"),
+                    "macd_sig":    daily_ind("macd_sig"),
+                    "macd_hist":   daily_ind("macd_hist"),
+                    "adx":         daily_ind("adx"),
+                    "di_plus":     daily_ind("di_plus"),
+                    "di_minus":    daily_ind("di_minus"),
                 }
 
                 # Mini chart: last 10 candles (for left panel)
@@ -7186,10 +7567,73 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
         df.index = pd.to_datetime(df.pop("__t"), unit="ms")
         df.index.name = "Date"
         df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        if df.empty or len(df) < 2:
+            return None
+        # Requestujeme adjusted=true, ale spoliehať sa naň naslepo je riskantné —
+        # overené naživo na MNST (2026-08-13): jeden bar mal close 90.36 -> 45.53,
+        # klasický 2:1 split artefakt, hoci sme si pýtali adjusted dáta. Príznak
+        # "adjusted" v odpovedi navyše hovorí len či Massive TVRDÍ, že upravil,
+        # nie že sa to reálne stalo pre náš plán/ticker. Preto vždy krížovo
+        # overíme proti známym splitom (_massive_splits) a manuálne dorovnáme
+        # LEN tie splity, kde surový skok cez hranicu dátumu splitu zodpovedá
+        # neupravenému pomeru — inak by sme mohli dvojnásobne upraviť dáta,
+        # ktoré Massive už správne adjustol.
+        if not payload.get("adjusted", True):
+            print(f"[massive] {ticker}: odpoveď hlási adjusted=false napriek requeste")
+        df = _massive_apply_unadjusted_splits(df, ticker)
         return df if len(df) >= 2 else None
     except Exception as exc:
         print(f"[massive] bary {ticker} {period}/{interval}: {type(exc).__name__}")
         return None
+
+
+def _massive_apply_unadjusted_splits(df: "pd.DataFrame", ticker: str) -> "pd.DataFrame":
+    """Bezpečnostná poistka pre _massive_daily_bars: Massive aggs endpoint sme
+    požiadali o adjusted=true, ale naživo (MNST, 2026-08-13) sa ukázalo, že sa
+    to nedá slepo veriť — vrátil surový, split-neupravený close so skokom cez
+    hranicu splitu (90.36 -> 45.53, klasický 2:1 artefakt). Táto funkcia si
+    vypýta známe splity z toho istého Massive účtu (_massive_splits, samostatný
+    endpoint/auth flag, fail-soft) a manuálne dorovná IBA tie splity, kde je zo
+    surových dát vidno, že adjustácia reálne chýba (skok cez hranicu zodpovedá
+    neupravenému split pomeru v tolerancii 25 % — bežná denná volatilita okolo
+    splitu nemá byť zamenená za split, ale ani opačne). Ak Massive dáta už boli
+    správne upravené, skok cez hranicu bude blízko 1.0 a nič sa nezmení — takže
+    dvojnásobná adjustácia už upravených dát nehrozí."""
+    try:
+        splits = _massive_splits(ticker)
+    except Exception:
+        return df  # splits endpoint nedostupný pre tento kľúč/plán — fail-soft
+    if not splits:
+        return df
+    for row in splits:
+        if not isinstance(row, dict):
+            continue
+        split_from = _fund_num(row.get("split_from"))
+        split_to = _fund_num(row.get("split_to"))
+        exec_date = row.get("execution_date")
+        if not split_from or not split_to or split_from <= 0 or split_to <= 0 or not exec_date:
+            continue
+        try:
+            exec_ts = pd.Timestamp(exec_date)
+        except Exception:
+            continue
+        before_mask = df.index < exec_ts
+        after_mask = df.index >= exec_ts
+        if not before_mask.any() or not after_mask.any():
+            continue
+        last_before = df.loc[before_mask, "Close"].iloc[-1]
+        first_after = df.loc[after_mask, "Close"].iloc[0]
+        if not last_before or not first_after or last_before <= 0 or first_after <= 0:
+            continue
+        expected_factor = split_from / split_to  # napr. 1/2 pre 2:1 split
+        observed_factor = first_after / last_before
+        if abs(observed_factor - expected_factor) / expected_factor >= 0.25:
+            continue  # skok nezodpovedá tomuto splitu — Massive ho už upravil (alebo iný dôvod pohybu)
+        df.loc[before_mask, ["Open", "High", "Low", "Close"]] *= expected_factor
+        df.loc[before_mask, "Volume"] *= (split_to / split_from)
+        print(f"[massive] {ticker}: manuálne dorovnaný neupravený split {row.get('execution_date')} "
+              f"({split_from:g}:{split_to:g})")
+    return df
 
 
 _ALPACA_BARS_TIMESPAN = {"1d": "1Day", "1wk": "1Week"}
@@ -8581,7 +9025,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.2"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.3"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -8590,6 +9034,31 @@ def _assistant_snapshot(account: str) -> dict:
         return _positions_cache.get(account) or cache_read(_portfolio_disk_path(account)) or {}
     except Exception:
         return {}
+
+
+def _assistant_solvency(symbol: str) -> dict:
+    """Solventnostné polia z insights DISK cache — nikdy nefetchuje.
+
+    Export beží nad ~60 tickermi; per-ticker fetch by z read-only handoffu spravil
+    minútový sieťový beh a vypálil Finnhub limit. Chýbajúci alebo starý záznam je
+    legitímna odpoveď 'zatiaľ neviem', nesie ju `data_age_days`."""
+    try:
+        cached = json.loads((YAHOO_INSIGHTS_DIR / f"{symbol}.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    solvency = cached.get("solvency")
+    if not isinstance(solvency, dict):
+        return {}
+    stamp = solvency.get("carried_from") or cached.get("fetched_at")
+    return _assistant_compact({
+        "net_debt_to_ebitda": _assistant_number(solvency.get("net_debt_to_ebitda")),
+        "interest_coverage": _assistant_number(solvency.get("interest_coverage")),
+        "current_ratio": _assistant_number(solvency.get("current_ratio")),
+        "quick_ratio": _assistant_number(solvency.get("quick_ratio")),
+        "debt_to_equity": _assistant_number(solvency.get("debt_to_equity")),
+        "total_debt_to_ebitda": _assistant_number(solvency.get("total_debt_to_ebitda")),
+        "data_age_days": _assistant_days_since(stamp),
+    })
 
 
 def _assistant_iso_timestamp(value) -> str | None:
@@ -8704,6 +9173,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "days_remaining": (earnings or {}).get("days"),
             "confirmed": bool((earnings or {}).get("date")),
         }),
+        "solvency": _assistant_solvency(symbol),
         "dca_context": {
             "status": dca_status,
             "portfolio_pnl_pct": total_pnl_pct,
@@ -8720,12 +9190,19 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
 
 
 @app.get("/api/assistant/export")
-def get_assistant_export():
+def get_assistant_export(account: str = "1"):
     """Read-only AI handoff. Protected by normal Basic Auth, never public-token auth.
-    It reuses dashboard snapshots and scanner/DIP cache; it never explicitly requests refresh=1."""
+    It reuses dashboard snapshots and scanner/DIP cache; it never explicitly requests refresh=1.
+
+    One account per export, never merged: account 1 and account 2 follow different
+    strategies (see docs/CLAUDE_investicna_analyza.md), so merging them by ticker
+    silently mixes lots and distorts every weight."""
+    account = str(account or "1")
+    if account not in ("1", "2"):
+        raise HTTPException(status_code=400, detail="account must be '1' or '2'")
     now = datetime.now(timezone.utc)
     settings = _dash_settings()
-    snapshots = {account: _assistant_snapshot(account) for account in ("1", "2")}
+    snapshots = {account: _assistant_snapshot(account)}
     positions_by_symbol: dict[str, list[dict]] = {}
     all_position_symbols: set[str] = set()
     excluded_crypto_symbols: set[str] = set()
@@ -8943,6 +9420,7 @@ def get_assistant_export():
         "dca_context": "Explicit DCA evidence. eligible means current conditions pass; conditional means positive conditions exist but chart blockers require manual review.",
         "change_from_last_entry_pct": "Signed price change from the latest open lot entry. Positive means current price is above that entry; negative means below it.",
         "dca_drawdown_from_last_entry_pct": "Negative-only price change from the latest open lot entry. Omitted when the current price is at or above that entry.",
+        "solvency": "Balance-sheet risk from the Finnhub metric snapshot: net_debt_to_ebitda and interest_coverage are the two that decide whether a loss is a dip or a solvency problem. Read only from cached insights, so it is absent for tickers whose insights card was never opened; data_age_days says how old the numbers are. Absent means unknown, never healthy.",
         "attention_items": "One normalized list of held tickers that need review. It replaces duplicated weekly-plan and inbox text in this export.",
         "passes_dip_threshold": "Whether the imported DIP score meets the configured DCA minimum. It separates priority candidates from scanner-only watch candidates.",
     }
@@ -8954,11 +9432,19 @@ def get_assistant_export():
             "name": "DIP Strategy v3",
             "dca_trigger_pct": -float(settings["dca_loss_pct"]),
             "dca_min_dip_score": settings["dca_dip_min"],
-            "holding_horizon": "1-3 years",
+            "holding_horizon": "up to 5 years",
             "buy_only": True,
-            "notes": ["DIP signal is not an automatic buy.", "Verify weekly and daily chart before DCA."],
+            "notes": [
+                "DIP signal is not an automatic buy.",
+                "Verify weekly and daily chart before DCA.",
+                "Default for a losing position is HOLD, not close.",
+                "Earlier exit is allowed only once a lot has passed the 1-year Slovak tax test in profit and the case for holding it has weakened; position age itself is never an exit reason.",
+            ],
         },
         "analysis_scope": {
+            "account": account,
+            "accounts_merged": False,
+            "account_note": "Single account only. Accounts follow different strategies and must never be analyzed as one portfolio.",
             "include_asset_types": ["Stock", "ETF"],
             "exclude_crypto_from_dip_analysis": True,
             "exclude_crypto_from_export": True,
@@ -8971,6 +9457,7 @@ def get_assistant_export():
                 "Daily P/L is a dashboard approximation based on live price and previous market close.",
                 "Scanner and DIP data can be older than the portfolio snapshot; inspect source_timestamps.",
                 "Dashboard recommendations are interpretive aids, not trading instructions.",
+                "Solvency fields come from cached ticker insights and are missing for tickers not yet fetched; treat a missing solvency block as unknown, not as a clean balance sheet.",
             ],
         },
         "portfolio_summary": {
@@ -10301,6 +10788,19 @@ def _insights_fetch_finnhub(sym: str) -> dict:
                 "short_ratio": short_ratio,
                 "source": "finnhub",
             }
+        # Solventnosť z TEJ ISTEJ odpovede — žiadne nové API volanie. Bez týchto
+        # polí je pravidlo o zatváraní pozícií pri riziku bankrotu neoveriteľné
+        # (docs/CLAUDE_investicna_analyza.md, sekcia 3 + Priorita 6).
+        solvency = _assistant_compact({
+            "net_debt_to_ebitda": _first_number(metric, "netDebtToEBITDAAnnual", "netDebtToEBITDATTM", "netDebtToTotalCapitalAnnual"),
+            "interest_coverage": _first_number(metric, "netInterestCoverageAnnual", "netInterestCoverageTTM"),
+            "current_ratio": _first_number(metric, "currentRatioAnnual", "currentRatioQuarterly"),
+            "quick_ratio": _first_number(metric, "quickRatioAnnual", "quickRatioQuarterly"),
+            "debt_to_equity": _first_number(metric, "totalDebtToEquityAnnual", "totalDebt/totalEquityAnnual", "totalDebtToEquityQuarterly"),
+            "total_debt_to_ebitda": _first_number(metric, "totalDebtToEBITDAAnnual", "totalDebt/ebitdaAnnual"),
+        })
+        if solvency:
+            out["solvency"] = {**solvency, "source": "finnhub"}
     except Exception as e:
         print(f"[insights] short interest {sym} failed: {_scrub_token(e)}")
     if not (buys or sells or eps_hist):
@@ -11444,6 +11944,14 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         carried.setdefault("carried_from", cached.get("fetched_at"))
         payload["price_target"] = carried
         print(f"[insights] price target {sym}: prenesený z predošlej cache")
+    # Rovnaký dôvod aj rovnaký vzor pre solventnosť: Finnhub free tier tieto
+    # polia pre časť tickerov nevráti, takže neúspešná obnova nesmie zmazať
+    # platný údaj. Schéma sa ZÁMERNE nebumpuje — bump by zahodil celú cache a
+    # nový fetch by ju pre časť tickerov nevedel zopakovať (pitfall 16→17).
+    if not payload.get("solvency") and cached and cached.get("solvency"):
+        carried_solv = dict(cached["solvency"])
+        carried_solv.setdefault("carried_from", cached.get("fetched_at"))
+        payload["solvency"] = carried_solv
     try:
         YAHOO_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
         fpath.write_text(json.dumps(payload), encoding="utf-8")
@@ -11585,6 +12093,521 @@ def get_ticker_profile(symbol: str, refresh: int = Query(0)):
     except Exception:
         pass
     return payload
+
+
+# ── Institutional 13F holdings — interpretation-only Analytika layer ────────
+# This data NEVER feeds C1-C4 scoring, DCA, scanner tier, Verdikt/BUILD or ML.
+# It is deliberately a slow, fail-soft context layer served from disk cache.
+INSTITUTIONAL_13F_DIR = DATA_ROOT / "institutional_13f"
+INSTITUTIONAL_13F_STATE_FILE = INSTITUTIONAL_13F_DIR / "state.json"
+INSTITUTIONAL_13F_CUSIP_FILE = INSTITUTIONAL_13F_DIR / "cusip_map.json"
+INSTITUTIONAL_13F_SCHEMA_VERSION = 1
+INSTITUTIONAL_13F_RECHECK_SECONDS = 7 * 24 * 3600
+INSTITUTIONAL_13F_FAILURE_RETRY_SECONDS = 3600
+INSTITUTIONAL_13F_CUSIP_TTL_SECONDS = 180 * 24 * 3600
+INSTITUTIONAL_13F_LISTING_URL = (
+    "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets"
+)
+INSTITUTIONAL_13F_USER_AGENT = (
+    "TradingDashboard research (contact: norbert.garaj@gmail.com)"
+)
+OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping"
+_institutional_13f_refresh_lock = threading.Lock()
+
+
+def _institutional_json_read(path: Path, default):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, type(default)) else default
+    except Exception:
+        return default
+
+
+def _discover_latest_13f_zip_url() -> str | None:
+    """Return the first SEC 13F ZIP link (the listing is newest-first).
+
+    Discovery is intentionally fail-soft because an SEC outage must not turn a
+    cached interpretation card into an HTTP 500.
+    """
+    try:
+        response = requests.get(
+            INSTITUTIONAL_13F_LISTING_URL,
+            headers={"User-Agent": INSTITUTIONAL_13F_USER_AGENT},
+            timeout=25,
+        )
+        response.raise_for_status()
+        hrefs = re.findall(
+            r'''href\s*=\s*["']([^"']+\.zip(?:\?[^"']*)?)["']''',
+            response.text,
+            flags=re.IGNORECASE,
+        )
+        for href in hrefs:
+            url = urllib.parse.urljoin("https://www.sec.gov", href)
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme == "https" and parsed.netloc.lower().endswith("sec.gov"):
+                return url
+    except Exception as e:
+        print(f"[13f] SEC listing unavailable: {_scrub_token(e)}")
+    return None
+
+
+def _normalize_13f_cusip(value) -> str | None:
+    cusip = re.sub(r"\s+", "", str(value or "")).upper()
+    return cusip if re.fullmatch(r"[0-9A-Z*@#]{9}", cusip) else None
+
+
+_INSTITUTIONAL_NAME_SUFFIXES = {
+    "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY", "LTD",
+    "LIMITED", "PLC", "LLC", "LP", "L P", "NV", "N V", "SA", "AG",
+}
+
+
+def _normalize_13f_issuer_name(value) -> str:
+    name = str(value or "").upper().replace("&", " AND ")
+    tokens = re.sub(r"[^A-Z0-9]+", " ", name).split()
+    while tokens and tokens[-1] in _INSTITUTIONAL_NAME_SUFFIXES:
+        tokens.pop()
+    return " ".join(tokens)
+
+
+def _13f_name_inference_class(title) -> bool:
+    """Conservative guard for learning a CUSIP from an exact issuer-name hit."""
+    value = re.sub(r"[^A-Z0-9]+", " ", str(title or "").upper())
+    return any(marker in f" {value} " for marker in (
+        " COM ", " COMMON ", " ORD ", " SHS ", " STOCK ", " CAP STK ",
+        " BEN INT ", " CL A ", " CL B ", " CLASS A ", " CLASS B ",
+    ))
+
+
+def _openfigi_result_cusip(result: dict) -> str | None:
+    """Accept a CUSIP only when OpenFIGI explicitly returns one.
+
+    The current unauthenticated mapping response normally exposes FIGI/name/
+    ticker metadata but no licensed CUSIP field. Keeping this extractor strict
+    prevents a FIGI or securityDescription from being mistaken for a CUSIP.
+    """
+    for key in ("cusip", "CUSIP"):
+        cusip = _normalize_13f_cusip(result.get(key))
+        if cusip:
+            return cusip
+    identifiers = result.get("identifiers")
+    if isinstance(identifiers, dict):
+        for key in ("cusip", "CUSIP", "ID_CUSIP"):
+            cusip = _normalize_13f_cusip(identifiers.get(key))
+            if cusip:
+                return cusip
+    return None
+
+
+def _openfigi_ticker_metadata(symbols: list[str]) -> dict[str, dict]:
+    """Resolve ticker metadata in <=10-job unauthenticated OpenFIGI batches.
+
+    A failed batch affects only its tickers and never raises to the caller.
+    OPENFIGI_API_KEY is optional; no key is required for this small universe.
+    """
+    out: dict[str, dict] = {}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": INSTITUTIONAL_13F_USER_AGENT,
+    }
+    api_key = os.getenv("OPENFIGI_API_KEY", "").strip()
+    if api_key:
+        headers["X-OPENFIGI-APIKEY"] = api_key
+    for start in range(0, len(symbols), 10):
+        batch = symbols[start:start + 10]
+        jobs = [{"idType": "TICKER", "idValue": sym, "exchCode": "US"}
+                for sym in batch]
+        try:
+            response = requests.post(
+                OPENFIGI_MAPPING_URL, json=jobs, headers=headers, timeout=25,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list) or len(payload) != len(batch):
+                raise ValueError("unexpected OpenFIGI response shape")
+            for sym, item in zip(batch, payload):
+                rows = item.get("data") if isinstance(item, dict) else None
+                if not isinstance(rows, list) or not rows:
+                    out[sym] = {"status": "unresolved", "error": "no mapping"}
+                    continue
+                preferred = next(
+                    (row for row in rows if str(row.get("ticker") or "").upper() == sym
+                     and str(row.get("exchCode") or "").upper() in ("US", "UN", "UW", "UQ")),
+                    rows[0],
+                )
+                out[sym] = {
+                    "status": "resolved" if _openfigi_result_cusip(preferred) else "name_only",
+                    "cusip": _openfigi_result_cusip(preferred),
+                    "name": preferred.get("name"),
+                    "figi": preferred.get("figi"),
+                    "ticker": preferred.get("ticker"),
+                    "exchange": preferred.get("exchCode"),
+                }
+        except Exception as e:
+            message = _scrub_token(e)
+            print(f"[13f] OpenFIGI batch unavailable: {message}")
+            for sym in batch:
+                out[sym] = {"status": "unavailable", "error": str(message)}
+    return out
+
+
+def _institutional_target_symbols() -> list[str]:
+    """Portfolio Stock/ETF (both accounts) plus the persisted watchlist.
+
+    _get_portfolio_symbols() remains the shared portfolio-symbol source; the
+    intersection applies the already-established Stock/ETF holdings filter.
+    The DIP scanner universe is deliberately not consulted.
+    """
+    portfolio = _get_portfolio_symbols() & set(_get_portfolio_holdings())
+    watchlist = {
+        str(item.get("symbol") or "").strip().upper()
+        for item in _read_watchlist_file()
+        if isinstance(item, dict)
+    }
+    return sorted(
+        sym for sym in (portfolio | watchlist)
+        if sym and re.fullmatch(r"[A-Z0-9.\-]{1,20}", sym)
+    )
+
+
+def _resolve_institutional_cusips(symbols: list[str]) -> dict[str, dict]:
+    """Return long-lived per-ticker OpenFIGI metadata/CUSIP cache."""
+    now = datetime.now(timezone.utc)
+    cache = _institutional_json_read(INSTITUTIONAL_13F_CUSIP_FILE, {})
+    resolved: dict[str, dict] = {}
+    misses = []
+    for sym in symbols:
+        entry = cache.get(sym)
+        fresh = False
+        if isinstance(entry, dict):
+            try:
+                age = (now - datetime.fromisoformat(entry["fetched_at"])).total_seconds()
+                fresh = age < INSTITUTIONAL_13F_CUSIP_TTL_SECONDS
+            except Exception:
+                fresh = False
+        if fresh and entry.get("status") in ("resolved", "name_only", "unresolved"):
+            resolved[sym] = entry
+        else:
+            misses.append(sym)
+    if misses:
+        fetched = _openfigi_ticker_metadata(misses)
+        stamp = now.isoformat()
+        for sym in misses:
+            got = fetched.get(sym) or {"status": "unavailable"}
+            previous = cache.get(sym) if isinstance(cache.get(sym), dict) else None
+            # A temporary provider failure must not erase a previously useful
+            # name/CUSIP ("failed now" is not "does not exist").
+            if got.get("status") == "unavailable" and previous and (
+                previous.get("cusip") or previous.get("name")
+            ):
+                entry = dict(previous)
+                entry["last_error"] = got.get("error")
+            else:
+                entry = {**got, "fetched_at": stamp, "source": "openfigi"}
+            cache[sym] = entry
+            resolved[sym] = entry
+        try:
+            _atomic_write_json(INSTITUTIONAL_13F_CUSIP_FILE, cache)
+        except Exception as e:
+            print(f"[13f] CUSIP cache write failed: {e}")
+    return resolved
+
+
+def _aggregate_13f_stream(stream, cusip_to_tickers: dict[str, set[str]],
+                          issuer_to_tickers: dict[str, set[str]] | None = None) -> tuple[dict, dict]:
+    """Stream/filter INFOTABLE.tsv; never materialize the multi-GB table.
+
+    `stream` is a text file-like object to keep this helper independently
+    regression-testable with StringIO. Returns compact aggregates and CUSIPs
+    conservatively learned from unique exact OpenFIGI issuer-name matches.
+    """
+    reader = csv.reader(stream, delimiter="\t")
+    try:
+        header = next(reader)
+    except StopIteration:
+        raise ValueError("INFOTABLE.tsv is empty")
+    columns = {str(name).strip().upper(): idx for idx, name in enumerate(header)}
+    required = ("ACCESSION_NUMBER", "NAMEOFISSUER", "TITLEOFCLASS", "CUSIP", "SSHPRNAMT")
+    missing = [name for name in required if name not in columns]
+    if missing:
+        raise ValueError(f"INFOTABLE.tsv missing columns: {', '.join(missing)}")
+
+    issuer_to_tickers = issuer_to_tickers or {}
+    learned: dict[str, str] = {}
+    filer_sets: dict[str, set[str]] = {}
+    share_totals: dict[str, float] = {}
+    max_idx = max(columns[name] for name in required)
+    for row in reader:
+        if len(row) <= max_idx:
+            continue
+        cusip = _normalize_13f_cusip(row[columns["CUSIP"]])
+        if not cusip:
+            continue
+        tickers = cusip_to_tickers.get(cusip)
+        if not tickers and issuer_to_tickers and _13f_name_inference_class(
+            row[columns["TITLEOFCLASS"]]
+        ):
+            issuer = _normalize_13f_issuer_name(row[columns["NAMEOFISSUER"]])
+            candidates = issuer_to_tickers.get(issuer) or set()
+            unlearned = {sym for sym in candidates if sym not in learned}
+            if len(unlearned) == 1:
+                sym = next(iter(unlearned))
+                learned[sym] = cusip
+                cusip_to_tickers.setdefault(cusip, set()).add(sym)
+                tickers = {sym}
+        if not tickers:
+            continue
+        accession = str(row[columns["ACCESSION_NUMBER"]]).strip()
+        try:
+            shares = float(str(row[columns["SSHPRNAMT"]]).replace(",", ""))
+        except (TypeError, ValueError):
+            shares = 0.0
+        for sym in tickers:
+            if accession:
+                filer_sets.setdefault(sym, set()).add(accession)
+            share_totals[sym] = share_totals.get(sym, 0.0) + shares
+
+    aggregates = {}
+    for sym in set(filer_sets) | set(share_totals):
+        total = share_totals.get(sym, 0.0)
+        aggregates[sym] = {
+            "holder_count": len(filer_sets.get(sym, set())),
+            "total_shares": int(total) if total.is_integer() else round(total, 4),
+        }
+    return aggregates, learned
+
+
+def _download_and_parse_13f(zip_url: str, mappings: dict[str, dict]) -> tuple[dict, dict]:
+    """Download to one temporary ZIP, stream INFOTABLE.tsv, always delete ZIP."""
+    direct: dict[str, set[str]] = {}
+    names: dict[str, set[str]] = {}
+    for sym, entry in mappings.items():
+        cusip = _normalize_13f_cusip(entry.get("cusip"))
+        if cusip:
+            direct.setdefault(cusip, set()).add(sym)
+        issuer = _normalize_13f_issuer_name(entry.get("name"))
+        if issuer and not cusip:
+            names.setdefault(issuer, set()).add(sym)
+
+    INSTITUTIONAL_13F_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="13f_", suffix=".zip", dir=INSTITUTIONAL_13F_DIR, delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            response = requests.get(
+                zip_url,
+                headers={"User-Agent": INSTITUTIONAL_13F_USER_AGENT},
+                timeout=(30, 180),
+                stream=True,
+            )
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    tmp.write(chunk)
+        with zipfile.ZipFile(tmp_path) as archive:
+            entry_name = next(
+                (name for name in archive.namelist()
+                 if Path(name).name.upper() == "INFOTABLE.TSV"),
+                None,
+            )
+            if not entry_name:
+                raise ValueError("SEC ZIP does not contain INFOTABLE.tsv")
+            with archive.open(entry_name) as raw:
+                with TextIOWrapper(raw, encoding="utf-8-sig", errors="replace", newline="") as text:
+                    return _aggregate_13f_stream(text, direct, names)
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception as e:
+                print(f"[13f] temporary ZIP cleanup failed: {e}")
+
+
+def _institutional_period_label(zip_url: str) -> str:
+    name = Path(urllib.parse.urlparse(zip_url).path).name
+    return re.sub(r"_form13f\.zip$", "", name, flags=re.IGNORECASE)
+
+
+def _institutional_apply_comparison(current: dict, previous: dict | None) -> None:
+    previous_aggregates = (previous or {}).get("aggregates") or {}
+    for sym, item in (current.get("aggregates") or {}).items():
+        old = previous_aggregates.get(sym)
+        item["holder_count_delta"] = (
+            item["holder_count"] - old["holder_count"] if old else None
+        )
+        old_shares = float(old.get("total_shares") or 0) if old else 0.0
+        if old and old_shares:
+            item["share_count_delta_pct"] = round(
+                (float(item.get("total_shares") or 0) - old_shares) / old_shares * 100,
+                2,
+            )
+        else:
+            item["share_count_delta_pct"] = None
+
+
+def _institutional_refresh_worker() -> None:
+    """Single-flight background refresh; request handlers never wait for it."""
+    now = datetime.now(timezone.utc)
+    state = _institutional_json_read(INSTITUTIONAL_13F_STATE_FILE, {})
+    try:
+        latest_url = _discover_latest_13f_zip_url()
+        if not latest_url:
+            raise RuntimeError("SEC listing is temporarily unavailable")
+        if latest_url == state.get("latest_url") and state.get("periods"):
+            state["checked_at"] = now.isoformat()
+            state.pop("last_error", None)
+            _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+            return
+
+        symbols = _institutional_target_symbols()
+        if not symbols:
+            raise RuntimeError("portfolio/watchlist universe is empty")
+        mappings = _resolve_institutional_cusips(symbols)
+        if not any(entry.get("cusip") or entry.get("name") for entry in mappings.values()):
+            raise RuntimeError("OpenFIGI mapping is temporarily unavailable")
+        aggregates, learned = _download_and_parse_13f(latest_url, mappings)
+
+        mapping_cache = _institutional_json_read(INSTITUTIONAL_13F_CUSIP_FILE, {})
+        learned_at = datetime.now(timezone.utc).isoformat()
+        for sym, cusip in learned.items():
+            entry = dict(mapping_cache.get(sym) or mappings.get(sym) or {})
+            entry.update({
+                "cusip": cusip,
+                "status": "resolved",
+                "cusip_source": "sec_issuer_name_exact",
+                "fetched_at": learned_at,
+            })
+            mapping_cache[sym] = entry
+            mappings[sym] = entry
+        if learned:
+            _atomic_write_json(INSTITUTIONAL_13F_CUSIP_FILE, mapping_cache)
+
+        resolved_tickers = []
+        unavailable = {}
+        for sym in symbols:
+            cusip = _normalize_13f_cusip((mappings.get(sym) or {}).get("cusip"))
+            if cusip:
+                resolved_tickers.append(sym)
+                aggregates.setdefault(sym, {"holder_count": 0, "total_shares": 0})
+                aggregates[sym]["cusip"] = cusip
+            else:
+                unavailable[sym] = (mappings.get(sym) or {}).get("status") or "unresolved"
+
+        period = {
+            "url": latest_url,
+            "period": _institutional_period_label(latest_url),
+            "parsed_at": datetime.now(timezone.utc).isoformat(),
+            "universe": symbols,
+            "resolved_tickers": sorted(resolved_tickers),
+            "unavailable": unavailable,
+            "aggregates": aggregates,
+        }
+        old_periods = state.get("periods") if isinstance(state.get("periods"), list) else []
+        previous = next((p for p in old_periods if p.get("url") != latest_url), None)
+        _institutional_apply_comparison(period, previous)
+        state = {
+            "schema_version": INSTITUTIONAL_13F_SCHEMA_VERSION,
+            "latest_url": latest_url,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "periods": [period] + ([previous] if previous else []),
+        }
+        _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+        print(f"[13f] {period['period']}: {len(aggregates)} tickerov, ZIP odstránený")
+    except Exception as e:
+        # Preserve every previous successful period. Only diagnostics/backoff
+        # change; temporary failure never becomes a fabricated zero holding.
+        state["schema_version"] = INSTITUTIONAL_13F_SCHEMA_VERSION
+        state["last_attempt_at"] = now.isoformat()
+        state["last_error"] = str(_scrub_token(e))
+        try:
+            _atomic_write_json(INSTITUTIONAL_13F_STATE_FILE, state)
+        except Exception:
+            pass
+        print(f"[13f] refresh failed: {_scrub_token(e)}")
+    finally:
+        _institutional_13f_refresh_lock.release()
+
+
+def _institutional_refresh_due(state: dict) -> bool:
+    now = datetime.now(timezone.utc)
+    stamp = state.get("checked_at")
+    threshold = INSTITUTIONAL_13F_RECHECK_SECONDS
+    if state.get("last_error"):
+        stamp = state.get("last_attempt_at") or stamp
+        threshold = INSTITUTIONAL_13F_FAILURE_RETRY_SECONDS
+    if not stamp:
+        return True
+    try:
+        return (now - datetime.fromisoformat(stamp)).total_seconds() >= threshold
+    except Exception:
+        return True
+
+
+def _kickoff_institutional_refresh(state: dict | None = None) -> bool:
+    state = state if isinstance(state, dict) else _institutional_json_read(
+        INSTITUTIONAL_13F_STATE_FILE, {}
+    )
+    if not _institutional_refresh_due(state):
+        return False
+    if not _institutional_13f_refresh_lock.acquire(blocking=False):
+        return False
+    threading.Thread(target=_institutional_refresh_worker, daemon=True).start()
+    return True
+
+
+@app.get("/api/ticker/institutional/{symbol}")
+def get_ticker_institutional(symbol: str):
+    """Serve cached quarterly 13F context and kick a non-blocking refresh.
+
+    Explicit `available`/`status` fields distinguish a real zero-holder result
+    from data that has not been resolved or fetched yet.
+    """
+    sym = re.sub(r"[^A-Za-z0-9.\-]", "", symbol.upper())
+    if not sym:
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    state = _institutional_json_read(INSTITUTIONAL_13F_STATE_FILE, {})
+    started = _kickoff_institutional_refresh(state)
+    running = started or _institutional_13f_refresh_lock.locked()
+    periods = state.get("periods") if isinstance(state.get("periods"), list) else []
+    current = periods[0] if periods else None
+    item = ((current or {}).get("aggregates") or {}).get(sym)
+    base = {
+        "ticker": sym,
+        "interpretation_only": True,
+        "refresh_running": running,
+        "checked_at": state.get("checked_at"),
+    }
+    if item is not None:
+        return {
+            **base,
+            "available": True,
+            "status": "ok",
+            "period": current.get("period"),
+            "parsed_at": current.get("parsed_at"),
+            **item,
+        }
+    if not current and state.get("last_error"):
+        status = "unavailable"
+        message = "SEC/OpenFIGI zdroj je dočasne nedostupný; nejde o nulový počet držiteľov."
+    elif not current:
+        status = "pending"
+        message = "13F dáta sa pripravujú na pozadí."
+    elif sym not in (current.get("universe") or []):
+        status = "not_in_snapshot"
+        message = "Ticker pribudol po poslednom 13F spracovaní; zaradí sa pri ďalšom období."
+    else:
+        status = "unresolved"
+        message = "Ticker sa zatiaľ nepodarilo bezpečne priradiť ku CUSIP."
+    return {
+        **base,
+        "available": False,
+        "status": status,
+        "period": current.get("period") if current else None,
+        "message": message,
+        "error": state.get("last_error") if not current else None,
+    }
 
 
 EARNINGS_SYMBOL_DIR = DATA_ROOT / "earnings_symbol"
@@ -13198,7 +14221,7 @@ def help_screenshot(fname: str):
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
-    "chart_patterns.js", "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
+    "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
     # Nový modul MUSÍ pribudnúť aj sem — inak endpoint vráti 404 a v produkcii
     # padne všetko, čo ten súbor potrebuje (lokálne to nevidno, ak sa testuje
     # bez tohto endpointu).

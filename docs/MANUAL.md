@@ -211,7 +211,7 @@ ale schová pokročilú diagnostiku. V Scanneri skracuje trhový kontext na stru
 stav trhu, skryje importné diagnostiky, raw počty a textový export. Radar
 watchlist/eToro ukazuje menej kariet pred rozbalením. V Analytike schová
 90D+ validačné detaily, analytiku signálov, backtesting, hit-rate, váhy
-indikátorov, prognózu modelu, vstupnú zónu a detailné chart-pattern filtre.
+indikátorov, prognózu modelu a vstupnú zónu.
 V pravom paneli ostávajú najbližšie earnings, firma & očakávania a relatívna
 sila. Záložka História je v Basic skrytá.
 
@@ -353,32 +353,17 @@ Farba vždy vyjadruje rozhodnutie, číslo `x/4` vždy silu.
   a vysvetlenie setupu. Pri dlhodobom horizonte (12 mesiacov a viac, časový
   test) je týždenný smer šum — rozhodnutia stavaj na C1–C4 signáloch, ich
   90D+ validácii a týždennom trende.
-- **Volume Profile** (checkbox v *Indikátory — overlay*, skupina Objem) —
+- **Indikátorové tlačidlá pod grafom** sú samostatné pre Weekly a Daily. EMA10,
+  EMA20, EMA50 a EMA200 možno ľubovoľne kombinovať; ICHIMOKU zobrazí Tenkan,
+  Kijun aj Kumo. RSI, ADX a MACD otvárajú vlastné subpanely a všetky tri môžu
+  byť otvorené naraz. Voľby Weekly a Daily sa navzájom neovplyvňujú a prežijú reload.
+- **Volume Profile** (tlačidlo *VOL PROFILE* iba v riadku Weekly) —
   horizontálny histogram pri pravom okraji ukazuje, **pri akých cenách** sa
   zobchodoval najväčší objem za viditeľný úsek grafu. Najdlhší pruh = **POC**
   (cena najväčšej zhody, pôsobí ako magnet); zhluky dlhých pruhov = supportné /
   rezistenčné zóny (HVN); tenké miesta = ceny, cez ktoré trh prelieta rýchlo
   (LVN). Profil sa prepočítava podľa zoomu — priblíženie = voľba obdobia analýzy.
   Stav prežíva reload (`localStorage`).
-- **Pattern overlay** (checkbox v *Indikátory — overlay*, skupina Chart patterns) —
-  vizuálna pomôcka nad hlavným Weekly/Daily grafom. Rozpozná základné zaužívané
-  formácie (`Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`,
-  `Descending Triangle`) a kreslí trendlines, support/resistance, neckline,
-  dotykové body a krátky label priamo v grafe. Pravý panel **Chart Pattern**
-  vysvetlí stav (`forming`, `confirmed`, `failed`), kvalitu, trigger úroveň a
-  invalidáciu. Vrstva je iba vizuálna: **nemení C1–C4, scanner, predikciu ani
-  Verdikt**. Farby sú zámerne mimo farieb sviečok: bullish patterny sú cyan,
-  bearish patterny fialové, neutral/range zlaté. Prepínače **Bullish**,
-  **Bearish** a **Range** filtrujú, čo sa má kresliť a zobrazovať v karte;
-  ukladajú sa do `localStorage`. Pattern sa považuje za potvrdený až po
-  breakoute/breakdowne podľa pravidiel technickej analýzy. Potvrdený breakout
-  na **zvýšenom objeme** (≥ 1.2× priemer ~20 sviečok pred breakoutom) zvýši
-  kvalitu patternu — spoľahlivosť breakoutu na tenkom objeme je nižšia. Overlay
-  kreslí aj **measured-move cieľ** (bodkovaná čiara `Ciel`): projekciu výšky
-  patternu od breakout úrovne — pri Double Bottom `neckline + (neckline − dno)`,
-  pri range/trojuholníkoch výška pásma od prerazenej hranice. Pri neutrálnom
-  Rectangle sa cieľ ukáže až po breakoute (dovtedy smer nepoznáme). Cieľ je
-  orientačná projekcia, nie cenová predpoveď.
 
 ### Pravý panel (sidebar)
 

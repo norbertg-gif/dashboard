@@ -574,6 +574,7 @@ function renderSidebar() {
     }
 
     return `<div class="${cls}" data-sym="${sym}" onclick="onSbTickerClick('${sym}')"
+      oncontextmenu="onSbTickerContextMenu(event,'${sym}')"
       style="border-left:2px solid ${tag>0?tagColor:'transparent'};">
       <div style="display:flex;align-items:center;gap:4px;">
         ${getLogoWrapper(sym, 22, chgCls==='up'?'var(--green)':chgCls==='down'?'var(--red)':'var(--muted)')}

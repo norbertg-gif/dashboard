@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260805-191833">
+<link rel="stylesheet" href="/dashboard.css?v=20260813-172938">
 </head>
 <body data-main-tab="home">
 
@@ -78,6 +78,7 @@
         <input type="checkbox" id="movers-portfolio-only" style="cursor:pointer;">Len z portfólia
       </label>
       <button class="btn" id="clipboard-charts-btn" onclick="importChartsFromClipboard()" title="Vloží tickery zo schránky (každý na samostatnom riadku), zruší aktuálne grafy a otvorí ich ako 1d grafy. Limit 20.">📋 Tickery</button>
+      <button class="btn" id="basket-open-btn" onclick="openChartBasket()" title="Otvorí tickery vyklikané cez ⊕ naprieč dashboardom" style="display:none;">🧺 Košík</button>
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -165,9 +166,24 @@
           </div>
         </div>
       </div>
-      <div id="verdictContent" class="verdict-content">
-        <div class="verdict-empty">Zadaj ticker alebo otvor verdikt zo Scannera.</div>
+      <!-- Dva nezávislé verdikty vedľa seba — DIP (mean-reversion) a Trend
+           (momentum). Odpovedajú na rôzne otázky ("je to teraz lacný dip?"
+           vs. "je to potvrdený trend na pokračovanie?"), zámerne sa
+           nezlučujú do jedného čísla. -->
+      <div class="verdict-dual">
+        <div id="verdictContent" class="verdict-content">
+          <div class="verdict-empty">Zadaj ticker alebo otvor verdikt zo Scannera.</div>
+        </div>
+        <div id="trendVerdictContent" class="verdict-content">
+          <div class="verdict-empty">Zadaj ticker alebo otvor verdikt zo Scannera.</div>
+        </div>
       </div>
+    </div>
+    <!-- Graf vedľa verdiktu — štandardný panel (rovnaký ako Grafy/chart dock),
+         nie analytický z Analytiky. Vypĺňa prázdne miesto vpravo a šetrí
+         preklikávanie medzi tabmi. -->
+    <div id="verdict-chart" class="verdict-chart">
+      <div id="verdict-grid" class="dock-grid"></div>
     </div>
   </div>
 
@@ -276,10 +292,42 @@
           <button class="toggle-btn" id="btnDaily" onclick="switchView('daily')" style="padding:3px 10px;font-size:11px;">Daily</button>
         </div>
       </div>
+      <div class="p-inds pc-indicator-row" id="pcWeeklyIndicatorRow">
+        <button id="pc-weekly-ema10" class="ind-btn" onclick="pc_toggleIndicator('weekly','ema10')">EMA10</button>
+        <button id="pc-weekly-ema20" class="ind-btn" onclick="pc_toggleIndicator('weekly','ema20')">EMA20</button>
+        <button id="pc-weekly-ema50" class="ind-btn" onclick="pc_toggleIndicator('weekly','ema50')">EMA50</button>
+        <button id="pc-weekly-ema200" class="ind-btn" onclick="pc_toggleIndicator('weekly','ema200')">EMA200</button>
+        <button id="pc-weekly-ichimoku" class="ind-btn" onclick="pc_toggleIndicator('weekly','ichimoku')">ICHIMOKU</button>
+        <button id="pc-weekly-rsi" class="ind-btn" onclick="pc_toggleIndicator('weekly','rsi')">RSI</button>
+        <button id="pc-weekly-adx" class="ind-btn" onclick="pc_toggleIndicator('weekly','adx')">ADX</button>
+        <button id="pc-weekly-macd" class="ind-btn" onclick="pc_toggleIndicator('weekly','macd')">MACD</button>
+        <button id="pc-weekly-vp" class="ind-btn advanced-only" onclick="pc_toggleIndicator('weekly','vp')">VOL PROFILE</button>
+      </div>
+      <div class="p-inds pc-indicator-row" id="pcDailyIndicatorRow" style="display:none;">
+        <button id="pc-daily-ema10" class="ind-btn" onclick="pc_toggleIndicator('daily','ema10')">EMA10</button>
+        <button id="pc-daily-ema20" class="ind-btn" onclick="pc_toggleIndicator('daily','ema20')">EMA20</button>
+        <button id="pc-daily-ema50" class="ind-btn" onclick="pc_toggleIndicator('daily','ema50')">EMA50</button>
+        <button id="pc-daily-ema200" class="ind-btn" onclick="pc_toggleIndicator('daily','ema200')">EMA200</button>
+        <button id="pc-daily-ichimoku" class="ind-btn" onclick="pc_toggleIndicator('daily','ichimoku')">ICHIMOKU</button>
+        <button id="pc-daily-rsi" class="ind-btn" onclick="pc_toggleIndicator('daily','rsi')">RSI</button>
+        <button id="pc-daily-adx" class="ind-btn" onclick="pc_toggleIndicator('daily','adx')">ADX</button>
+        <button id="pc-daily-macd" class="ind-btn" onclick="pc_toggleIndicator('daily','macd')">MACD</button>
+      </div>
       <div class="chart-body" style="position:relative;">
         <div id="realChart" style="position:absolute;inset:0;"></div>
         <div id="dailyMainChart" style="position:absolute;inset:0;display:none;"></div>
       </div>
+    </div>
+
+    <div class="pc-chart-subpanels" id="pcWeeklySubpanels">
+      <div class="p-sub pc-indicator-subpanel" id="pc-weekly-rsi-sub"><div class="p-sub-label" style="color:var(--ind-rsi)">RSI 14</div><div class="pc-subchart-canvas" id="pc-weekly-rsi-chart"></div></div>
+      <div class="p-sub pc-indicator-subpanel" id="pc-weekly-adx-sub"><div class="p-sub-label" style="color:var(--ind-adx)">ADX 14 + DI</div><div class="pc-subchart-canvas" id="pc-weekly-adx-chart"></div></div>
+      <div class="p-sub pc-indicator-subpanel" id="pc-weekly-macd-sub"><div class="p-sub-label" style="color:var(--ind-macd)">MACD</div><div class="pc-subchart-canvas" id="pc-weekly-macd-chart"></div></div>
+    </div>
+    <div class="pc-chart-subpanels" id="pcDailySubpanels" style="display:none;">
+      <div class="p-sub pc-indicator-subpanel" id="pc-daily-rsi-sub"><div class="p-sub-label" style="color:var(--ind-rsi)">RSI 14</div><div class="pc-subchart-canvas" id="pc-daily-rsi-chart"></div></div>
+      <div class="p-sub pc-indicator-subpanel" id="pc-daily-adx-sub"><div class="p-sub-label" style="color:var(--ind-adx)">ADX 14 + DI</div><div class="pc-subchart-canvas" id="pc-daily-adx-chart"></div></div>
+      <div class="p-sub pc-indicator-subpanel" id="pc-daily-macd-sub"><div class="p-sub-label" style="color:var(--ind-macd)">MACD</div><div class="pc-subchart-canvas" id="pc-daily-macd-chart"></div></div>
     </div>
 
     <div class="chart-block chart-block-sub" id="predictiveModelBlock">
@@ -291,13 +339,6 @@
         <button class="pc-inline-toggle" id="predictiveModelToggle" onclick="togglePredictiveModelChart()" title="Zbaliť alebo rozbaliť modelový chart">−</button>
       </div>
       <div class="chart-body"><div id="predChart"></div></div>
-    </div>
-
-    <div id="subpanelBlock" class="chart-block" style="display:none; flex: 0 0 160px;">
-      <div class="chart-header">
-        <span class="label" id="subpanelLabel">—</span>
-      </div>
-      <div class="chart-body"><div id="subpanelChart"></div></div>
     </div>
 
   </div>
@@ -314,6 +355,7 @@
     </div>
     <div class="card" id="companyCard" style="display:none;"></div>
     <div class="card" id="insightsCard" style="display:none;"></div>
+    <div class="card" id="institutionalCard" style="display:none;"></div>
     <div class="card" id="fundAnalysisCard" style="display:none;"></div>
     <div class="card" id="corpActionsCard" style="display:none;"></div>
     <div class="card" id="fairValueCard" style="display:none;"></div>
@@ -337,95 +379,6 @@
       <div id="weightsInfo" style="color:var(--muted); font-size:12px;">—</div>
     </div>
 
-    <div class="card">
-      <div class="card-title">Indikátory — overlay</div>
-      <div class="ind-controls">
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:#60a5fa;"></div>
-          <input type="checkbox" id="chk_ema10" onchange="pc_applyOverlays()">
-          <label for="chk_ema10">EMA 10</label>
-        </div>
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:#f59e0b;"></div>
-          <input type="checkbox" id="chk_ema20" onchange="pc_applyOverlays()">
-          <label for="chk_ema20">EMA 20</label>
-        </div>
-        <div class="ind-group-label" style="margin-top:6px;">Ichimoku</div>
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:#34d399;"></div>
-          <input type="checkbox" id="chk_tenkan" onchange="pc_applyOverlays()">
-          <label for="chk_tenkan">Tenkan (9)</label>
-        </div>
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:#f87171;"></div>
-          <input type="checkbox" id="chk_kijun" onchange="pc_applyOverlays()">
-          <label for="chk_kijun">Kijun (26)</label>
-        </div>
-        <div class="ind-check-row">
-          <div class="ind-dot" style="background:rgba(124,106,247,0.4); height:8px; border-radius:2px;"></div>
-          <input type="checkbox" id="chk_kumo" onchange="pc_applyOverlays()">
-          <label for="chk_kumo">Kumo cloud</label>
-        </div>
-        <div class="ind-group-label advanced-only" style="margin-top:6px;">Objem</div>
-        <div class="ind-check-row advanced-only">
-          <div class="ind-dot" style="background:rgba(96,165,250,0.45); height:8px; border-radius:2px;"></div>
-          <input type="checkbox" id="chk_vp" onchange="pc_toggleVolumeProfile(this)">
-          <label for="chk_vp">Volume Profile</label>
-        </div>
-        <div class="ind-group-label advanced-only" style="margin-top:6px;">Chart patterns</div>
-        <div class="ind-check-row advanced-only">
-          <div class="ind-dot" style="background:#f59e0b;"></div>
-          <input type="checkbox" id="chk_patterns" onchange="pc_toggleChartPatterns(this)">
-          <label for="chk_patterns">Pattern overlay</label>
-        </div>
-        <div class="ind-check-row advanced-only">
-          <div class="ind-dot" style="background:#22d3ee;"></div>
-          <input type="checkbox" id="chk_patterns_bullish" onchange="pc_togglePatternFilter('bullish', this.checked)">
-          <label for="chk_patterns_bullish">Bullish</label>
-        </div>
-        <div class="ind-check-row advanced-only">
-          <div class="ind-dot" style="background:#c084fc;"></div>
-          <input type="checkbox" id="chk_patterns_bearish" onchange="pc_togglePatternFilter('bearish', this.checked)">
-          <label for="chk_patterns_bearish">Bearish</label>
-        </div>
-        <div class="ind-check-row advanced-only">
-          <div class="ind-dot" style="background:#fbbf24;"></div>
-          <input type="checkbox" id="chk_patterns_neutral" onchange="pc_togglePatternFilter('neutral', this.checked)">
-          <label for="chk_patterns_neutral">Range</label>
-        </div>
-      </div>
-    </div>
-
-    <div class="card advanced-only" id="chartPatternCard">
-      <div class="card-title">Chart Pattern <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:10px;">vizuálna pomôcka</span></div>
-      <div id="chartPatternInfo" style="color:var(--muted); font-size:12px;">Zapni Pattern overlay.</div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Subpanel oscilátora</div>
-      <div class="ind-controls">
-        <div class="sub-radio-row">
-          <input type="radio" name="subpanel" id="sub_none" value="none" checked onchange="applySubpanel()">
-          <label for="sub_none">Vypnutý</label>
-        </div>
-        <div class="sub-radio-row">
-          <input type="radio" name="subpanel" id="sub_rsi" value="rsi" onchange="applySubpanel()">
-          <label for="sub_rsi">RSI 14</label>
-        </div>
-        <div class="sub-radio-row">
-          <input type="radio" name="subpanel" id="sub_macd" value="macd" onchange="applySubpanel()">
-          <label for="sub_macd">MACD</label>
-        </div>
-        <div class="sub-radio-row">
-          <input type="radio" name="subpanel" id="sub_stoch" value="stoch" onchange="applySubpanel()">
-          <label for="sub_stoch">Stoch RSI</label>
-        </div>
-        <div class="sub-radio-row">
-          <input type="radio" name="subpanel" id="sub_adx" value="adx" onchange="applySubpanel()">
-          <label for="sub_adx">ADX + DI</label>
-        </div>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -482,7 +435,14 @@
         <input id="set-risk-per-trade" type="number" min="0.1" max="10" step="0.1"></label>
       <label>Stop = <span class="settings-unit">× ATR14</span>
         <input id="set-atr-stop-mult" type="number" min="0.5" max="5" step="0.1"></label>
+      <label>Cieľová váha — pomer CORE
+        <input id="set-class-ratio-core" type="number" min="0" max="20" step="0.5"></label>
+      <label>Cieľová váha — pomer STANDARD
+        <input id="set-class-ratio-standard" type="number" min="0" max="20" step="0.5"></label>
+      <label>Cieľová váha — pomer SPECULATIVE
+        <input id="set-class-ratio-speculative" type="number" min="0" max="20" step="0.5"></label>
     </div>
+    <div class="settings-note">Pomer tried (napr. 4:2:1) sa normalizuje na 100 % cez zaradené pozície v karte Dobudovanie — takto sa cieľ prepočíta sám pri každej novej pozícii, bez ručného vypĺňania 56 čísel.</div>
     <div class="settings-note">Prahy platia pre DCA kartu, Investor Inbox aj filter Pozornosť — server ich drží na jednom mieste, zmena nevyžaduje redeploy.</div>
     <div class="modal-btns">
       <button class="btn" onclick="resetSettingsModal()" title="Vráti predvolené hodnoty do formulára (uloží až Ulož)">Predvolené</button>
@@ -541,17 +501,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260805-191833"></script>
-  <script src="/js/live.js?v=20260805-191833"></script>
-  <script src="/js/portfolio.js?v=20260805-191833"></script>
-  <script src="/js/watchlist.js?v=20260805-191833"></script>
-  <script src="/js/scanner-table-sort.js?v=20260805-191833"></script>
-  <script src="/js/scanner.js?v=20260805-191833"></script>
-  <script src="/js/chart_patterns.js?v=20260805-191833"></script>
-  <script src="/js/predictive.js?v=20260805-191833"></script>
-  <script src="/js/verdict.js?v=20260805-191833"></script>
-  <script src="/js/home.js?v=20260805-191833"></script>
-  <script src="/js/charts.js?v=20260805-191833"></script>
-  <script src="/js/main.js?v=20260805-191833"></script>
+  <script src="/js/core.js?v=20260813-172938"></script>
+  <script src="/js/live.js?v=20260813-172938"></script>
+  <script src="/js/portfolio.js?v=20260813-172938"></script>
+  <script src="/js/watchlist.js?v=20260813-172938"></script>
+  <script src="/js/scanner-table-sort.js?v=20260813-172938"></script>
+  <script src="/js/scanner.js?v=20260813-172938"></script>
+  <script src="/js/predictive.js?v=20260813-172938"></script>
+  <script src="/js/verdict.js?v=20260813-172938"></script>
+  <script src="/js/home.js?v=20260813-172938"></script>
+  <script src="/js/charts.js?v=20260813-172938"></script>
+  <script src="/js/main.js?v=20260813-172938"></script>
 </body>
 </html>

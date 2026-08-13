@@ -450,15 +450,38 @@ let pc_scannerLoading = false;
 let pc_signalSegmentHorizon = 90;
 
 // Overlay series refs
-let pc_oEma10 = null, pc_oEma20 = null, pc_oTenkan = null, pc_oKijun = null;
+let pc_oEma10 = null, pc_oEma20 = null, pc_oEma50 = null, pc_oEma200 = null;
+let pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc__kumoAreaSeries = [];
 // Subpanel
-let pc_subChartInst = null;
-let pc_subRO = null;   // ResizeObserver pre subpanel — treba disconnect() pri clearSubpanel, inak sa hromadia
-let pc_realRangeHandler = null;      // subscribeVisibleLogicalRangeChange handler na pc_realChartInst (persistentný chart)
-let pc_realCrosshairHandler = null;  // subscribeCrosshairMove handler na pc_realChartInst
-let pc_currentSubpanel = 'none';
+const PC_INDICATOR_KEYS = ['ema10', 'ema20', 'ema50', 'ema200', 'ichimoku', 'rsi', 'adx', 'macd'];
+const PC_SUBPANEL_KEYS = ['rsi', 'adx', 'macd'];
+const PC_WEEKLY_INDICATORS_KEY = 'pc_weekly_indicators';
+const PC_DAILY_INDICATORS_KEY = 'pc_daily_indicators';
+
+function pc_loadIndicatorState(key, defaults) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || '{}');
+    return { ...defaults, ...Object.fromEntries(Object.entries(saved).map(([k, v]) => [k, !!v])) };
+  } catch (e) {
+    return { ...defaults };
+  }
+}
+
+let pc_weeklyIndicators = pc_loadIndicatorState(PC_WEEKLY_INDICATORS_KEY, {
+  ema10:false, ema20:false, ema50:false, ema200:false, ichimoku:false,
+  rsi:false, adx:false, macd:false,
+  vp:isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1',
+});
+let pc_dailyIndicators = pc_loadIndicatorState(PC_DAILY_INDICATORS_KEY, {
+  ema10:false, ema20:true, ema50:false, ema200:false, ichimoku:true,
+  rsi:false, adx:false, macd:false,
+});
+const pc_subpanels = {
+  weekly: { syncing:false, rsi:null, adx:null, macd:null },
+  daily: { syncing:false, rsi:null, adx:null, macd:null },
+};
 
 function getPcChartOpts() {
   const t = (typeof getChartTheme === 'function') ? getChartTheme() : {
@@ -570,8 +593,7 @@ let pc_vpPrimitive = null;
 // Advanced ju obnoví pri najbližšom načítaní stránky (tieto flagy sa
 // vyhodnocujú raz, pri načítaní modulu). isAdvancedUiMode() je deklarácia
 // funkcie v core.js, ktorý sa načíta skôr, takže volanie je bezpečné.
-let pc_vpEnabled = isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1';
-let pc_patternsEnabled = isAdvancedUiMode() && localStorage.getItem('pc_patterns_enabled') === '1';
+let pc_vpEnabled = isAdvancedUiMode() && pc_weeklyIndicators.vp;
 const PC_VP_BINS = 40;
 
 class VolumeProfilePrimitive {
@@ -665,66 +687,12 @@ function pc_refreshVolumeProfile() {
   if (pc_vpPrimitive) pc_vpPrimitive.requestUpdate();
 }
 
-function pc_toggleVolumeProfile(el) {
-  pc_vpEnabled = !!el.checked;
-  localStorage.setItem('pc_vp_enabled', pc_vpEnabled ? '1' : '0');
-  pc_applyVolumeProfile();
-}
-
-function pc_applyChartPatterns() {
-  if (typeof applyChartPatternOverlay !== 'function' || !pc_lastData) return;
-  if (pc_currentView === 'daily') {
-    applyChartPatternOverlay({
-      chart: pc_dailyMainInst,
-      series: pc_dailyMainSeries,
-      candles: pc_lastData.daily_candles || [],
-      timeframe: 'daily',
-      enabled: pc_patternsEnabled,
-      daily: true,
-    });
-  } else {
-    applyChartPatternOverlay({
-      chart: pc_realChartInst,
-      series: pc_realSeries,
-      candles: pc_lastData.candles || [],
-      timeframe: 'weekly',
-      enabled: pc_patternsEnabled,
-      daily: false,
-    });
-  }
-}
-
-function pc_toggleChartPatterns(el) {
-  pc_patternsEnabled = !!el.checked;
-  localStorage.setItem('pc_patterns_enabled', pc_patternsEnabled ? '1' : '0');
-  pc_applyChartPatterns();
-}
-
-function pc_syncPatternFilterControls() {
-  if (typeof getChartPatternFilters !== 'function') return;
-  const filters = getChartPatternFilters();
-  const bull = document.getElementById('chk_patterns_bullish');
-  const bear = document.getElementById('chk_patterns_bearish');
-  const neutral = document.getElementById('chk_patterns_neutral');
-  if (bull) bull.checked = filters.bullish !== false;
-  if (bear) bear.checked = filters.bearish !== false;
-  if (neutral) neutral.checked = filters.neutral !== false;
-}
-
-function pc_togglePatternFilter(kind, enabled) {
-  if (typeof setChartPatternFilter !== 'function') return;
-  setChartPatternFilter(kind, enabled);
-  pc_syncPatternFilterControls();
-  pc_applyChartPatterns();
-}
-
 function initCharts() {
   removeKumoCanvas();
-  if (typeof clearChartPatternOverlays === 'function') clearChartPatternOverlays();
   pc__kumoPrimitive = null; // starý chart sa odstraňuje celý, detach netreba
   pc__kumoAreaSeries = [];
-  clearSubpanel();
-  pc_oEma10 = pc_oEma20 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
+  pc_clearAllSubpanels();
+  pc_oEma10 = pc_oEma20 = pc_oEma50 = pc_oEma200 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
   if (pc_realChartInst) { pc_realChartInst.remove(); }
   if (pc_predChartInst) { pc_predChartInst.remove(); }
 
@@ -746,11 +714,7 @@ function initCharts() {
   // Volume Profile — starý primitive zomrel s odstráneným chartom
   pc_vpPrimitive = null;
   pc_applyVolumeProfile();
-  const vpChk = document.getElementById('chk_vp');
-  if (vpChk) vpChk.checked = pc_vpEnabled;
-  const patternChk = document.getElementById('chk_patterns');
-  if (patternChk) patternChk.checked = pc_patternsEnabled;
-  pc_syncPatternFilterControls();
+  pc_syncIndicatorButtons();
 
   // BOTTOM: backtest candles + actual close line + future prediction candle
   pc_predChartInst = pc_makeChart('predChart');
@@ -996,7 +960,6 @@ function renderCharts(data) {
   }
   pc_applyAnalystTargetLine();
   pc_applyEntryPriceLine();
-  if (pc_currentView === 'weekly') pc_applyChartPatterns();
 
   // BOTTOM: actual close line — full candles so pred chart has same x-axis extent
   pc_btActualLine.setData(candles.map(c => ({ time: c.time, value: c.close })));
@@ -1667,6 +1630,7 @@ function pc_renderSidebar(data) {
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
+  pc_loadInstitutional(data.ticker);
   pc_prepareFundAnalysisCard(data.ticker);
   pc_prepareCorpActionsCard(data.ticker);
   pc_prepareFairValueCard(data.ticker);
@@ -1999,16 +1963,21 @@ function detachKumoPrimitive() {
   pc__kumoPrimitive = null;
 }
 
-function attachKumoPlugin(chart, saData, sbData) {
-  detachKumoPrimitive();
-  if (!pc_realSeries || typeof pc_realSeries.attachPrimitive !== 'function') return;
+function createKumoPlugin(chart, series, saData, sbData) {
+  if (!series || typeof series.attachPrimitive !== 'function') return;
   const sbMap = new Map(sbData.map(d => [d.time, d.value]));
   const pts = saData
     .filter(p => Number.isFinite(p.value) && Number.isFinite(sbMap.get(p.time)))
     .map(p => ({ time: p.time, sa: p.value, sb: sbMap.get(p.time) }));
   if (pts.length < 2) return;
-  pc__kumoPrimitive = new KumoCloudPrimitive(chart, pc_realSeries, pts);
-  pc_realSeries.attachPrimitive(pc__kumoPrimitive);
+  const primitive = new KumoCloudPrimitive(chart, series, pts);
+  series.attachPrimitive(primitive);
+  return primitive;
+}
+
+function attachKumoPlugin(chart, series, saData, sbData) {
+  detachKumoPrimitive();
+  pc__kumoPrimitive = createKumoPlugin(chart, series, saData, sbData) || null;
 }
 
 function clearOverlays() {
@@ -2016,73 +1985,56 @@ function clearOverlays() {
   detachKumoPrimitive();
   pc__kumoAreaSeries.forEach(s => { try { pc_realChartInst.removeSeries(s); } catch(e) {} });
   pc__kumoAreaSeries = [];
-  [pc_oEma10, pc_oEma20, pc_oTenkan, pc_oKijun, pc_oKumoA, pc_oKumoB].forEach(s => {
+  [pc_oEma10, pc_oEma20, pc_oEma50, pc_oEma200, pc_oTenkan, pc_oKijun, pc_oKumoA, pc_oKumoB].forEach(s => {
     if (s) { try { pc_realChartInst.removeSeries(s); } catch(e) {} }
   });
-  pc_oEma10 = pc_oEma20 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
+  pc_oEma10 = pc_oEma20 = pc_oEma50 = pc_oEma200 = pc_oTenkan = pc_oKijun = pc_oKumoA = pc_oKumoB = null;
 }
 
 function pc_applyOverlays() {
   if (!pc_lastData || !pc_lastData.indicators) return;
-  // Rovnaký nesúlad zdrojov ako v buildSubpanel (eToro sviečky vs yfinance
+  // Rovnaký nesúlad zdrojov ako v subpaneloch (eToro sviečky vs yfinance
   // indikátory) — orež overlaye na rozsah sviečok, nech nerozťahujú os.
-  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: Senkou A/B sú zámerne posunuté dopredu,
-  // takže mrak pred poslednou sviečkou je funkcia, nie chyba.
+  // ichi_sa/ichi_sb sa NEOREZÁVAJÚ: backend k historickým posunutým hodnotám
+  // pridáva 26 reálnych budúcich bodov, takže mrak pokračuje za poslednú sviečku.
   const candles = pc_lastData.candles;
   const rawInd = pc_lastData.indicators;
   const ind = { ...rawInd };
-  for (const key of ['ema10', 'ema20', 'ichi_tenkan', 'ichi_kijun']) {
+  for (const key of ['ema10', 'ema20', 'ema50', 'ema200', 'ichi_tenkan', 'ichi_kijun']) {
     if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
   }
   clearOverlays();
 
-  if (document.getElementById('chk_ema10').checked) {
+  if (pc_weeklyIndicators.ema10) {
     pc_oEma10 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA10' });
     pc_oEma10.setData(ind.ema10);
   }
-  if (document.getElementById('chk_ema20').checked) {
+  if (pc_weeklyIndicators.ema20) {
     pc_oEma20 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
     pc_oEma20.setData(ind.ema20);
   }
-  if (document.getElementById('chk_tenkan').checked) {
+  if (pc_weeklyIndicators.ema50) {
+    pc_oEma50 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#4a9eff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA50' });
+    pc_oEma50.setData(ind.ema50);
+  }
+  if (pc_weeklyIndicators.ema200) {
+    pc_oEma200 = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#ff8c42', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA200' });
+    pc_oEma200.setData(ind.ema200);
+  }
+  if (pc_weeklyIndicators.ichimoku) {
     pc_oTenkan = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#34d399', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Tenkan' });
     pc_oTenkan.setData(ind.ichi_tenkan);
-  }
-  if (document.getElementById('chk_kijun').checked) {
     pc_oKijun = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f87171', lineWidth: 1, lineStyle: 0, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
     pc_oKijun.setData(ind.ichi_kijun);
-  }
-  if (document.getElementById('chk_kumo').checked) {
-    // Senkou A and B as lines
     pc_oKumoA = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(52,211,153,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou A' });
     pc_oKumoA.setData(ind.ichi_sa);
     pc_oKumoB = pc_realChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(248,113,113,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Senkou B' });
     pc_oKumoB.setData(ind.ichi_sb);
-    // Draw filled cloud via custom canvas plugin on pc_realChartInst
-    attachKumoPlugin(pc_realChartInst, ind.ichi_sa, ind.ichi_sb);
+    attachKumoPlugin(pc_realChartInst, pc_realSeries, ind.ichi_sa, ind.ichi_sb);
   }
-}
-
-function clearSubpanel() {
-  if (pc_subRO) { try { pc_subRO.disconnect(); } catch(e) {} pc_subRO = null; }
-  if (pc_realRangeHandler) {
-    try { pc_realChartInst?.timeScale().unsubscribeVisibleLogicalRangeChange(pc_realRangeHandler); } catch(e) {}
-    pc_realRangeHandler = null;
-  }
-  if (pc_realCrosshairHandler) {
-    try { pc_realChartInst?.unsubscribeCrosshairMove(pc_realCrosshairHandler); } catch(e) {}
-    pc_realCrosshairHandler = null;
-  }
-  if (pc_subChartInst) { try { pc_subChartInst.remove(); } catch(e) {} pc_subChartInst = null; }
-  const _sb = document.getElementById('subpanelBlock'); if (_sb) _sb.style.display = 'none';
-}
-
-function applySubpanel() {
-  const val = document.querySelector('input[name="subpanel"]:checked')?.value || 'none';
-  pc_currentSubpanel = val;
-  clearSubpanel();
-  if (val === 'none' || !pc_lastData || !pc_lastData.indicators) return;
-  buildSubpanel(val, pc_lastData.indicators, pc_lastData.candles);
+  pc_vpEnabled = !!pc_weeklyIndicators.vp && isAdvancedUiMode();
+  pc_applyVolumeProfile();
+  pc_renderSubpanels('weekly', ind, candles, pc_realChartInst);
 }
 
 // Indikátory a vykresľované sviečky pochádzajú z RÔZNYCH zdrojov: `/api/chart`
@@ -2104,124 +2056,183 @@ function pc_clipToCandles(series, candles) {
   return series.filter(p => p && p.time >= first && p.time <= last);
 }
 
-function buildSubpanel(type, ind, candles) {
-  // Orež všetky indikátorové rady naraz — nižšie sa už pracuje len s `ind`.
-  const clipKeys = ['rsi', 'macd', 'macd_sig', 'macd_hist', 'stoch_k', 'stoch_d',
-                    'adx', 'di_plus', 'di_minus'];
-  ind = { ...ind };
-  for (const key of clipKeys) {
-    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], candles);
+// Subpanely musia mať presne rovnakú logickú časovú os ako broker sviečky.
+// Weekly zdroje môžu ten istý týždeň označiť dátumom posunutým o deň; samotné
+// orezanie rozsahu by preto do LWC pridalo ďalší time slot a osi by sa rozišli.
+function pc_alignSeriesToCandles(series, candles) {
+  if (!Array.isArray(series) || !series.length || !Array.isArray(candles) || !candles.length) return [];
+  const candleTimes = candles.map(c => Number(c.time)).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!candleTimes.length) return [];
+  const gaps = candleTimes.slice(1).map((t, i) => t - candleTimes[i]).filter(g => g > 0).sort((a, b) => a - b);
+  const spacing = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 86400;
+  const tolerance = Math.max(2 * 86400, spacing * 0.45);
+  const mapped = new Map();
+  for (const point of series) {
+    const time = Number(point?.time);
+    if (!Number.isFinite(time) || !Number.isFinite(Number(point?.value))) continue;
+    let lo = 0, hi = candleTimes.length - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (candleTimes[mid] < time) lo = mid + 1; else hi = mid;
+    }
+    const candidates = [candleTimes[lo], candleTimes[Math.max(0, lo - 1)]].filter(Number.isFinite);
+    const target = candidates.reduce((best, t) => Math.abs(t - time) < Math.abs(best - time) ? t : best, candidates[0]);
+    if (Math.abs(target - time) <= tolerance) mapped.set(target, { ...point, time:target });
   }
-  const block = document.getElementById('subpanelBlock');
-  block.style.display = 'flex';
-  const label = document.getElementById('subpanelLabel');
-  const el = document.getElementById('subpanelChart');
+  return candleTimes.filter(time => mapped.has(time)).map(time => mapped.get(time));
+}
 
-  const _t = getChartTheme();
-  const opts = {
-    ...getPcChartOpts(),
-    width: el.offsetWidth, height: el.offsetHeight,
-    rightPriceScale: { borderColor: _t.border, minimumWidth: (typeof CHART_RIGHT_SCALE_WIDTH !== 'undefined' ? CHART_RIGHT_SCALE_WIDTH : 64), scaleMargins: { top: 0.1, bottom: 0.1 } },
-    timeScale: { borderColor: _t.border, timeVisible: false },
-  };
-  pc_subChartInst = LightweightCharts.createChart(el, opts);
-  pc_subRO = new ResizeObserver(() => {
-    if (pc_subChartInst) pc_subChartInst.applyOptions({ width: el.offsetWidth, height: el.offsetHeight });
-  });
-  pc_subRO.observe(el);
-  const anchor = pc_subChartInst.addSeries(LightweightCharts.LineSeries, {
-    color: 'rgba(0,0,0,0)',
-    lineWidth: 0,
-    priceLineVisible: false,
-    lastValueVisible: false,
-    crosshairMarkerVisible: false,
-  });
-  anchor.setData((candles || []).map(d => ({ time: d.time })));
-
-  if (type === 'rsi') {
-    label.textContent = 'RSI 14';
-    const s = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'RSI' });
-    s.setData(ind.rsi);
-    // overbought/oversold lines
-    const times = ind.rsi.map(d => d.time);
-    [[70,CHART_COLORS.down],[30,CHART_COLORS.up]].forEach(([lvl, color]) => {
-      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-      ref.setData(times.map(t => ({ time: t, value: lvl })));
-    });
-    pc_subChartInst.priceScale('right').applyOptions({ autoScale: false, minValue: 0, maxValue: 100 });
-
-  } else if (type === 'macd') {
-    label.textContent = 'MACD';
-    const macdLine = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'MACD' });
-    macdLine.setData(ind.macd);
-    const sigLine = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'Signal' });
-    sigLine.setData(ind.macd_sig);
-    const hist = pc_subChartInst.addSeries(LightweightCharts.HistogramSeries, {
-      priceLineVisible: false, lastValueVisible: false,
-      color: CHART_COLORS.up,
-    });
-    hist.setData(ind.macd_hist.map(d => ({ time: d.time, value: d.value, color: d.value >= 0 ? CHART_COLORS.up : CHART_COLORS.down })));
-
-  } else if (type === 'stoch') {
-    label.textContent = 'Stochastic RSI';
-    const k = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#60a5fa', lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: '%K' });
-    k.setData(ind.stoch_k);
-    const d = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, title: '%D' });
-    d.setData(ind.stoch_d);
-    const times = ind.stoch_k.map(p => p.time);
-    [[80,CHART_COLORS.down],[20,CHART_COLORS.up]].forEach(([lvl, color]) => {
-      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-      ref.setData(times.map(t => ({ time: t, value: lvl })));
-    });
-    pc_subChartInst.priceScale('right').applyOptions({ autoScale: false, minValue: 0, maxValue: 100 });
-
-  } else if (type === 'adx') {
-    label.textContent = 'ADX + DI';
-    const adx = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'ADX' });
-    adx.setData(ind.adx);
-    const dip = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: CHART_COLORS.up, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI+' });
-    dip.setData(ind.di_plus);
-    const dim = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: CHART_COLORS.down, lineWidth: 1, priceLineVisible: false, lastValueVisible: true, title: 'DI-' });
-    dim.setData(ind.di_minus);
-    // ADX 25 reference
-    if (ind.adx.length) {
-      const ref = pc_subChartInst.addSeries(LightweightCharts.LineSeries, { color: 'rgba(255,255,255,0.15)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
-      ref.setData(ind.adx.map(d => ({ time: d.time, value: 25 })));
+function pc_syncIndicatorButtons() {
+  for (const view of ['weekly', 'daily']) {
+    const state = view === 'weekly' ? pc_weeklyIndicators : pc_dailyIndicators;
+    const keys = view === 'weekly' ? [...PC_INDICATOR_KEYS, 'vp'] : PC_INDICATOR_KEYS;
+    for (const key of keys) {
+      const btn = document.getElementById(`pc-${view}-${key}`);
+      if (!btn) continue;
+      const activeClass = key.startsWith('ema') || key === 'vp' ? 'active-ema'
+        : key === 'ichimoku' ? 'active-ichimoku' : `active-${key}`;
+      btn.classList.toggle(activeClass, !!state[key]);
+      btn.setAttribute('aria-pressed', state[key] ? 'true' : 'false');
     }
   }
+  const weekly = pc_currentView === 'weekly';
+  const weeklyRow = document.getElementById('pcWeeklyIndicatorRow');
+  const dailyRow = document.getElementById('pcDailyIndicatorRow');
+  const weeklySubs = document.getElementById('pcWeeklySubpanels');
+  const dailySubs = document.getElementById('pcDailySubpanels');
+  if (weeklyRow) weeklyRow.style.display = weekly ? 'flex' : 'none';
+  if (dailyRow) dailyRow.style.display = weekly ? 'none' : 'flex';
+  if (weeklySubs) weeklySubs.style.display = weekly ? '' : 'none';
+  if (dailySubs) dailySubs.style.display = weekly ? 'none' : '';
+}
 
-  // Sync subpanel timeScale with real chart. pc_realChartInst pretrváva medzi
-  // subpanel prepnutiami (RSI->MACD->...) — bez uloženia referencie a
-  // unsubscribe v clearSubpanel by sa handlery hromadili (každý ďalší by
-  // volal setVisibleLogicalRange navyše, redundantne, pri každom pane/zoome).
-  let subSyncing = false;
-  pc_realRangeHandler = range => {
-    if (subSyncing || !range || !pc_subChartInst) return;
-    subSyncing = true;
-    pc_subChartInst.timeScale().setVisibleLogicalRange(range);
-    subSyncing = false;
-  };
-  pc_realChartInst.timeScale().subscribeVisibleLogicalRangeChange(pc_realRangeHandler);
-  pc_subChartInst.timeScale().subscribeVisibleLogicalRangeChange(range => {
-    if (subSyncing || !range) return;
-    subSyncing = true;
-    pc_realChartInst.timeScale().setVisibleLogicalRange(range);
-    subSyncing = false;
+function pc_toggleIndicator(view, key) {
+  if (!['weekly', 'daily'].includes(view)) return;
+  if (!PC_INDICATOR_KEYS.includes(key) && !(view === 'weekly' && key === 'vp')) return;
+  const state = view === 'weekly' ? pc_weeklyIndicators : pc_dailyIndicators;
+  state[key] = !state[key];
+  localStorage.setItem(view === 'weekly' ? PC_WEEKLY_INDICATORS_KEY : PC_DAILY_INDICATORS_KEY, JSON.stringify(state));
+  if (view === 'weekly' && key === 'vp') {
+    pc_vpEnabled = state.vp && isAdvancedUiMode();
+    localStorage.setItem('pc_vp_enabled', state.vp ? '1' : '0');
+  }
+  pc_syncIndicatorButtons();
+  if (!pc_lastData) {
+    if (view === 'weekly' && key === 'vp') pc_applyVolumeProfile();
+    return;
+  }
+  if (view === 'weekly') pc_applyOverlays();
+  else if (pc_currentView === 'daily') renderDailyMain(pc_lastData);
+}
+
+function pc_clearSubpanel(view, type) {
+  const manager = pc_subpanels[view], entry = manager?.[type];
+  if (entry) {
+    try { entry.ro?.disconnect(); } catch (e) {}
+    try { entry.mainChart?.timeScale().unsubscribeVisibleLogicalRangeChange(entry.mainRangeHandler); } catch (e) {}
+    try { entry.chart?.timeScale().unsubscribeVisibleLogicalRangeChange(entry.subRangeHandler); } catch (e) {}
+    try { entry.mainChart?.unsubscribeCrosshairMove(entry.mainCrosshairHandler); } catch (e) {}
+    try { entry.chart?.remove(); } catch (e) {}
+    manager[type] = null;
+  }
+  document.getElementById(`pc-${view}-${type}-sub`)?.classList.remove('active');
+}
+
+function pc_clearAllSubpanels(view = null) {
+  for (const target of (view ? [view] : ['weekly', 'daily']))
+    for (const type of PC_SUBPANEL_KEYS) pc_clearSubpanel(target, type);
+}
+
+// Subpanel anchor musí pokryť CELÚ doménu hlavného grafu, nielen sviečky —
+// keď je zapnutý Ichimoku, Senkou A/B na hlavnom grafe pokračujú 26 periód
+// do budúcnosti (viď _ichimoku_future_points), takže hlavný graf má širší
+// bar-index rozsah než čisté sviečky. Bez tohto by sync po zapnutí Ichimoku
+// požadoval rozsah mimo domény subpanelu a LWC by ho odmietol/skrátil.
+function pc_subpanelAnchorPoints(candles, ind, includeIchimoku) {
+  const times = new Set((candles || []).map(d => d.time));
+  if (includeIchimoku) {
+    for (const key of ['ichi_sa', 'ichi_sb']) {
+      for (const p of (ind?.[key] || [])) if (p && Number.isFinite(p.time)) times.add(p.time);
+    }
+  }
+  return Array.from(times).sort((a, b) => a - b).map(time => ({ time, value: 0 }));
+}
+
+function pc_buildSubpanel(view, type, ind, candles, mainChart) {
+  const manager = pc_subpanels[view];
+  const block = document.getElementById(`pc-${view}-${type}-sub`);
+  const el = document.getElementById(`pc-${view}-${type}-chart`);
+  if (!manager || !block || !el || !mainChart) return;
+  block.classList.add('active');
+  const theme = getChartTheme();
+  const chart = LightweightCharts.createChart(el, {
+    ...getPcChartOpts(), width:Math.max(1, el.offsetWidth), height:Math.max(1, el.offsetHeight),
+    rightPriceScale:{ borderColor:theme.border, minimumWidth:(typeof CHART_RIGHT_SCALE_WIDTH !== 'undefined' ? CHART_RIGHT_SCALE_WIDTH : 64), scaleMargins:{top:0.1,bottom:0.1} },
   });
-  // Sync crosshair
-  pc_realCrosshairHandler = param => {
-    if (!param.time || !pc_subChartInst) return;
-    const firstSeries = pc_subChartInst.getSeries ? pc_subChartInst.getSeries()[0] : null;
-    if (firstSeries) pc_subChartInst.setCrosshairPosition(0, param.time, firstSeries);
-  };
-  pc_realChartInst.subscribeCrosshairMove(pc_realCrosshairHandler);
+  const entry = { chart, mainChart };
+  manager[type] = entry;
+  entry.ro = new ResizeObserver(() => chart.applyOptions({width:Math.max(1,el.offsetWidth),height:Math.max(1,el.offsetHeight)}));
+  entry.ro.observe(el);
+  entry.anchor = chart.addSeries(LightweightCharts.LineSeries, {
+    color:'rgba(0,0,0,0)',lineWidth:0,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+    priceScaleId:'pc_anchor_scale',
+  });
+  const ichimokuOn = (view === 'weekly' ? pc_weeklyIndicators : pc_dailyIndicators).ichimoku;
+  entry.anchor.setData(pc_subpanelAnchorPoints(candles, ind, ichimokuOn));
 
-  requestAnimationFrame(() => {
-    const range = pc_realChartInst.timeScale().getVisibleLogicalRange();
-    if (range && pc_subChartInst) pc_subChartInst.timeScale().setVisibleLogicalRange(range);
+  if (type === 'rsi') {
+    const line=chart.addSeries(LightweightCharts.LineSeries,{color:'#a78bfa',lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'RSI'});
+    const data=ind.rsi || []; line.setData(data);
+    for (const [level,color] of [[70,CHART_COLORS.down],[30,CHART_COLORS.up]]) {
+      const ref=chart.addSeries(LightweightCharts.LineSeries,{color,lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false});
+      ref.setData(data.map(d=>({time:d.time,value:level})));
+    }
+  } else if (type === 'adx') {
+    const adx=chart.addSeries(LightweightCharts.LineSeries,{color:'#f59e0b',lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:'ADX'});
+    const dip=chart.addSeries(LightweightCharts.LineSeries,{color:CHART_COLORS.up,lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'DI+'});
+    const dim=chart.addSeries(LightweightCharts.LineSeries,{color:CHART_COLORS.down,lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'DI-'});
+    adx.setData(ind.adx||[]); dip.setData(ind.di_plus||[]); dim.setData(ind.di_minus||[]);
+    const ref=chart.addSeries(LightweightCharts.LineSeries,{color:'rgba(255,255,255,0.15)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false});
+    ref.setData((ind.adx||[]).map(d=>({time:d.time,value:25})));
+  } else if (type === 'macd') {
+    const macd=chart.addSeries(LightweightCharts.LineSeries,{color:'#60a5fa',lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'MACD'});
+    const signal=chart.addSeries(LightweightCharts.LineSeries,{color:'#f59e0b',lineWidth:1,priceLineVisible:false,lastValueVisible:true,title:'Signal'});
+    const hist=chart.addSeries(LightweightCharts.HistogramSeries,{priceLineVisible:false,lastValueVisible:false,color:CHART_COLORS.up});
+    macd.setData(ind.macd||[]); signal.setData(ind.macd_sig||[]);
+    hist.setData((ind.macd_hist||[]).map(d=>({time:d.time,value:d.value,color:d.value>=0?CHART_COLORS.up:CHART_COLORS.down})));
+  }
+
+  entry.mainRangeHandler=range=>{
+    if(manager.syncing||!range||manager[type]!==entry)return;
+    manager.syncing=true; try{chart.timeScale().setVisibleLogicalRange(range);}finally{manager.syncing=false;}
+  };
+  entry.subRangeHandler=range=>{
+    if(manager.syncing||!range||manager[type]!==entry)return;
+    manager.syncing=true; try{mainChart.timeScale().setVisibleLogicalRange(range);}finally{manager.syncing=false;}
+  };
+  entry.mainCrosshairHandler=param=>{
+    if(!param.time||manager[type]!==entry)return;
+    try{chart.setCrosshairPosition(0,param.time,entry.anchor);}catch(e){}
+  };
+  mainChart.timeScale().subscribeVisibleLogicalRangeChange(entry.mainRangeHandler);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(entry.subRangeHandler);
+  mainChart.subscribeCrosshairMove(entry.mainCrosshairHandler);
+  requestAnimationFrame(()=>{
+    const range=mainChart.timeScale().getVisibleLogicalRange();
+    if(range&&manager[type]===entry)chart.timeScale().setVisibleLogicalRange(range);
   });
 }
 
+function pc_renderSubpanels(view, rawInd, candles, mainChart) {
+  const state=view==='weekly'?pc_weeklyIndicators:pc_dailyIndicators;
+  const ind={...(rawInd||{})};
+  for(const key of ['rsi','macd','macd_sig','macd_hist','adx','di_plus','di_minus'])
+    if(Array.isArray(ind[key]))ind[key]=pc_alignSeriesToCandles(ind[key],candles);
+  for(const type of PC_SUBPANEL_KEYS){
+    pc_clearSubpanel(view,type);
+    if(state[type])pc_buildSubpanel(view,type,ind,candles,mainChart);
+  }
+}
 function switchView(view) {
   pc_currentView = view;
   document.getElementById('realChart').style.display       = view === 'weekly' ? '' : 'none';
@@ -2232,11 +2243,11 @@ function switchView(view) {
   if (markerControls) markerControls.style.display = view === 'daily' ? 'flex' : 'none';
   const haControls = document.getElementById('dailyHaControls');
   if (haControls) haControls.style.display = view === 'daily' ? 'flex' : 'none';
+  pc_syncIndicatorButtons();
   document.getElementById('mainChartLabel').textContent = view === 'weekly' ? 'Weekly chart' : 'Daily chart — buy signály';
   if (view === 'daily' && pc_lastData) renderDailyMain(pc_lastData);
   else pc_applyMainChartMarkers();
   pc_applyOverlays();
-  pc_applyChartPatterns();
 }
 
 let pc_dailyMarkerMode = localStorage.getItem('pc_daily_marker_mode') === 'return' ? 'return' : 'strength';
@@ -2319,6 +2330,7 @@ function renderDailyMain(data) {
   const previousRange = pc_dailyMainInst && pc_dailyMainTicker === ticker
     ? pc_dailyMainInst.timeScale().getVisibleLogicalRange()
     : null;
+  pc_clearAllSubpanels('daily');
   if (pc_dailyMainRO) { try { pc_dailyMainRO.disconnect(); } catch(e) {} pc_dailyMainRO = null; }
   if (pc_dailyMainInst) { pc_dailyMainInst.remove(); pc_dailyMainInst = null; pc_dailyMainSeries = null; }
   pc_dailyMainInst = LightweightCharts.createChart(el, {
@@ -2365,16 +2377,31 @@ function renderDailyMain(data) {
   pc_applyAnalystTargetLine();
   pc_applyEntryPriceLine();
 
-  const ind = data.daily_indicators || {};
-  if (ind.ema20 && ind.ema20.length) {
-    const e20 = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, title: 'EMA20' });
-    e20.setData(ind.ema20);
+  const rawInd = data.daily_indicators || {};
+  const ind = { ...rawInd };
+  for (const key of ['ema10', 'ema20', 'ema50', 'ema200', 'ichi_tenkan', 'ichi_kijun']) {
+    if (Array.isArray(ind[key])) ind[key] = pc_clipToCandles(ind[key], data.daily_candles);
   }
-  if (ind.ichi_kijun && ind.ichi_kijun.length) {
-    const kj = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color: '#f87171', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, title: 'Kijun' });
-    kj.setData(ind.ichi_kijun);
+  const emaStyles = {
+    ema10:{color:'#60a5fa',title:'EMA10'}, ema20:{color:'#f59e0b',title:'EMA20'},
+    ema50:{color:'#4a9eff',title:'EMA50'}, ema200:{color:'#ff8c42',title:'EMA200'},
+  };
+  for (const key of ['ema10', 'ema20', 'ema50', 'ema200']) {
+    if (!pc_dailyIndicators[key] || !ind[key]?.length) continue;
+    const line = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, {
+      ...emaStyles[key], lineWidth:1, priceLineVisible:false, lastValueVisible:false,
+    });
+    line.setData(ind[key]);
   }
-
+  if (pc_dailyIndicators.ichimoku) {
+    const tenkan = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#34d399', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Tenkan' });
+    const kijun = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#f87171', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Kijun' });
+    const spanA = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'rgba(52,211,153,0.8)', lineWidth:1, priceLineVisible:false, lastValueVisible:true, title:'Senkou A' });
+    const spanB = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'rgba(248,113,113,0.8)', lineWidth:1, priceLineVisible:false, lastValueVisible:true, title:'Senkou B' });
+    tenkan.setData(ind.ichi_tenkan || []); kijun.setData(ind.ichi_kijun || []);
+    spanA.setData(ind.ichi_sa || []); spanB.setData(ind.ichi_sb || []);
+    createKumoPlugin(pc_dailyMainInst, pc_dailyMainSeries, ind.ichi_sa || [], ind.ichi_sb || []);
+  }
   pc_dailyMainBaseMarkers = [];
   if (data.daily_buy_signals && data.daily_buy_signals.length) {
     pc_dailyMainBaseMarkers = data.daily_buy_signals.map(s => {
@@ -2395,7 +2422,12 @@ function renderDailyMain(data) {
 
   if (previousRange) pc_dailyMainInst.timeScale().setVisibleLogicalRange(previousRange);
   else pc_dailyMainInst.timeScale().fitContent();
-  if (pc_currentView === 'daily') pc_applyChartPatterns();
+  // Subpanely sa stavajú AŽ TU, po obnovení rozsahu — ich vlastný rAF sync
+  // (v pc_buildSubpanel) číta rozsah hlavného grafu v momente stavby, takže
+  // keby sa stavali skôr (ako predtým), zachytili by predbežný/nerestorovaný
+  // rozsah a zostali by rozídené aj po tom, čo sa hlavný graf posunul na
+  // previousRange.
+  pc_renderSubpanels('daily', ind, data.daily_candles, pc_dailyMainInst);
   requestAnimationFrame(() => {
     if (!pc_dailyMainInst) return;
     pc_dailyMainInst.applyOptions({ width: Math.max(1, el.offsetWidth), height: Math.max(1, el.offsetHeight) });
@@ -2404,6 +2436,73 @@ function renderDailyMain(data) {
   });
   setDailyMarkerModeButtons();
   setDailyHaButton();
+}
+
+// SEC 13F inštitucionálne držby — interpretačná karta, NIKDY neovplyvňuje
+// C1-C4, DCA, scanner tier, Verdikt/BUILD ani ML.
+let _institutionalForTicker = null;
+
+function pc_institutionalCount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n).toLocaleString('sk-SK') : '—';
+}
+
+function pc_institutionalInterpretation(data) {
+  const holders = data.holder_count_delta == null ? NaN : Number(data.holder_count_delta);
+  const shares = data.share_count_delta_pct == null ? NaN : Number(data.share_count_delta_pct);
+  if (!Number.isFinite(holders) || !Number.isFinite(shares))
+    return 'Prvé dostupné obdobie — medzištvrťročné porovnanie ešte nie je možné.';
+  if (holders > 0 && shares > 0)
+    return 'Rástol počet filerov aj súhrnný počet akcií — široká akumulácia.';
+  if (holders < 0 && shares < 0)
+    return 'Klesol počet filerov aj súhrnný počet akcií — široká distribúcia.';
+  if (holders === 0 && shares === 0)
+    return 'Počet filerov aj súhrnná pozícia ostali stabilné.';
+  return 'Zmiešaný obraz: počet filerov a veľkosť súhrnnej pozície sa nevyvíjali rovnako.';
+}
+
+async function pc_loadInstitutional(ticker) {
+  const card = document.getElementById('institutionalCard');
+  if (!card || !ticker) return;
+  const sym = String(ticker).toUpperCase();
+  _institutionalForTicker = sym;
+  card.style.display = '';
+  card.innerHTML = `<div class="card-title" title="Štvrťročný kontext zo SEC Form 13F. Je oneskorený približne 45 dní a nevstupuje do C1–C4, DCA, Scannera ani Verdiktu.">Inštitucionálne držby · 13F</div>
+    <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Kontrolujem posledné spracované obdobie…</div>`;
+  try {
+    const r = await fetch('/api/ticker/institutional/' + encodeURIComponent(sym));
+    if (!r.ok || _institutionalForTicker !== sym) return;
+    const d = await r.json();
+    if (_institutionalForTicker !== sym) return;
+    const title = `<div class="card-title" title="Počet unikátnych SEC 13F filingov a súčet nahlásených akcií. Kontext je oneskorený a nevstupuje do C1–C4, DCA, Scannera ani Verdiktu.">Inštitucionálne držby · 13F</div>`;
+    if (!d.available) {
+      const pending = d.status === 'pending' || d.refresh_running;
+      card.innerHTML = title + `<div class="earnings-unavailable">${pending ? 'Dáta sa pripravujú' : 'Zatiaľ nedostupné'}</div>
+        <div class="earnings-unavailable-note">${escHtml(d.message || 'Inštitucionálne dáta sa nepodarilo načítať.')}${pending ? ' Obnova beží na pozadí; ostatné karty fungujú bez čakania.' : ''}</div>`;
+      return;
+    }
+    const holderDelta = d.holder_count_delta == null ? NaN : Number(d.holder_count_delta);
+    const shareDelta = d.share_count_delta_pct == null ? NaN : Number(d.share_count_delta_pct);
+    const holderDeltaText = Number.isFinite(holderDelta)
+      ? `${holderDelta > 0 ? '+' : ''}${pc_institutionalCount(holderDelta)}` : '—';
+    const shareDeltaText = Number.isFinite(shareDelta)
+      ? `${shareDelta > 0 ? '+' : ''}${shareDelta.toLocaleString('sk-SK', {maximumFractionDigits: 1})} %` : '—';
+    const zeroNote = Number(d.holder_count) === 0
+      ? '<div class="earnings-unavailable-note">Nula znamená, že sa pre bezpečne priradený CUSIP v tomto období nenašiel žiadny filer — nie že dáta chýbajú.</div>' : '';
+    card.innerHTML = title + `
+      <div class="pred-row"><span class="key">13F fileri</span><span class="val">${pc_institutionalCount(d.holder_count)}</span></div>
+      <div class="pred-row"><span class="key">Zmena filerov</span><span class="val">${holderDeltaText}</span></div>
+      <div class="pred-row"><span class="key">Súhrn akcií</span><span class="val">${pc_institutionalCount(d.total_shares)}</span></div>
+      <div class="pred-row"><span class="key">Zmena akcií q/q</span><span class="val">${shareDeltaText}</span></div>
+      <div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px;line-height:1.45;color:var(--muted);">${escHtml(pc_institutionalInterpretation(d))}</div>
+      ${zeroNote}
+      <div class="fair-value-foot">SEC obdobie ${escHtml(d.period || '—')} · 13F má prirodzené oneskorenie</div>`;
+  } catch (e) {
+    if (_institutionalForTicker === sym) {
+      card.innerHTML = `<div class="card-title">Inštitucionálne držby · 13F</div>
+        <div class="earnings-unavailable-note">Vrstva je dočasne nedostupná; nejde o nulový počet držiteľov.</div>`;
+    }
+  }
 }
 
 // Relatívna sila voči QQQ/SPY (1M/3M) — interpretačná karta, neovplyvňuje skóre
@@ -2623,6 +2722,24 @@ async function pc_loadInsights(ticker) {
       const ratio = Number.isFinite(Number(si.short_ratio)) ? ` · ratio ${Number(si.short_ratio).toFixed(1)}` : '';
       rows.push(`<div class="pred-row" title="Podiel voľne obchodovaných akcií predaných nakrátko. Vysoká hodnota môže zosilniť odraz aj riziko; sama osebe nie je Buy signál.">
         <span class="key">Short interest</span><span class="val"><span style="color:${color}">${level}</span> · ${shortPct.toFixed(1)} % float${ratio}</span></div>`);
+    }
+    // Solventnosť: odlišuje "lacné po prepade" od "má problém so súvahou".
+    // Rovnaké polia idú do AI exportu — karta a export musia ukazovať to isté.
+    const sv = d.solvency;
+    const nd = Number(sv?.net_debt_to_ebitda);
+    const cov = Number(sv?.interest_coverage);
+    if (Number.isFinite(nd) || Number.isFinite(cov)) {
+      const parts = [];
+      if (Number.isFinite(nd)) {
+        const color = nd >= 4 ? 'var(--down)' : nd >= 2.5 ? 'var(--yellow)' : 'var(--up)';
+        parts.push(`<span style="color:${color}">dlh/EBITDA ${nd.toFixed(1)}×</span>`);
+      }
+      if (Number.isFinite(cov)) {
+        const color = cov < 2 ? 'var(--down)' : cov < 5 ? 'var(--yellow)' : 'var(--up)';
+        parts.push(`<span style="color:${color}">krytie úrokov ${cov.toFixed(1)}×</span>`);
+      }
+      rows.push(`<div class="pred-row" title="Net Debt/EBITDA a krytie úrokov z Finnhub. Odpovedá na otázku, či je strata dip alebo problém so súvahou. Kontext, nevstupuje do C1–C4 ani ML.">
+        <span class="key">Solventnosť</span><span class="val">${parts.join(' · ')}</span></div>`);
     }
     if (!rows.length) return;
     card.innerHTML = `<div class="card-title" title="Finnhub, Yahoo fallback, obnova 12 h. Kontext kvality a očakávaní; zatiaľ nemení C1–C4 ani ML.">Firma &amp; očakávania</div>` + rows.join('');
@@ -3171,7 +3288,6 @@ async function loadData(reoptimize = false) {
     renderCharts(data);
     if (pc_currentView === 'daily') renderDailyMain(data);
     pc_applyOverlays();
-    pc_applyChartPatterns();
     // Donačítaj eToro pozície ak ešte nie sú alebo je cache stará, potom re-renderuj markery
     (async () => {
       let updated = false;
@@ -3184,7 +3300,6 @@ async function loadData(reoptimize = false) {
       if (updated && pc_lastData) {
         renderCharts(pc_lastData);
         if (pc_currentView === 'daily') renderDailyMain(pc_lastData);
-        pc_applyChartPatterns();
       }
     })();
     pc_renderSidebar(data);

@@ -113,7 +113,7 @@ function onSbTickerClick(symbol) {
   // Nájdi aktívny CHART panel (nie portfolio)
   let chartPanelId = activePanelId;
   if (chartPanelId?.startsWith('port-panel-')) {
-    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.id !== dockPanelId && p.querySelector('.p-sym'))?.id || null;
+    chartPanelId = [...document.querySelectorAll('.panel')].find(p => !p.id.startsWith('port-panel-') && p.id !== dockPanelId && p.id !== verdictPanelId && p.querySelector('.p-sym'))?.id || null;
   }
   if (chartPanelId && document.getElementById(chartPanelId)) {
     const panel = document.getElementById(chartPanelId);
@@ -121,12 +121,70 @@ function onSbTickerClick(symbol) {
     loadChart(chartPanelId);
   } else {
     // Žiadny aktívny panel — vytvor nový
-    const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
-    const newId = createPanel(cfg);
-    setActivePanel(newId);
-    loadChart(newId);
-    saveLayout();
+    openNewChartPanel(symbol);
   }
+}
+
+// Vždy vytvorí nový panel, nikdy neprepíše existujúci — na rozdiel od
+// onSbTickerClick, ktorý pri aktívnom paneli prepisuje jeho ticker. Right-click
+// akcia "Nový graf" túto reuse-logiku zámerne obchádza.
+function openNewChartPanel(symbol) {
+  const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
+  const newId = createPanel(cfg);
+  setActivePanel(newId);
+  loadChart(newId);
+  saveLayout();
+}
+
+function onSbTickerContextMenu(event, symbol) {
+  event.preventDefault();
+  showContextMenu(event.clientX, event.clientY, [
+    { label: `🗺 Nový graf — ${symbol}`, action: () => openNewChartPanel(symbol) },
+  ]);
+}
+
+// Duplikát všetkých ikoniek z hlavičky chart panela do right-click menu —
+// ikonky ostávajú (netreba sa učiť nové miesto), toto je len rýchlejšia
+// cesta k tej istej funkcii pre toho, kto vie, čo chce.
+function onChartPanelContextMenu(event, id) {
+  const panel = document.getElementById(id);
+  const r = registry[id];
+  if (!panel || !r) return;
+  event.preventDefault();
+  const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase() || '';
+  const inds = r.indicators || {};
+  const inWl = typeof isInWatchlist === 'function' && sym ? isInWatchlist(sym) : false;
+  const tradeBtn = document.getElementById('trade-btn-' + id);
+  const tradeAvailable = sym && tradeBtn && tradeBtn.style.display !== 'none';
+  const items = [
+    { label: 'Otvoriť v Analytike', action: () => openPanelInAnalytika(id) },
+    { label: inWl ? 'Vo watchliste' : 'Pridať do watchlistu', checked: inWl,
+      action: () => sym && addCurrentToWatchlist(sym) },
+    tradeAvailable
+      ? { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') }
+      : { label: 'Trade na eToro ↗ (titul nie je v portfóliu)', disabled: true },
+    { sep: true },
+    { label: 'Obnoviť graf', action: () => loadChart(id) },
+    { label: 'Heikin Ashi', checked: !!inds.ha, action: () => toggleHA(id) },
+    { sep: true },
+    { label: 'EMA', checked: !!inds.ema, action: () => toggleIndicator(id, 'ema') },
+    { label: 'Ichimoku', checked: !!inds.ichimoku, action: () => toggleIndicator(id, 'ichimoku') },
+    { label: 'RSI', checked: !!inds.rsi, action: () => toggleIndicator(id, 'rsi') },
+    { label: 'ADX', checked: !!inds.adx, action: () => toggleIndicator(id, 'adx') },
+    { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
+    { sep: true },
+    { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
+    { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
+  ];
+  // Dock a Verdikt panel majú vlastný uzatvárací tok (closeChartDock,
+  // resetuje dockPanelId) — priamy removePanel(id) by ho obišiel a nechal
+  // dockPanelId ukazovať na už zmazaný panel.
+  if (id === dockPanelId) {
+    items.push({ sep: true }, { label: '✕ Zavrieť graf', action: () => closeChartDock() });
+  } else if (id !== verdictPanelId) {
+    items.push({ sep: true }, { label: '✕ Zavrieť graf', action: () => removePanel(id) });
+  }
+  showContextMenu(event.clientX, event.clientY, items);
 }
 
 function applyThemeToAllCharts() {
@@ -140,14 +198,19 @@ function applyThemeToAllCharts() {
   // Predictive tab grafy. Pozn.: classic-script top-level `let` nevytvára
   // window.* vlastnosť (main.js to rieši len pre pc_realChartInst/
   // pc_predChartInst cez defineProperty) — pc_dailyChartInst/pc_dailyMainInst/
-  // pc_subChartInst boli cez window.* vždy undefined, takže Daily graf a
-  // subpanel po prepnutí témy zostávali v starej téme až do ďalšieho reloadu.
+  // Analytika subpanely sú uložené v pc_subpanels, nie na window.*.
   // Bežné identifikátory fungujú, lebo charts.js sa načíta až po predictive.js.
   if (typeof pc_realChartInst !== 'undefined' && pc_realChartInst) applyChartTheme(pc_realChartInst);
   if (typeof pc_predChartInst !== 'undefined' && pc_predChartInst) applyChartTheme(pc_predChartInst);
   if (typeof pc_dailyChartInst !== 'undefined' && pc_dailyChartInst) applyChartTheme(pc_dailyChartInst);
   if (typeof pc_dailyMainInst !== 'undefined' && pc_dailyMainInst) applyChartTheme(pc_dailyMainInst);
-  if (typeof pc_subChartInst !== 'undefined' && pc_subChartInst) applyChartTheme(pc_subChartInst);
+  if (typeof pc_subpanels !== 'undefined') {
+    for (const manager of Object.values(pc_subpanels)) {
+      for (const type of ['rsi', 'adx', 'macd']) {
+        if (manager[type]?.chart) applyChartTheme(manager[type].chart);
+      }
+    }
+  }
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -177,7 +240,7 @@ async function loadPreset() {
   if (String(name).startsWith('__')) return;
   const presets = await fetchPresets();
   const cfg = presets[name]; if (!cfg?.length) return;
-  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
   setActivePanel(null);
   cfg.forEach(c => createPanel(c));
   saveLayout(); loadAll();
@@ -214,7 +277,7 @@ async function confirmSave() {
 function getCurrentConfig() {
   try {
     return [...document.querySelectorAll('.panel')].map(p => {
-      if (p.id === dockPanelId) return null;
+      if (p.id === dockPanelId || p.id === verdictPanelId) return null;
       if (p.id.startsWith('port-panel-')) return { type: 'portfolio' };
       const symEl = p.querySelector('.p-sym');
       if (!symEl) return null;
@@ -286,6 +349,10 @@ async function ensureHoldingsForChartFlags() {
 // getCurrentConfig/saveLayout, onSbTickerClick) — má vlastný ✕ close.
 // Zámerne ZAHRNUTÝ v loadAll() bulk refreshi a v applyAllChartPortfolioFlags.
 let dockPanelId = null;
+// Panel s grafom vedľa Verdiktu. Rovnako ako chart dock MUSÍ byť vylúčený zo
+// všetkých hromadných operácií nad `.panel` (clearAllPanels, loadMovers,
+// saveLayout, import…) — inak by ho tie funkcie uniesli alebo zmazali.
+let verdictPanelId = null;
 
 function syncChartDockVisibilityForTab() {
   const dock = document.getElementById('chart-dock');
@@ -363,6 +430,31 @@ function openChartDock(symbol) {
   dockPanelId = createPanel(cfg);
   setActivePanel(dockPanelId);
   loadChart(dockPanelId);
+}
+
+// Graf vedľa Verdiktu — ten istý `createPanel` factory ako Grafy a chart dock,
+// takže funguje aj s indikátormi, markermi a eToro čiarami. Zámerne NIE
+// analytický graf z Analytiky: na Verdikte ide o rýchly vizuálny súhlas s
+// rozhodnutím, nie o ďalšiu analytickú vrstvu.
+function openVerdictChart(symbol) {
+  const sym = String(symbol || '').trim().toUpperCase();
+  const host = document.getElementById('verdict-grid');
+  if (!sym || !host) return;
+
+  if (verdictPanelId && document.getElementById(verdictPanelId)) {
+    const panel = document.getElementById(verdictPanelId);
+    const symEl = panel.querySelector('.p-sym');
+    if (symEl && symEl.value.trim().toUpperCase() === sym) return;   // už ten istý
+    if (symEl) symEl.value = sym;
+    loadChart(verdictPanelId);
+    return;
+  }
+  verdictPanelId = createPanel({
+    symbol: sym, period: 'auto', interval: '1d',
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+    container: 'verdict-grid',
+  });
+  loadChart(verdictPanelId);
 }
 
 function closeChartDock() {
@@ -819,6 +911,12 @@ function createPanel(cfg) {
     <div class="p-resize-handle" id="rh-${id}" title="Potiahnite pre zmenu výšky grafu"></div>
   `;
   document.getElementById(cfg.container || 'grid').appendChild(panel);
+  // Nespúšťaj vlastné menu nad textovým poľom/selectom — nech ostane natívne
+  // kopírovanie/vkladanie funkčné pri hľadaní tickeru.
+  panel.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.p-sym, .p-sel, select, input')) return;
+    onChartPanelContextMenu(e, id);
+  });
   applyChartPortfolioFlag(id);
   ensureHoldingsForChartFlags();
 
@@ -1160,7 +1258,10 @@ function applyOverlays(id, data, r) {
     r.overlaySeries['chikou'] = null;
 
     // Span A (zelená prerušovaná) + Span B (červená prerušovaná) + canvas výplň medzi nimi
-    const allCloud = data.filter(d => d.span_a != null && d.span_b != null);
+    const allCloud = mergeChartRows(
+      data.filter(d => d.span_a != null && d.span_b != null),
+      (r.ichimokuFuture || []).filter(d => d.span_a != null && d.span_b != null),
+    );
     const sAB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#2d9e6b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
     const sBB  = mc.addSeries(LightweightCharts.LineSeries, {color:'#c0392b', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, ...OPT});
     const sABr = mc.addSeries(LightweightCharts.LineSeries, {color:'transparent', lineWidth:0, ...OPT});
@@ -2061,12 +2162,13 @@ async function loadChart(id, opts = {}) {
       symbol: sym, period, interval, ha: haParam, indicators: allInds,
       account: acct, limit: CHART_INITIAL_BARS, before: '',
     });
-    let name, data, instrumentId;
+    let name, data, instrumentId, ichimokuFuture;
     const cached = opts.refresh !== 1 ? ohlcvBatchTake(batchKey) : null;
     if (cached) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
+      ichimokuFuture = cached.ichimoku_future;
       r.hasMoreHistory = !!cached.hasMore;
     } else {
       const refreshParam = opts.refresh === 1 ? 1 : 0;
@@ -2075,6 +2177,7 @@ async function loadChart(id, opts = {}) {
       if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail); }
       const payload = await resp.json();
       ({ name, data, instrumentId } = payload);
+      ichimokuFuture = payload.ichimoku_future;
       r.hasMoreHistory = !!payload.hasMore;
     }
     if (instrumentId) {
@@ -2085,6 +2188,7 @@ async function loadChart(id, opts = {}) {
     }
     if (loadSeq !== r.loadSeq) return;
     if (!data?.length) throw new Error('Žiadne dáta');
+    r.ichimokuFuture = Array.isArray(ichimokuFuture) ? ichimokuFuture : [];
 
     // Tichý tail refresh nesmie znovu posielať celú sériu do chart enginu.
     // Aktualizuj iba poslednú sviečku; plný setData patrí prvému loadu,
@@ -2257,7 +2361,7 @@ function removePanel(id) {
 
 function clearAllPanels() {
   if (!confirm('Vymazať všetky grafy?')) return;
-  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+  [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
   setActivePanel(null);
   saveLayout();
   setStatus('Grafy vymazané', '');
@@ -2279,7 +2383,7 @@ function parseTickerClipboardText(text) {
 
 function clearChartPanelsForImport() {
   [...document.querySelectorAll('.panel')]
-    .filter(panel => !panel.id.startsWith('port-panel-') && panel.id !== dockPanelId && panel.querySelector('.p-sym'))
+    .filter(panel => !panel.id.startsWith('port-panel-') && panel.id !== dockPanelId && panel.id !== verdictPanelId && panel.querySelector('.p-sym'))
     .forEach(panel => removePanel(panel.id));
 }
 
@@ -2302,6 +2406,16 @@ async function importChartsFromClipboard() {
   } else {
     setStatus(`Načítavam ${tickers.length} tickerov`, 'ok');
   }
+  openChartsForSymbols(tickers);
+}
+
+// Spoločné otvorenie zoznamu tickerov ako 1d grafov. Používa import zo schránky
+// aj košík grafov — bez tejto extrakcie by dva povrchy robili to isté dvoma
+// mierne odlišnými spôsobmi (a jeden by zabudol napr. applyAllChartPortfolioFlags).
+function openChartsForSymbols(symbols) {
+  const tickers = [...new Set((symbols || [])
+    .map(s => String(s || '').trim().toUpperCase()).filter(Boolean))].slice(0, 20);
+  if (!tickers.length) return;
   switchMainTab('charts');
   clearChartPanelsForImport();
   setActivePanel(null);
@@ -2314,6 +2428,7 @@ async function importChartsFromClipboard() {
   saveLayout();
   applyAllChartPortfolioFlags();
   ids.forEach(id => loadChart(id));
+  return ids;
 }
 // Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
 // z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
@@ -2348,7 +2463,7 @@ async function loadMovers() {
       setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
       return;
     }
-    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId) removePanel(p.id); });
+    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
     setActivePanel(null);
     movers.forEach(m => createPanel({
       symbol: m.symbol,

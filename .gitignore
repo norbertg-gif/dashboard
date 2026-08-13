@@ -12,8 +12,10 @@ finviz_screeners.json
 yahoo_insights/
 massive_market/
 dashboard_settings.json
+position_classes.json
 watchlist.json
 company_profiles/
+institutional_13f/
 predictive_signals_log.json
 predictive_signals_archive.json
 predictive_weights_log.json
@@ -29,3 +31,8 @@ api_call_stats.json
 mem_watch.jsonl
 mem_watch.jsonl.tmp
 memtest_data/
+
+# Scanner cache pri lokálnom behu bez DATA_DIR (DATA_ROOT padá na APP_ROOT)
+market_scanner_cache.json
+scanner_auto_rescan.json
+scanner_daily_bars/

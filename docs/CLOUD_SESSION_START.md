@@ -128,7 +128,7 @@ farbí až nad 2pp. Skóring sa nemenil — ML sa k predikcii aj tak nedostane,
 ## 6. Tvrdé pravidlá (porušenie = zbytočná práca)
 
 - **Interpretačné vrstvy NEVSTUPUJÚ do skóringu.** Fair value, RS, makro
-  režim, news clustering, chart health, market context bar, chart patterny,
+  režim, news clustering, chart health, market context bar,
   correlation map, DCA — žiadna z nich nesmie ovplyvniť C1–C4, scanner tier,
   Verdikt ani účtovníctvo. Toto je opakované a explicitné rozhodnutie.
 - **Read-only rozsah.** Aplikácia nesmie zadávať, rušiť ani meniť eToro

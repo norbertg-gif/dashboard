@@ -342,7 +342,7 @@ async function renderHistoryView(force = false) {
     ['profitPct', '%'],
     ['daysHeld', 'Days'],
   ];
-  el.innerHTML = `<div class="tool-panel">
+  el.innerHTML = `<div class="tool-panel fill">
     <div class="tool-toolbar">
       <div class="tool-title">Historia obchodov</div>
       <div class="tb-group">
@@ -389,6 +389,7 @@ async function renderHistoryView(force = false) {
       <div class="tool-kpi"><div class="tool-kpi-label">Net P/L</div><div class="tool-kpi-val ${(s.netProfit||0)>=0?'port-pos':'port-neg'}">${fmtMoney(s.netProfit)}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Fees</div><div class="tool-kpi-val">$${(s.fees || 0).toFixed(2)}</div></div>
     </div>
+    <div class="tool-table-scroll">
     <table class="tool-table"><thead><tr>
       ${histHeaders.map(([key, label]) => `<th onclick="sortHistory('${key}')" style="cursor:pointer;">${label}${historySort.key === key ? (historySort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>`).join('')}
     </tr></thead><tbody>
@@ -415,6 +416,7 @@ async function renderHistoryView(force = false) {
         </tr>`;
       }).join('')}
     </tbody></table>
+    </div>
   </div>`;
 }
 
@@ -549,6 +551,33 @@ async function loadDcaCandidates(force = false) {
   }
 }
 
+// Zdieľaný komparátor pre klikacie stĺpce (DCA aj Build karta). Typ hodnoty
+// namiesto zoznamu kľúčov — funguje pre akýkoľvek stĺpec bez rizika, že sa
+// kľúč v triediacej funkcii a v dátach jedného dňa rozíde (napr. `ticker` vs
+// skutočné pole `symbol`).
+function compareSortableRows(sortState, a, b) {
+  const key = sortState.key;
+  const dir = sortState.dir;
+  const va = a[key] ?? '';
+  const vb = b[key] ?? '';
+  if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+  // Chýbajúce hodnoty vždy na konci, nezávisle od smeru triedenia.
+  if (va === '' && vb !== '') return 1;
+  if (va !== '' && vb === '') return -1;
+  if (va === '' && vb === '') return 0;
+  return String(va).localeCompare(String(vb)) * dir;
+}
+
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (flag priorita, potom najväčšia strata), nie abecedné.
+let dcaSort = { key: null, dir: 1 };
+
+function sortDca(key) {
+  if (dcaSort.key === key) dcaSort.dir *= -1;
+  else dcaSort = { key, dir: (key === 'flag' || key === 'symbol') ? 1 : -1 };
+  renderDcaCard(_dcaCache.data);
+}
+
 const DCA_FLAG_META = {
   dca:          { cls: 'good',    label: 'DCA',          tip: 'Kvalitný dip — strata ≥ prah, DIP ≥ prah, váha pod limitom' },
   concentrated: { cls: 'warn',    label: 'Veľká váha',   tip: 'DCA podmienky OK, ale pozícia je už veľká časť equity — koncentračné riziko' },
@@ -584,7 +613,10 @@ function renderDcaCard(data) {
     c.value_trap ? `<span class="dca-pill bad">${c.value_trap}× pozor</span>` : '',
     c.no_data ? `<span class="dca-pill neutral">${c.no_data}× mimo dát</span>` : '',
   ].filter(Boolean).join('');
-  const rows = list.map(x => {
+  // Bez kliknutia ostáva backendové poradie (flag priorita, potom strata);
+  // triedenie sa aktivuje až explicitným klikom na hlavičku.
+  const sortedList = dcaSort.key ? [...list].sort((a, b) => compareSortableRows(dcaSort, a, b)) : list;
+  const rows = sortedList.map(x => {
     const meta = DCA_FLAG_META[x.flag] || DCA_FLAG_META.no_data;
     const dipTxt = x.dip_total != null ? `${x.dip_total} ${x.dip_label}` : '—';
     return `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;" title="${escHtml(meta.tip)}">
@@ -596,12 +628,224 @@ function renderDcaCard(data) {
       <td class="r" style="color:var(--muted);">${x.trades}×</td>
     </tr>`;
   }).join('');
+  const dcaTh = (key, label, cls = '') => {
+    const active = dcaSort.key === key;
+    const arrow = active ? (dcaSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortDca('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
+  };
   wrap.innerHTML = `${head}
     <div class="dca-summary">${summary}</div>
     <table class="tool-table"><thead><tr>
-      <th>Flag</th><th>Ticker</th><th class="r">Strata</th><th class="r">Váha</th><th class="r">DIP</th><th class="r">Tranže</th>
+      ${dcaTh('flag', 'Flag')}${dcaTh('symbol', 'Ticker')}${dcaTh('pnl_pct', 'Strata', 'r')}${dcaTh('weight_pct', 'Váha', 'r')}${dcaTh('dip_total', 'DIP', 'r')}${dcaTh('trades', 'Tranže', 'r')}
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="signal-outcome-note" style="margin-top:6px;">Interpretačná pomôcka — DIP skóre je z posledného Finviz importu, over jeho vek. Nevstupuje do žiadneho scoringu.</div>`;
+}
+
+// ── PORTFOLIO BUILD — ktorá pozícia je najviac pod cieľovou váhou ────────────
+// Hierarchia kapitálu: DCA (stratová, spĺňa DIP) → BUILD (kvalitná pod cieľom,
+// aj zisková) → NEW. Klasické DCA dokupuje len pri poklese, takže nový kapitál
+// tečie prednostne do horších pozícií; BUILD je odpoveď na to.
+// Fáza 1 zámerne NEMÁ žiadne skóre — gap = cieľ − aktuálna váha, nič viac.
+// Trieda a cieľová váha sú RUČNÝ vstup (definícia stratégie, nie odvodený údaj).
+let _buildCache = { account: null, data: null };
+const PORT_BUILD_COLLAPSED_KEY = 'td_portfolio_build_collapsed';
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (build/over_max/no_target/unclassified priorita, potom najväčší odstup).
+let buildSort = { key: null, dir: 1 };
+// 'all' = bez filtra. Filtruje LEN zobrazené riadky, nie počty v hlavičke
+// karty ani v zbalenom zhrnutí — tie musia ukazovať celé portfólio.
+let buildClassFilter = 'all';
+
+function sortBuild(key) {
+  if (buildSort.key === key) buildSort.dir *= -1;
+  else buildSort = { key, dir: (key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
+  renderBuildCard(_buildCache.data);
+}
+
+function setBuildClassFilter(value) {
+  buildClassFilter = value;
+  renderBuildCard(_buildCache.data);
+}
+
+const BUILD_STATE_META = {
+  build:        { cls: 'good',    label: 'Dokúpiť',    tip: 'Pozícia je pod cieľovou váhou — kandidát na BUILD, aj keď je v zisku' },
+  at_target:    { cls: 'neutral', label: 'Na cieli',   tip: 'Váha zodpovedá cieľu alebo ho presahuje' },
+  over_max:     { cls: 'bad',     label: 'Nad stropom',tip: 'Váha dosiahla max_weight — nedokupovať' },
+  no_target:    { cls: 'warn',    label: 'Bez cieľa',  tip: 'Trieda priradená, ale cieľová váha chýba' },
+  unclassified: { cls: 'neutral', label: 'Nezaradené', tip: 'Bez triedy a cieľa — BUILD o tejto pozícii nevie rozhodnúť' },
+};
+
+function isPortfolioBuildCollapsed() {
+  const v = localStorage.getItem(PORT_BUILD_COLLAPSED_KEY);
+  return v == null ? true : v === '1';
+}
+
+function togglePortfolioBuild() {
+  localStorage.setItem(PORT_BUILD_COLLAPSED_KEY, isPortfolioBuildCollapsed() ? '0' : '1');
+  if (_buildCache.data) renderBuildCard(_buildCache.data);
+  else if (!isPortfolioBuildCollapsed()) loadBuildCard();
+}
+
+function buildCardHead(data = null) {
+  const collapsed = isPortfolioBuildCollapsed();
+  const c = data?.counts || {};
+  const sub = data
+    ? `${c.classified || 0}/${c.total || 0} zaradených · základ váh: akciová/ETF kniha $${Number(data.book_value || 0).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`
+    : 'kde chýba kapitál oproti cieľu';
+  const actions = collapsed ? '' : `<span style="display:flex;gap:4px;">
+    ${c.unclassified ? `<button class="btn" onclick="seedBuildClasses()" style="font-size:10px;" title="Označí nezaradené pozície ako CORE s rovnomernou cieľovou váhou. Už vyplnené tickery neprepíše.">Predvyplniť</button>` : ''}
+    <button class="btn" onclick="loadBuildCard(true)" style="font-size:10px;">Refresh</button>
+  </span>`;
+  const refresh = actions;
+  return `<div class="risk-corr-head dca-head">
+    <button class="btn dca-toggle" onclick="togglePortfolioBuild()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <div class="tool-title" style="margin:0;">Dobudovanie pozícií
+      <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${sub}</span>
+    </div>${refresh}
+  </div>`;
+}
+
+async function loadBuildCard(force = false) {
+  const account = String(portState?.main?.account || activeAccount || '1');
+  const wrap = document.getElementById('portfolio-build');
+  if (!wrap) return;
+  if (!force && _buildCache.account === account && _buildCache.data) {
+    renderBuildCard(_buildCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/build?account=${account}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    _buildCache = { account, data };
+    renderBuildCard(data);
+  } catch (e) {
+    wrap.innerHTML = `${buildCardHead()}<div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function seedBuildClasses() {
+  const account = String(portState?.main?.account || activeAccount || '1');
+  try {
+    const r = await fetch(`${API}/api/portfolio/classes/seed?account=${account}`, { method: 'POST' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const out = await r.json();
+    await loadBuildCard(true);
+    setStatus?.(`Predvyplnené: ${out.seeded} pozícií ako CORE`
+      + (out.kept ? `, ${out.kept} ponechaných` : ''), 'ok');
+  } catch (e) {
+    setStatus?.(`Predvyplnenie zlyhalo: ${e.message}`, 'error');
+  }
+}
+
+async function saveBuildClass(symbol, field, rawValue) {
+  const sym = String(symbol || '').toUpperCase();
+  const row = (_buildCache.data?.positions || []).find(p => p.symbol === sym);
+  if (!row) return;
+  const entry = {
+    position_class: row.position_class,
+    target_weight: row.target_weight,
+    max_weight: row.max_weight,
+  };
+  if (field === 'position_class') {
+    entry.position_class = rawValue || null;
+  } else {
+    const n = rawValue === '' ? null : Number(rawValue);
+    entry[field] = Number.isFinite(n) ? n : null;
+  }
+  // Bez triedy nemá cieľová váha kam patriť — server by to aj tak odmietol.
+  if (!entry.position_class) {
+    setStatus?.(`${sym}: najprv vyber triedu`, 'error');
+    renderBuildCard(_buildCache.data);
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/portfolio/classes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ classes: { [sym]: entry } }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    Object.assign(row, entry);
+    await loadBuildCard(true);
+    setStatus?.(`${sym} uložené`, 'ok');
+  } catch (e) {
+    setStatus?.(`Uloženie ${sym} zlyhalo: ${e.message}`, 'error');
+  }
+}
+
+function renderBuildCard(data) {
+  const wrap = document.getElementById('portfolio-build');
+  if (!wrap || !data) return;
+  const head = buildCardHead(data);
+  const c = data.counts || {};
+  if (isPortfolioBuildCollapsed()) {
+    const parts = [
+      c.build ? `${c.build} na dokúpenie` : '',
+      c.over_max ? `${c.over_max} nad stropom` : '',
+      c.unclassified ? `${c.unclassified} nezaradených` : '',
+    ].filter(Boolean).join(' · ') || 'nič na dokúpenie';
+    wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
+    return;
+  }
+  const allPositions = data.positions || [];
+  const filtered = buildClassFilter === 'all' ? allPositions
+    : buildClassFilter === 'unclassified' ? allPositions.filter(x => !x.position_class)
+    : allPositions.filter(x => x.position_class === buildClassFilter);
+  // Bez kliknutia ostáva backendové poradie (stav priorita, potom odstup);
+  // triedenie sa aktivuje až explicitným klikom na hlavičku.
+  const sortedPositions = buildSort.key
+    ? [...filtered].sort((a, b) => compareSortableRows(buildSort, a, b)) : filtered;
+  const rows = sortedPositions.map(x => {
+    const meta = BUILD_STATE_META[x.state] || BUILD_STATE_META.unclassified;
+    const opts = ['', 'CORE', 'STANDARD', 'SPECULATIVE'].map(v =>
+      `<option value="${v}"${v === (x.position_class || '') ? ' selected' : ''}>${v || '—'}</option>`).join('');
+    const gapTxt = x.gap_pct == null ? '—'
+      : `<span style="color:${x.gap_pct > 0 ? 'var(--up)' : 'var(--muted)'}">${x.gap_pct > 0 ? '+' : ''}${x.gap_pct.toFixed(1)}%</span>`;
+    const addTxt = x.gap_amount ? `$${x.gap_amount.toLocaleString('sk-SK', { maximumFractionDigits: 0 })}` : '—';
+    return `<tr title="${escHtml(meta.tip)}">
+      <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
+      <td><span class="port-sym" style="cursor:pointer;" onclick="onSbTickerClick('${escHtml(x.symbol)}')">${escHtml(x.symbol)}</span></td>
+      <td class="r">${x.weight_pct == null ? '—' : x.weight_pct.toFixed(1) + '%'}</td>
+      <td><select class="build-input" onchange="saveBuildClass('${escHtml(x.symbol)}','position_class',this.value)">${opts}</select></td>
+      <td class="r"><input class="build-input${x.target_source === 'class' ? ' derived' : ''}" type="number" step="0.1" min="0" max="100"
+        value="${x.target_source === 'manual' ? x.target_weight : ''}"
+        placeholder="${x.target_source === 'class' ? x.target_weight.toFixed(1) : '—'}"
+        title="${x.target_source === 'class' ? 'Odvodené z pomeru tried v ⚙ — napíš vlastné číslo, ak chceš prebiť.' : x.target_source === 'manual' ? 'Nastavené ručne — zmaž pole a odvodí sa znova z triedy.' : 'Bez triedy sa cieľ nedá odvodiť.'}"
+        onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
+      <td class="r">${gapTxt}</td>
+      <td class="r" style="color:var(--muted);">${addTxt}</td>
+    </tr>`;
+  }).join('');
+  const buildTh = (key, label, cls = '') => {
+    const active = buildSort.key === key;
+    const arrow = active ? (buildSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortBuild('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
+  };
+  const filterBtn = (value, label) =>
+    `<button class="btn${buildClassFilter === value ? ' primary' : ''}" onclick="setBuildClassFilter('${value}')" style="font-size:10px;">${label}</button>`;
+  const filterBar = `<div style="display:flex;gap:4px;margin:6px 0;flex-wrap:wrap;">
+    ${filterBtn('all', 'Všetky')}${filterBtn('CORE', 'CORE')}${filterBtn('STANDARD', 'STANDARD')}${filterBtn('SPECULATIVE', 'SPECULATIVE')}${filterBtn('unclassified', 'Nezaradené')}
+  </div>`;
+  // Súčet cieľov je kontrola konzistencie, nie pravidlo — 100 % nie je povinnosť,
+  // ale výrazný odklon znamená, že cieľové váhy nedávajú spolu zmysel.
+  // Počíta sa VŽDY z celého portfólia, nie z filtrovaného pohľadu — inak by
+  // filter menil číslo, ktoré má byť nezávislou kontrolou konzistencie.
+  const sum = Number(data.target_weight_sum || 0);
+  const sumColor = sum > 105 ? 'var(--down)' : sum && sum < 60 ? 'var(--yellow)' : 'var(--muted)';
+  wrap.innerHTML = `${head}
+    ${filterBar}
+    <table class="tool-table"><thead><tr>
+      ${buildTh('state', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
+      ${buildTh('target_weight', 'Cieľ %', 'r')}${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    ${!sortedPositions.length ? `<div style="color:var(--muted);font-size:11px;padding:6px 0;">Filtru nezodpovedá žiadna pozícia.</div>` : ''}
+    <div class="signal-outcome-note" style="margin-top:6px;">
+      Súčet cieľových váh: <span style="color:${sumColor}">${sum.toFixed(1)} %</span>.
+      Bledé cieľové váhy sú odvodené z pomeru tried v ⚙ (${data.class_ratios ? `CORE ${data.class_ratios.CORE}:STANDARD ${data.class_ratios.STANDARD}:SPECULATIVE ${data.class_ratios.SPECULATIVE}` : '4:2:1'}), nie manuálny vstup — napíš vlastné číslo do poľa, ak chceš konkrétny titul prebiť.
+      Váha sa počíta z akciovej/ETF knihy účtu, nie z celej equity — krypto je zo stratégie vylúčené.
+      Odstup je odčítanie, nie skóre; poradie nehovorí, že dokúpiť treba.
+    </div>`;
 }
 
 // ── KORELAČNÁ MAPA PORTFÓLIA ─────────────────────────────────────────────────
@@ -664,20 +908,37 @@ async function loadSectorCard(force = false) {
   }
 }
 
+// key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
+// (zoradené podľa kapitálu, najväčší sektor hore).
+let sectorSort = { key: null, dir: 1 };
+
+function sortSectors(key) {
+  if (sectorSort.key === key) sectorSort.dir *= -1;
+  else sectorSort = { key, dir: key === 'sector' ? 1 : -1 };
+  renderSectorCard(_sectorsCache.data);
+}
+
 function renderSectorCard(data) {
   const wrap = document.getElementById('portfolio-sectors');
   if (!wrap) return;
   const head = sectorCardHead(data);
   if (isPortfolioSectorsCollapsed()) { wrap.innerHTML = head; return; }
   if (!data) { wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>`; return; }
-  const sectors = data.sectors || [];
-  if (!sectors.length) {
+  const rawSectors = data.sectors || [];
+  if (!rawSectors.length) {
     wrap.innerHTML = `${head}<div class="signal-outcome-note">Žiadne držané tituly.</div>`;
     return;
   }
+  const sectors = sectorSort.key
+    ? [...rawSectors].sort((a, b) => compareSortableRows(sectorSort, a, b)) : rawSectors;
+  const sTh = (key, label, cls = '') => {
+    const active = sectorSort.key === key;
+    const arrow = active ? (sectorSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortSectors('${key}')" style="cursor:pointer;${cls === '' ? 'text-align:left;' : ''}">${label}${arrow}</th>`;
+  };
   let html = `${head}<table class="port-table" style="width:100%;font-size:11px;"><thead><tr>
-    <th style="text-align:left;">Sektor</th><th class="r">Titulov</th>
-    <th class="r">Kapitál</th><th class="r">Zisk</th><th class="r">V zisku</th></tr></thead><tbody>`;
+    ${sTh('sector', 'Sektor')}${sTh('count', 'Titulov', 'r')}
+    ${sTh('amount_pct', 'Kapitál', 'r')}${sTh('pnl_pct', 'Zisk', 'r')}${sTh('green', 'V zisku', 'r')}</tr></thead><tbody>`;
   for (const s of sectors) {
     const unknown = s.sector === 'Nezaradené';
     const pnlCls = s.pnl >= 0 ? 'port-pos' : 'port-neg';
@@ -1349,6 +1610,15 @@ function tradePassedYearTest(row) {
   return opened <= cutoff;
 }
 
+// Per ticker pohľad: hviezdička len keď VŠETKY tranže titulu prešli časovým
+// testom — jedna nedávno dokúpená tranža celý titul ešte nerobí voľným na
+// predaj bez dane, takže "aspoň jedna" by bolo zavádzajúce.
+function tickerPassedYearTest(row) {
+  const trades = row?._trades;
+  if (!trades || !trades.length) return tradePassedYearTest(row);
+  return trades.every(tradePassedYearTest);
+}
+
 async function ensurePortfolioAnalystTargets(pid) {
   const state = getPortState(pid);
   if (!state?.data?.positions || !state.colVisible.analystTarget) return;
@@ -1407,6 +1677,45 @@ function fmtPortVal(val, fmt) {
   }
 }
 
+// ── Periodická resynchronizácia snapshotu ────────────────────────────────────
+// Živé súčty sú extrapolácia zo snapshotu, takže sa od reality postupne
+// vzďaľujú. Namiesto vylepšovania odhadu sa snapshot pravidelne obnoví —
+// odchýlka sa tým nemôže kumulovať a hlavička ostane zároveň živá.
+//
+// Beží LEN keď je karta viditeľná: refresh=1 obchádza 24h POSITIONS_CACHE_TTL
+// a ide na eToro, takže nemá zmysel volať to do prázdna na skrytej karte.
+const PORTFOLIO_RESYNC_MS = 5 * 60 * 1000;
+let _portfolioResyncTimer = null;
+
+let _lastResyncAt = 0;
+
+async function resyncPortfolioSnapshots() {
+  if (document.visibilityState !== 'visible') return;
+  _lastResyncAt = Date.now();
+  for (const acct of ['1', '2']) {
+    if (!portfolioAccountData[acct]) continue;   // účet sa ešte nenačítal
+    try {
+      const r = await fetch(`${API}/api/etoro/portfolio?account=${acct}&refresh=1`);
+      if (!r.ok) continue;
+      const data = await r.json();
+      // Pri výpadku proxy vracia backend staršie dáta s `stale: true` — tie by
+      // resync len "potvrdili" ako čerstvé, takže sa ignorujú (rovnaký dôvod
+      // ako pri manuálnom refreshi Portfólia).
+      if (data?.stale || !data?.positions || !data?.summary) continue;
+      preparePortfolioSnapshot(data);
+      portfolioAccountData[acct] = data;
+      if (typeof rememberLiveInstruments === 'function') rememberLiveInstruments(data.positions);
+    } catch (e) { /* fail-soft: ďalší pokus o 5 minút */ }
+  }
+  if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
+  if (typeof updateHomeKpiLive === 'function') updateHomeKpiLive();
+}
+
+function startPortfolioResync() {
+  if (_portfolioResyncTimer) return;
+  _portfolioResyncTimer = setInterval(resyncPortfolioSnapshots, PORTFOLIO_RESYNC_MS);
+}
+
 function preparePortfolioSnapshot(data) {
   if (!data || data.error) return;
   const sum = data.summary || {};
@@ -1423,10 +1732,25 @@ function preparePortfolioSnapshot(data) {
   });
 }
 
+// Odhad P/L z živej ceny. Je to EXTRAPOLÁCIA zo snapshotu, nie meraná hodnota —
+// `(cena − snapshot) × units`. Pri pozíciách s obrovským počtom jednotiek to
+// zosilní aj nepatrný rozdiel medzi WS kotáciou a tým, čím eToro pozíciu
+// oceňuje (spread): TRX má ~35 900 jednotiek, takže tisícina centa rozdielu =
+// $36 v hlavičke. Nameraný drift 2026-08-06 bol +$37 proti eToro, kým serverový
+// súčet sedel na dva centy.
+//
+// Preto sa krypto z odhadu vynecháva a drží si snapshot hodnotu až do ďalšej
+// synchronizácie. Cena v riadku sa aktualizuje ďalej — mení sa len to, či sa
+// z nej dopočítava P/L do súčtov.
+function positionSupportsLivePnl(pos) {
+  return (pos?.type || '') !== 'Crypto';
+}
+
 function estimatePositionLivePnl(pos, livePrice) {
   const snapshotPnl = Number(pos._snapshotPnl ?? pos.pnl ?? 0);
   const snapshotRate = Number(pos._snapshotCurrentRate || pos.currentRate || 0);
   const units = Number(pos.units || 0);
+  if (!positionSupportsLivePnl(pos)) return snapshotPnl;
   if (!Number.isFinite(livePrice) || livePrice <= 0 || !snapshotRate || !units) return snapshotPnl;
   const direction = pos.isBuy === false ? -1 : 1;
   return snapshotPnl + (livePrice - snapshotRate) * units * direction;
@@ -1980,7 +2304,19 @@ function renderPortPanel(pid) {
     <div class="port-sum-item"><div class="port-sum-label">Invested</div><div class="port-sum-val">$${(sum.invested||0).toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">P/L</div><div id="port-sum-${pid}-pnl" class="port-sum-val ${liveSummaryPnl>=0?'port-pos':'port-neg'}">${liveSummaryPnl>=0?'+':''}$${liveSummaryPnl.toFixed(2)}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Dnes P/L</div><div id="port-sum-${pid}-daily" class="port-sum-val ${dailyPnlSum>=0?'port-pos':'port-neg'}">${dailyPnlSum>=0?'+':''}$${dailyPnlSum.toFixed(2)}</div></div>
-    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div></div>
+    <div class="port-sum-item"><div class="port-sum-label">Equity</div><div id="port-sum-${pid}-equity" class="port-sum-val" style="color:var(--blue);">$${liveSummaryEquity.toFixed(2)}</div>${
+      // Serverová (snapshot) hodnota vedľa živej. Živá je extrapolácia z WS
+      // tickov, serverová je to, čo naposledy povedalo eToro — keď sa rozídu,
+      // vidno to hneď a netreba otvárať /api/diagnostics/summary.
+      // Ukazuje sa len pri rozdiele nad $1, aby to bežne nerušilo.
+      (() => {
+        const snap = Number(sum._snapshotEquity ?? sum.equity ?? 0);
+        const diff = liveSummaryEquity - snap;
+        if (!snap || Math.abs(diff) < 1) return '';
+        const ageMin = _lastResyncAt ? Math.round((Date.now() - _lastResyncAt) / 60000) : null;
+        return `<div class="port-sum-sub" title="Živá hodnota je odhad z WebSocket tickov; serverová je posledný stav z eToro. Snapshot sa obnovuje každých 5 minút.">server $${snap.toFixed(2)} · ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}${ageMin != null ? ` · ${ageMin} min` : ''}</div>`;
+      })()
+    }</div>
     <div class="port-sum-item"><div class="port-sum-label">Pozícií</div><div class="port-sum-val">${sum.positions_count||0}</div></div>
     <div class="port-sum-item"><div class="port-sum-label">Smart/Copy</div><div class="port-sum-val">${sum.mirrors_count||0}</div></div>
     ${(sum.orders_count || (s.data.orders || []).length) ? `<div class="port-sum-item"><div class="port-sum-label">Objednávky</div><div class="port-sum-val" style="color:var(--yellow);">${sum.orders_count || s.data.orders.length}</div></div>` : ''}
@@ -2002,11 +2338,13 @@ function renderPortPanel(pid) {
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
   </div>`;
+    html += `<div id="portfolio-build">${buildCardHead(_buildCache.data)}</div>`;
     html += `<div id="portfolio-sectors">${sectorCardHead(_sectorsCache.data)}</div>`;
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       html += `<div id="portfolio-corr" class="advanced-only">${corrCardHead(_corrCache.data)}</div>`;
     }
     setTimeout(() => loadDcaCandidates(), 0);
+    setTimeout(() => { if (!isPortfolioBuildCollapsed()) loadBuildCard(); else renderBuildCard(_buildCache.data); }, 0);
     setTimeout(() => { if (!isPortfolioSectorsCollapsed()) loadSectorCard(); }, 0);
     if (typeof isAdvancedUiMode !== 'function' || isAdvancedUiMode()) {
       setTimeout(() => { if (!isPortfolioCorrCollapsed()) loadCorrelationCard(); }, 0);
@@ -2037,7 +2375,8 @@ function renderPortPanel(pid) {
       const sym = row.symbol || '';
       const isTickerView = s.view === 'ticker';
       const rowKey = row.positionId || sym;
-      html += `<tr data-port-row="${pid}-${rowKey}" onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}" style="cursor:pointer;">`;
+      html += `<tr data-port-row="${pid}-${rowKey}" onclick="${isTickerView ? `portDrillDown('${pid}','${sym}')` : `portRowClick('${pid}','${sym}')`}"
+        oncontextmenu="onPortRowContextMenu(event,'${pid}','${sym}',${isTickerView})" style="cursor:pointer;">`;
       for (const col of cols) {
         if (col.key === 'symbol') {
           const count = row._count > 1 ? ` <span style="color:var(--muted);font-size:9px;">(${row._count})</span>` : '';
@@ -2052,8 +2391,12 @@ function renderPortPanel(pid) {
         } else if (col.key === 'trade') {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
         } else if (col.key === 'openDateTime') {
-          const star = (s.view !== 'ticker' && tradePassedYearTest(row))
-            ? ' <span class="port-year-test" title="Časový test splnený — akcia/ETF držaná dlhšie než rok (oslobodenie od dane z príjmu pri predaji)">★</span>'
+          const passedTest = s.view === 'ticker' ? tickerPassedYearTest(row) : tradePassedYearTest(row);
+          const starTitle = s.view === 'ticker'
+            ? 'Časový test splnený — VŠETKY tranže tohto titulu držané dlhšie než rok (oslobodenie od dane z príjmu pri predaji)'
+            : 'Časový test splnený — akcia/ETF držaná dlhšie než rok (oslobodenie od dane z príjmu pri predaji)';
+          const star = passedTest
+            ? ` <span class="port-year-test" title="${starTitle}">★</span>`
             : '';
           html += `<td>${fmtPortVal(row.openDateTime, 'date')}${star}</td>`;
         } else if (col.key === 'analystTarget') {
@@ -2147,7 +2490,8 @@ function renderPortPanel(pid) {
           : null;
         const slTp = [o.stopLoss ? `SL ${o.stopLoss}${o.isTsl ? ' (TSL)' : ''}` : null,
                       o.takeProfit ? `TP ${o.takeProfit}` : null].filter(Boolean).join(' · ') || '—';
-        html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')" style="cursor:pointer;">
+        html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')"
+          oncontextmenu="onPortRowContextMenu(event,'${pid}','${o.symbol}',false)" style="cursor:pointer;">
           <td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
             ${getLogoWrapper(o.symbol, 22)}
             <div style="display:flex;flex-direction:column;gap:1px;">
@@ -2266,6 +2610,28 @@ function portClearDrillDown(pid) {
   renderPortPanel(pid);
 }
 
+// Duplikuje presne to, čo je na riadku Portfólia už klikateľné — dock ikonka,
+// "G" odkaz na Google Finance, Trade odkaz na eToro a samotný klik na riadok.
+// `isTickerView` rozlišuje, čo robí klik na riadok (drill-down na tranže
+// vs. otvorenie v Grafoch) — objednávky posielajú `false`, majú len jedno.
+function onPortRowContextMenu(event, pid, sym, isTickerView) {
+  if (!sym) return;
+  event.preventDefault();
+  const t = gfNormSym(sym);
+  const gfExch = _gfExchange[t];
+  const gfHref = gfExch ? googleFinanceQuoteUrl(t, gfExch) : googleFinanceSearchUrl(t);
+  const items = [
+    { label: 'Zobraziť v bočnom paneli', action: () => openChartDock(sym) },
+    isTickerView
+      ? { label: 'Zobraziť tranže', action: () => portDrillDown(pid, sym) }
+      : { label: 'Otvoriť v Grafoch', action: () => portRowClick(pid, sym) },
+    { sep: true },
+    { label: 'Google Finance ↗', action: () => window.open(gfHref, '_blank', 'noopener') },
+    { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') },
+  ];
+  showContextMenu(event.clientX, event.clientY, items);
+}
+
 function portDrillDown(pid, sym) {
   // Prepni na per-trade view a filtruj podľa symbolu
   const s = getPortState(pid);
@@ -2279,7 +2645,7 @@ function portRowClick(pid, sym) {
   if (!sym) return;
   // Prepni na grafy tab a otvor ticker
   switchMainTab('charts');
-  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.id !== dockPanelId && p.querySelector('.p-sym'));
+  const chartPanel = [...document.querySelectorAll('.panel')].find(p => p.id !== dockPanelId && p.id !== verdictPanelId && p.querySelector('.p-sym'));
   if (chartPanel) {
     chartPanel.querySelector('.p-sym').value = sym;
     loadChart(chartPanel.id);

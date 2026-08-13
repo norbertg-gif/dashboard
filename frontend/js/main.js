@@ -49,6 +49,13 @@ ddEl.addEventListener('mouseleave', () => ddHovered = false);
   isLightMode = localStorage.getItem('td_theme') === 'light';
   applyTheme();
   applyUiMode();
+  // Košík grafov prežíva reload — lišta sa musí obnoviť pri štarte, inak by
+  // vyklikané tickery ostali v localStorage bez viditeľného spôsobu, ako ich
+  // otvoriť alebo vyčistiť.
+  renderBasketBar();
+  // Snapshot portfólia sa periodicky obnoví, aby sa živý odhad nemohol
+  // rozísť s eToro (nameraný drift +$37 pri extrapolácii bez resyncu).
+  startPortfolioResync();
   const requestedTab = new URLSearchParams(window.location.search).get('tab');
   if (requestedTab === 'risk') {
     switchMainTab('portfolio');
@@ -355,9 +362,7 @@ document.addEventListener('mousedown', e => {
 
 // Expose predictive functions globally for HTML onclick
 window.pc_applyOverlays = pc_applyOverlays;
-window.pc_toggleVolumeProfile = pc_toggleVolumeProfile;
-window.pc_toggleChartPatterns = pc_toggleChartPatterns;
-window.pc_togglePatternFilter = pc_togglePatternFilter;
+window.pc_toggleIndicator = pc_toggleIndicator;
 window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;
@@ -369,7 +374,6 @@ window.togglePredictiveModelChart = togglePredictiveModelChart;
 window.exportSnapshot = exportSnapshot;
 window.switchView = switchView;
 window.pc_applyOverlays = pc_applyOverlays;
-window.applySubpanel = applySubpanel;
 window.onTickerInput = onTickerInput;
 window.onTickerKeydown = onTickerKeydown;
 window.pc_selectTicker = pc_selectTicker;

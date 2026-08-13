@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused regression tests for cache and public portfolio contracts."""
 
+import asyncio
 import io
 import sys
 import tempfile
@@ -18,6 +19,48 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import trading_backend as tb
+
+
+class IchimokuFutureRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _frame(n=100, freq="D"):
+        index = pd.date_range("2025-01-01", periods=n, freq=freq)
+        close = pd.Series(range(n), index=index, dtype=float) + 100.0
+        return pd.DataFrame({
+            "Open": close - 0.5,
+            "High": close + 2.0,
+            "Low": close - 2.0,
+            "Close": close,
+            "Volume": 1000,
+        }, index=index)
+
+    def test_projects_raw_tail_26_periods_past_last_candle(self):
+        df = self._frame()
+        points = tb._ichimoku_future_points(df)
+        self.assertEqual(len(points), 26)
+        self.assertEqual(points[0][0], df.index[-1] + pd.Timedelta(days=1))
+        self.assertEqual(points[-1][0], df.index[-1] + pd.Timedelta(days=26))
+        self.assertTrue(all(ts > df.index[-1] for ts, _sa, _sb in points))
+
+        _tenkan, _kijun, raw_a, raw_b = tb._ichimoku_raw_spans(df)
+        self.assertAlmostEqual(points[0][1], float(raw_a.iloc[-26]))
+        self.assertAlmostEqual(points[0][2], float(raw_b.iloc[-26]))
+        self.assertAlmostEqual(points[-1][1], float(raw_a.iloc[-1]))
+        self.assertAlmostEqual(points[-1][2], float(raw_b.iloc[-1]))
+
+        _t, _k, shifted_a, shifted_b, _chikou = tb.calc_ichimoku(df)
+        pd.testing.assert_series_equal(shifted_a, raw_a.shift(26))
+        pd.testing.assert_series_equal(shifted_b, raw_b.shift(26))
+
+    def test_too_short_frame_returns_empty_list(self):
+        self.assertEqual(tb._ichimoku_future_points(self._frame(n=20)), [])
+
+    def test_infers_weekly_spacing_from_index(self):
+        df = self._frame(freq="W-MON")
+        points = tb._ichimoku_future_points(df)
+        self.assertEqual(len(points), 26)
+        self.assertEqual(points[0][0], df.index[-1] + pd.Timedelta(weeks=1))
+        self.assertEqual(points[-1][0], df.index[-1] + pd.Timedelta(weeks=26))
 
 
 class ScannerTableSortRegressionTests(unittest.TestCase):
@@ -155,6 +198,57 @@ class CacheRegressionTests(unittest.TestCase):
         self.assertEqual(payload["order_symbols"], ["AAPL", "MSFT"])
 
 
+class Institutional13FRegressionTests(unittest.TestCase):
+    def test_stream_parser_aggregates_targets_and_ignores_other_cusips(self):
+        header = (
+            "ACCESSION_NUMBER\tINFOTABLE_SK\tNAMEOFISSUER\tTITLEOFCLASS\tCUSIP\tFIGI\t"
+            "VALUE\tSSHPRNAMT\tSSHPRNAMTTYPE\tPUTCALL\tINVESTMENTDISCRETION\t"
+            "OTHERMANAGER\tVOTING_AUTH_SOLE\tVOTING_AUTH_SHARED\tVOTING_AUTH_NONE\n"
+        )
+        rows = (
+            "0001\t1\tAPPLE INC\tCOM\t037833100\t\t1\t10\tSH\t\tSOLE\t\t0\t0\t10\n"
+            "0001\t2\tAPPLE INC\tCOM\t037833100\t\t2\t20\tSH\t\tSOLE\t\t0\t0\t20\n"
+            "0002\t3\tAPPLE INC\tCOM\t037833100\t\t3\t25\tSH\t\tSOLE\t\t0\t0\t25\n"
+            "9999\t4\tOTHER CO\tCOM\t999999999\t\t999\t999\tSH\t\tSOLE\t\t0\t0\t999\n"
+        )
+        aggregates, learned = tb._aggregate_13f_stream(
+            io.StringIO(header + rows), {"037833100": {"AAPL"}},
+        )
+        self.assertEqual(aggregates, {
+            "AAPL": {"holder_count": 2, "total_shares": 55},
+        })
+        self.assertEqual(learned, {})
+        self.assertNotIn("999999999", str(aggregates))
+
+    def test_sec_discovery_failure_is_fail_soft(self):
+        with patch.object(tb.requests, "get", side_effect=OSError("offline")):
+            self.assertIsNone(tb._discover_latest_13f_zip_url())
+
+    def test_resolved_zero_holders_is_available_not_unresolved(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            state_path = Path(tmp_dir) / "state.json"
+            state_path.write_text(json.dumps({
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "periods": [{
+                    "period": "01jan2026-31mar2026",
+                    "parsed_at": "2026-05-15T00:00:00+00:00",
+                    "universe": ["ZERO"],
+                    "aggregates": {"ZERO": {
+                        "holder_count": 0,
+                        "total_shares": 0,
+                        "holder_count_delta": 0,
+                        "share_count_delta_pct": 0.0,
+                    }},
+                }],
+            }), encoding="utf-8")
+            with patch.object(tb, "INSTITUTIONAL_13F_STATE_FILE", state_path), \
+                    patch.object(tb, "_kickoff_institutional_refresh", return_value=False):
+                payload = tb.get_ticker_institutional("zero")
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["holder_count"], 0)
+
+
 class PublicPortfolioRegressionTests(unittest.TestCase):
     @staticmethod
     def _request():
@@ -265,6 +359,147 @@ class PublicRateLimitRegressionTests(unittest.TestCase):
         self.assertEqual(set(tb._public_rate), {"new-client"})
 
 
+class PortfolioBuildRegressionTests(unittest.TestCase):
+    """Fáza 1 modulu BUILD: gap = cieľ − váha, žiadne skóre."""
+
+    PORTFOLIO = {
+        "summary": {"equity": 30000},
+        "positions": [
+            {"symbol": "AAPL", "name": "Apple", "type": "Stock", "amount": 1000, "pnl": 100},
+            {"symbol": "AAPL", "name": "Apple", "type": "Stock", "amount": 1000, "pnl": -50},
+            {"symbol": "VWCE", "name": "ETF", "type": "ETF", "amount": 2000, "pnl": 0},
+            {"symbol": "BTC", "name": "Bitcoin", "type": "Crypto", "amount": 6000, "pnl": 500},
+        ],
+    }
+
+    def _build(self, classes):
+        with (
+            patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            patch.object(tb, "_load_position_classes", return_value=classes),
+        ):
+            return tb.get_build_candidates(account="1")
+
+    def test_weight_uses_stock_etf_book_not_account_equity(self):
+        data = self._build({"AAPL": {"position_class": "CORE", "target_weight": 60}})
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Kniha je 2000 + 2000 = 4000, nie equity 30000, a krypto v nej nie je.
+        self.assertEqual(data["book_value"], 4000)
+        self.assertNotIn("BTC", rows)
+        self.assertEqual(rows["AAPL"]["weight_pct"], 50.0)   # 2000/4000, nie 2000/30000
+        self.assertEqual(rows["AAPL"]["gap_pct"], 10.0)
+        self.assertEqual(rows["AAPL"]["gap_amount"], 400.0)
+        self.assertEqual(rows["AAPL"]["state"], "build")
+
+    def test_position_over_max_weight_is_not_a_build_candidate(self):
+        data = self._build({"AAPL": {"position_class": "CORE", "target_weight": 60, "max_weight": 40}})
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Strop prebíja cieľ — inak by karta odporúčala dokupovať cez vlastný limit.
+        self.assertEqual(rows["AAPL"]["state"], "over_max")
+        self.assertEqual(rows["VWCE"]["state"], "unclassified")
+        self.assertEqual(data["counts"]["unclassified"], 1)
+
+    def test_targets_are_derived_from_class_ratio_and_sum_to_100(self):
+        data = self._build({
+            "AAPL": {"position_class": "CORE"},
+            "VWCE": {"position_class": "SPECULATIVE"},
+        })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Pomer 4:1 → 80/20, normalizované na 100 % cez zaradené pozície.
+        self.assertEqual(rows["AAPL"]["target_weight"], 80.0)
+        self.assertEqual(rows["VWCE"]["target_weight"], 20.0)
+        self.assertEqual(rows["AAPL"]["target_source"], "class")
+        self.assertEqual(data["target_weight_sum"], 100.0)
+
+    def test_manual_target_beats_derived_one(self):
+        data = self._build({
+            "AAPL": {"position_class": "CORE", "target_weight": 12},
+            "VWCE": {"position_class": "CORE"},
+        })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        # Ručné číslo sa nesmie prepísať odvodením, inak sa názor stratí.
+        self.assertEqual(rows["AAPL"]["target_weight"], 12)
+        self.assertEqual(rows["AAPL"]["target_source"], "manual")
+        self.assertEqual(rows["VWCE"]["target_weight"], 50.0)
+        self.assertEqual(data["manual_targets"], 1)
+
+    def test_zero_ratio_class_gets_zero_target_not_a_crash(self):
+        with patch.object(tb, "_dash_settings", return_value={
+            **tb.DASH_SETTINGS_DEFAULTS, "class_ratio_speculative": 0}):
+            data = self._build({
+                "AAPL": {"position_class": "CORE"},
+                "VWCE": {"position_class": "SPECULATIVE"},
+            })
+        rows = {r["symbol"]: r for r in data["positions"]}
+        self.assertEqual(rows["AAPL"]["target_weight"], 100.0)
+        self.assertEqual(rows["VWCE"]["target_weight"], 0.0)
+        self.assertEqual(rows["VWCE"]["state"], "at_target")
+
+    def test_seed_fills_evenly_and_never_overwrites_manual_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with (
+                patch.object(tb, "POSITION_CLASSES_FILE", path),
+                patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            ):
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"AAPL": {"position_class": "SPECULATIVE", "target_weight": 12}}})))
+                out = tb.seed_position_classes(account="1")
+                stored = tb._load_position_classes()
+                # Dva Stock/ETF tickery (krypto sa neráta), jeden už zaradený.
+                self.assertEqual(out["positions"], 2)
+                self.assertEqual((out["seeded"], out["kept"]), (1, 1))
+                # Seed NEUKLADÁ cieľ — ten sa odvodzuje z triedy.
+                self.assertNotIn("target_weight", stored["VWCE"])
+                # Ručné rozhodnutie musí prežiť; seed dopĺňa, neprepisuje.
+                self.assertEqual(stored["AAPL"]["position_class"], "SPECULATIVE")
+                self.assertEqual(stored["AAPL"]["target_weight"], 12)
+                self.assertEqual(stored["VWCE"]["position_class"], "CORE")
+                self.assertEqual(stored["VWCE"]["note"], "seed")
+                tb.seed_position_classes(account="1", overwrite=1)
+                reseeded = tb._load_position_classes()["AAPL"]
+                self.assertEqual(reseeded["position_class"], "CORE")
+                self.assertNotIn("target_weight", reseeded)
+
+    def test_seed_flag_clears_once_the_value_is_edited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with (
+                patch.object(tb, "POSITION_CLASSES_FILE", path),
+                patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            ):
+                tb.seed_position_classes(account="1")
+                self.assertTrue({r["symbol"]: r for r in tb.get_build_candidates(account="1")["positions"]}["AAPL"]["is_seed"])
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"AAPL": {"position_class": "CORE", "target_weight": 8}}})))
+                rows = {r["symbol"]: r for r in tb.get_build_candidates(account="1")["positions"]}
+                # Ručná úprava zahodí značku seed — inak by "čo ešte prejsť" nikdy neubúdalo.
+                self.assertFalse(rows["AAPL"]["is_seed"])
+
+    def test_classes_round_trip_and_reject_unknown_class(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "position_classes.json"
+            with patch.object(tb, "POSITION_CLASSES_FILE", path):
+                asyncio.run(tb.save_position_classes(_JsonRequest(
+                    {"classes": {"aapl": {"position_class": "core", "target_weight": 5}}})))
+                stored = tb._load_position_classes()
+                self.assertEqual(stored["AAPL"]["position_class"], "CORE")
+                self.assertIn("updated_at", stored["AAPL"])
+                with self.assertRaises(tb.HTTPException):
+                    asyncio.run(tb.save_position_classes(_JsonRequest(
+                        {"classes": {"MSFT": {"position_class": "GROWTH"}}})))
+                # Zmazanie musí ísť z UI, inak sa preklep opravuje ručne v súbore.
+                asyncio.run(tb.save_position_classes(_JsonRequest({"classes": {"AAPL": None}})))
+                self.assertEqual(tb._load_position_classes(), {})
+
+
+class _JsonRequest:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+
 class AssistantExportRegressionTests(unittest.TestCase):
     def test_export_has_versioned_schema_and_redacts_internal_ids(self):
         snapshot = {
@@ -277,8 +512,14 @@ class AssistantExportRegressionTests(unittest.TestCase):
             }, {"symbol": "BTC", "name": "Bitcoin", "type": "Crypto", "amount": 50, "pnl": 5}],
             "orders": [{"orderId": 555, "symbol": "MSFT", "type": "Stock", "kind": "limit", "isBuy": True, "rate": 400, "amount": 50}],
         }
+        requested_accounts: list[str] = []
+
+        def _snapshot(account):
+            requested_accounts.append(account)
+            return snapshot if account == "1" else {}
+
         with (
-            patch.object(tb, "_assistant_snapshot", side_effect=lambda account: snapshot if account == "1" else {}),
+            patch.object(tb, "_assistant_snapshot", side_effect=_snapshot),
             patch.object(tb, "load_dip_scores", return_value={
                 "AAPL": {"rank": 1, "total": 105, "fa": 70, "ta": 35, "label": "VERY STRONG"},
                 "MSFT": {"rank": 2, "total": 95, "fa": 65, "ta": 30, "label": "STRONG"},
@@ -294,7 +535,11 @@ class AssistantExportRegressionTests(unittest.TestCase):
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.2")
+        self.assertEqual(payload["schema_version"], "1.3")
+        # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
+        self.assertEqual(requested_accounts, ["1"])
+        self.assertEqual(payload["analysis_scope"]["account"], "1")
+        self.assertFalse(payload["analysis_scope"]["accounts_merged"])
         self.assertEqual(payload["positions"][0]["ticker"], "AAPL")
         self.assertEqual(payload["positions"][0]["earnings"]["date"], "2026-07-15")
         self.assertEqual(payload["positions"][0]["dca_context"]["change_from_last_entry_pct"], 10.0)
@@ -316,6 +561,23 @@ class AssistantExportRegressionTests(unittest.TestCase):
         rendered = json.dumps(payload)
         self.assertNotIn("positionId", rendered)
         self.assertNotIn("orderId", rendered)
+
+    def test_solvency_comes_from_insights_cache_and_never_fetches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp)
+            (cache_dir / "AAPL.json").write_text(json.dumps({
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "solvency": {"net_debt_to_ebitda": 1.4, "interest_coverage": 22.5,
+                             "current_ratio": 0.95, "source": "finnhub"},
+            }), encoding="utf-8")
+            with patch.object(tb, "YAHOO_INSIGHTS_DIR", cache_dir):
+                found = tb._assistant_solvency("AAPL")
+                # Ticker bez cache je "neviem", nie prázdny zdravý súvahový list.
+                missing = tb._assistant_solvency("NVDA")
+        self.assertEqual(found["net_debt_to_ebitda"], 1.4)
+        self.assertEqual(found["interest_coverage"], 22.5)
+        self.assertEqual(found["data_age_days"], 0)
+        self.assertEqual(missing, {})
 
     def test_dca_context_can_be_eligible_without_chart_blockers(self):
         position = tb._assistant_export_position(
@@ -1103,6 +1365,79 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
                 payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
         self.assertEqual(payload["source"], "Alpha Vantage")
         self.assertEqual(payload["company"], "AV Corp")
+
+
+class MassiveSplitAdjustmentRegressionTests(unittest.TestCase):
+    """Massive aggs endpoint is requested with adjusted=true, but a live check
+    against MNST (2026-08-13) showed it can still return a raw, split-unadjusted
+    close series (single-bar 90.36 -> 45.53 halving, classic 2:1 split artifact).
+    _massive_apply_unadjusted_splits() is the safety net: it only rewrites bars
+    when the raw jump across a KNOWN split date actually matches the unadjusted
+    ratio, so already-adjusted data (jump ~= 1.0) is left untouched."""
+
+    @staticmethod
+    def _frame(closes, start="2026-01-01"):
+        index = pd.date_range(start, periods=len(closes), freq="D")
+        closes = pd.Series(closes, index=index, dtype=float)
+        return pd.DataFrame({
+            "Open": closes, "High": closes + 1, "Low": closes - 1,
+            "Close": closes, "Volume": [1000.0] * len(closes),
+        }, index=index)
+
+    def test_unadjusted_split_is_detected_and_corrected(self):
+        # Bars 0-3 before the split (raw, unadjusted), 4-6 after (already at
+        # post-split scale) -- mirrors the observed MNST 2:1 artifact.
+        df = self._frame([90.0, 91.0, 92.0, 90.36, 45.53, 45.98, 46.645])
+        split_date = df.index[4].strftime("%Y-%m-%d")
+        splits = [{"execution_date": split_date, "split_from": 1, "split_to": 2}]
+        with patch.object(tb, "_massive_splits", return_value=splits):
+            adjusted = tb._massive_apply_unadjusted_splits(df.copy(), "MNST")
+        # Pre-split bars must be halved to match the post-split scale.
+        self.assertAlmostEqual(adjusted["Close"].iloc[0], 45.0)
+        self.assertAlmostEqual(adjusted["Close"].iloc[3], 45.18)
+        # Volume scales up by the inverse ratio.
+        self.assertAlmostEqual(adjusted["Volume"].iloc[0], 2000.0)
+        # Post-split bars (already correct scale) must be untouched.
+        self.assertAlmostEqual(adjusted["Close"].iloc[4], 45.53)
+        self.assertAlmostEqual(adjusted["Close"].iloc[6], 46.645)
+
+    def test_already_adjusted_data_is_left_untouched(self):
+        # No real jump across the split boundary -> Massive already adjusted
+        # this series; applying the split again would corrupt it.
+        df = self._frame([44.5, 44.8, 45.1, 45.2, 45.53, 45.98, 46.645])
+        split_date = df.index[4].strftime("%Y-%m-%d")
+        splits = [{"execution_date": split_date, "split_from": 1, "split_to": 2}]
+        with patch.object(tb, "_massive_splits", return_value=splits):
+            adjusted = tb._massive_apply_unadjusted_splits(df.copy(), "MNST")
+        pd.testing.assert_frame_equal(adjusted, df)
+
+    def test_no_splits_or_failed_lookup_returns_frame_unchanged(self):
+        df = self._frame([10.0, 10.5, 11.0])
+        with patch.object(tb, "_massive_splits", return_value=[]):
+            self.assertTrue(df.equals(tb._massive_apply_unadjusted_splits(df.copy(), "AAPL")))
+        with patch.object(tb, "_massive_splits", side_effect=RuntimeError("splits unavailable")):
+            self.assertTrue(df.equals(tb._massive_apply_unadjusted_splits(df.copy(), "AAPL")))
+
+    def test_daily_bars_calls_split_adjustment_on_success(self):
+        rows = [
+            {"o": 90.0, "h": 91.0, "l": 89.0, "c": 90.36, "t": 1735689600000},
+            {"o": 45.5, "h": 46.0, "l": 45.0, "c": 45.53, "t": 1735776000000},
+            {"o": 45.9, "h": 46.5, "l": 45.5, "c": 45.98, "t": 1735862400000},
+        ]
+        response = type("R", (), {
+            "content": b"{}", "status_code": 200, "ok": True,
+            "json": lambda self: {"status": "OK", "adjusted": True, "results": rows},
+        })()
+        with (
+            patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+            patch.object(tb, "_massive_bars_disabled", False),
+            patch.object(tb.requests, "get", return_value=response),
+            patch.object(tb, "_massive_apply_unadjusted_splits", side_effect=lambda df, t: df) as adj_call,
+        ):
+            result = tb._massive_daily_bars("MNST", "1y", "1d")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 3)
+        adj_call.assert_called_once()
 
 
 class CorporateActionsRegressionTests(unittest.TestCase):

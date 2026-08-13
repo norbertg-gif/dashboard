@@ -275,6 +275,7 @@ function homeEarningsHtml(earnings) {
     <div class="home-list-row" onclick="homeOpenTicker('${escHtml(it.ticker)}')">
       <span class="home-plan-ticker">${escHtml(it.ticker)}</span>
       <span class="home-earn-days">${it.days === 0 ? 'dnes' : it.days === 1 ? 'zajtra' : `o ${it.days} dní`}</span>
+      <span onclick="event.stopPropagation()">${basketButtonHtml(it.ticker, 'home-basket-btn')}</span>
       ${it.in_portfolio ? '<span class="scanner-label buy">PORT</span>' : ''}
     </div>`).join('')}</div>`;
 }
@@ -716,6 +717,7 @@ function heatmapCellHtml(row, metricKey, range) {
   return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind, range)}flex-grow:${grow.toFixed(2)};"
       title="${escHtml(tip || row?.symbol || '')}" onclick="openVerdictTicker('${escHtml(row.symbol)}')">
     <span class="hm-sym">${escHtml(row.symbol)}</span>
+    <span class="hm-basket" onclick="event.stopPropagation()">${basketButtonHtml(row.symbol, 'hm-basket-btn')}</span>
     <span class="hm-val">${shown}</span>
   </button>`;
 }

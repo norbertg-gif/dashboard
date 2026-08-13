@@ -52,7 +52,6 @@ dokument ho dopĺňa stavovým/environmentálnym kontextom, nenahrádza ho.
   - `portfolio.js` — portfóliá, DCA, Pozornosť, objednávky, korelácie, história
   - `watchlist.js` — watchlist, synchronizácia, sparklines, live hodnoty
   - `scanner.js` — Investor Inbox, earnings, DIP scanner, checklist, news, poznámky
-  - `chart_patterns.js` — chart pattern overlay (registry + detektory + renderer)
   - `predictive.js` — analytický/prediktívny graf (tab "Analytika"), signály, overlaye, pravý panel
   - `verdict.js` — Verdikt tab
   - `charts.js` — štandardné grafy, markery, presety, Top pohyby, chart dock
@@ -113,11 +112,12 @@ treba spustiť ručne**, inak sa autobump nespustí.
 - Watchlist s lokálnou/serverovou synchronizáciou, radením, označením
   držaných titulov a titulov v objednávkach.
 - Štandardné grafy (Lightweight Charts 5.2.0): indikátory, markery,
-  tooltipy, MagnetOHLC crosshair, Volume Profile, chart pattern overlaye.
+  tooltipy, MagnetOHLC crosshair a Volume Profile.
 - Import tickerov zo schránky do denných grafov (limit 20).
 - Chart dock vpravo v Portfóliu (viditeľný iba v Portfólio tabe).
-- Analytika: história signálov, 90D+ validácia (Advanced), chart patterny,
-  earnings, relatívna sila (RS), technická zóna, voliteľná fair-value karta.
+- Analytika: história signálov, 90D+ validácia (Advanced), nezávislé weekly/daily
+  indikátory a subpanely, earnings, relatívna sila (RS), technická zóna,
+  voliteľná fair-value karta.
 - Scanner: Investor Inbox, týždenný plán, earnings kalendár, DIP ranking,
   import XLSX, diagnostika, lazy news/sentiment detail.
 - Basic/Advanced UI režim pre zníženie vizuálneho šumu.

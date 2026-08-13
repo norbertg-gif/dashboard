@@ -1243,6 +1243,26 @@ body.sidebar-collapsed #sb-resizer {
 .ind-btn.active-rsi      { border-color: var(--ind-rsi); color: var(--ind-rsi); background: var(--ind-rsi-soft); }
 .ind-btn.active-adx      { border-color: var(--ind-adx); color: var(--ind-adx); background: var(--ind-adx-soft); }
 .ind-btn.active-macd     { border-color: var(--ind-macd); color: var(--ind-macd); background: var(--ind-macd-soft); }
+#predictiveTab .pc-indicator-row {
+  flex: 0 0 auto;
+}
+#predictiveTab .pc-chart-subpanels {
+  flex: 0 0 auto;
+}
+#predictiveTab .pc-indicator-subpanel {
+  display: none;
+  height: 96px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  flex: 0 0 96px;
+}
+#predictiveTab .pc-indicator-subpanel.active {
+  display: block;
+}
+#predictiveTab .pc-subchart-canvas {
+  position: absolute;
+  inset: 0;
+}
 .ema-indicator-wrap {
   position: relative;
   display: inline-flex;
@@ -1922,13 +1942,38 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* NIE overflow:hidden. Sticky (.tool-table th) sa viaže na najbližšieho
+     predka s neviditeľným overflow; keď je to táto škatuľa a ona sama
+     nescrolluje (rastie s obsahom), hlavička sa netvári ako prilepená k
+     viewportu, len sa posúva s ním. Zafarbenie detí je zhodné s pozadím
+     panela (var(--bg-card)), takže vizuálne orezanie rohov aj tak nič
+     nerobilo — bezpečné odstrániť. */
   box-shadow: var(--shadow);
 }
 .tool-panel.fill {
   min-height: 100%;
   display: flex;
   flex-direction: column;
+}
+/* Vlastný scroll pre samotnú tabuľku, nie celý panel — inak `.tool-panel`
+   svojím `overflow:hidden` láme position:sticky na hlavičke: sticky sa viaže
+   na najbližšieho predka s neviditeľným overflow, a keď ten predok nemá
+   vlastnú výšku (nescrolluje), hlavička sa netvári ako prilepená k viewportu,
+   len sa posúva s ním. Tabuľka dostáva vlastnú ohraničenú výšku (flex:1 v
+   .tool-panel.fill), takže scrolluje ona a hlavička ostáva viditeľná. */
+.tool-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* História je jediný .tool-panel.fill, ktorý má byť OHRANIČENÝ na výšku
+   viewportu (aby .tool-table-scroll vyššie dostal reálny strop a scrolloval
+   sám). Scanner naopak potrebuje viacero panelov voľne rastúcich v rámci
+   scrollujúcej stránky (.scanner-page) — base `.tool-panel.fill{min-height:
+   100%}` je len spodná hranica, nie strop, takže tento override je zámerne
+   scoped len na Históriu, nie globálny. */
+#main-history .tool-panel.fill {
+  height: 100%;
 }
 .tool-toolbar {
   display: flex;
@@ -2016,6 +2061,49 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 .dca-pill.warn    { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-soft); }
 .dca-pill.bad     { color: var(--down); border-color: var(--down); background: var(--down-soft); }
 .dca-pill.neutral { color: var(--muted); border-color: var(--border); background: var(--bg-input); }
+
+/* Build card inputs — trieda a cieľová váha sa vypĺňajú priamo v tabuľke,
+   takže musia byť úzke a nesmú rozhodiť šírku riadku. */
+.build-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  font: 700 10px var(--font-mono);
+  padding: 1px 4px;
+}
+.build-input[type="number"] { width: 52px; text-align: right; }
+.build-input:focus { border-color: var(--blue); outline: none; }
+/* Odvodený cieľ (z pomeru tried) sa musí dať odlíšiť od ručne zadaného,
+   inak nevidno, ktoré čísla si používateľ naozaj vybral. */
+.build-input.derived { border-style: dashed; }
+.build-input.derived::placeholder { color: var(--muted); opacity: 1; font-style: italic; }
+
+/* ── Context menu (right-click) ───────────────────────────────── */
+.ctx-menu {
+  position: fixed;
+  z-index: 99999;
+  min-width: 160px;
+  background: var(--bg-card);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  font-family: var(--font-ui);
+}
+.ctx-menu-item {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-menu-item:hover { background: var(--bg-input); }
+.ctx-menu-item.disabled { color: var(--muted2); cursor: default; }
+.ctx-menu-item.disabled:hover { background: transparent; }
+.ctx-menu-item.checked { color: var(--blue); }
+.ctx-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* ── Shared card head (DCA) ─────────────────────────────────── */
 .risk-corr-head {
@@ -2607,6 +2695,30 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   text-transform: uppercase;
   margin-bottom: 10px;
 }
+/* Použité RS/insights/inštitucionálnou kartou pre riadky "popisok: hodnota" —
+   chýbalo úplne, takže sa label a hodnota lepili bez medzery ("13F fileri3 437"). */
+#predictiveTab .pred-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-size: 12px;
+}
+#predictiveTab .pred-row:last-of-type {
+  border-bottom: none;
+}
+#predictiveTab .pred-row .key {
+  color: var(--muted);
+  white-space: nowrap;
+}
+#predictiveTab .pred-row .val {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-align: right;
+}
 #predictiveTab .fair-value-beta {
   margin-left: 4px;
   color: var(--accent);
@@ -2854,97 +2966,6 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 #predictiveTab .stat-value.bull { color: var(--up); }
 #predictiveTab .stat-value.bear { color: var(--down); }
 #predictiveTab .stat-value.pred { color: var(--accent); }
-
-#predictiveTab .pc-pattern-empty {
-  color: var(--muted);
-  line-height: 1.45;
-}
-#predictiveTab .pc-pattern-item {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-#predictiveTab .pc-pattern-item + .pc-pattern-item {
-  margin-top: 8px;
-}
-#predictiveTab .pc-pattern-item.secondary {
-  opacity: .78;
-}
-#predictiveTab .pc-pattern-top,
-#predictiveTab .pc-pattern-score,
-#predictiveTab .pc-pattern-levels {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-#predictiveTab .pc-pattern-name {
-  color: var(--text);
-  font-weight: 800;
-  font-size: 12px;
-}
-#predictiveTab .pc-pattern-sk {
-  color: var(--muted);
-  font-size: 10px;
-  margin-top: 2px;
-}
-#predictiveTab .pc-pattern-state {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  border-radius: 999px;
-  padding: 3px 7px;
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-#predictiveTab .pc-pattern-state.buy {
-  color: var(--up);
-  background: var(--up-soft);
-  border-color: color-mix(in srgb, var(--up) 50%, var(--border));
-}
-#predictiveTab .pc-pattern-state.watch {
-  color: var(--yellow);
-  background: var(--yellow-soft);
-  border-color: color-mix(in srgb, var(--yellow) 50%, var(--border));
-}
-#predictiveTab .pc-pattern-state.counter {
-  color: var(--down);
-  background: var(--down-soft);
-  border-color: color-mix(in srgb, var(--down) 50%, var(--border));
-}
-#predictiveTab .pc-pattern-score,
-#predictiveTab .pc-pattern-levels {
-  font-size: 10px;
-  color: var(--muted);
-}
-#predictiveTab .pc-pattern-score strong {
-  color: var(--accent);
-  font-family: var(--font-mono);
-}
-#predictiveTab .pc-pattern-summary {
-  color: var(--muted2);
-  font-size: 11px;
-  line-height: 1.35;
-}
-#predictiveTab .pc-pattern-levels {
-  align-items: flex-start;
-  border-top: 1px solid var(--border);
-  padding-top: 7px;
-}
-#predictiveTab .pc-pattern-levels span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-#predictiveTab .pc-pattern-levels b {
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
 
 #predictiveTab .signal-current-box {
   border: 1px solid var(--border);
@@ -3723,7 +3744,11 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .scanner-output {
   min-height: 0;
-  overflow: auto;
+  /* NIE overflow:auto — táto škatuľa je vnorená v .tool-panel.fill, ktorý
+     voľne rastie s obsahom (nie je ohraničený), takže by (rovnako ako
+     .scanner-table-wrap vyššie) sama nikdy neskrolovala a len by lámala
+     sticky hlavičku. Skutočný scroll dáva .scanner-page. */
+  overflow: visible;
   padding: 14px 18px 18px;
   flex: 1;
 }
@@ -3857,7 +3882,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .scanner-table-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  overflow: auto;
+  /* Plain `visible`, nie `overflow-x:auto;overflow-y:visible` — CSS spec
+     núti "visible" os na "auto", keď je druhá os auto/scroll/hidden (overené
+     priamo v prehliadači: `overflow-x:auto;overflow-y:visible` sa spočíta
+     ako overflowY:"auto", nie "visible"), takže by aj tak lámalo sticky ako
+     predtým. Horizontálny scroll pre širokú tabuľku prevzalo `.scanner-page`
+     (má vlastný `overflow:auto` na oboch osiach). */
+  overflow: visible;
   background: var(--bg-card);
 }
 .scanner-table {
@@ -4812,9 +4843,48 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     radial-gradient(900px 420px at 18% 0%, color-mix(in oklch, var(--accent) 16%, transparent), transparent 60%),
     radial-gradient(720px 380px at 92% 18%, color-mix(in oklch, var(--purple) 11%, transparent), transparent 65%);
 }
+/* Verdikt je dvojstĺpcový: obsah vľavo, graf vpravo. Pod 1280px sa graf
+   presunie pod obsah — pri užšom okne je čitateľnosť verdiktu prednejšia. */
+.verdict-view {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+.verdict-chart {
+  flex: 1 1 480px;
+  min-width: 420px;
+  position: sticky;
+  top: 12px;
+  /* Bez explicitnej výšky — `align-items:stretch` na .verdict-view natiahne
+     graf presne na výšku ľavého stĺpca (obsah karty je predvídateľne
+     rovnako vysoký), namiesto fixného podielu viewportu, ktorý s obsahom
+     nesúvisel. */
+  min-height: 420px;
+  align-self: stretch;
+}
+/* `height:100%` samo osebe nestačí — bez display:flex sa táto výška
+   nikam neprenáša na .panel vo vnútri (ten by si vzal len svoju prirodzenú
+   výšku, cca 250px z .p-chart flex-basis). flex + panel flex:1 natiahne
+   celý reťazec až po samotný chart canvas. */
+.verdict-chart .dock-grid {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.verdict-chart .dock-grid .panel {
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 1280px) {
+  .verdict-view { flex-direction: column; }
+  .verdict-chart { width: 100%; min-width: 0; position: static; height: 420px; }
+}
+
 .verdict-shell {
   width: min(1080px, 100%);
-  margin: 0 auto;
+  flex: 1 1 560px;
+  min-width: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -4852,6 +4922,34 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 .verdict-content {
   display: grid;
   gap: 16px;
+}
+/* Dva verdikty vedľa seba (DIP + Trend) — na užšom okne pod sebou, nech sa
+   karty nezmenšia natoľko, že prestanú byť čitateľné. */
+.verdict-dual {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.verdict-dual > .verdict-content {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .verdict-dual { flex-direction: column; }
+}
+.verdict-mode-tag {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--muted2);
+  background: color-mix(in oklch, var(--bg-input) 78%, transparent);
 }
 .verdict-empty {
   min-height: 260px;
@@ -4947,13 +5045,23 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 11px;
   font-family: var(--font-mono);
 }
+.verdict-sources-label {
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
 .verdict-sources {
   position: relative;
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 5px;
 }
 .verdict-sources span {
   padding: 4px 8px;
@@ -4965,10 +5073,13 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   font-size: 9px;
   font-weight: 800;
 }
+/* ZÁMERNE nie var(--up)/zelená — tá v appke všade znamená "bullish", ale
+   tento chip hovorí len "máme dáta", nie "je to priaznivé". Modrá je
+   neutrálna, aby sa to nedalo zameniť za súhlas. */
 .verdict-sources .ok {
-  color: var(--up);
-  border-color: color-mix(in oklch, var(--up) 45%, var(--border));
-  background: var(--up-soft);
+  color: var(--blue);
+  border-color: color-mix(in oklch, var(--blue) 45%, var(--border));
+  background: color-mix(in oklch, var(--blue) 12%, transparent);
 }
 .verdict-sources .missing {
   color: var(--yellow);
@@ -5551,6 +5662,92 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 }
 .home-pos { color: var(--up); }
 .home-neg { color: var(--down); }
+
+/* Scanner režim "Kam pridať" — verdikt nad tabuľkou držaných titulov. */
+.scanner-mine-verdict {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm);
+  background: var(--bg3);
+}
+.scanner-mine-verdict .scanner-label { margin-right: 6px; }
+.scanner-mine-table td { cursor: pointer; }
+
+/* Serverová hodnota pod živou equity — objaví sa len pri rozdiele nad $1. */
+.port-sum-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--muted3);
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+/* Košík grafov — ⊕ tlačidlo pri tickeri a globálna lišta dole.
+   Modrá zámerne: je to výber, nie stav pozície ani P/L. */
+.basket-btn {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.basket-btn:hover { color: var(--text); border-color: var(--blue); }
+.basket-btn.in-basket {
+  background: color-mix(in oklch, var(--blue) 22%, transparent);
+  border-color: var(--blue);
+  color: var(--text);
+}
+.earncal-wrap { display: inline-flex; align-items: center; }
+.hm-basket { position: absolute; top: 3px; right: 3px; opacity: 0; transition: opacity 0.12s ease; }
+.hm-cell { position: relative; }
+.hm-cell:hover .hm-basket, .hm-basket:has(.in-basket) { opacity: 1; }
+
+#chart-basket-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  /* Nad bežným chrome (hlavička a panely idú do ~200), ale POD modálmi
+     (9000+), aby neprekrývala dialógy. */
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--blue);
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  max-width: min(90vw, 720px);
+}
+#chart-basket-bar .cb-count {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text);
+  background: color-mix(in oklch, var(--blue) 28%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+#chart-basket-bar .cb-list {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Benchmark "moje výbery vs index" — jedno hlavné číslo, dve porovnania,
    pod tým najlepší a najhorší výber voči QQQ. */

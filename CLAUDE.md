@@ -83,7 +83,7 @@ These were already in the codebase and need to stay fixed:
 - **Bump verzie schémy cache je pri nespoľahlivých zdrojoch DEŠTRUKTÍVNA operácia.** `INSIGHTS_SCHEMA_VERSION` 16→17 (2026-08-04) zneplatnil všetky uložené insights payloady, aby sa prejavila nová FMP vetva pri `price_target`. Lenže časť tickerov nový fetch nedokázala obnoviť — Finnhub free tier cieľ pre veľa titulov nedá, Yahoo z Render IP prejde len občas, FMP má vlastné limity. GOOG mal hodinu predtým platných 421,79 zo zdroja `yahoo+av` a po bumpe ostal prázdny; zmizol z karty, z čiary na grafe aj zo stĺpca `Cieľ` v Portfóliu. **Správne poradie je: najprv doplniť prenos poľa zo starého záznamu, až potom bumpnúť verziu.** Insights write path teraz cieľ prenáša (`carried_from` drží pôvodný čas), takže jedna neúspešná obnova ho už nezmaže — rovnaký vzor treba použiť pre každé pole z fail-soft zdroja, ktoré sa nedá spoľahlivo zopakovať. Platí všeobecne: „teraz sa nepodarilo" NIE JE „neexistuje".
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise. The public portfolio endpoint reuses the same processed snapshot as the Portfolio tab; do not add a parallel raw-cache calculation path.
 - **Cache identity and writes matter.** Backtest cache identity includes an OHLCV fingerprint, not only the last date/row count. Disk JSON/gzip cache writes must remain temp-file + `os.replace()` atomic and use the striped file lock shared with reads.
-- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). Schema `1.2` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
+- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). **Exportuje sa VŽDY len jeden účet, default `?account=1`; zlúčenie účtov je zakázané** — účet 2 (Nelkin, ~15 rokov, pasívne ETF) má inú stratégiu a zlúčenie podľa tickeru je stratové (loty sa už nedajú rozlíšiť). Parameter prijíma iba `1`/`2`, inak 400. `analysis_scope.account` + `accounts_merged:false` nesú túto identitu v payloade. Schema `1.3` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
 - **Don't duplicate `/api/search`.** There were two routes with the same path returning different shapes (`list` vs `{results: [...]}`). FastAPI keeps the first; the second is dead, and clients expecting the other shape silently break (predictive autocomplete).
 - **Don't redefine `calc_adx` / `calc_rsi` / `calc_macd` / `calc_ichimoku` / `calc_stoch_rsi`.** The file had two sets — the second `calc_adx` returns a DataFrame, the first returns a tuple. Anything unpacking `_adx, _di, _di2 = calc_adx(df)` will silently get column-name strings → NaN columns → ADX disabled. Keep one definition each, near the top, used by both predictive and `/api/ohlcv`.
 - **Profit/loss colouring uses `pos.pnl >= 0`, not rate comparison.** `pos.openRate <= lastClose` is wrong for short positions, leveraged trades, and ignores fees. The `pos.pnl` field from eToro is the source of truth.
@@ -110,23 +110,271 @@ These were already in the codebase and need to stay fixed:
 - **Scanner memory limits.** In the low-memory profile `SCANNER_MAX_WORKERS` defaults to 2 (normal profile 3); 8 concurrent workers caused OOM restarts on Render free tier. `_CACHE_MEM_MAX` is 50. Scanner workers explicitly `del` DataFrames before returning, do not retain their downloaded OHLCV in `_YF_CACHE`, and run `gc.collect()` every `SCANNER_GC_INTERVAL` completions plus after the full scan. Scanner state records RSS start/peak for diagnostics; this is a high-water mark, not a live memory reading.
 - **`dailyPnL` does not exist in eToro API.** `/pnl/real` positions schema has no `dailyPnL` field — `pos.get("dailyPnL")` always returns `None`. Portfolio Stock/ETF Daily P/L is computed via `_get_market_prev_close(sym, type)`: current eToro `currentRate` minus market previous close from Massive/yfinance daily bars, then `× units × direction`. Non-Stock/ETF falls back to `_get_prev_close(sym)` from eToro OHLCV cache. This is still an approximation; eToro's own calculation includes spread/internal factors and their own day boundary. The market-close cache lives under `cache/market_close` with a 6h TTL.
 
+- **`overflow-x:auto; overflow-y:visible` sa NESPRÁVA tak, ako znie — CSS spec núti "visible" os na "auto", keď je druhá os auto/scroll/hidden.** Overené priamo v prehliadači (2026-08-11): takto zapísaný pár sa spočíta ako `overflowY:"auto"`, nie `"visible"`, takže box stále láme `position:sticky` (sticky sa viaže na najbližšieho predka s NEviditeľným overflow — a "auto" nie je viditeľný, hoci vyzerá neškodne). Jediný spoľahlivý spôsob, ako dať elementu horizontálny scroll bez toho, aby blokoval sticky vo vertikálnom smere niektorého potomka, je NEDÁVAŤ mu žiadny vertikálny overflow vôbec (`overflow: visible` ako JEDNU hodnotu) a horizontálny scroll presunúť o úroveň vyššie, na predka, ktorý má aj tak `overflow:auto` na oboch osiach.
+- **Sticky hlavička (`.tool-table th{position:sticky;top:0}`) potrebuje OHRANIČENÉHO, skutočne scrollujúceho predka — nie len `overflow:auto`/`hidden` na krabici, ktorá voľne rastie s obsahom.** Ak najbližší predok s neviditeľným overflow nemá vlastnú definitívnu výšku (napr. `.tool-panel{overflow:hidden}` bez `flex:1`+ohraničeného rodiča), box sa nikdy sám neposunie — len sa posúva CELÝ spolu so stránkou, takže sticky vyzerá "rozbité" (hlavička uteká preč), hoci CSS vyzerá správne. `#main-history .tool-panel.fill{height:100%}` (nie `min-height`) je scoped fix presne na toto pre Históriu; Scanner namiesto toho necháva `.scanner-page{overflow:auto}` scrollovať CELÚ voľne rastúcu stránku a všetky vnorené `overflow` na `.scanner-table-wrap`/`.scanner-output` musia byť `visible`, inak preberú sticky containing block bez toho, aby samy scrollovali. Overovanie vyžaduje reálne meranie v prehliadači (viacnásobné scroll pozície + porovnanie `getBoundingClientRect().top`), nie len čítanie CSS — statická analýza dvakrát viedla k nesprávnemu záveru "už to funguje".
+
 ## Backlog (priority order)
 
--4. **BUG: subpanel oscilátora nelícuje s hlavným grafom v Analytike — HLÁSENÉ 2026-08-05.**
-   Overené na RSI 14 aj MACD (AMD, weekly, 2 roky, 104 sviečok): spodný subpanel
-   má širší časový rozsah než hlavný graf — hlavný končí okolo mája 2026,
-   subpanel pokračuje do júla a začína inde. Osi teda nie sú zarovnané, nie je
-   to optický klam.
-   **Kde hľadať:** `buildSubpanel()` v `predictive.js` synchronizuje časovú os
-   cez `subscribeVisibleLogicalRangeChange`. Logical range je index sviečky, nie
-   dátum — takže ak subpanel dostane INÝ POČET bodov než hlavná séria (napr. RSI
-   počítané z dennej série pri weekly grafe, alebo séria bez orezania na tých
-   istých 104 sviečok), rovnaký logical range ukáže iné dátumy a osi sa
-   rozídu. Prvý krok je porovnať `length` dát hlavnej série a subpanelu, nie
-   ladiť handler.
-   Pozn.: `pc_realRangeHandler`/`pc_realCrosshairHandler` sa pri prepínaní
-   subpanelu odhlasujú (audit 2026-07-10) — zrejme nesúvisí, ale je to tá istá
-   oblasť kódu.
+-10. **Časový test hviezdička (★) v Portfóliu — teraz aj per ticker, HOTOVO 2026-08-11.**
+   `tradePassedYearTest(row)` (per trade, existovalo) + nové
+   `tickerPassedYearTest(row)` — pri agregovanom per-ticker riadku vyžaduje
+   `_trades.every(tradePassedYearTest)`, nie "aspoň jedna". Jedna nedávno
+   dokúpená tranža celý titul ešte nerobí voľným na predaj bez dane, takže
+   "aspoň jedna prešla" by bolo zavádzajúce — zámerne prísnejšie ako by sa
+   dalo čakať. Fallback na `tradePassedYearTest(row)` priamo, keď `_trades`
+   chýba (row nie je z agregácie). Overené priamo v prehliadači na
+   syntetických tranžiach: všetky staré → true, zmiešané (jedna čerstvá) →
+   false, single-trade bez `_trades` → fallback funguje.
+
+-9. **Right-click context menu — watchlist HOTOVO 2026-08-11, chart panel HOTOVO 2026-08-11.**
+   `showContextMenu(x, y, items)` / `hideContextMenu()` v `core.js` — jedna
+   zdieľaná DOM inštancia (`#ctx-menu`), `items:[{label, action, disabled?,
+   checked?}]` alebo `{sep:true}` na oddeľovač. `checked` vykreslí ✓ a modrú
+   farbu — zrkadlí LIVE stav (napr. `registry[id].indicators`), nie stav pri
+   vytvorení panela.
+   **Pasca, na ktorú prišiel priamy test v prehliadači, nie čítanie kódu:**
+   globálny `document.addEventListener('contextmenu', ...)` na zatváranie
+   "cudzieho" menu by sa spustil V TOM ISTOM TIKU ako `showContextMenu()`
+   nového menu (bublanie toho istého eventu), takže by novo otvorené menu
+   hneď zavrel samo seba pri right-clicku na iný cieľ. Preto NEMÁ vlastný
+   globálny closer na `contextmenu` — spolieha sa na to, že `showContextMenu()`
+   už aj tak volá `hideContextMenu()` pred vytvorením nového menu. Zatváranie
+   ide len cez ľavý klik mimo, Escape a scroll.
+   **Watchlist ticker** (`onSbTickerContextMenu` v `charts.js`): "Nový graf"
+   — na rozdiel od ľavého kliku (`onSbTickerClick`), ktorý pri existujúcom
+   aktívnom paneli PREPÍŠE jeho ticker, right-click cez `openNewChartPanel(symbol)`
+   VŽDY vytvorí nový panel. Bola to reálna frustrácia — aktívny panel je
+   "sticky" naprieč session (`activePanelId`) bez jasného vizuálneho
+   upozornenia, takže klik na watchlist vedel prepísať graf, o ktorom
+   používateľ ani nevedel, že je aktívny.
+   **Chart panel** (`onChartPanelContextMenu` v `charts.js`, viazané na celý
+   `.panel` cez `addEventListener('contextmenu', ...)`) duplikuje VŠETKÝCH 13
+   akcií z hlavičky: Analytika, watchlist, Trade (disabled s dôvodom, keď
+   titul nie je v portfóliu), refresh, HA, 5× indikátor, Wizard, Správy,
+   zavrieť. Right-click na `.p-sym`/`select`/`input` vlastné menu NEOTVÁRA —
+   necháva natívne kopírovanie/vkladanie pri hľadaní tickeru funkčné.
+   **Zavretie je podmienené typom panela** — dock (`id === dockPanelId`)
+   volá `closeChartDock()`, Verdikt panel (`id === verdictPanelId`) položku
+   zavrieť vôbec nemá, ostatné `removePanel(id)` priamo. Priamy `removePanel`
+   na dock paneli by obišiel `closeChartDock()` a nechal `dockPanelId`
+   ukazovať na už zmazaný panel — rovnaký vzor vylučovania dock/verdikt z
+   bulk operácií, aký už tento súbor popisuje pri chart docku vyššie.
+   Overené naživo v prehliadači: 13 položiek + 4 oddeľovače, klik na EMA
+   prepol tlačidlo aj graf, opätovné otvorenie menu ukázalo ✓ EMA.
+   **Portfolio riadok HOTOVO 2026-08-11** (`onPortRowContextMenu` v
+   `portfolio.js`, viazané na hlavnú tabuľku pozícií v oboch pohľadoch aj na
+   riadky čakajúcich objednávok) — duplikuje presne to, čo už bolo na riadku
+   klikateľné, nič navyše: dock ("Zobraziť v bočnom paneli" →
+   `openChartDock`), Google Finance (rovnaká fallback logika ako `gfLinkHtml`
+   — `_gfExchange` cache, bez nej Google search namiesto priamej kotácie),
+   Trade na eToro, a samotný klik na riadok (`isTickerView` parameter
+   rozlišuje "Zobraziť tranže"/`portDrillDown` v ticker pohľade od "Otvoriť
+   v Grafoch"/`portRowClick` v trade pohľade a objednávkach). Mirrors tabuľka
+   (Smart/Copy) vynechaná zámerne — `m.name` tam nie je ticker, na riadku
+   dnes nie je ani dock, ani G, ani Trade odkaz, takže "všetko čo tam takto
+   je" je prázdna množina.
+   **Ďalšie miesta zatiaľ NEROBENÉ** (Scanner riadok, Analytika sidebar) —
+   používateľ avizoval postupné rozšírenie ("často je right click rýchlejší
+   než hľadanie ikonky"); pri ďalšom mieste znovupoužiť `showContextMenu()`,
+   nie stavať nový mechanizmus.
+
+-8. **UI polish naprieč tabuľkami — HOTOVÉ 2026-08-11.** Sticky hlavičky
+   stĺpcov v Histórii, Scanneri (DIP univerzum) a Portfóliu — mechanizmus
+   a jeho pasce popísané v pitfalls vyššie. Klikacie triedenie stĺpcov
+   (zdieľaný `compareSortableRows()` v `portfolio.js`, poradie `key:null` =
+   backendové predvolené poradie, nie abecedné) doplnené do DCA karty,
+   Build karty a Sektorovej karty; História a hlavná Portfolio tabuľka aj
+   Scanner hlavná tabuľka mali vlastné triedenie už predtým (`sortHistory`,
+   `portSort`, `setScannerSort`) — zámerne NEZJEDNotené do jedného helpera,
+   každá karta má svoj malý, nezávislý stav (zavedený vzor v tomto súbore).
+   Build karta pridala filter podľa triedy (Všetky/CORE/STANDARD/
+   SPECULATIVE/Nezaradené, `buildClassFilter`) — filtruje LEN zobrazené
+   riadky, súčet cieľových váh a počty v hlavičke/zbalenom zhrnutí sa
+   počítajú vždy z celého portfólia, inak by filter menil číslo, ktoré má
+   byť nezávislou kontrolou konzistencie. Verdikt graf (`.verdict-chart`)
+   dostal `align-self:stretch` namiesto `height:calc(100vh - 150px)` — výška
+   teraz sedí s ľavým stĺpcom namiesto fixného podielu viewportu.
+   **Doplnené 2026-08-13:** samotné `align-self:stretch`/`height:100%` na
+   `.verdict-chart`/`#verdict-grid` NESTAČILO — `#verdict-grid` (trieda
+   `dock-grid`) nemal `display:flex`, takže výška sa nikam neprenášala na
+   `.panel` vo vnútri; ten si bral len prirodzenú výšku ~250px z `.p-chart`
+   flex-basis. Graf teda vyzeral úzky napriek "opravenej" výške kontajnera —
+   statické čítanie CSS to neodhalilo, až meranie `getBoundingClientRect()`
+   naprieč celým reťazcom (shell→verdict-chart→verdict-grid→panel→p-chart).
+   Pridané `.verdict-chart .dock-grid{display:flex;flex-direction:column}` +
+   `.panel{flex:1;min-height:0}` — teraz sa výška reálne prenáša až po canvas
+   (overené: shell 864px = verdict-chart = verdict-grid = panel 864px,
+   p-chart 747px po odčítaní hlavičky/indikátorového riadku panela).
+   Zámerne vynechané: Rates tabuľka (`renderRatesView`/`#main-rates`) —
+   `#main-rates` v HTML neexistuje, je to mŕtvy kód, netreba doň investovať.
+   Orders/Mirrors tabuľky v Portfóliu — typicky pod 10 riadkov, triedenie by
+   pridalo zložitosť bez úžitku. Correlation matrix — heatmapa, nie zoznam,
+   triedenie nedáva zmysel.
+
+-7. **PORTFOLIO BUILD — FÁZA 1 HOTOVÁ 2026-08-10, cieľové váhy odvodené 2026-08-11.**
+   `GET/POST /api/portfolio/classes` (ručné `position_class` CORE/STANDARD/
+   SPECULATIVE + voliteľný `target_weight` override + `max_weight`, ukladá
+   `DATA_ROOT/position_classes.json`, atomický zápis, gitignored) a
+   `GET /api/portfolio/build` (gap = cieľ − váha). Karta „Dobudovanie pozícií"
+   v Portfóliu pod DCA, default zbalená, triedy sa vypĺňajú priamo v tabuľke.
+   `POST /api/portfolio/classes/seed` (tlačidlo „Predvyplniť") označí VŠETKY
+   držané Stock/ETF ako CORE, cieľ nezapisuje. Zaradené tickery NEPREPISUJE
+   (bez `overwrite=1`), lebo jedno kliknutie by inak zmazalo ručnú prácu.
+   **Cieľová váha sa ODVODZUJE z pomeru tried, nezadáva sa po tickeroch**
+   (rozhodnutie 2026-08-11 — používateľ nemá preferenciu na konkrétne %, ale
+   trieda je rozhodnutie, ktoré má). Tri ⚙ prahy `class_ratio_core/standard/
+   speculative` (default 4:2:1) sa v `/api/portfolio/build` normalizujú na
+   100 % cez zaradené pozície — pribudnutie pozície prepočíta ciele samo.
+   Ručne zadaný `target_weight` má VŽDY prednosť pred odvodeným (payload nesie
+   `target_source: manual|class`); zmazanie poľa v UI cieľ vráti späť na
+   odvodený. Odvodené hodnoty sú v UI bledé/prerušované (`.build-input.derived`,
+   zobrazené ako `placeholder`, nie `value`) — nesmú vyzerať rovnako ako ručný
+   vstup, inak sa nedá po mesiacoch zistiť, čo bolo naozaj premyslené.
+   **Menovateľ váh je Stock/ETF kniha účtu, NIE equity** (`BUILD_WEIGHT_BASIS`,
+   rozhodnutie 2026-08-10) — krypto je zo stratégie vylúčené, takže v menovateli
+   nemá čo robiť; inak by každá akciová pozícia vyšla „hlboko pod cieľom", lebo
+   krypto berie dve tretiny účtu. Regresný test to stráži.
+   `max_weight` prebíja `target_weight` (stav `over_max`), inak by karta
+   odporúčala dokupovať cez vlastný limit. `max_weight` je ZÁMERNE
+   nepodviazaný na globálny `dca_max_weight` (10 %) vo Verdikte/DCA brzdách —
+   používateľ to k 2026-08-11 odmietol s „zatiaľ nie", ostáva čisto
+   informačné pole, kým nepríde ďalší podnet. **Stĺpec Max % odstránený z UI
+   2026-08-11** (nepoužívaný, zbytočný šum) — pole `max_weight` a stav
+   `over_max` v `/api/portfolio/build` zostávajú funkčné pre prípadné staré
+   dáta nastavené priamo cez API, len sa už nedá zadať z karty.
+   **Fáza 2 (kompozitné Add Score) ostáva odložená** — a nezabudni na overený
+   fakt nižšie o dvojitom započítaní. Blokujú ju dátové diery z položky -6,
+   nie fáza 1; fáza 1 ich nepotrebuje, lebo počíta len z investovanej sumy.
+   Pôvodný zámer (stále platný pre fázu 2):
+   Používateľov problém nie je málo nápadov, ale priveľa titulov (~56 na účte 1)
+   a kapitál, ktorý ide stále do nových. Klasické DCA má vstavanú chybu: dokupuje
+   len pri poklese, takže nový kapitál tečie prednostne do HORŠÍCH pozícií.
+   Dôkaz z dát 2026-08-09: HLNE má DIP 107 a váhu 1,4 %, kým FOUR má DIP 51
+   a váhu 3,0 %.
+   **Dohodnutá hierarchia kapitálu** (zapísaná aj v `CLAUDE_investicna_analyza.md`):
+   1. DCA (stratová pozícia spĺňajúca DIP podmienky) → 2. BUILD (kvalitná pozícia
+   pod cieľovou váhou, **aj zisková**) → 3. NEW (nový titul, musí sa obhájiť).
+   **Fáza 1 — postaviť:** `position_class` (CORE / STANDARD / SPECULATIVE) +
+   `target_weight` + `max_weight` na ticker. Potom sa deterministicky odpovie
+   „ktorá kvalitná pozícia je najviac pod cieľom" BEZ akéhokoľvek nového skóre.
+   Toto je ~80 % úžitku a nepotrebuje to žiadne nové dáta.
+   **Fáza 2 — odložiť:** kompozitné „Add Score" 0–100. Odložiť, kým nie je
+   hotová -6 a dátové pokrytie (viď nižšie).
+   **POZOR pri návrhu skóre — overený fakt:** `dip_score == fa_score + ta_score`
+   presne (ADBE 95=84+11, ASML 101=82+19, MU 110=89+21). Návrh z externej analýzy
+   dával body za FA (30) + technický stav (20) + DIP (15) — to je dvojité
+   započítanie tých istých vstupov. Do kompozitu patrí BUĎ FA a TA, ALEBO DIP.
+   Nikdy oboje.
+   **Bariéra pre nové tituly** (najhodnotnejšia časť návrhu): nový kandidát musí
+   prekonať najlepšiu existujúcu BUILD príležitosť + rezervu. Mení to úlohu DIP
+   scanneru z „nájdi čo kúpiť" na „nájdi niečo natoľko dobré, že to ospravedlní
+   ďalší ticker".
+   **Zámerne NErobiť:** 8 stavov (BUILD/ADD ON PULLBACK/DCA/FULL/OVERWEIGHT/
+   WATCH/FREEZE/SPECULATIVE) je na začiatok priveľa — pôvodný problém bola
+   manažovateľnosť, nie málo kategórií. Začať s 3–4.
+
+-6. **AI export a investičné analýzy = VÝHRADNE ÚČET 1 — OPRAVENÉ 2026-08-10.**
+   Export berie jeden účet (`?account=1` default, povolené len `1`/`2`, inak 400),
+   schema bumpnutá na `1.3`, payload nesie `analysis_scope.account` +
+   `accounts_merged:false`, frontend sťahuje súbor s názvom `…-ucet1-…json`.
+   Regresný test overuje, že `_assistant_snapshot` sa volá výhradne pre účet 1.
+   **Dátové diery nižšie (dip_score/daily_state pokrytie, earnings) ostávajú
+   otvorené a stále blokujú -7.**
+   Pôvodný popis chyby: `snapshots = {account: _assistant_snapshot(account)
+   for account in ("1", "2")}` zlučoval oba účty do `positions_by_symbol`
+   **kľúčovaného podľa tickeru**, bez značky účtu. `portfolio_summary` bol súčet
+   oboch snapshotov.
+   **Prečo je to chyba, nie vlastnosť:** účet 2 je Nelkin, horizont ~15 rokov,
+   pasívne ETF — iná stratégia s inými pravidlami. `CLAUDE_investicna_analyza.md`
+   sekcia 5 miešanie účtov explicitne ZAKAZUJE, takže export porušuje zapísané
+   pravidlo.
+   **Rozsah kontaminácie (overené proti eToro CSV):** +$10 300,00 investovaných,
+   6 tickerov, 13 lotov. BMI a VWRD.L sú v exporte celé cudzie; META, VVSM.DE,
+   VWCG.L a CNDX.L majú zlúčené loty z oboch účtov. Zlúčenie je **stratové** —
+   bez CSV sa už nedá zistiť, ktorý lot je čí.
+   **Nezávislé potvrdenie:** `/api/diagnostics/summary?account=1` z 2026-08-07
+   hlási equity $26 843,79 a invested $15 966,34; export z 2026-08-09 hlási
+   $38 264,78 / $26 326,31. Rozdiel investovaného je $10 359,97, čiže tých
+   $10 300 + tranža TTD za $60 kúpená 8. 8. Sedí.
+   **Dôsledok pre analýzy:** všetky `market_value_weight_pct` sú posunuté.
+   Pre tickery výhradne z účtu 1 stačí násobiť ~1,43; pre tú šesticu sa musí
+   počítať odznova. Externá analýza na tom postavila záver „ETF jadro absorbuje
+   straty" — v skutočnosti to absorboval Nelkin účet (VVSM.DE: $200 na účte 1
+   proti $4 000 na účte 2).
+   **Oprava:** export defaultne len účet 1. `?account=2` nechať existovať pre
+   samostatný pohľad, ale NIE ako default a NIE zlúčené. Parameter s dvoma
+   hodnotami sa nedá omylom použiť zle, zlúčenie áno.
+   **Súvisiace dátové diery, ktoré blokujú -7** (opraviť pri tom istom prechode):
+   (a) `dip_score` chýba pri 32 z 58 pozícií, `daily_state`/`weekly_state` pri
+   41 z 58 — modul, ktorý má alokovať kapitál, vráti pri väčšine portfólia
+   „neviem"; (b) earnings feed zmeškal CELH aj FOUR (obe hlásili 2026-08-06,
+   obe mali v exporte `earnings.confirmed: false`) — earnings sú najväčší
+   jednotlivý zdroj pohybu ceny.
+
+-5. **Equity v hlavičke vs eToro — VYRIEŠENÉ 2026-08-07, NEOTVÁRAŤ ZNOVA.**
+   Nebola to chyba výpočtu. `/api/diagnostics/summary` ukázal, že serverový
+   vzorec `cash + invested + total_pnl` sedí s eToro **na dva centy**, vrátane
+   korektného vyrušenia Smart Portfolios (`mirror_closed_profit` je záporný a
+   vstupuje do `invested` aj `total_pnl` s opačným znamienkom).
+   Pozorovaný rozdiel ($37 → $31 → nakoniec $5) bol **časový posun medzi dvoma
+   oknami**: eToro a dashboard neukazujú ten istý okamih. Dôkaz je v znamienkach
+   — per-pozíciu rozdiely išli oboma smermi (AMD +$2,02, ARM −$0,34) a nakoniec
+   sa prevrátil aj celkový (dashboard začal hlásiť MENEJ než eToro). Systematické
+   skreslenie odhadu by tlačilo vždy jedným smerom.
+   **Čo z toho ostalo v kóde a prečo to nechať:**
+   (a) `positionSupportsLivePnl()` — krypto sa neextrapoluje; pri ~35 900
+   jednotkách TRX robí tisícina centa $36, takže to je aj tak správne;
+   (b) `PORTFOLIO_RESYNC_MS` (5 min) — bráni kumulácii driftu;
+   (c) riadok `server $… · rozdiel · vek` pod Equity — objaví sa len pri
+   rozdiele nad $1 a robí z porovnania jeden pohľad namiesto workflowu;
+   (d) `GET /api/diagnostics/summary` — rozpad equity na členy.
+   **Netreba znovu overovať:** serverový vzorec, mirrors, kurzy európskych
+   titulov, WS spread. Ak by rozdiel niekedy narástol a bol STABILNE jedným
+   smerom, až potom ide o skutočný bug.
+
+-4. **Subpanel oscilátora sa po zapnutí EMA rozišiel s hlavným grafom — SKUTOČNE OPRAVENÉ 2026-08-13 (predchádzajúci záznam nižšie bol predčasný, pokrýval len unsubscribe/cleanup, nie skutočnú príčinu).**
+   Koreňová príčina, nájdená priamym meraním v prehliadači (nie čítaním kódu —
+   statická analýza vyzerala korektne): `entry.anchor` v `pc_buildSubpanel()`
+   bol whitespace-only séria (`{time}` bez `value`). LWC v5.2.0 takúto sériu
+   NEZAPOČÍTA do bar-indexovej domény chartu — overené priamo: izolovaný chart
+   len s whitespace anchorom mal `getVisibleLogicalRange()` degenerovaný na
+   prakticky nulový rozsah, kým ten istý anchor s `value:0` na KAŽDOM bode
+   správne dal doménu 0..(N-1) sviečok. Bez skutočnej domény subpanel odvodzoval
+   svoj bar-index 0 od PRVÉHO REÁLNEHO bodu RSI/ADX/MACD série — a keďže RSI-14
+   má ~14 sviečok warmup (91 z 105 týždňov), subpanel bol systematicky posunutý
+   o presne toľko periód, koľko chýbalo na začiatku indikátora. EMA toggle sám
+   o sebe posun nespôsoboval (rozdiel bol identický pred aj po ňom) — iba
+   spúšťal `pc_applyOverlays()` → `pc_renderSubpanels()` full rebuild, ktorý
+   posun sprístupnil pri každom prekreslení.
+   **Fix:** `entry.anchor` dostáva `value:0` na každom bode (nie whitespace) a
+   vlastný `priceScaleId:'pc_anchor_scale'` — oddelená price scale zabraňuje,
+   aby fiktívna nula ťahala dole viditeľnú Y os RSI/ADX/MACD (overené: RSI
+   scale ostal 43,57–85,07, nie stiahnutý k nule).
+   **Druhá, súvisiaca príčina:** keď je zapnutý Ichimoku, Senkou A/B na
+   hlavnom grafe pokračujú 26 periód do budúcnosti (`_ichimoku_future_points`,
+   položka 7 nižšie) — hlavný graf má teda širšiu doménu než čisté sviečky
+   (116 vs 90 na dennom grafe, overené). `pc_subpanelAnchorPoints(candles, ind,
+   includeIchimoku)` preto zjednocuje časy sviečok s `ichi_sa`/`ichi_sb`, ale
+   LEN keď je Ichimoku pre daný view skutočne zapnutý (`pc_weeklyIndicators.
+   ichimoku`/`pc_dailyIndicators.ichimoku`) — bezpodmienečné rozšírenie by
+   naopak rozišlo subpanel od hlavného grafu VŽDY, keď je Ichimoku vypnutý
+   (chybu som si sám spôsobil v medzikroku, chytené pred commitom).
+   **Tretia príčina, len denný graf:** `renderDailyMain()` volal
+   `pc_renderSubpanels()` PRED obnovením `previousRange` (zachovanie scroll
+   pozície pri re-renderi rovnakého tickeru) — subpanely sa teda stihli
+   synchronizovať na predbežný/nerestorovaný rozsah hlavného grafu. Presunuté
+   za `previousRange`/`fitContent()` blok.
+   **Metodologická poznámka pre budúce ladenie LWC v tomto prostredí:**
+   `chart.timeScale().setVisibleLogicalRange()` sa v tejto automatizovanej
+   browser-pane session ukázal ako nespoľahlivý na meranie — `computer
+   {action:"screenshot"}` vrátil "Browser pane is not displayed, so the page
+   is not compositing frames" a explicitné `setVisibleLogicalRange()` volania
+   (aj na HLAVNOM grafe, nielen subpaneloch) boli ticho ignorované, kým
+   rendering pipeline nekompozituje frames. Spoľahlivé boli len READ-ONLY,
+   rendering-nezávislé kontroly: `.data().length` po `setData()` a
+   prirodzený (fitContent) rozsah hneď po vytvorení série — obe reflektujú
+   vnútorný model synchrónne, nie cez rAF/paint. Skutočnú vizuálnu zhodu po
+   paneli/zoome treba overiť naživo v reálnom (foregrounded) prehliadači.
 
 -3. **Benchmark — HOTOVÉ 2026-08-05, ale INAK než sa plánovalo.**
    `GET /api/portfolio/benchmark` porovnáva každú otvorenú Stock/ETF pozíciu
@@ -194,13 +442,12 @@ These were already in the codebase and need to stay fixed:
 
 0. **Redukcia analytického šumu — ČIASTOČNE HOTOVÉ 2026-08-04.**
    Prvá vlna hotová: z ~13 vrstiev ostáva v Basic šesť. Za `.advanced-only`
-   pribudli makro režim (FRED chip), Volume Profile, chart patterny, porovnanie
+   pribudli makro režim (FRED chip), Volume Profile, porovnanie
    Klasické vs Heikin Ashi a Zhoda časových rámcov; predtým tam boli len
    correlation map, ML karta a HMM režim. V Basic ostávajú RS, Firma &
    očakávania, O firme, chart health, market context bar a news (za tlačidlom).
-   Pri VP a patternoch nestačila trieda — ich stav je v localStorage, takže
-   skrytie checkboxu by nechalo kresliť overlay bez možnosti vypnúť ho; oba
-   flagy sa v Basic čítajú ako vypnuté, uložená hodnota ostáva.
+   Pri VP nestačila trieda — jeho stav je v localStorage, takže skrytie tlačidla
+   by nechalo kresliť overlay bez možnosti vypnúť ho; v Basic sa číta ako vypnutý.
    **Zavrhnuté pri tom istom prechode (neotvárať znova):** téza k pozícii /
    dôvod nákupu — už raz v dashboarde bola a bola zrušená pre nevyužívanie;
    odpočet do ročného daňového testu — používateľ chce hviezdičku manuálne a
@@ -222,7 +469,7 @@ These were already in the codebase and need to stay fixed:
    ale používateľ pýtal len pozičné kolieska.
    Používateľ: informácie sú „skvelé, ale z pohľadu užívateľa málo využívané".
    Vzniklo ~12 interpretačných vrstiev (RS, makro režim, news clustering,
-   chart health, market context bar, chart patterny, correlation map, company
+   chart health, market context bar, correlation map, company
    profile, insights, ML karta, HMM režim, volume profile), z ktorých viacero
    odpovedá na otázky s horizontom dní až týždňov — pri 12+ mesačnom horizonte
    sú to kontext, nie vstup do rozhodnutia. Každá jednotlivo bola dobré
@@ -237,12 +484,18 @@ These were already in the codebase and need to stay fixed:
    telemetria) — rozhoduje používateľ, nie odhad.
 1. **Predictive chart accuracy → 60%+ directional. UZAVRETÉ AKO NEDOSIAHNUTEĽNÉ v tomto feature priestore (2026-07-07).** Tri merania na reálnych dátach (34 S&P500 tickerov, walk-forward, ~6k predikcií/horizont) zhodne: (a) "always up" base rate rastie s horizontom 53.4 % (1w) → 56.8 % (4w) → 61.1 % (12w) a ŽIADEN variant ju neprekoná — analog vote je pri 4w −5pp, pri 12w −7.7pp pod base; (b) confidence gating nefunguje: subsety s vysokou zhodou susedov (|vote| ≥ 0.3…0.8) sú na VLASTNOM base rate horšie, nie lepšie; (c) regime-conditioning (trend×vol bucket kandidátov) nepomáha (−2 až −10pp); (d) kľúčové: kedykoľvek model povie "down", trafí < 50 % (drift-down subsety 48.9/46.1/40.3 % pri 1w/4w/12w — mean reversion zožerie každú persistence-based odchýlku). Preto: NEskúšať ďalšie ladenie smeru z cenových/technických features (k, recency, gating, horizonty, regime — všetko zmerané). Jediné nezmerané cesty vyžadujú NOVÚ informáciu: cross-sectional RS features, fundament/news. Hodnota analog modelu je magnitúda (avg err 4.5 % vs 18.6 % composite) a vysvetliteľnosť, nie smer. Eval skripty: scratchpad `horizon_eval.py`, `followup_eval.py`, dataset all_stocks_5yr.csv.
 2. **Regime-aware signal analytics.** ✅ INFRAŠTRUKTÚRA HOTOVÁ. (a) Backfill: `POST /api/admin/backfill-regime-context` (target=log|archive|both, ?ticker, ?limit, ?force) idempotentne dopĺňa regime kontext do starých signálov cez `_backfill_ticker_context` → reuse `build_signal_context` (zscore + weekly_bullish dopočítané z dát orezaných po dátume signálu, žiadny look-ahead, tag `context_source='backfill'`). Spúšťať po dávkach (HMM per signál náročný). (b) Per-regime tabuľka: nová `regime` skupina v `build_signal_outcome_analytics` segments (bull/sideways/bear/high_volatility), signály nesú `regime` label z log kontextu; frontend `segmentTable('regime')` v Analytike signálov, skrytá kým nie sú dáta. (c) Auto-kontext: `/api/chart` pri 90-dňovom prepočte dopĺňa chýbajúci kontext novým aj starým signálom so stropom `_ctx_budget=4` HMM fitov na request (posledná sviečka vždy) — pri bežnom prezeraní sa medzery samy zaplnia, manuálny backfill je len na hromadné dobehnutie. Ďalej: po nazbieraní ~20–30 signálov/regime zvážiť per-regime váženie scoringu (zatiaľ NEOVPLYVŇUJE C1–C4).
-3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro, buy-signal and pattern markers.
+3. **Hover tooltip for markers.** Done — LWC v5 `hoveredInfo.objectId` hit-testing is active in Predictive and standard chart panels for eToro and buy-signal markers.
 4. **Upgrade Lightweight Charts 4.1.3 → v5.** Done (v5.2.0). Marker primitives and native hit-testing are migrated; MagnetOHLC is enabled. Remaining optional gains: data conflation, `setSeriesOrder()` and native panes for subpanels.
-5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive main charte, checkbox `chk_vp` → `pc_toggleVolumeProfile()`, stav v localStorage (`pc_vp_enabled`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
-6. **Chart Pattern overlay.** V1 hotovo — samostatný modul `frontend/js/chart_patterns.js` s registry + detektormi + LWC primitive rendererom. Checkbox `chk_patterns` (`pc_patterns_enabled` v localStorage) kreslí vizuálne patterny nad Predictive Weekly/Daily grafom: `Double Bottom`, `Double Top`, `Rectangle`, `Ascending Triangle`, `Descending Triangle`. Filtre `chk_patterns_bullish`, `chk_patterns_bearish`, `chk_patterns_neutral` (`pc_pattern_filters` v localStorage) iba filtrujú render a sidebar kartu podľa biasu, detekčnú logiku nemenia. Sidebar karta `#chartPatternCard` vysvetľuje stav (`forming`/`confirmed`/`failed`), kvalitu, trigger a invalidáciu. V1.1 doplnky: (a) **objemové potvrdenie breakoutu** — `cpBreakoutVolumeBoost()` nájde prvú sviečku breakout runu a porovná objem s priemerom ~20 sviečok pred ňou; ratio ≥ 1.2× → +5 confidence, ≥ 1.5× → +8, bez volume dát fail-soft 0 (kvôli tomu `daily_candles` v `/api/chart` payloade nesú aditívne pole `volume`); (b) **measured-move cieľ** — `levels.target` (projekcia výšky patternu od breakout úrovne, pri neutrálnom Rectangle až po breakoute), renderer kreslí bodkovanú čiaru `Ciel` v pravej časti patternu, info karta pridáva tretí level. Je to výlučne vizuálna pomôcka; NESMIE meniť C1–C4, scanner tier, ML predikciu, Verdikt ani portfolio logiku.
-7. **Kumo canvas po resize.** Fixed 2026-06-12 — redraw is deferred
-   until LWC finishes layout; manual drag uses a double animation frame.
+5. **Volume Profile.** Done — vlastný `VolumeProfilePrimitive` (LWC v5 ISeriesPrimitive, adaptácia oficiálneho plugin-example) v Predictive weekly charte, tlačidlo `VOL PROFILE` v weekly indikátorovom riadku, stav v localStorage (`pc_vp_enabled` + `pc_weekly_indicators`). SafariTrader plugin zavrhnutý (vlastné DOM/canvas, bil by sa s témami).
+6. **Chart Pattern overlay. ODSTRÁNENÉ 2026-08-13 na žiadosť používateľa.** Modul, renderer, ovládanie, sidebar karta, CSS a localStorage call-sites boli odstránené; nezavádzať späť bez novej explicitnej požiadavky.
+7. **Kumo canvas + projekcia.** Resize fixed 2026-06-12 — redraw is deferred
+   until LWC finishes layout; manual drag uses a double animation frame. Senkou
+   A/B od 2026-08-11 reálne pokračujú 26 periód za poslednú sviečku vo všetkých
+   troch response cestách (`/api/ohlcv`, `/api/chart` weekly aj daily) cez
+   `_ichimoku_future_points()`. Bol to skutočný 3-call-site bug, nie display
+   quirk: syntetický pandas test potvrdil, že `.shift(26)` historické dátumy
+   nekazí; chýbal iba nikdy nezobrazený raw future tail, pretože bounded index
+   nemal budúce riadky. Historická `.shift(26)` matematika ostáva nezmenená.
 8. **💡 Legacy eToro recommendations.** ✅ ODSTRÁNENÉ. Free eToro API tier endpoint nepodporuje a UI ho už nepoužívalo; nezavádzať späť bez funkčného zdroja dát.
 
 ### Analytické plány (Neuberg inšpirácia, 2026-06-12 — user si ich vyžiada)
@@ -277,19 +530,21 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
   open-position markers (circles) are injected in `renderCharts()` alongside
   buy signal arrows. Marker IDs resolve through `pc_markerMeta`; standard chart
   panels use the same hover implementation through `registry[id]._markerMeta`.
-- **Chart Pattern overlay**: `frontend/js/chart_patterns.js` is intentionally
-  separate from `predictive.js`. Keep the split: registry = names/descriptions,
-  detectors = visual pattern recognition, renderer = LWC primitive. The overlay
-  reads already loaded candles only and must remain a visual aid. If adding a
-  new pattern later, add registry metadata and a detector; do not wire pattern
-  confidence into signal scoring unless the user explicitly asks for a separate
-  research phase. Bullish/Bearish/Range checkboxes are render filters only and
-  are persisted in `pc_pattern_filters`.
+- **Per-chart indicator controls:** weekly and daily each have their own `.p-inds`
+  row and independent persisted state (`pc_weekly_indicators` / `pc_daily_indicators`).
+  EMA10/20/50/200 are four freely combinable buttons. EMA10 is deliberately kept
+  separate because the trend-tier explanation uses EMA10/20. One ICHIMOKU button
+  draws Tenkan + Kijun + Kumo including the existing future-cloud projection.
+  Weekly alone also has `VOL PROFILE`.
 - **Predictive chart** (bottom, collapsible): `flex:1` vs main chart `flex:2` → 2:1 height ratio. Collapsed via `PC_MODEL_CHART_COLLAPSED_KEY` in localStorage.
 - **Predictive backtest accuracy**: `run_backtest()` scores direction as predicted close vs previous close and actual close vs previous close. Do not change it back to candle color (`close >= open`) — gaps distort hit/miss dots and reported accuracy.
 - **Predictive candle algorithm**: `predict_next_candle()` now prefers an analog/similarity model (`method="analog_similarity"`) when at least ~60 historical candles are available. It builds a numeric fingerprint from EMA/Kijun/Kumo position, RSI, MACD histogram, volume ratio, StochRSI, ADX, ATR%, ROC4 and 52w position, finds nearest historical setups, and uses their next-candle close-to-close direction/return. The backtest remains walk-forward because each slice only sees candles already closed inside that slice. If analog features are insufficient, it falls back to the old weighted technical composite (`method="technical_composite"`). This changes historical prediction overlay/dots after deploy, but never rewrites real candles.
 - **Direction = drift prior + analog override (MEASURED — don't revert to pure vote).** Offline eval on 7,854 walk-forward weekly predictions (34 S&P500 tickers, 2013-2018, real data): pure neighbor vote scored 52.15% test accuracy vs 54.75% "always up" base rate — i.e. it LOST to the base rate; the old technical composite too (53.43%). Best measured variant (implemented): direction follows the slice's historical drift (`up_rate`) unless neighbor vote is strong (`|vote| >= ANALOG_OVERRIDE_VOTE = 0.60`, ~80/20 split) → test 54.79%, overall 52.39% (+2.6pp vs pure vote, ~2.5σ). Magnitude (pred close) still comes from neighbor returns (avg price error 4.5% vs 18.6% of the old composite — keep). `analog` payload carries `drift/up_rate/decision` ("drift_prior"|"analog_override") and the prediction card explains the decision ("Ako model rozhodol"). Gate sweep 0.15→1.0 converged monotonically to base rate — weekly direction has no exploitable edge in these features; don't burn time re-tuning k/recency/feature subsets without new information (regime conditioning & per-ticker features were the untested ideas).
-- **Subpanel** (RSI/MACD/ADX/StochRSI): `pc_subChartInst`, synced timescale with main chart.
+- **Subpanels:** RSI, ADX and MACD are independent toggles on both timeframe rows;
+  all three may be visible simultaneously. Six dedicated containers (three per
+  timeframe) are managed through `pc_subpanels` and synchronized to their own
+  main chart. Stoch RSI was deliberately dropped from the Analytika UI; its
+  backend data may remain for scoring/model consumers.
 - **HMM regime**: `detect_market_regime(df)` called from `/api/chart` — 3-state GaussianHMM (bull/bear/sideways) + high_volatility override. Diagnostic only, does not affect ML prediction.
 - **Color consistency**: tier colors use CSS variables (`var(--up)`, `var(--down)`, `var(--yellow)`) everywhere — both `.pc-decision-badge` and `.scanner-label`. `sigTierColor()` returns hardcoded hex matching these vars; `sigTierLabel()` returns 'Buy'/'Watch'/'Counter'.
 
@@ -402,6 +657,38 @@ Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()
 - Source availability chips expose Technika / Trh / Firma / Earnings. Missing
   optional insights are fail-soft and lower confidence; they must not turn an
   otherwise valid technical setup into an automatic negative verdict.
+  **Chips mean "dáta sú dostupné", NIE "sú priaznivé"** — pôvodne zelené s
+  fajkou (rovnaká farba ako "bullish" všade inde v appke), takže štyri zelené
+  fajky vedľa NIE verdiktu pôsobilo ako protirečenie. Opravené 2026-08-13:
+  vlastný label "Dostupnosť dát pre vyhodnotenie" + tooltip + neutrálna modrá
+  namiesto `var(--up)`.
+- **Dva nezávislé verdikty vedľa seba — DIP a Trend, HOTOVO 2026-08-13.**
+  `buildInvestorVerdict()` (DIP, mean-reversion, existujúci) a
+  `buildTrendVerdict()` (Trend, momentum, nový) odpovedajú na inú otázku a
+  ZÁMERNE sa nezlučujú do jedného čísla — používateľské rozhodnutie po tom,
+  čo pri LRCX videl DIP verdikt NIE napriek peknému grafu (cena držala EMA10
+  nad EMA20, nad EMA200), lebo DIP hľadá SLABOSŤ v silnom titule (C1-C4:
+  RSI<45, blízko EMA20/Kijun, oversold z-score), nie silu.
+  `buildTrendVerdict()` nepoužíva `today_raw_score`/C1-C4 vôbec — počíta
+  výhradne z `data.daily_indicators` (ema10/20/50/200, rsi), ktoré sú tam
+  vždy nezávisle od `detail=basic/advanced` (doplnené v tom istom dni pri
+  Analytika prestavbe, žiadny nový fetch). Základná podmienka: EMA10>EMA20 na
+  weekly AJ daily naraz. Nad tým štrukturálne potvrdenie — aspoň jedno z: nad
+  EMA200 / odraz od EMA200 (low niektorej z posledných 10 sviečok sa priblížil
+  k EMA200 na danú dátumu, cena teraz nad ňou) / prienik cez EMA50 (cross-up
+  v okne 10 dní, cena stále drží nad). RSI 50-70 = "podporujúce" (zdravá sila,
+  nie eufória); nad 70 aj pod 50 sú riziká, nie automatický NIE.
+  Zámerne rovnaké `earningsRisk`/`marketAdverse` gate ako DIP verdikt
+  (duplicitný výpočet, nie zdieľaný stav — obe funkcie musia ostať plne
+  nezávislé). Render: `renderTrendVerdict()` do `#trendVerdictContent`,
+  rovnaká `.verdict-hero verdict-${verdict}` trieda ako DIP (farby sa
+  aplikujú automaticky), `.verdict-mode-tag` label ("DIP VSTUP"/"TREND
+  VSTUP") na oboch kartách, aby ani jedna nepôsobila ako tá "hlavná".
+  `.verdict-dual` (flex row, `@media max-width:900px` sa zloží pod seba).
+  Overené naživo na LRCX: DIP hlásil POČKAŤ (weekly uptrend, ale C1-C4
+  0/4 — žiadny dip setup), Trend hlásil NIE (EMA200/EMA50 štruktúra OK, ale
+  daily EMA10/20 v tú chvíľu nesedelo s weekly) — dva rôzne, KOREKTNÉ pohľady
+  na ten istý ticker naraz, nie rozpor.
 - The Predictive Decision Bar and Scanner rows both link to the Verdict tab.
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
@@ -449,7 +736,12 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
 - **Frontend:** karta `#insightsCard` v Predictive sidebar
   (`pc_loadInsights`) má názov **Firma & očakávania**: insider 90d, EPS
   beat/miss, Buy/Hold/Sell s priemerným targetom v zátvorke a short interest
-  klasifikovaný ako nízky / zvýšený / vysoký.
+  klasifikovaný ako nízky / zvýšený / vysoký, plus riadok **Solventnosť**
+  (Net Debt/EBITDA + krytie úrokov). Solventnostné polia idú z TEJ ISTEJ
+  Finnhub `metric=all` odpovede ako short interest — žiadne nové volanie — a
+  medzi obnovami sa prenášajú rovnako ako `price_target` (schéma sa preto
+  NEBUMPOVALA). AI export ich číta iba z disk cache (`_assistant_solvency`),
+  nikdy nefetchuje: chýbajúci blok znamená „nevieme", nie „zdravá súvaha".
   Tieto polia sú interpretačné a NEVSTUPUJÚ do C1–C4 ani ML.
 - **Portfolio target column:** `PORT_COLS.analystTarget`, default hidden and
   stocks-only. Lazy-loads `/api/ticker/insights/{symbol}` only when visible,
@@ -477,6 +769,52 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   CSS line-clamp + `pc_toggleCompanyDesc()` viac/menej. Fail-soft: pri chybe
   sa karta jednoducho nezobrazí. Interpretačná vrstva — NEVSTUPUJE do C1–C4,
   ML ani Verdiktu.
+- **Inštitucionálne držby / SEC 13F** (`GET /api/ticker/institutional/{symbol}`):
+  interpretačná karta `#institutionalCard` v Analytika sidebare
+  (`pc_loadInstitutional`). Universe je striktne union watchlistu a Stock/ETF
+  pozícií z oboch účtov cez existujúce `_read_watchlist_file()` +
+  `_get_portfolio_symbols()`/`_get_portfolio_holdings()`; DIP scanner universe
+  sa sem NIKDY nepridáva. Request je neblokujúci: okamžite vráti poslednú disk
+  cache alebo explicitný `available:false` stav a iba spustí single-flight
+  daemon worker. Prvá návšteva nového/cold tickeru preto ukáže „dáta sa
+  pripravujú“; ďalšia návšteva po dokončení číta hotovú cache.
+  Worker najviac raz za 7 dní objaví najnovší ZIP automaticky zo SEC stránky
+  (povinný identifikačný `User-Agent`), pričom 99 MB archív znovu sťahuje a
+  parsuje iba keď sa zmení URL obdobia. ZIP existuje len ako dočasný súbor a vo
+  `finally` sa zmaže; `INFOTABLE.tsv` sa NIKDY celý nerozbaľuje ani nenačíta do
+  RAM — `ZipFile.open()` → `TextIOWrapper` → `csv.reader`, okamžitý filter na
+  malú množinu CUSIPov. Agregácia na ticker drží unikátne
+  `ACCESSION_NUMBER`, počet filerov a súčet `SSHPRNAMT`; posledné dve obdobia
+  dávajú delta filerov a percentuálnu q/q delta akcií.
+  CUSIP gotcha: SEC 13F nemá ticker a **overené priamo 2026-08-11** — OpenFIGI
+  forward `TICKER` mapping NIKDY nevracia CUSIP (odpoveď má len figi/name/
+  ticker/exchCode metadata), takže vetva na explicitné CUSIP pole je mŕtvy kód
+  ponechaný ako budúcoodolná poistka, nie aktívna cesta. Jediná reálne
+  fungujúca cesta je učenie CUSIPu z unikátnej presnej normalizovanej zhody
+  OpenFIGI issuer name s equity riadkom SEC (ambiguita zostane `unresolved`,
+  nikdy falošná nula) — **funkčnosť potvrdená end-to-end behom proti živému
+  SEC/OpenFIGI** (AAPL→037833100, MSFT→594918104, NVDA→67066G104, zhoda so
+  známymi CUSIPmi; 42 s na stiahnutie 99 MB + spracovanie 3,8M riadkov na 3
+  tickery). Stabilná mapa je v
+  `DATA_ROOT/institutional_13f/cusip_map.json` (180d), agregáty/stav v
+  `state.json`; oba zápisy idú cez `_atomic_write_json`, adresár je v
+  `.gitignore`. Výpadok SEC/OpenFIGI zachová starú úspešnú cache a skúsi sa
+  znovu po 1 h — „teraz sa nepodarilo“ NIE JE „nula držiteľov“. Skutočná nula
+  je dostupný výsledok pre bezpečne vyriešený CUSIP bez matching riadka.
+  Limity: Form 13F je US-only a prirodzene oneskorený približne 45 dní;
+  európske tickery typicky nemajú 13F záznam. Táto vrstva NEVSTUPUJE do C1–C4,
+  DCA, scanner tier, Verdikt/BUILD ani ML a nesmie sa bez explicitného
+  rozhodnutia zmeniť na buy/sell signál.
+- **`#predictiveTab .pred-row` CSS chýbalo úplne — OPRAVENÉ 2026-08-11.** RS,
+  insights aj inštitucionálna karta v Analytika sidebare renderujú riadky
+  `<div class="pred-row"><span class="key">…</span><span class="val">…</span></div>`,
+  ale `.pred-row`/`.key`/`.val` nemali žiadny CSS predpis — popisok a hodnota
+  sa lepili bez medzery ("13F fileri3 437"). Objavené až na živom screenshote
+  novej karty, hoci diera bola v kóde od skoršej session (predtým si to nikto
+  nevšimol). Pridané pod `#predictiveTab .card-title` — `display:flex;
+  justify-content:space-between`, `.key` tlmená farba, `.val` mono/tučné.
+  Pri pridávaní ďalšej `.pred-row` karty netreba nový CSS, tento už pokrýva
+  všetky.
 - **Chart panel → Analytika button:** `.p-btn-an` (🔬) v hlavičke každého
   panelu (aj chart dock — rovnaký `createPanel` factory) volá
   `openPanelInAnalytika(id)` → číta aktuálnu hodnotu `.p-sym` (nie
@@ -529,6 +867,7 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 ## Data flow worth knowing
 
 - **`_yf_download_cached` skúša Massive pred yfinance.** yfinance je na free tieri najkrehkejší zdroj (rate-limit → prázdne grafy, scanner "chyby"). `_massive_daily_bars(ticker, period, interval)` ťahá denné/týždenné bary z Massive `/v2/aggs/ticker/.../range/1/{day|week}/...` (Polygon-style), yfinance je fallback. Intraday (1h/4h) ostáva na yfinance (free Massive plán ho nemá). Po prvom `NOT_AUTHORIZED` sa Massive bary vypnú flagom `_massive_bars_disabled` (žiadny opakovaný latency hit). `get_chart` (weekly predictive) má Massive len ako fallback keď yfinance vráti prázdno. **Over cez `/api/diagnostics/massive`, či free plán per-ticker agregáty vôbec dáva** — ak nie, všetko padá späť na yfinance bez zmeny správania.
+- **Massive `adjusted=true` sa nedá slepo veriť — vie vrátiť split-neupravený close aj napriek requeste. OPRAVENÉ 2026-08-13.** Objavené naživo na MNST: Analytika/Verdikt-text (yfinance/Massive zdroj) hlásili RSI 11,7, kým Verdikt-embedded mini-graf (eToro zdroj cez `/api/ohlcv`) hlásil RSI 47,3 pre ten istý deň — používateľ si to okamžite všimol ako protirečenie. Príčina: `daily_candles`/`daily_indicators` z `/api/chart` mali surový close skok 90,36 → 45,53 v jednom bare (klasický 2:1 split artefakt), hoci `_massive_daily_bars()` posiela `adjusted=true`. RSI-14 počítaný cez takýto falošný "50% jednodňový krach" dá nezmyselne nízke číslo — a **rovnaký mechanizmus môže poškodiť AKÝKOĽVEK indikátor citlivý na krátkodobý cenový pohyb** (EMA/SMA falošné cross, MACD spike, ADX falošná volatilita) a hlavne `score_signal_day()`/C1-C4 — falošný krach trivialne splní c2 (RSI<45) aj c4 (z-score≤-1,5), takže mohol historicky vygenerovať falošné BUY signály presne okolo split dátumov pre akýkoľvek ticker, ktorý kedy splitol počas sledovania. **Fix:** `_massive_apply_unadjusted_splits(df, ticker)` — po `_massive_daily_bars()` skontroluje známe splity (`_massive_splits()`, samostatný Massive endpoint/auth flag) a manuálne dorovná IBA tie, kde surový skok cez hranicu dátumu splitu zodpovedá neupravenému pomeru (tolerancia 25 %) — ak Massive dáta už boli správne upravené, skok je ~1,0 a nič sa nemení, takže dvojnásobná adjustácia nehrozí. Regresné testy (`MassiveSplitAdjustmentRegressionTests`, 4 testy) používajú presne MNST čísla z tohto nálezu. **Neopravené zámerne:** historické záznamy v `predictive_signals_log.json`/archíve okolo minulých splitov sa NEPREPOČÍTAVAJÚ spätne — fix zabraňuje len budúcim výskytom. Ak sa niekedy bude počítať win-rate/regime analytika pre ticker so známym splitom v histórii, zvážiť backfill.
 - **Analytika vykresľuje eToro sviečky, počíta z yfinance/Massive.** `get_chart` interne stále počíta signály/backtest/predikciu z yfinance-derived `df`/`df_d` (nezmenené — 2026-07-08 explicitné rozhodnutie, aby sa nemenila analytická filozofia). Tesne pred návratom `_etoro_display_candles(ticker, interval, count)` znovupoužije `get_ohlcv()` (rovnaká funkcia ako Grafy panel, teda rovnaký eToro broker feed + disk cache) a JEHO výstup ide do vrátených polí `candles`/`daily_candles` — takže graf v Analytike vyzerá rovnako ako v Grafoch pre ten istý ticker. Interné premenné `candles`/`daily_candles` (yfinance-based) sa naďalej používajú na `pred_candle`/`pred_current_candle`/`current_week_open` — teda display a computation sú od tohto momentu zámerne rozdielne zdroje. Fail-soft: `_etoro_display_candles` vráti `None` pri chýbajúcom instrumente/výpadku proxy → padá späť na pôvodné yfinance sviečky (predchádzajúce správanie, žiadna zmena). Markery (signály, eToro pozície, patterny) fungujú ďalej bez úprav, lebo `resolveMarkerTime()`/index-matching vo frontende už boli navrhnuté na toleranciu dátumových nezhôd medzi eventom a candle sériou.
 - **ML + HMM model cache (`_MODEL_CACHE`).** `train_ml_model` a `detect_market_regime` sa inak fitovali pri každom `/api/chart` requeste. Cache kľúč `ticker:period:1wk:{posledná_sviečka}:{n}` → fit sa robí raz za sviečku. ML ukladá len `(acc, bull_prob)` (model je downstream nepoužitý → šetrí RAM), HMM celý dict. Max 256 záznamov, LRU prune.
 - **OHLCV cache is incremental.** `cache/ohlcv/{SYMBOL}_{INTERVAL}.gz` stores up to 1000 candles. Subsequent fetches request a tail (3–50 candles) and merge by `fromDate` key. Full refetch only on first load.
@@ -569,7 +908,7 @@ Komplexný audit (3 paralelné agenty: backend výkon/pamäť, frontend perf/dea
 - **Massive API kľúč mohol uniknúť do error správy** (`raise_for_status()` vkladá celú URL vrátane `?apiKey=`) a odtiaľ do `company_profiles/{SYM}.json` na disku. Fix: `_scrub_token` maskuje aj `apiKey=`, nielen `token=`.
 - **Sidebar plný re-render na každý WS tick** (~6.6 ms/tick pri 40 tickeroch, meraný) + `saveWatchlist()` (localStorage + server PUT) na každý tick + `chg` počítaný tick-na-tick namiesto voči dennému `previousClose`. Fix: `updateSidebarPriceCell(sym)` patchne len `.sb-price`/`.sb-chg` v existujúcom riadku; `item.previousClose` sa ukladá pri `fetchWatchlistPrice` a WS ticky rátajú % voči nemu; `saveWatchlist()` sa na ticky už nevolá.
 - **ResizeObserver a chart subscribe leaky v Analytike.** `buildSubpanel()` (RSI/MACD/ADX/StochRSI prepínanie) a `renderDailyMain()` vytvárali nový `ResizeObserver` pri každom volaní bez `disconnect()` predošlého — `pc_subRO`/`pc_dailyMainRO` teraz držia referenciu a čistia sa pred recreate. `buildSubpanel()` navyše registroval `subscribeVisibleLogicalRangeChange`/`subscribeCrosshairMove` na PERZISTENTNOM `pc_realChartInst` bez unsubscribe — `pc_realRangeHandler`/`pc_realCrosshairHandler` teraz umožňujú `clearSubpanel()` odhlásiť starý handler pred ďalším prepnutím subpanelu. `drawCloudCanvas()` (Ichimoku cloud) mal identický problém na `r.mainChart` — `r.cloudCanvasRender` sa teraz odhlasuje pred re-subscribe.
-- **Theme toggle nikdy nezmenil tému Daily grafu ani subpanelu.** `applyThemeToAllCharts()` čítal `window.pc_dailyChartInst`/`pc_dailyMainInst`/`pc_subChartInst` — classic-script top-level `let` nevytvára `window.*` vlastnosť (na rozdiel od `pc_realChartInst`/`pc_predChartInst`, ktoré main.js explicitne exportuje cez `defineProperty`). Fix: bežné identifikátory + `typeof` guard (funguje, lebo charts.js sa načíta až po predictive.js).
+- **Theme toggle kedysi nemenil tému Daily grafu ani subpanelu.** Classic-script top-level `let` nevytvára `window.*` vlastnosť. Aktuálne `applyThemeToAllCharts()` používa bežné identifikátory a iteruje všetky chart instances v `pc_subpanels` (funguje, lebo charts.js sa načíta až po predictive.js).
 - **Portfólio: 2+ čakajúce objednávky na ten istý ticker prepisovali navzájom svoje bunky.** `data-port-order-distance="${pid}-${sym}"` bez `orderId` — `querySelectorAll` vyberal všetky zhodné riadky a WS tick/`hydrateOrderRates` patch napísal do KAŽDÉHO z nich hodnotu POSLEDNEJ iterovanej objednávky. Fix: `orderId` súčasťou selektora.
 - **`stale: true` z backendu sa ticho ignorovalo.** Pri výpadku eToro proxy `get_portfolio` vráti 200 so starými dátami a `stale: true`, ale `loadPortData` to ignorovala — ⟳ počas výpadku "potvrdil" deň staré dáta ako čerstvé (resetol `etoroPositionsFetchedAt`, predĺžil 24h okno). Fix: force-refresh nezapisuje do `etoroPositionsAll`/`etoroOrdersAll` keď `stale`, UI ukáže "⚠ zastarané dáta".
 - **`predictive_signals_log.json` bol trackovaný v gite** napriek `.gitignore` pravidlu (pridané, ale súbor bol commitnutý predtým) — `git rm --cached`.
