@@ -7567,10 +7567,73 @@ def _massive_daily_bars(ticker: str, period: str, interval: str):
         df.index = pd.to_datetime(df.pop("__t"), unit="ms")
         df.index.name = "Date"
         df = df.dropna(subset=["Open", "High", "Low", "Close"])
+        if df.empty or len(df) < 2:
+            return None
+        # Requestujeme adjusted=true, ale spoliehať sa naň naslepo je riskantné —
+        # overené naživo na MNST (2026-08-13): jeden bar mal close 90.36 -> 45.53,
+        # klasický 2:1 split artefakt, hoci sme si pýtali adjusted dáta. Príznak
+        # "adjusted" v odpovedi navyše hovorí len či Massive TVRDÍ, že upravil,
+        # nie že sa to reálne stalo pre náš plán/ticker. Preto vždy krížovo
+        # overíme proti známym splitom (_massive_splits) a manuálne dorovnáme
+        # LEN tie splity, kde surový skok cez hranicu dátumu splitu zodpovedá
+        # neupravenému pomeru — inak by sme mohli dvojnásobne upraviť dáta,
+        # ktoré Massive už správne adjustol.
+        if not payload.get("adjusted", True):
+            print(f"[massive] {ticker}: odpoveď hlási adjusted=false napriek requeste")
+        df = _massive_apply_unadjusted_splits(df, ticker)
         return df if len(df) >= 2 else None
     except Exception as exc:
         print(f"[massive] bary {ticker} {period}/{interval}: {type(exc).__name__}")
         return None
+
+
+def _massive_apply_unadjusted_splits(df: "pd.DataFrame", ticker: str) -> "pd.DataFrame":
+    """Bezpečnostná poistka pre _massive_daily_bars: Massive aggs endpoint sme
+    požiadali o adjusted=true, ale naživo (MNST, 2026-08-13) sa ukázalo, že sa
+    to nedá slepo veriť — vrátil surový, split-neupravený close so skokom cez
+    hranicu splitu (90.36 -> 45.53, klasický 2:1 artefakt). Táto funkcia si
+    vypýta známe splity z toho istého Massive účtu (_massive_splits, samostatný
+    endpoint/auth flag, fail-soft) a manuálne dorovná IBA tie splity, kde je zo
+    surových dát vidno, že adjustácia reálne chýba (skok cez hranicu zodpovedá
+    neupravenému split pomeru v tolerancii 25 % — bežná denná volatilita okolo
+    splitu nemá byť zamenená za split, ale ani opačne). Ak Massive dáta už boli
+    správne upravené, skok cez hranicu bude blízko 1.0 a nič sa nezmení — takže
+    dvojnásobná adjustácia už upravených dát nehrozí."""
+    try:
+        splits = _massive_splits(ticker)
+    except Exception:
+        return df  # splits endpoint nedostupný pre tento kľúč/plán — fail-soft
+    if not splits:
+        return df
+    for row in splits:
+        if not isinstance(row, dict):
+            continue
+        split_from = _fund_num(row.get("split_from"))
+        split_to = _fund_num(row.get("split_to"))
+        exec_date = row.get("execution_date")
+        if not split_from or not split_to or split_from <= 0 or split_to <= 0 or not exec_date:
+            continue
+        try:
+            exec_ts = pd.Timestamp(exec_date)
+        except Exception:
+            continue
+        before_mask = df.index < exec_ts
+        after_mask = df.index >= exec_ts
+        if not before_mask.any() or not after_mask.any():
+            continue
+        last_before = df.loc[before_mask, "Close"].iloc[-1]
+        first_after = df.loc[after_mask, "Close"].iloc[0]
+        if not last_before or not first_after or last_before <= 0 or first_after <= 0:
+            continue
+        expected_factor = split_from / split_to  # napr. 1/2 pre 2:1 split
+        observed_factor = first_after / last_before
+        if abs(observed_factor - expected_factor) / expected_factor >= 0.25:
+            continue  # skok nezodpovedá tomuto splitu — Massive ho už upravil (alebo iný dôvod pohybu)
+        df.loc[before_mask, ["Open", "High", "Low", "Close"]] *= expected_factor
+        df.loc[before_mask, "Volume"] *= (split_to / split_from)
+        print(f"[massive] {ticker}: manuálne dorovnaný neupravený split {row.get('execution_date')} "
+              f"({split_from:g}:{split_to:g})")
+    return df
 
 
 _ALPACA_BARS_TIMESPAN = {"1d": "1Day", "1wk": "1Week"}

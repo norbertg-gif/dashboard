@@ -1367,6 +1367,79 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
         self.assertEqual(payload["company"], "AV Corp")
 
 
+class MassiveSplitAdjustmentRegressionTests(unittest.TestCase):
+    """Massive aggs endpoint is requested with adjusted=true, but a live check
+    against MNST (2026-08-13) showed it can still return a raw, split-unadjusted
+    close series (single-bar 90.36 -> 45.53 halving, classic 2:1 split artifact).
+    _massive_apply_unadjusted_splits() is the safety net: it only rewrites bars
+    when the raw jump across a KNOWN split date actually matches the unadjusted
+    ratio, so already-adjusted data (jump ~= 1.0) is left untouched."""
+
+    @staticmethod
+    def _frame(closes, start="2026-01-01"):
+        index = pd.date_range(start, periods=len(closes), freq="D")
+        closes = pd.Series(closes, index=index, dtype=float)
+        return pd.DataFrame({
+            "Open": closes, "High": closes + 1, "Low": closes - 1,
+            "Close": closes, "Volume": [1000.0] * len(closes),
+        }, index=index)
+
+    def test_unadjusted_split_is_detected_and_corrected(self):
+        # Bars 0-3 before the split (raw, unadjusted), 4-6 after (already at
+        # post-split scale) -- mirrors the observed MNST 2:1 artifact.
+        df = self._frame([90.0, 91.0, 92.0, 90.36, 45.53, 45.98, 46.645])
+        split_date = df.index[4].strftime("%Y-%m-%d")
+        splits = [{"execution_date": split_date, "split_from": 1, "split_to": 2}]
+        with patch.object(tb, "_massive_splits", return_value=splits):
+            adjusted = tb._massive_apply_unadjusted_splits(df.copy(), "MNST")
+        # Pre-split bars must be halved to match the post-split scale.
+        self.assertAlmostEqual(adjusted["Close"].iloc[0], 45.0)
+        self.assertAlmostEqual(adjusted["Close"].iloc[3], 45.18)
+        # Volume scales up by the inverse ratio.
+        self.assertAlmostEqual(adjusted["Volume"].iloc[0], 2000.0)
+        # Post-split bars (already correct scale) must be untouched.
+        self.assertAlmostEqual(adjusted["Close"].iloc[4], 45.53)
+        self.assertAlmostEqual(adjusted["Close"].iloc[6], 46.645)
+
+    def test_already_adjusted_data_is_left_untouched(self):
+        # No real jump across the split boundary -> Massive already adjusted
+        # this series; applying the split again would corrupt it.
+        df = self._frame([44.5, 44.8, 45.1, 45.2, 45.53, 45.98, 46.645])
+        split_date = df.index[4].strftime("%Y-%m-%d")
+        splits = [{"execution_date": split_date, "split_from": 1, "split_to": 2}]
+        with patch.object(tb, "_massive_splits", return_value=splits):
+            adjusted = tb._massive_apply_unadjusted_splits(df.copy(), "MNST")
+        pd.testing.assert_frame_equal(adjusted, df)
+
+    def test_no_splits_or_failed_lookup_returns_frame_unchanged(self):
+        df = self._frame([10.0, 10.5, 11.0])
+        with patch.object(tb, "_massive_splits", return_value=[]):
+            self.assertTrue(df.equals(tb._massive_apply_unadjusted_splits(df.copy(), "AAPL")))
+        with patch.object(tb, "_massive_splits", side_effect=RuntimeError("splits unavailable")):
+            self.assertTrue(df.equals(tb._massive_apply_unadjusted_splits(df.copy(), "AAPL")))
+
+    def test_daily_bars_calls_split_adjustment_on_success(self):
+        rows = [
+            {"o": 90.0, "h": 91.0, "l": 89.0, "c": 90.36, "t": 1735689600000},
+            {"o": 45.5, "h": 46.0, "l": 45.0, "c": 45.53, "t": 1735776000000},
+            {"o": 45.9, "h": 46.5, "l": 45.5, "c": 45.98, "t": 1735862400000},
+        ]
+        response = type("R", (), {
+            "content": b"{}", "status_code": 200, "ok": True,
+            "json": lambda self: {"status": "OK", "adjusted": True, "results": rows},
+        })()
+        with (
+            patch.dict("os.environ", {"MASSIVE_API_KEY": "test-key"}),
+            patch.object(tb, "_massive_bars_disabled", False),
+            patch.object(tb.requests, "get", return_value=response),
+            patch.object(tb, "_massive_apply_unadjusted_splits", side_effect=lambda df, t: df) as adj_call,
+        ):
+            result = tb._massive_daily_bars("MNST", "1y", "1d")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 3)
+        adj_call.assert_called_once()
+
+
 class CorporateActionsRegressionTests(unittest.TestCase):
     class _Response:
         def __init__(self, payload, status_code=200):
