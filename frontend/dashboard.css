@@ -4911,6 +4911,34 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   display: grid;
   gap: 16px;
 }
+/* Dva verdikty vedľa seba (DIP + Trend) — na užšom okne pod sebou, nech sa
+   karty nezmenšia natoľko, že prestanú byť čitateľné. */
+.verdict-dual {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.verdict-dual > .verdict-content {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .verdict-dual { flex-direction: column; }
+}
+.verdict-mode-tag {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--muted2);
+  background: color-mix(in oklch, var(--bg-input) 78%, transparent);
+}
 .verdict-empty {
   min-height: 260px;
   display: grid;

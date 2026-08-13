@@ -608,6 +608,38 @@ Scanner rows also expose a dedicated **Verdikt** button → `openVerdictTicker()
 - Source availability chips expose Technika / Trh / Firma / Earnings. Missing
   optional insights are fail-soft and lower confidence; they must not turn an
   otherwise valid technical setup into an automatic negative verdict.
+  **Chips mean "dáta sú dostupné", NIE "sú priaznivé"** — pôvodne zelené s
+  fajkou (rovnaká farba ako "bullish" všade inde v appke), takže štyri zelené
+  fajky vedľa NIE verdiktu pôsobilo ako protirečenie. Opravené 2026-08-13:
+  vlastný label "Dostupnosť dát pre vyhodnotenie" + tooltip + neutrálna modrá
+  namiesto `var(--up)`.
+- **Dva nezávislé verdikty vedľa seba — DIP a Trend, HOTOVO 2026-08-13.**
+  `buildInvestorVerdict()` (DIP, mean-reversion, existujúci) a
+  `buildTrendVerdict()` (Trend, momentum, nový) odpovedajú na inú otázku a
+  ZÁMERNE sa nezlučujú do jedného čísla — používateľské rozhodnutie po tom,
+  čo pri LRCX videl DIP verdikt NIE napriek peknému grafu (cena držala EMA10
+  nad EMA20, nad EMA200), lebo DIP hľadá SLABOSŤ v silnom titule (C1-C4:
+  RSI<45, blízko EMA20/Kijun, oversold z-score), nie silu.
+  `buildTrendVerdict()` nepoužíva `today_raw_score`/C1-C4 vôbec — počíta
+  výhradne z `data.daily_indicators` (ema10/20/50/200, rsi), ktoré sú tam
+  vždy nezávisle od `detail=basic/advanced` (doplnené v tom istom dni pri
+  Analytika prestavbe, žiadny nový fetch). Základná podmienka: EMA10>EMA20 na
+  weekly AJ daily naraz. Nad tým štrukturálne potvrdenie — aspoň jedno z: nad
+  EMA200 / odraz od EMA200 (low niektorej z posledných 10 sviečok sa priblížil
+  k EMA200 na danú dátumu, cena teraz nad ňou) / prienik cez EMA50 (cross-up
+  v okne 10 dní, cena stále drží nad). RSI 50-70 = "podporujúce" (zdravá sila,
+  nie eufória); nad 70 aj pod 50 sú riziká, nie automatický NIE.
+  Zámerne rovnaké `earningsRisk`/`marketAdverse` gate ako DIP verdikt
+  (duplicitný výpočet, nie zdieľaný stav — obe funkcie musia ostať plne
+  nezávislé). Render: `renderTrendVerdict()` do `#trendVerdictContent`,
+  rovnaká `.verdict-hero verdict-${verdict}` trieda ako DIP (farby sa
+  aplikujú automaticky), `.verdict-mode-tag` label ("DIP VSTUP"/"TREND
+  VSTUP") na oboch kartách, aby ani jedna nepôsobila ako tá "hlavná".
+  `.verdict-dual` (flex row, `@media max-width:900px` sa zloží pod seba).
+  Overené naživo na LRCX: DIP hlásil POČKAŤ (weekly uptrend, ale C1-C4
+  0/4 — žiadny dip setup), Trend hlásil NIE (EMA200/EMA50 štruktúra OK, ale
+  daily EMA10/20 v tú chvíľu nesedelo s weekly) — dva rôzne, KOREKTNÉ pohľady
+  na ten istý ticker naraz, nie rozpor.
 - The Predictive Decision Bar and Scanner rows both link to the Verdict tab.
 
 Scanner row badges (rendered by `applyScannerBadges()`, data loaded by `ensureScannerMetaLoaded()`):
