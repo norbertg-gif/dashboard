@@ -63,6 +63,7 @@ There are two test layers. `python test_regressions.py` contains focused unit/re
 ## Working conventions
 
 - **GitHub is the first source of truth.** Before reading implementation state or making any change, run `git status`, fetch the remote, and compare the current checkout with `origin/main`. The user regularly changes the repository outside Codex threads, so never assume the local checkout or an earlier session handoff is current. Preserve unrelated local changes while synchronizing.
+- **Push completed work.** When a requested change is finished and its relevant checks pass, commit and push the task-owned changes to GitHub instead of leaving them only in the local checkout. Stage explicit task files only; never include unrelated local edits, notes, generated files, or backups. If a safe push is blocked by remote changes, synchronize first and resolve the task-owned branch without overwriting user work.
 - **Partial edits over rewrites.** I read the file, change the relevant block, leave the rest alone unless asked.
 - **Test between changes.** I report the specific symptom or error rather than describing what I think should happen.
 - **Decisions on me when trade-offs are unclear.** Architecture / UX choices: propose options + a default, don't ask a stream of clarifying questions.
