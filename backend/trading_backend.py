@@ -183,6 +183,8 @@ def add_indicators(df):
     df = df.copy()
     df["ema10"]      = calc_ema(df["Close"], 10)
     df["ema20"]      = calc_ema(df["Close"], 20)
+    df["ema50"]      = df["Close"].ewm(span=50, adjust=False).mean()
+    df["ema200"]     = df["Close"].ewm(span=200, adjust=False).mean()
     df["rsi"]        = calc_rsi(df["Close"])
     df["atr"]        = calc_atr(df)
     df["macd"], df["macd_sig"], df["macd_hist"] = calc_macd(df["Close"])
@@ -5999,6 +6001,8 @@ def get_chart(
         indicators = {
             "ema10":      ind_series("ema10"),
             "ema20":      ind_series("ema20"),
+            "ema50":      ind_series("ema50"),
+            "ema200":     ind_series("ema200"),
             "ichi_tenkan":ind_series("ichi_tenkan"),
             "ichi_kijun": ind_series("ichi_kijun"),
             "ichi_sa":    ind_series("ichi_sa") + ichi_future_sa,
@@ -6173,8 +6177,8 @@ def get_chart(
                         daily_candles.append({
                             "time":  int(pd.Timestamp(ts).timestamp()),
                             "open": o, "high": h, "low": l, "close": c,
-                            # volume: pattern overlay potrebuje objemové potvrdenie breakoutu;
-                            # LWC candlestick series extra pole ignoruje (aditívne, fail-soft)
+                            # Volume ostáva aditívnou súčasťou OHLCV payloadu;
+                            # LWC candlestick series extra pole ignoruje (fail-soft).
                             "volume": safe_float(row.get("Volume")),
                         })
 
@@ -6198,11 +6202,21 @@ def get_chart(
                 ]
 
                 daily_indicators = {
+                    "ema10":       daily_ind("ema10"),
                     "ema20":       daily_ind("ema20"),
-                    "ema50":       daily_ind("ema10"),   # use ema10 as proxy for ema50-like
+                    "ema50":       daily_ind("ema50"),
+                    "ema200":      daily_ind("ema200"),
+                    "ichi_tenkan": daily_ind("ichi_tenkan"),
                     "ichi_kijun":  daily_ind("ichi_kijun"),
                     "ichi_sa":     daily_ind("ichi_sa") + daily_ichi_future_sa,
                     "ichi_sb":     daily_ind("ichi_sb") + daily_ichi_future_sb,
+                    "rsi":         daily_ind("rsi"),
+                    "macd":        daily_ind("macd"),
+                    "macd_sig":    daily_ind("macd_sig"),
+                    "macd_hist":   daily_ind("macd_hist"),
+                    "adx":         daily_ind("adx"),
+                    "di_plus":     daily_ind("di_plus"),
+                    "di_minus":    daily_ind("di_minus"),
                 }
 
                 # Mini chart: last 10 candles (for left panel)
@@ -14144,7 +14158,7 @@ def help_screenshot(fname: str):
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
-    "chart_patterns.js", "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
+    "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
     # Nový modul MUSÍ pribudnúť aj sem — inak endpoint vráti 404 a v produkcii
     # padne všetko, čo ten súbor potrebuje (lokálne to nevidno, ak sa testuje
     # bez tohto endpointu).

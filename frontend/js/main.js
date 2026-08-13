@@ -362,9 +362,7 @@ document.addEventListener('mousedown', e => {
 
 // Expose predictive functions globally for HTML onclick
 window.pc_applyOverlays = pc_applyOverlays;
-window.pc_toggleVolumeProfile = pc_toggleVolumeProfile;
-window.pc_toggleChartPatterns = pc_toggleChartPatterns;
-window.pc_togglePatternFilter = pc_togglePatternFilter;
+window.pc_toggleIndicator = pc_toggleIndicator;
 window.setSignalSegmentHorizon = setSignalSegmentHorizon;
 window.pc_closeDropdown = pc_closeDropdown;
 window.pc_renderDropdown = pc_renderDropdown;
@@ -376,7 +374,6 @@ window.togglePredictiveModelChart = togglePredictiveModelChart;
 window.exportSnapshot = exportSnapshot;
 window.switchView = switchView;
 window.pc_applyOverlays = pc_applyOverlays;
-window.applySubpanel = applySubpanel;
 window.onTickerInput = onTickerInput;
 window.onTickerKeydown = onTickerKeydown;
 window.pc_selectTicker = pc_selectTicker;

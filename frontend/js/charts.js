@@ -198,14 +198,19 @@ function applyThemeToAllCharts() {
   // Predictive tab grafy. Pozn.: classic-script top-level `let` nevytvára
   // window.* vlastnosť (main.js to rieši len pre pc_realChartInst/
   // pc_predChartInst cez defineProperty) — pc_dailyChartInst/pc_dailyMainInst/
-  // pc_subChartInst boli cez window.* vždy undefined, takže Daily graf a
-  // subpanel po prepnutí témy zostávali v starej téme až do ďalšieho reloadu.
+  // Analytika subpanely sú uložené v pc_subpanels, nie na window.*.
   // Bežné identifikátory fungujú, lebo charts.js sa načíta až po predictive.js.
   if (typeof pc_realChartInst !== 'undefined' && pc_realChartInst) applyChartTheme(pc_realChartInst);
   if (typeof pc_predChartInst !== 'undefined' && pc_predChartInst) applyChartTheme(pc_predChartInst);
   if (typeof pc_dailyChartInst !== 'undefined' && pc_dailyChartInst) applyChartTheme(pc_dailyChartInst);
   if (typeof pc_dailyMainInst !== 'undefined' && pc_dailyMainInst) applyChartTheme(pc_dailyMainInst);
-  if (typeof pc_subChartInst !== 'undefined' && pc_subChartInst) applyChartTheme(pc_subChartInst);
+  if (typeof pc_subpanels !== 'undefined') {
+    for (const manager of Object.values(pc_subpanels)) {
+      for (const type of ['rsi', 'adx', 'macd']) {
+        if (manager[type]?.chart) applyChartTheme(manager[type].chart);
+      }
+    }
+  }
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
