@@ -317,8 +317,9 @@ function renderInvestorVerdict(result) {
       <div class="verdict-label">${result.label}</div>
       <div class="verdict-summary">${escHtml(result.summary)}</div>
       <div class="verdict-confidence">Istota: <strong>${escHtml(result.confidence)}</strong> · horizont 30–90 dní</div>
+      <div class="verdict-sources-label" title="Toto hovorí len o tom, či máme dáta na vyhodnotenie — nie či sú priaznivé.">Dostupnosť dát pre vyhodnotenie:</div>
       <div class="verdict-sources">
-        ${result.sources.map(source => `<span class="${source.available ? 'ok' : 'missing'}">${source.available ? '✓' : '–'} ${escHtml(source.label)}</span>`).join('')}
+        ${result.sources.map(source => `<span class="${source.available ? 'ok' : 'missing'}" title="${source.available ? 'Dáta pre túto kategóriu sú k dispozícii — nehovorí to, či sú priaznivé.' : 'Dáta pre túto kategóriu chýbajú; verdikt s nimi nepočítal.'}">${source.available ? '✓' : '–'} ${escHtml(source.label)}</span>`).join('')}
       </div>
     </section>
     <div class="verdict-evidence">
