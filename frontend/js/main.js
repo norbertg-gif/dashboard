@@ -27,10 +27,7 @@ ddEl.addEventListener('mouseenter', () => ddHovered = true);
 ddEl.addEventListener('mouseleave', () => ddHovered = false);
 
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (maximizedPanelId) toggleMaximizePanel(maximizedPanelId);
-  const ema200Overlay = document.getElementById('ema200ScanOverlay');
-  if (ema200Overlay && ema200Overlay.style.display !== 'none') closeEma200ScanModal();
+  if (e.key === 'Escape' && maximizedPanelId) toggleMaximizePanel(maximizedPanelId);
 });
 
 // ── ETORO MARKERY ────────────────────────────────────────────────────────────

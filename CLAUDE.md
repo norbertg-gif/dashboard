@@ -654,25 +654,43 @@ Main source sections:
 - **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only). Výsledok používa spoločnú `scannerCachedJson` 24h client cache; obyčajný render nikdy nevolá force refresh, explicitné ⟳ áno.
 - **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.
 - **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but an imported DIP ranking XLSX is now the primary scanned universe (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). Nasdaq-100 is only the fallback when no DIP import exists. This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks and scanning Nasdaq on top of it created avoidable timeouts. The scanner uses a bounded worker queue, so waiting tickers are not timed out before they actually start. The result table keeps every successfully scanned imported ticker with `TOTAL >= 85` (`DIP_SCANNER_VISIBILITY_THRESHOLD`) even without a fresh technical signal; lower-ranked rows remain signal-only. Therefore `recent_signal` is nullable in cached scanner results: always use `(row.get("recent_signal") or {})`, including sort keys and crossover counters. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
-- **EMA200 scan (ad-hoc, HOTOVO 2026-08-18).** Tlačidlo „EMA200 scan" v Scanner
-  DIP tb-group → `GET /api/scanner/ema200-scan` prebehne `scanner_universe_from_dip()`
+- **EMA200 scan (ad-hoc, HOTOVO 2026-08-18, prerobené z modalu na kartu v ten
+  istý deň).** `GET /api/scanner/ema200-scan` prebehne `scanner_universe_from_dip()`
   (rovnaké naimportované univerzum ako klasický scan, Nasdaq-100 fallback bez
   importu), pre každý ticker spočíta weekly EMA200 z `_scan_ema200_distance()`
   cez `_scanner_download_cached(ticker,"5y","1wk")` — zdieľaná daily-history
   cache, žiadny nový fetch mechanizmus. Zámerne BEZ akejkoľvek server/klient
   cache (na rozdiel od ostatných scanner sekcií) — je to explicitne "spusti keď
-  chceš", nie denný snapshot. Výstup je modálne okno (`.ema-scan-*`,
-  `position:fixed` cez celý viewport, nie relatívne k jednému tabu ako
-  `pc-news-*`, lebo sa spúšťa zo Scanneru) s klikacou `.tool-table` (triedenie
-  cez `sortEma200Scan`/zdieľaný `compareSortableRows`, `dist_pct` sa vždy
-  triedi podľa absolútnej hodnoty — najbližšie k EMA200 hore, nezávisle od
-  znamienka). Riadky majú right-click menu (`onEma200ScanRowContextMenu`,
-  zdieľaný `showContextMenu()`): Analytika / Grafy / Verdikt / Watchlist —
-  rovnaký vzor ako ostatné right-click menu v appke (backlog položka o
-  context menu). Prah "nebezpečne blízko" (`ema200_scan_threshold_pct`,
-  default 5 %, len ABSOLÚTNA vzdialenosť — smer používateľ vyhodnocuje
-  vizuálne, zámerne sa nekóduje) je v `⚙` nastaveniach ako ďalší tunable.
-  Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani scoringu.
+  chceš", nie denný snapshot.
+  **Prvá verzia (modal) bola zlý dizajn — nahlásené hneď pri prvom použití:**
+  beh trvá ~20-30s (studená cache), modal ukazoval spinner, ale bez jasného
+  vizuálu to pôsobilo ako "nič sa nedeje"; a keď sa modal zavrel (klik mimo,
+  Escape), výsledok bol nenávratne preč — žiadna cesta späť bez nového behu.
+  Prerobené na trvalú kartu `#ema200-scan-section` v `.scanner-aux-grid`
+  (vedľa Investor Inbox), rovnaký `.investor-week-card`/`.scanner-aux-card`
+  vzor ako Weekly Plan a Investor Inbox: `ema200ScanData`/`ema200ScanLoading`/
+  `ema200ScanError` sú modulové premenné, ktoré prežijú prepnutie tabu (overené
+  naživo — 99 riadkov ostalo po Portfolio→Scanner prepnutí), takže sa k
+  poslednému behu dá kedykoľvek vrátiť scrollom bez nového klikania. Tlačidlo
+  v hlavičke karty (`ema200CardHead()`) sa počas behu disable-ne a ukáže
+  "Skenujem…", card body ukáže explicitný text s odhadom trvania — žiadny
+  neinformatívny spinner. Zbaliteľná (`toggleEma200CardCollapsed`,
+  `td_ema200_scan_collapsed`, default ROZBALENÉ na rozdiel od Weekly
+  Plan/Inbox, keďže je to nová funkcia, ktorú treba najprv objaviť), zbalený
+  stav ukazuje jednoriadkový súhrn z posledného behu.
+  Klikacia `.tool-table` (vlastný scroll wrapper `max-height:360px;overflow:auto`
+  — karta nie je v bounded modal body ako predtým, takže sticky header
+  potrebuje vlastného scroll rodiča, viď CSS pitfall vyššie o sticky
+  hlavičkách), triedenie cez `sortEma200Scan`/zdieľaný `compareSortableRows`,
+  `dist_pct` sa vždy triedi podľa absolútnej hodnoty (najbližšie k EMA200
+  hore, nezávisle od znamienka). Riadky majú right-click menu
+  (`onEma200ScanRowContextMenu`, zdieľaný `showContextMenu()`): Analytika /
+  Grafy / Verdikt / Watchlist — rovnaký vzor ako ostatné right-click menu v
+  appke (backlog položka o context menu). Prah "nebezpečne blízko"
+  (`ema200_scan_threshold_pct`, default 5 %, len ABSOLÚTNA vzdialenosť — smer
+  používateľ vyhodnocuje vizuálne, zámerne sa nekóduje) je v `⚙` nastaveniach
+  ako ďalší tunable. Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani
+  scoringu.
 - **DIP univerzum je len US — overené 2026-08-05.** Finviz vo free tieri ponúka iba
   `Any / AMEX / CBOE / NASDAQ / NYSE`; európske burzy sú za `Custom (Elite only)`.
   Dôsledok: európske tituly (`RHM.DE`, `NOVO-B.CO`, `TEP.PA`, `VWCG.L`, `CSG.NV`)

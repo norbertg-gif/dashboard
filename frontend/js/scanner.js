@@ -913,7 +913,6 @@ async function renderScannerView() {
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
                 <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
                 <button class="btn primary" id="nasdaqRescanBtn" onclick="runNasdaqScanner()">Rescan teraz</button>
-                <button class="btn" onclick="runEma200Scan()" title="Ad-hoc: aktuálna cena vs weekly EMA200 pre celé naimportované DIP univerzum">EMA200 scan</button>
               </div>
             </div>
             <div class="tb-sep"></div>
@@ -967,6 +966,10 @@ async function renderScannerView() {
             <span class="scanner-source-note">DCA · profit · earnings · riziká · nové príležitosti</span>
           </div>
           <div id="investorWeekBox" class="inbox-empty">Načítavam týždenný prehľad...</div>
+        </section>
+        <section class="investor-week-card scanner-aux-card scanner-aux-ema200" id="ema200-scan-section">
+          ${ema200CardHead()}
+          <div id="ema200ScanBox" class="inbox-empty">${ema200CardBodyHtml()}</div>
         </section>
         <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar">
           <div class="scanner-source-head">
@@ -1713,54 +1716,64 @@ function openScannerTicker(ticker) {
 }
 
 // ── EMA200 scan (ad-hoc, weekly) ────────────────────────────────────────────
-// Žiadna server ani klient cache — na rozdiel od ostatných scanner sekcií je
-// toto explicitne "spusti keď chceš", nie denný snapshot. Dáta idú z tej istej
-// zdieľanej daily-history cache ako zvyšok scanneru (backend), takže opakovaný
-// beh je lacný.
+// Trvalá karta v scanner-aux-grid (vedľa Investor Inbox), nie modal — modal
+// zmizol bez stopy po zatvorení a pri ~20-30s behu bez viditeľného postupu
+// pôsobil ako "nič sa nedeje" (nahlásené 2026-08-18). Karta drží posledný
+// výsledok v `ema200ScanData` cez celú session (kým sa nespustí nový beh
+// alebo nenačíta stránka), takže sa k nej dá kedykoľvek vrátiť scrollom, nie
+// len hneď po kliknutí. Žiadna server ani klient cache samotného behu — na
+// rozdiel od ostatných scanner sekcií je toto explicitne "spusti keď chceš",
+// nie denný snapshot. Dáta idú z tej istej zdieľanej daily-history cache ako
+// zvyšok scanneru (backend), takže opakovaný beh je lacný.
 let ema200ScanData = null;
+let ema200ScanLoading = false;
+let ema200ScanError = null;
 let ema200ScanSort = { key: 'dist_pct', dir: 1 };
 
-async function runEma200Scan() {
-  const overlay = document.getElementById('ema200ScanOverlay');
-  const body = document.getElementById('ema200ScanBody');
-  const sub = document.getElementById('ema200ScanSubtitle');
-  if (!overlay || !body) return;
-  overlay.style.display = 'flex';
-  sub.textContent = 'Skenujem naimportované univerzum...';
-  body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;"><span class="cl-spinner"></span> Počítam odstup od weekly EMA200...</div>';
-  try {
-    const resp = await fetch(`${API}/api/scanner/ema200-scan`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    ema200ScanData = await resp.json();
-    ema200ScanSort = { key: 'dist_pct', dir: 1 };
-    renderEma200ScanResults();
-  } catch (e) {
-    body.innerHTML = `<div style="color:var(--red);font-size:12px;">Chyba: ${escHtml(e.message)}</div>`;
-    sub.textContent = 'Chyba';
+const EMA200_SCAN_COLLAPSED_KEY = 'td_ema200_scan_collapsed';
+function isEma200CardCollapsed() { return localStorage.getItem(EMA200_SCAN_COLLAPSED_KEY) === '1'; }
+function toggleEma200CardCollapsed() {
+  localStorage.setItem(EMA200_SCAN_COLLAPSED_KEY, isEma200CardCollapsed() ? '0' : '1');
+  renderEma200Card();
+}
+
+function ema200CardHead() {
+  const collapsed = isEma200CardCollapsed();
+  return `<div class="scanner-source-head">
+    <button class="btn dca-toggle" onclick="toggleEma200CardCollapsed()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
+    <div class="scanner-aux-heading">
+      <span class="scanner-aux-icon" aria-hidden="true">◎</span>
+      <div>
+      <div class="scanner-section-kicker">Alternatíva k DIP</div>
+      <div class="scanner-source-title">EMA200 sledovanie (weekly)</div>
+      </div>
+    </div>
+    <button class="btn" id="ema200ScanBtn" style="font-size:10px;padding:3px 9px;" onclick="runEma200Scan()"${ema200ScanLoading ? ' disabled' : ''}
+      title="Ad-hoc: aktuálna cena vs weekly EMA200 pre celé naimportované DIP univerzum">${ema200ScanLoading ? 'Skenujem…' : (ema200ScanData ? '↻ Znova' : 'Spustiť sken')}</button>
+  </div>`;
+}
+
+function ema200CardBodyHtml() {
+  if (isEma200CardCollapsed()) {
+    if (!ema200ScanData) return 'Zatiaľ nespustené.';
+    return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200 (posledný beh)`;
   }
+  if (ema200ScanLoading) {
+    return '<div style="color:var(--muted);font-size:11px;padding:6px 0;"><span class="cl-spinner"></span> Skenujem naimportované univerzum — pri prvom behu môže trvať cca 20-30 sekúnd, opakovaný beh je rýchlejší (zdieľaná cache).</div>';
+  }
+  if (ema200ScanError) {
+    return `<div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(ema200ScanError)}</div>`;
+  }
+  if (!ema200ScanData) {
+    return '<div style="color:var(--muted);font-size:11px;padding:6px 0;">Zatiaľ nespustené — klikni "Spustiť sken" vpravo hore. Porovná aktuálnu cenu s weekly EMA200 pre celé naimportované DIP univerzum, žiadny nový fetch (zdieľaná cache).</div>';
+  }
+  return ema200ResultsTableHtml();
 }
 
-function closeEma200ScanModal(ev) {
-  if (ev && ev.target && ev.target.id !== 'ema200ScanOverlay') return;
-  const overlay = document.getElementById('ema200ScanOverlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
-function sortEma200Scan(key) {
-  if (ema200ScanSort.key === key) ema200ScanSort.dir *= -1;
-  else ema200ScanSort = { key, dir: key === 'ticker' ? 1 : -1 };
-  renderEma200ScanResults();
-}
-
-function renderEma200ScanResults() {
+function ema200ResultsTableHtml() {
   const data = ema200ScanData;
-  const body = document.getElementById('ema200ScanBody');
-  const sub = document.getElementById('ema200ScanSubtitle');
-  if (!data || !body) return;
-  sub.textContent = `${data.universe_label} · ${data.scanned}/${data.total} tickerov · prah ±${data.threshold_pct}% · ${data.near_count} blízko EMA200`;
   if (!data.results.length) {
-    body.innerHTML = '<div style="color:var(--muted);font-size:12px;">Žiadne dáta — importuj DIP Excel v Scanneri.</div>';
-    return;
+    return '<div style="color:var(--muted);font-size:11px;">Žiadne dáta — importuj DIP Excel v Scanneri.</div>';
   }
   // dist_pct sa triedi podľa ABSOLÚTNEJ hodnoty (najbližšie k EMA200 hore),
   // ostatné stĺpce normálne — preto vlastný komparátor namiesto compareSortableRows.
@@ -1785,10 +1798,47 @@ function renderEma200ScanResults() {
       <td class="r" style="color:var(--muted);">${r.weeks}t</td>
     </tr>`;
   }).join('');
-  body.innerHTML = `
+  return `
+    <div class="dca-summary" style="margin-bottom:6px;">
+      <span class="dca-pill neutral">${escHtml(data.universe_label)}</span>
+      <span class="dca-pill neutral">${data.scanned}/${data.total} tickerov</span>
+      <span class="dca-pill warn">${data.near_count}× do ±${data.threshold_pct}%</span>
+    </div>
+    <div style="max-height:360px;overflow:auto;">
     <table class="tool-table"><thead><tr>
       ${th('ticker', 'Ticker')}${th('close', 'Cena', 'r')}${th('ema200', 'EMA200', 'r')}${th('dist_pct', 'Odstup', 'r')}${th('weeks', 'História', 'r')}
-    </tr></thead><tbody>${rows}</tbody></table>`;
+    </tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
+
+function renderEma200Card() {
+  const wrap = document.getElementById('ema200-scan-section');
+  if (!wrap) return;
+  wrap.innerHTML = `${ema200CardHead()}<div id="ema200ScanBox" class="inbox-empty">${ema200CardBodyHtml()}</div>`;
+}
+
+async function runEma200Scan() {
+  if (ema200ScanLoading) return;
+  ema200ScanLoading = true;
+  ema200ScanError = null;
+  renderEma200Card();
+  try {
+    const resp = await fetch(`${API}/api/scanner/ema200-scan`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    ema200ScanData = await resp.json();
+    ema200ScanSort = { key: 'dist_pct', dir: 1 };
+  } catch (e) {
+    ema200ScanError = e.message;
+  } finally {
+    ema200ScanLoading = false;
+    renderEma200Card();
+  }
+}
+
+function sortEma200Scan(key) {
+  if (ema200ScanSort.key === key) ema200ScanSort.dir *= -1;
+  else ema200ScanSort = { key, dir: key === 'ticker' ? 1 : -1 };
+  renderEma200Card();
 }
 
 function onEma200ScanRowContextMenu(event, symbol) {

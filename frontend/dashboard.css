@@ -4769,52 +4769,8 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   min-height: 120px;
 }
 
-/* EMA200 scan — position:fixed (nie relatívne k jednému tabu ako pc-news-*)
-   lebo sa spúšťa zo Scanner lišty, nie z Analytiky. */
-.ema-scan-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(0,0,0,.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.ema-scan-modal {
-  width: min(760px, 100%);
-  max-height: min(640px, calc(100vh - 48px));
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg2) 94%, black 6%);
-  box-shadow: 0 22px 70px rgba(0,0,0,.55);
-  overflow: hidden;
-}
-.ema-scan-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg3);
-}
-.ema-scan-modal-title { font-size: 13px; font-weight: 800; color: var(--text); letter-spacing: .02em; }
-.ema-scan-modal-sub { margin-top: 2px; font-size: 11px; color: var(--muted); }
-.ema-scan-close {
-  width: 28px; height: 28px;
-  border: 1px solid var(--border2);
-  border-radius: 7px;
-  background: var(--bg-input);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-.ema-scan-close:hover { color: var(--text); border-color: var(--accent); }
-.ema-scan-modal-body { padding: 12px 14px 14px; overflow: auto; min-height: 120px; }
+/* EMA200 scan — trvalá karta v scanner-aux-grid (.scanner-aux-ema200), nie
+   modal; zdieľa .investor-week-card/.scanner-aux-card layout, len farba riadku. */
 .ema-scan-row-near td { color: var(--yellow); }
 .pc-news-summary {
   display: flex;
