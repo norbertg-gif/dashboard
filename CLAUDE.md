@@ -116,6 +116,55 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-11. **Solvency filter kričí vlka + `dca_trigger_pct` sa stále rozchádza — NÁLEZY Z TÝŽDENNEJ ANALÝZY 2026-08-15.**
+   Prvý týždeň, čo sú `solvency` polia v exporte (pribudli s -6). Fungujú, dáta
+   sú pri 41 z 56 pozícií, `data_age_days: 1`. Ale naivný prah na JEDNU metriku
+   je nepoužiteľný: `interest_coverage < 3` vyhodí 13 pozícií, z toho väčšinu
+   falošne.
+   **Prečo falošne:** NET (−5,52), PLTR (−1,78), WDAY (−2,54), MOH (0,97) sú
+   rastové firmy s účtovnou stratou alebo bez dlhu — PLTR má pritom
+   `debt_to_equity: 0.0` a `current_ratio: 7.11`, čiže súvaha bez jediného
+   problému. NU je BANKA, kde `debt_to_equity: 4.17` a `current_ratio: 0.20`
+   nemajú vypovedaciu hodnotu; rovnaká pasca čaká pri akejkoľvek finančnej
+   inštitúcii (FG je poisťovňa, `quick_ratio: 0`).
+   **Čo dá zmysluplný signál:** až KOMBINÁCIA nízkeho krytia úrokov A vysokej
+   páky A slabej likvidity. Na dátach 2026-08-15 to vyberie presne tri:
+   NCLH (2,25 / 6,61 / 0,21), CHTR (2,40 / 6,05 / 0,39), FOUR (1,69 / 3,15 / 1,66).
+   To sú vierohodné nálezy — a ani jeden z nich nespĺňa kritérium na zatvorenie,
+   lebo napätá súvaha nie je to isté čo riziko TRVALEJ straty kapitálu; NCLH aj
+   CHTR sú odvetvia, kde je páka normou.
+   **Návrh:** viacmetrikový prah + sektorová výnimka pre financie/banky. Ak sa
+   nechá jednometrikový, používateľ ho prestane sledovať do troch týždňov a pole
+   bude zbytočné. Prahy patria medzi ⚙ nastavenia, nie natvrdo.
+   **Druhý nález — `strategy.dca_trigger_pct` je v exporte stále `-15`**, hoci
+   dohodnuté (2026-08-09) a v `CLAUDE_investicna_analyza.md` zapísané je
+   **−20 % na POSLEDNEJ TRANŽI**, nie −15 % na celej pozícii. Sú to dve rôzne
+   definície, nie iné číslo tej istej — na dátach 2026-08-09 by stará pustila
+   FOUR a TTD, ktoré mali poslednú tranžu v ZISKU. Analýza počíta podľa dohody,
+   dashboard podľa poľa, takže sa povrchy môžu rozísť. Zjednotiť.
+   **Tretí nález — koncentrácia je tesne pri brzde.** Prvé čisté meranie po -6:
+   AMD **9,99 %** a NET **8,19 %** Stock/ETF knihy účtu 1 (spolu 18,2 %), pri
+   `dca_max_weight` 10 %. AMD je teda prakticky NA brzde. Nie je to problém —
+   obe sú víťazi nechaní bežať, čo je v súlade s filozofiou, a `max_weight` je
+   správne postavený ako zákaz DOKUPOVANIA, nie príkaz predávať (viď -7). Len
+   to treba vedieť skôr, než sa bude riešiť previazanie `max_weight` na
+   `dca_max_weight`, ktoré používateľ 2026-08-11 odložil („zatiaľ nie").
+   **Štvrtý nález — AI export nenesie NIČ z BUILD-u (-7).** Overené na exporte
+   z 2026-08-15: `position_class`, `target_weight`, `max_weight`, `gap` ani
+   `over_max` v ňom nie sú, v žiadnej sekcii. Fáza 1 teda existuje len v UI
+   Portfólia, kým **týždenná investičná analýza — čiže miesto, kde sa reálne
+   rozhoduje o nasadení kapitálu — ju nevidí.** Konkrétny dopad 2026-08-15:
+   DCA nemalo ani jedného kandidáta druhý týždeň po sebe (žiadna posledná tranža
+   pod −20 %, lebo trh rástol), takže BUILD bol JEDINÁ vetva hierarchie, ktorá
+   mohla nasadiť voľných $678,74 — a nedala sa vyhodnotiť, lebo v exporte nie
+   je. Analýza vedela ukázať len to, že kandidáti existujú (ASML: DIP 113,
+   graf ok/ok, váha 0,63 %), nie ktorý je najviac pod cieľom.
+   **Návrh:** pridať do `positions[]` blok `build` (`position_class`,
+   `target_weight`, `target_source`, `gap_pct`, `state`) z toho istého zdroja
+   ako `/api/portfolio/build`, aby sa povrchy nemohli rozísť. Bez toho je
+   hierarchia kapitálu z `CLAUDE_investicna_analyza.md` v týždennej rutine
+   nepoužiteľná — pozná len bod 1 (DCA) a bod 3 (nový titul).
+
 -10. **Časový test hviezdička (★) v Portfóliu — teraz aj per ticker, HOTOVO 2026-08-11.**
    `tradePassedYearTest(row)` (per trade, existovalo) + nové
    `tickerPassedYearTest(row)` — pri agregovanom per-ticker riadku vyžaduje
@@ -888,6 +937,8 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - **Top movers ("dynamický preset").** `GET /api/movers?account=&n=6&direction=down|up&min_change=` returns the top-N stock/ETF by daily % change across watchlist (whole) + portfolio (stock/ETF only via `type`, so crypto is excluded), Top pohyby no longer applies `attention_daily_pct`; that threshold belongs only to Portfolio Pozornosť. Portfolio symbols prefer eToro `currentRate` versus market previous close from `_get_market_prev_close()` (`price_source=etoro_live`); watchlist-only/cold fallback uses `_daily_change_from_cache()` from OHLCV cache (`price_source=ohlcv_cache`). Frontend `loadMovers()` (header button `📉 Top pohyby` + `Rast` checkbox for `up`) requests `n = cols × 2` (STĹPCE select → 2 rows: 3 cols→6, 4 cols→8), clears panels and opens that many chart panels. The chart header receives the returned mover % so it shows the same reason the ticker was selected, instead of recomputing from the last two chart candles; 1d mover panels also patch the last candle close/high/low to the returned live price when available (`r.moverLastPrice`, applied by `applyMoverLiveClose()`). Caveat: values may still differ from eToro UI because eToro has spread/internal daily rules.
   **Pitfall (fixed 2026-07-09):** `r.moverLastPrice`/`moverChangePct`/`moverPriceSource` live on the panel's `registry[id]` entry and previously were never cleared when that SAME panel got retargeted to a different ticker (watchlist click reusing the active panel, or typing a new symbol) — `loadChart()` kept patching the new ticker's last candle with the stale mover price from whatever ticker the panel originally showed, producing a wild single-candle spike far outside the real price range. Fix: the `chartKey` mismatch branch in `loadChart()` (same block that resets `viewRange`/`_rawChartData` on ticker/interval change) now also nulls the three mover fields.
 - **Chart UX helpers:** chart panels get a `portfolio-held` border when their ticker exists in `/api/portfolio/holdings` (any account), colored by aggregate P/L — green (`.profit`, `pnl >= 0`) or red (`.loss`, `pnl < 0`) via `_holdings[sym].pnl`, same sign convention as the portfolio table (not a rate comparison). Title tooltip shows the aggregate `pnl_pct`. Header button `📋 Tickery` reads tickers from clipboard/prompt, clears current chart panels and opens up to 20 symbols as `1d` charts; intended input is one ticker per line. Frontend-only, no backend state change.
+- **Maximalizácia panelu v Grafoch (HOTOVO 2026-08-18).** `⛶` tlačidlo v `.p-controls` (len `inGrid` panely — dock/verdikt panel ho nemá) → `toggleMaximizePanel(id)` v `charts.js`: pridá `.maximized` na panel a `.has-maximized` na `#grid`, CSS skryje ostatné panely (`display:none`) a maximalizovaný dostane `position:absolute;inset:0` voči `#grid`. Panely aj ich LWC inštancie ostávajú v DOM/pamäti nedotknuté — existujúci `ResizeObserver` na `.panel`/`.p-chart` (viď `ro` v `createPanel`) sám dorovná rozmery grafu, netreba volať `applyOptions` ručne. Escape (listener v `main.js`) aj opätovný klik na ⛶ (teraz `⤡`) vrátia pôvodný layout. `removePanel()` čistí `maximizedPanelId`, ak sa zmaže práve maximalizovaný panel.
+  **Pasca objavená naživo (nie čítaním kódu):** `#grid` má CSS `flex:1`, ale jeho skutočný rodič `#main-charts` je `display:block` (samotné `flex:1` na `#main-charts` funguje, lebo flex-item sizing sa riadi rodičom `#main`, nie vlastným `display` elementu) — takže `#grid` NIKDY nebolo skutočným flex-itemom svojho priameho rodiča a jeho výška bežne pochádza výhradne z obsahu (CSS grid auto-sizing cez viditeľné panely). Keď maximalizácia skryje všetky ostatné panely a ten maximalizovaný vytiahne z normal flow (`position:absolute`), `#grid` stratí VŠETOK in-flow obsah a skolabuje na holý padding (24px, overené priamo v prehliadači) — `inset:0` na maximalizovanom paneli tak nemá čo vyplniť. Fix: `#grid.has-maximized{height:100%}` (spoľahlivé, lebo `#main-charts` má definitívnu výšku cez vlastný flex:1 od `#main`).
 - **Chart dock (bočný graf z Portfólia).** `#chart-dock` je tretí flex stĺpec v `#body` (sourozenec `#sidebar`/`#main`, mimo tab-switchovaného obsahu), zatvorený pri načítaní stránky (žiadna perzistencia otvoreného stavu, len šírky cez `td_dock_width`). Viditeľný je iba pri aktívnom tabe Portfólio: `syncChartDockVisibilityForTab()` mimo Portfólia pridá `.tab-hidden` a ponechá panel/dáta v pamäti, pri návrate do Portfólia ho znovu ukáže. Klik na `.port-sym-cell` v Portfóliu volá `openChartDock(sym)` (`charts.js`), ktorý recykluje jeden `createPanel({..., container:'dock-grid'})` panel — identický so štandardným Grafy panelom (rovnaký `createPanel()` factory, teda aj indikátory/wizard/news/WL tlačidlo fungujú). Vnútorné `.p-btn-rm` je v `#dock-grid` skryté, zatvára sa len hlavičkovým `.dock-close`. `dockPanelId` global sleduje tento jediný panel a je explicitne vylúčený zo VŠETKÝCH bulk operácií Grafy tabu, ktoré robia `document.querySelectorAll('.panel')` sweep: `getCurrentConfig()`/`saveLayout()` (dock sa nikdy neukladá do layoutu/presetu), `clearAllPanels()`, `clearChartPanelsForImport()`, `loadMovers()`, `loadPreset()`, `onSbTickerClick()`, `portRowClick()` (posledné dve by inak mohli uniesť dock panel keď je `#grid` prázdny). Zámerne NEVYLÚČENÝ z `loadAll()` (dock sa obnovuje spolu s ostatnými grafmi) a z `applyAllChartPortfolioFlags()`/tag update (dock dostáva rovnaké portfolio-held orámovanie). Zatváracie ✕ volá `closeChartDock()` → `removePanel()` + reset `dockPanelId = null`. Resize cez `#dock-resizer` mirroruje `#sb-resizer` vzor (`main.js`), šírka v CSS custom property `--dock-width`.
 
 ## File touch policy

@@ -870,6 +870,7 @@ function createPanel(cfg) {
         onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--muted)'">Trade ↗</a>
       ${watchlistButtonHtml(cfg.symbol, 'chart-wl-btn')}
       <button class="p-btn-an" title="Otvoriť v Analytike" onclick="event.stopPropagation();openPanelInAnalytika('${id}')">🔬</button>
+      ${inGrid ? `<button class="p-btn-max" id="max-${id}" title="Maximalizovať" onclick="event.stopPropagation();toggleMaximizePanel('${id}')">⛶</button>` : ''}
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
     <div class="p-inds" onclick="setActivePanel('${id}')">
@@ -2342,7 +2343,42 @@ function removePortPanel(pid) {
   saveLayout();
 }
 
+let maximizedPanelId = null;
+
+// Dočasne prekryje ostatné panely v #grid jedným maximalizovaným — dock a
+// Verdikt panel nemajú tlačidlo vôbec (vlastný kontajner, viď createPanel
+// `inGrid`), takže sem sa nikdy nedostane ich id. Panely ostávajú v DOM aj s
+// LWC inštanciami nedotknuté; existujúci ResizeObserver na `.panel`/`.p-chart`
+// (viď `ro` v createPanel) sám dorovná rozmery grafu po (de)maximalizácii —
+// netreba volať applyOptions ručne.
+function toggleMaximizePanel(id) {
+  const grid = document.getElementById('grid');
+  const panel = document.getElementById(id);
+  if (!grid || !panel) return;
+  if (maximizedPanelId === id) {
+    panel.classList.remove('maximized');
+    grid.classList.remove('has-maximized');
+    maximizedPanelId = null;
+  } else {
+    if (maximizedPanelId) document.getElementById(maximizedPanelId)?.classList.remove('maximized');
+    panel.classList.add('maximized');
+    grid.classList.add('has-maximized');
+    maximizedPanelId = id;
+    setActivePanel(id);
+  }
+  document.querySelectorAll('.p-btn-max').forEach(btn => {
+    const isMax = btn.id === `max-${maximizedPanelId}`;
+    btn.classList.toggle('active', isMax);
+    btn.textContent = isMax ? '⤡' : '⛶';
+    btn.title = isMax ? 'Zrušiť maximalizáciu' : 'Maximalizovať';
+  });
+}
+
 function removePanel(id) {
+  if (maximizedPanelId === id) {
+    document.getElementById('grid')?.classList.remove('has-maximized');
+    maximizedPanelId = null;
+  }
   const r = registry[id];
   if (r) {
     clearTimeout(r.viewSaveTimer);

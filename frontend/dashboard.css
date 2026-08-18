@@ -1037,6 +1037,27 @@ body.sidebar-collapsed #sb-resizer {
   padding: 12px;
   overflow-y: auto;
   align-content: start;
+  position: relative;
+}
+
+/* Maximalizovaný panel prekryje CELÚ plochu #grid (nie celú obrazovku) —
+   ostatné panely ostávajú v DOM a v layout stave (ResizeObserver na paneli
+   ich automaticky vráti na správny rozmer po zrušení maximalizácie), len sa
+   dočasne skryjú. `position:absolute;inset:0` voči `#grid` (position:relative
+   vyššie) namiesto position:fixed, aby maximalizovaný graf rešpektoval
+   vyhradenú plochu grafov, nie header/sidebar. */
+/* Bez tejto výšky by #grid so ZATVORENÝMI ostatnými panelmi (a maximalizovaný
+   je position:absolute, teda mimo normal flow) nemal ŽIADEN in-flow obsah na
+   odvodenie vlastnej výšky — skolabovalo by na samotný padding (24px, overené
+   naživo), takže inset:0 na maximalizovanom paneli by nemalo čo vyplniť.
+   #main-charts (rodič) má definitívnu výšku cez flex:1 od #main, takže 100%
+   sa dá spoľahnúť. */
+#grid.has-maximized { height: 100%; }
+#grid.has-maximized .panel:not(.maximized) { display: none; }
+#grid.has-maximized .panel.maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
 }
 
 /* ── PANEL (GRAF CARD) ── */
@@ -1168,6 +1189,27 @@ body.sidebar-collapsed #sb-resizer {
 .p-btn-an:hover {
   border-color: var(--blue);
   color: var(--blue);
+}
+
+.p-btn-max {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted2);
+  cursor: pointer;
+  transition: var(--transition);
+  line-height: 1;
+}
+.p-btn-max:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.p-btn-max.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* karta "O firme" v Analytike */

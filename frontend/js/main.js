@@ -26,6 +26,10 @@ document.addEventListener('mousedown', e => {
 ddEl.addEventListener('mouseenter', () => ddHovered = true);
 ddEl.addEventListener('mouseleave', () => ddHovered = false);
 
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && maximizedPanelId) toggleMaximizePanel(maximizedPanelId);
+});
+
 // ── ETORO MARKERY ────────────────────────────────────────────────────────────
 
 (async function init() {
