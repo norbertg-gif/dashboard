@@ -2494,6 +2494,7 @@ DASH_SETTINGS_DEFAULTS = {
     "class_ratio_core": 4.0,
     "class_ratio_standard": 2.0,
     "class_ratio_speculative": 1.0,
+    "ema200_scan_threshold_pct": 5.0,  # |cena-EMA200|/EMA200 <= x % -> "nebezpečne blízko" v EMA200 scane
 }
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
@@ -2506,6 +2507,7 @@ _DASH_SETTINGS_LIMITS = {
     "class_ratio_core": (0, 20),
     "class_ratio_standard": (0, 20),
     "class_ratio_speculative": (0, 20),
+    "ema200_scan_threshold_pct": (0.5, 30),
 }
 
 
@@ -8164,6 +8166,33 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     }
 
 
+def _scan_ema200_distance(ticker: str) -> dict:
+    """Ad-hoc pomôcka: aktuálna cena vs weekly EMA200, žiadny vplyv na C1-C4/DIP.
+    "5y" dáva až ~260 týždňov (EMA200 sa reálne stabilizuje okolo 200 periód),
+    ale funguje aj s menej dátami — používateľ pri weekly nebazíruje na presnosti,
+    takže krátka história len znižuje spoľahlivosť, nevylučuje ticker."""
+    raw_w = _scanner_download_cached(ticker, "5y", "1wk")
+    if len(raw_w) < 15:
+        return {"ticker": ticker, "error": "Nedostatok dát"}
+    df_w = add_indicators(raw_w)
+    last = df_w.iloc[-1]
+    close = _finite_float(last.get("Close"))
+    ema200 = _finite_float(last.get("ema200"))
+    weeks = len(df_w)
+    del raw_w, df_w
+    if close is None or ema200 is None or ema200 <= 0:
+        return {"ticker": ticker, "error": "EMA200 nedostupná"}
+    dist_pct = round((close - ema200) / ema200 * 100, 2)
+    return {
+        "ticker": ticker,
+        "close": round(close, 4),
+        "ema200": round(ema200, 4),
+        "dist_pct": dist_pct,
+        "weeks": weeks,
+        "error": None,
+    }
+
+
 def _load_scanner_auto_state() -> dict:
     if not SCANNER_AUTO_STATE_FILE.exists():
         return {}
@@ -9585,6 +9614,48 @@ def get_assistant_export(account: str = "1"):
             "desired_style": "direct, skeptical, evidence-based",
             "requested_output_contract": ["separate facts from interpretation", "flag conflicting signals and missing data", "do not invent unavailable data"],
         },
+    }
+
+
+@app.get("/api/scanner/ema200-scan")
+def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50)):
+    """Ad-hoc: naimportované DIP univerzum vs weekly EMA200. Žiadny scheduled
+    job, žiadna server cache — spúšťa sa výhradne na klik z UI a číta z tej
+    istej zdieľanej daily-history cache ako ostatné scanner operácie
+    (_scanner_download_cached), takže pre už poskenované tickery je to takmer
+    zadarmo. Interpretačné, NEVSTUPUJE do C1-C4/DIP/scoringu."""
+    tickers, universe_label, universe_key = scanner_universe_from_dip()
+    thr = threshold if threshold is not None else float(_dash_settings().get("ema200_scan_threshold_pct", 5.0))
+    results: list[dict] = []
+    errors: list[dict] = []
+    max_workers = max(1, min(SCANNER_MAX_WORKERS, len(tickers) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_scan_ema200_distance, t): t for t in tickers}
+        for i, fut in enumerate(futures, 1):
+            ticker = futures[fut]
+            try:
+                row = fut.result()
+            except Exception as e:
+                row = {"ticker": ticker, "error": str(e)[:80]}
+            if row.get("error"):
+                errors.append(row)
+            else:
+                row["near"] = abs(row["dist_pct"]) <= thr
+                results.append(row)
+            if SCANNER_GC_INTERVAL > 0 and i % SCANNER_GC_INTERVAL == 0:
+                gc.collect()
+    results.sort(key=lambda r: abs(r["dist_pct"]))
+    return {
+        "universe": universe_key,
+        "universe_label": universe_label,
+        "threshold_pct": thr,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total": len(tickers),
+        "scanned": len(results),
+        "near_count": sum(1 for r in results if r["near"]),
+        "errors": len(errors),
+        "error_samples": errors[:15],
+        "results": results,
     }
 
 

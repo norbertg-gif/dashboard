@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260818-162644">
+<link rel="stylesheet" href="/dashboard.css?v=20260818-171047">
 </head>
 <body data-main-tab="home">
 
@@ -264,6 +264,19 @@
   </div>
 </div>
 
+<div id="ema200ScanOverlay" class="ema-scan-overlay" style="display:none;" onclick="closeEma200ScanModal(event)">
+  <div class="ema-scan-modal" onclick="event.stopPropagation()">
+    <div class="ema-scan-modal-head">
+      <div>
+        <div class="ema-scan-modal-title">EMA200 scan (weekly)</div>
+        <div class="ema-scan-modal-sub" id="ema200ScanSubtitle">—</div>
+      </div>
+      <button class="ema-scan-close" onclick="closeEma200ScanModal()" title="Zavrieť">×</button>
+    </div>
+    <div id="ema200ScanBody" class="ema-scan-modal-body"></div>
+  </div>
+</div>
+
 <div class="layout">
   <div class="daily-col signal-col" id="dailyCol">
     <div class="daily-resizer" id="dailyResizer"></div>
@@ -501,16 +514,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260818-162644"></script>
-  <script src="/js/live.js?v=20260818-162644"></script>
-  <script src="/js/portfolio.js?v=20260818-162644"></script>
-  <script src="/js/watchlist.js?v=20260818-162644"></script>
-  <script src="/js/scanner-table-sort.js?v=20260818-162644"></script>
-  <script src="/js/scanner.js?v=20260818-162644"></script>
-  <script src="/js/predictive.js?v=20260818-162644"></script>
-  <script src="/js/verdict.js?v=20260818-162644"></script>
-  <script src="/js/home.js?v=20260818-162644"></script>
-  <script src="/js/charts.js?v=20260818-162644"></script>
-  <script src="/js/main.js?v=20260818-162644"></script>
+  <script src="/js/core.js?v=20260818-171047"></script>
+  <script src="/js/live.js?v=20260818-171047"></script>
+  <script src="/js/portfolio.js?v=20260818-171047"></script>
+  <script src="/js/watchlist.js?v=20260818-171047"></script>
+  <script src="/js/scanner-table-sort.js?v=20260818-171047"></script>
+  <script src="/js/scanner.js?v=20260818-171047"></script>
+  <script src="/js/predictive.js?v=20260818-171047"></script>
+  <script src="/js/verdict.js?v=20260818-171047"></script>
+  <script src="/js/home.js?v=20260818-171047"></script>
+  <script src="/js/charts.js?v=20260818-171047"></script>
+  <script src="/js/main.js?v=20260818-171047"></script>
 </body>
 </html>

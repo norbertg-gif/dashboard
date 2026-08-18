@@ -913,6 +913,7 @@ async function renderScannerView() {
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
                 <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
                 <button class="btn primary" id="nasdaqRescanBtn" onclick="runNasdaqScanner()">Rescan teraz</button>
+                <button class="btn" onclick="runEma200Scan()" title="Ad-hoc: aktuálna cena vs weekly EMA200 pre celé naimportované DIP univerzum">EMA200 scan</button>
               </div>
             </div>
             <div class="tb-sep"></div>
@@ -1709,6 +1710,99 @@ async function runNasdaqScanner() {
 function openScannerTicker(ticker) {
   switchMainTab('predictive');
   setTimeout(() => pc_selectTicker(ticker), 120);
+}
+
+// ── EMA200 scan (ad-hoc, weekly) ────────────────────────────────────────────
+// Žiadna server ani klient cache — na rozdiel od ostatných scanner sekcií je
+// toto explicitne "spusti keď chceš", nie denný snapshot. Dáta idú z tej istej
+// zdieľanej daily-history cache ako zvyšok scanneru (backend), takže opakovaný
+// beh je lacný.
+let ema200ScanData = null;
+let ema200ScanSort = { key: 'dist_pct', dir: 1 };
+
+async function runEma200Scan() {
+  const overlay = document.getElementById('ema200ScanOverlay');
+  const body = document.getElementById('ema200ScanBody');
+  const sub = document.getElementById('ema200ScanSubtitle');
+  if (!overlay || !body) return;
+  overlay.style.display = 'flex';
+  sub.textContent = 'Skenujem naimportované univerzum...';
+  body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;"><span class="cl-spinner"></span> Počítam odstup od weekly EMA200...</div>';
+  try {
+    const resp = await fetch(`${API}/api/scanner/ema200-scan`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    ema200ScanData = await resp.json();
+    ema200ScanSort = { key: 'dist_pct', dir: 1 };
+    renderEma200ScanResults();
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:12px;">Chyba: ${escHtml(e.message)}</div>`;
+    sub.textContent = 'Chyba';
+  }
+}
+
+function closeEma200ScanModal(ev) {
+  if (ev && ev.target && ev.target.id !== 'ema200ScanOverlay') return;
+  const overlay = document.getElementById('ema200ScanOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function sortEma200Scan(key) {
+  if (ema200ScanSort.key === key) ema200ScanSort.dir *= -1;
+  else ema200ScanSort = { key, dir: key === 'ticker' ? 1 : -1 };
+  renderEma200ScanResults();
+}
+
+function renderEma200ScanResults() {
+  const data = ema200ScanData;
+  const body = document.getElementById('ema200ScanBody');
+  const sub = document.getElementById('ema200ScanSubtitle');
+  if (!data || !body) return;
+  sub.textContent = `${data.universe_label} · ${data.scanned}/${data.total} tickerov · prah ±${data.threshold_pct}% · ${data.near_count} blízko EMA200`;
+  if (!data.results.length) {
+    body.innerHTML = '<div style="color:var(--muted);font-size:12px;">Žiadne dáta — importuj DIP Excel v Scanneri.</div>';
+    return;
+  }
+  // dist_pct sa triedi podľa ABSOLÚTNEJ hodnoty (najbližšie k EMA200 hore),
+  // ostatné stĺpce normálne — preto vlastný komparátor namiesto compareSortableRows.
+  const sorted = [...data.results].sort((a, b) => {
+    if (ema200ScanSort.key === 'dist_pct') return (Math.abs(a.dist_pct) - Math.abs(b.dist_pct)) * ema200ScanSort.dir;
+    return compareSortableRows(ema200ScanSort, a, b);
+  });
+  const th = (key, label, cls = '') => {
+    const active = ema200ScanSort.key === key;
+    const arrow = active ? (ema200ScanSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th class="${cls}" onclick="sortEma200Scan('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
+  };
+  const rows = sorted.map(r => {
+    const near = r.near ? ' class="ema-scan-row-near"' : '';
+    const sign = r.dist_pct > 0 ? '+' : '';
+    return `<tr${near} onclick="openScannerTicker('${escHtml(r.ticker)}')"
+        oncontextmenu="onEma200ScanRowContextMenu(event,'${escHtml(r.ticker)}')" style="cursor:pointer;">
+      <td><span class="port-sym">${escHtml(r.ticker)}</span>${r.near ? ' ⚠' : ''}</td>
+      <td class="r">${r.close.toFixed(2)}</td>
+      <td class="r">${r.ema200.toFixed(2)}</td>
+      <td class="r">${sign}${r.dist_pct.toFixed(2)}%</td>
+      <td class="r" style="color:var(--muted);">${r.weeks}t</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `
+    <table class="tool-table"><thead><tr>
+      ${th('ticker', 'Ticker')}${th('close', 'Cena', 'r')}${th('ema200', 'EMA200', 'r')}${th('dist_pct', 'Odstup', 'r')}${th('weeks', 'História', 'r')}
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function onEma200ScanRowContextMenu(event, symbol) {
+  event.preventDefault();
+  event.stopPropagation();
+  const inWl = typeof isInWatchlist === 'function' && isInWatchlist(symbol);
+  showContextMenu(event.clientX, event.clientY, [
+    { label: 'Otvoriť v Analytike', action: () => openScannerTicker(symbol) },
+    { label: 'Otvoriť v Grafoch', action: () => { switchMainTab('charts'); openNewChartPanel(symbol); } },
+    { label: 'Otvoriť Verdikt', action: () => openVerdictTicker(symbol) },
+    { sep: true },
+    { label: inWl ? 'Vo watchliste' : 'Pridať do watchlistu', checked: inWl,
+      action: () => addCurrentToWatchlist(symbol) },
+  ]);
 }
 
 // ── Checklist ────────────────────────────────────────────────────────────────
