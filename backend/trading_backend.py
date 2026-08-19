@@ -183,8 +183,8 @@ def add_indicators(df):
     df = df.copy()
     df["ema10"]      = calc_ema(df["Close"], 10)
     df["ema20"]      = calc_ema(df["Close"], 20)
-    df["ema50"]      = df["Close"].ewm(span=50, adjust=False).mean()
-    df["ema200"]     = df["Close"].ewm(span=200, adjust=False).mean()
+    df["ema50"]      = calc_ema(df["Close"], 50)
+    df["ema200"]     = calc_ema(df["Close"], 200)
     df["rsi"]        = calc_rsi(df["Close"])
     df["atr"]        = calc_atr(df)
     df["macd"], df["macd_sig"], df["macd_hist"] = calc_macd(df["Close"])
@@ -5312,9 +5312,10 @@ def get_ohlcv(
     if not candle_list:
         raise HTTPException(404, f"Žiadne sviečky pre '{sym}'")
 
-    # Orezaj na požadovaný počet sviečok (najnovšie)
-    if not use_resample and len(candle_list) > candles_count:
-        candle_list = candle_list[-candles_count:]
+    # ORezanie na viditeľný počet sa robí AŽ po výpočte indikátorov (nižšie).
+    # Kedysi sa orezávalo tu — takže EMA200 na 90-sviečkovom grafe vznikala
+    # z 90 sviečok a bola to iná hodnota než v Analytike či v scanneri, hoci
+    # cache drží až 1000 sviečok. Warm-up je zadarmo, dáta už máme.
 
     # Vytvor DataFrame
     df = pd.DataFrame(candle_list)
@@ -5345,9 +5346,9 @@ def get_ohlcv(
     # (rovnaká logika indikátorov ako predtým)
     ema20 = ema50 = ema200 = None
     if "ema" in ind_set:
-        ema20  = df["Close"].ewm(span=20,  adjust=False).mean()
-        ema50  = df["Close"].ewm(span=50,  adjust=False).mean()
-        ema200 = df["Close"].ewm(span=200, adjust=False).mean()
+        ema20  = calc_ema(df["Close"], 20)
+        ema50  = calc_ema(df["Close"], 50)
+        ema200 = calc_ema(df["Close"], 200)
 
     rsi_s = None
     if "rsi" in ind_set:
@@ -5405,8 +5406,13 @@ def get_ohlcv(
             for ts, span_a, span_b in _ichimoku_future_points(df)
         ]
 
+    # Viditeľný výsek: indikátory vyššie sú spočítané z plnej histórie, klientovi
+    # ide len požadovaný počet sviečok. Pri resample vetve sa nikdy neorezávalo,
+    # tak to nechávam tak — inak by sa ticho zmenil tvar odpovede pre 15m/4h/12h/1mo.
+    visible_start = 0 if use_resample else max(0, len(df) - candles_count)
+
     result = []
-    for i in range(len(df)):
+    for i in range(visible_start, len(df)):
         row = df.iloc[i]
         point = {
             "time":   to_date_str(df.index[i]),
@@ -5550,7 +5556,22 @@ def safe(v):
         return None
 
 def calc_ema(series: pd.Series, period: int) -> pd.Series:
-    return series.ewm(span=period, adjust=False).mean()
+    """EMA, ktorá NEVRÁTI číslo, kým nemá aspoň `period` sviečok.
+
+    Bez `min_periods` pandas ochotne vráti hodnotu aj z 52 sviečok pri span=200
+    — a keďže `adjust=False` nasadzuje priemer prvou hodnotou, taká "EMA200"
+    drží 60 % váhy na jedinej úvodnej sviečke a v praxi kopíruje cenu. Presne
+    tak vznikol rozpor MSFT: scanner (52 týždňov) hlásil EMA200 481.87 pri cene
+    481.63, Analytika (104) 432 a graf (orezaný na viditeľné sviečky) 393 —
+    tri rôzne čísla z troch rôznych dĺžok histórie, žiadne z nich EMA200.
+    Radšej „nedostupné" než ticho nesprávne: obe vykresľovacie cesty nully
+    filtrujú, takže sa čiara jednoducho nezačne kresliť skôr, než dáva zmysel.
+
+    Zvyšková nepresnosť: aj presne pri `period` sviečkach drží seed ~13.5 %
+    váhy. To je bežná konvencia, nie chyba — plne sa to stabilizuje okolo 3×
+    period.
+    """
+    return series.ewm(span=period, adjust=False, min_periods=period).mean()
 
 def calc_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
@@ -5720,7 +5741,12 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
     počítané z yfinance/Massive (nemenené). Fail-soft: None → volajúci použije
     pôvodné yfinance sviečky (ticker mimo eToro univerza, proxy nedostupný...)."""
     try:
-        fetch_period = "5y" if interval == "1wk" else "6mo"
+        # "max" = celá cache (1000 sviečok). Kedysi tu bolo "5y"/"6mo", čo pre
+        # denné dáta znamenalo 130 sviečok — teda ani zďaleka warm-up, ktorý
+        # komentár u volajúceho sľuboval. Aby EMA200 vyšla v Analytike rovnako
+        # ako v Grafoch, obe cesty musia počítať z ROVNAKEJ série: EMA s
+        # adjust=False je závislá od toho, kde séria začína.
+        fetch_period = "max"
         payload = get_ohlcv(symbol=sym, period=fetch_period, interval=interval,
                             indicators="", ha=0, account=account, refresh=1,
                             limit=count, before="")
@@ -5739,6 +5765,42 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
         out.append({"time": ts, "open": o, "high": h, "low": l, "close": c,
                     "volume": r.get("volume")})
     return out if len(out) >= 2 else None
+
+
+# EMA s adjust=False je závislá od toho, KDE séria začína — dve rôzne dĺžky
+# histórie dajú dve rôzne "EMA200" z tých istých dát. Aby Grafy aj Analytika
+# hlásili rovnaké číslo, obe musia počítať z celej cache (eToro max = 1000).
+# Nie je to voľba presnosti, ale zhody: keby jedna cesta brala 300 a druhá
+# 1000, čísla by sa rozchádzali aj po oprave min_periods.
+_FULL_HISTORY_CANDLES = 1000
+
+
+def _trim_indicators_to_candles(indicators: dict, candles: list) -> dict:
+    """Zreže indikátorové série na časový rozsah zobrazených sviečok.
+
+    Indikátory sa počítajú z dlhšej histórie kvôli warm-upu, ale klientovi
+    smú ísť len body v rozsahu vykreslených sviečok. Inak by séria siahala
+    doľava za prvú sviečku, čím sa rozšíri doména hlavného grafu — a presne
+    o to sa opierajú subpanely pri odvodzovaní bar indexu (viď pitfall
+    o desynchronizácii subpanelov v CLAUDE.md).
+
+    Ichimoku `ichi_sa`/`ichi_sb` zámerne prečnievajú 26 periód DOPREDU, takže
+    sa orezáva iba zľava.
+    """
+    if not indicators or not candles:
+        return indicators
+    try:
+        first_time = min(int(c["time"]) for c in candles if c.get("time") is not None)
+    except (ValueError, TypeError, KeyError):
+        return indicators
+    trimmed = {}
+    for key, series in indicators.items():
+        if isinstance(series, list) and series and isinstance(series[0], dict):
+            trimmed[key] = [p for p in series if p.get("time") is None
+                            or p["time"] >= first_time]
+        else:
+            trimmed[key] = series
+    return trimmed
 
 
 def _indicators_from_display_candles(candles: list, include_stoch: bool = True) -> dict:
@@ -6337,21 +6399,26 @@ def get_chart(
         # (candles/daily_candles interné premenné) — mení sa len to, čo sa vracia
         # na vykreslenie. Fail-soft: bez eToro dát (ticker mimo univerza, proxy
         # nedostupný) ostáva pôvodná yfinance sada.
-        display_candles = _etoro_display_candles(
-            ticker, "1wk", _CHART_WEEKLY_PERIOD_TO_COUNT.get(period, 104)) or candles
-        # Use a wider broker history for indicator warm-up, but keep the
-        # visible daily chart compact. This avoids calculating EMA200 from
-        # only the 90 displayed candles while preserving source consistency.
-        display_daily_source = _etoro_display_candles(ticker, "1d", 300) or daily_candles
+        # Warm-up platí pre OBA timeframy: EMA200 potrebuje 200 periód, inak
+        # `calc_ema` (min_periods) vráti prázdno. Weekly sa kedysi počítalo len
+        # z ~104 zobrazených sviečok, takže EMA200 v Analytike bola iné číslo
+        # než v Grafoch aj v scanneri. Zdroj sa načíta dlhší, zobrazí sa krátky.
+        _weekly_visible = _CHART_WEEKLY_PERIOD_TO_COUNT.get(period, 104)
+        display_weekly_source = _etoro_display_candles(
+            ticker, "1wk", _FULL_HISTORY_CANDLES) or candles
+        display_candles = display_weekly_source[-_weekly_visible:]
+        display_daily_source = _etoro_display_candles(
+            ticker, "1d", _FULL_HISTORY_CANDLES) or daily_candles
         display_daily_candles = display_daily_source[-90:]
         # Keep the visible overlays/subpanels and the values consumed by
         # Verdict on the same broker candle source as the rendered charts.
         # Scoring/backtesting above intentionally remains on the longer
         # yfinance/Massive history.
-        display_indicators = _indicators_from_display_candles(display_candles)
-        display_daily_indicators = _indicators_from_display_candles(
-            display_daily_source, include_stoch=False
-        )
+        display_indicators = _trim_indicators_to_candles(
+            _indicators_from_display_candles(display_weekly_source), display_candles)
+        display_daily_indicators = _trim_indicators_to_candles(
+            _indicators_from_display_candles(display_daily_source, include_stoch=False),
+            display_daily_candles)
         if display_indicators:
             indicators = display_indicators
         if display_daily_indicators:
@@ -7303,6 +7370,12 @@ ROIC_MIN_REQUEST_INTERVAL_SECONDS = 13.0
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
 SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
+# Weekly EMA200 potrebuje 200 týždňov ≈ 1000 obchodných dní. Cache sa kedysi
+# seedovala rokom ("1y"), takže po prevzorkovaní zostalo ~52 týždňov a EMA200
+# zo scanneru bola úplne iné číslo než z grafu. Inkrement dopĺňa len dopredu,
+# preto sa plytká cache musí raz reseedovať (značka `seed_period` v attrs).
+SCANNER_DAILY_SEED_PERIOD = "5y"
+SCANNER_DAILY_MIN_HISTORY_ROWS = 1000
 SCANNER_DAILY_INCREMENTAL_DAYS = 10
 SCANNER_AUTO_HOUR_UTC = 23
 SCANNER_AUTO_MINUTE_UTC = 30
@@ -7948,7 +8021,13 @@ def _read_scanner_daily_cache(ticker: str) -> pd.DataFrame | None:
     if not path.exists():
         return None
     try:
-        cached = _normalize_scanner_daily_bars(pd.read_pickle(path))
+        raw = pd.read_pickle(path)
+        cached = _normalize_scanner_daily_bars(raw)
+        # `attrs` nesie značku, akou periódou bola cache seedovaná — normalizácia
+        # ju nemusí preniesť, tak ju kopírujeme ručne. Bez nej by sa ticker s
+        # krátkou históriou (nedávne IPO) reseedoval znova a znova.
+        if isinstance(getattr(raw, "attrs", None), dict):
+            cached.attrs.update(raw.attrs)
         return cached if len(cached) >= SCANNER_DAILY_CACHE_MIN_ROWS else None
     except Exception as exc:
         print(f"[scanner-cache] read {ticker}: {type(exc).__name__}")
@@ -8018,12 +8097,19 @@ def _scanner_daily_history(ticker: str) -> pd.DataFrame:
         cached = _read_scanner_daily_cache(ticker)
         completed_day = _most_recent_completed_us_trading_day()
         completed = pd.Timestamp(completed_day)
-        if cached is not None and cached.index.max() >= completed:
+        # Cache seedovaná rokom dát dá po prevzorkovaní ~52 týždňov, čo na
+        # weekly EMA200 nestačí — a inkrementálny update ju dopĺňa len dopredu,
+        # takže by sa sama nikdy nedotiahla. Krátku cache preto reseedujeme.
+        stale_depth = (cached is not None
+                       and len(cached) < SCANNER_DAILY_MIN_HISTORY_ROWS
+                       and cached.attrs.get("seed_period") != SCANNER_DAILY_SEED_PERIOD)
+        if cached is not None and cached.index.max() >= completed and not stale_depth:
             return cached.copy()
 
-        if cached is None:
+        if cached is None or stale_depth:
             fetched = _yf_download_cached(
-                ticker, "1y", "1d", prefer_massive=False, retain_in_memory=False
+                ticker, SCANNER_DAILY_SEED_PERIOD, "1d",
+                prefer_massive=False, retain_in_memory=False
             )
         else:
             fetched = _fetch_scanner_daily_increment(ticker, completed_day)
@@ -8036,6 +8122,7 @@ def _scanner_daily_history(ticker: str) -> pd.DataFrame:
             merged = merged[~merged.index.duplicated(keep="last")].sort_index()
         else:
             merged = fetched
+        merged.attrs["seed_period"] = SCANNER_DAILY_SEED_PERIOD
         if len(merged) >= SCANNER_DAILY_CACHE_MIN_ROWS:
             _write_scanner_daily_cache(ticker, merged)
         return merged.copy()
@@ -8168,12 +8255,16 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
 
 def _scan_ema200_distance(ticker: str) -> dict:
     """Ad-hoc pomôcka: aktuálna cena vs weekly EMA200, žiadny vplyv na C1-C4/DIP.
-    "5y" dáva až ~260 týždňov (EMA200 sa reálne stabilizuje okolo 200 periód),
-    ale funguje aj s menej dátami — používateľ pri weekly nebazíruje na presnosti,
-    takže krátka história len znižuje spoľahlivosť, nevylučuje ticker."""
+
+    Weekly EMA200 vyžaduje 200 týždňov; `calc_ema` pri kratšej histórii vráti
+    prázdno a ticker skončí s "EMA200 nedostupná". Pôvodná verzia tvrdila, že
+    krátka história „len znižuje spoľahlivosť" — to bolo nesprávne: pri ~52
+    týždňoch drží úvodná sviečka 60 % váhy a výsledok kopíruje cenu (MSFT
+    hlásil EMA200 481.87 pri cene 481.63). Číslo, ktoré sa mýli o desiatky
+    percent, nie je menej spoľahlivé — je nepoužiteľné."""
     raw_w = _scanner_download_cached(ticker, "5y", "1wk")
-    if len(raw_w) < 15:
-        return {"ticker": ticker, "error": "Nedostatok dát"}
+    if len(raw_w) < 200:
+        return {"ticker": ticker, "error": f"História len {len(raw_w)} týždňov (EMA200 potrebuje 200)"}
     df_w = add_indicators(raw_w)
     last = df_w.iloc[-1]
     close = _finite_float(last.get("Close"))

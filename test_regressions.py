@@ -1699,6 +1699,66 @@ class SignalRepresentationComparisonRegressionTests(unittest.TestCase):
         self.assertEqual(tb._signal_episode_rows(classic), expected)
 
 
+class Ema200ConsistencyRegressionTests(unittest.TestCase):
+    """EMA200 musí dať rovnaké číslo v Grafoch, Analytike aj scanneri.
+
+    Pozorované na MSFT: scanner 481.87 (52 týždňov), Analytika 432 (104),
+    graf 393 (orezaný na viditeľné sviečky) — tri hodnoty z tých istých dát.
+    Príčina: ewm(span=200, adjust=False) bez min_periods vráti číslo aj z 52
+    sviečok, a keďže sa priemer nasadzuje prvou hodnotou, výsledok závisí od
+    toho, kde séria začína.
+    """
+
+    def _closes(self, n):
+        import numpy as np
+        rng = np.random.default_rng(11)
+        steps = rng.normal(0.004, 0.03, n)
+        return pd.Series(100 * np.cumprod(1 + steps),
+                         index=pd.date_range("2010-01-08", periods=n, freq="W"))
+
+    def test_ema200_is_empty_until_two_hundred_periods(self):
+        closes = self._closes(260)
+        ema = tb.calc_ema(closes, 200)
+        self.assertTrue(ema.iloc[:199].isna().all(), "pred 200 periódami nesmie byť hodnota")
+        self.assertFalse(pd.isna(ema.iloc[199]), "presne pri 200 už hodnota byť má")
+
+    def test_short_history_no_longer_produces_a_number_that_tracks_price(self):
+        """Jadro MSFT chyby: z 52 sviečok vyšla "EMA200" prakticky rovná cene."""
+        short = self._closes(52)
+        legacy = short.ewm(span=200, adjust=False).mean().iloc[-1]
+        # Stará cesta dala číslo do pár percent od ceny — a tvárila sa ako EMA200.
+        self.assertLess(abs(legacy - short.iloc[-1]) / short.iloc[-1], 0.25)
+        self.assertTrue(pd.isna(tb.calc_ema(short, 200).iloc[-1]))
+
+    def test_same_series_gives_same_ema_regardless_of_visible_window(self):
+        """Orezanie na viditeľné sviečky sa smie diať až PO výpočte."""
+        closes = self._closes(600)
+        full = tb.calc_ema(closes, 200)
+        visible_90 = full.iloc[-90:]
+        visible_260 = full.iloc[-260:]
+        self.assertAlmostEqual(visible_90.iloc[-1], visible_260.iloc[-1], places=9)
+        self.assertAlmostEqual(visible_90.iloc[-1], full.iloc[-1], places=9)
+
+    def test_truncating_before_the_calculation_is_what_broke_it(self):
+        """Kontrolný test: počítať z orezanej série dá INÉ číslo — preto poradie."""
+        closes = self._closes(600)
+        correct = tb.calc_ema(closes, 200).iloc[-1]
+        truncated_first = tb.calc_ema(closes.iloc[-260:], 200).iloc[-1]
+        self.assertNotAlmostEqual(correct, truncated_first, places=2)
+
+    def test_add_indicators_uses_the_guarded_ema(self):
+        import numpy as np
+        closes = self._closes(120)
+        frame = pd.DataFrame({
+            "Open": closes * 0.99, "High": closes * 1.02,
+            "Low": closes * 0.98, "Close": closes,
+            "Volume": np.full(len(closes), 1_000_000.0),
+        })
+        enriched = tb.add_indicators(frame)
+        self.assertTrue(enriched["ema200"].isna().all(), "120 sviečok na EMA200 nestačí")
+        self.assertFalse(pd.isna(enriched["ema50"].iloc[-1]), "EMA50 na 120 sviečkach byť má")
+
+
 class MlBaseRateRegressionTests(unittest.TestCase):
     """ML accuracy bez base rate pôsobí ako kvalita modelu, hoci ňou nie je."""
 
