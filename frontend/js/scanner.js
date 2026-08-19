@@ -1850,7 +1850,7 @@ function ema200ResultsTableHtml() {
     const sign = r.dist_pct > 0 ? '+' : '';
     return `<tr${near} onclick="openScannerTicker('${escHtml(r.ticker)}')"
         oncontextmenu="onEma200ScanRowContextMenu(event,'${escHtml(r.ticker)}')" style="cursor:pointer;">
-      <td><span class="port-sym">${escHtml(r.ticker)}</span>${r.near ? ' ⚠' : ''}</td>
+      <td><span class="port-sym">${escHtml(r.ticker)}</span>${r.near ? ' ⚠' : ''}${basketButtonHtml(r.ticker, 'ema200-basket-btn')}</td>
       <td class="r">${r.close.toFixed(2)}</td>
       <td class="r">${r.ema200.toFixed(2)}</td>
       <td class="r">${sign}${r.dist_pct.toFixed(2)}%</td>
