@@ -1733,27 +1733,36 @@ function preparePortfolioSnapshot(data) {
 }
 
 // Odhad P/L z živej ceny. Je to EXTRAPOLÁCIA zo snapshotu, nie meraná hodnota —
-// `(cena − snapshot) × units`. Pri pozíciách s obrovským počtom jednotiek to
-// zosilní aj nepatrný rozdiel medzi WS kotáciou a tým, čím eToro pozíciu
-// oceňuje (spread): TRX má ~35 900 jednotiek, takže tisícina centa rozdielu =
-// $36 v hlavičke. Nameraný drift 2026-08-06 bol +$37 proti eToro, kým serverový
-// súčet sedel na dva centy.
-//
-// Preto sa krypto z odhadu vynecháva a drží si snapshot hodnotu až do ďalšej
-// synchronizácie. Cena v riadku sa aktualizuje ďalej — mení sa len to, či sa
-// z nej dopočítava P/L do súčtov.
-function positionSupportsLivePnl(pos) {
-  return (pos?.type || '') !== 'Crypto';
+// `(cena − snapshot) × units`. Pôvodne bol krypto z odhadu vynechaný, lebo pri
+// TRX (~35 900 jednotiek) nameraný drift 2026-08-06 bol +$37 proti eToro
+// (serverový súčet pritom sedel na dva centy). Skutočná príčina, overená
+// naživo 2026-08-19 cez eToro Public API (get-instruments-overview vs
+// get-my-portfolio-summary v tom istom momente): WS `livePrice` uprednostňoval
+// `LastExecution` (cena POSLEDNÉHO obchodu KOHOKOĽVEK na trhu), kým eToro
+// dlhú pozíciu oceňuje BIDOM — TRX currentRate v portfóliu (0,33343) sedel
+// PRESNE na dobovom bide (0,33343), nie na ask (0,33348) ani na last. Nebola
+// to amplifikácia šumu veľkým počtom jednotiek, bola to systematicky zlá
+// strana spreadu — tá sa veľkým počtom jednotiek len zviditeľnila.
+// `valuationPriceForDirection()` preto namiesto jedného `livePrice` použije
+// bid pre long a ask pre short (rovnaká konvencia ako eToro), takže krypto už
+// nie je potrebné z odhadu vynechávať.
+function valuationPriceForDirection(direction, livePrice, priceObj) {
+  const bid = Number(priceObj?.bid);
+  const ask = Number(priceObj?.ask);
+  const sidePrice = direction === -1
+    ? (Number.isFinite(ask) && ask > 0 ? ask : null)
+    : (Number.isFinite(bid) && bid > 0 ? bid : null);
+  return sidePrice ?? livePrice;
 }
 
-function estimatePositionLivePnl(pos, livePrice) {
+function estimatePositionLivePnl(pos, livePrice, priceObj) {
   const snapshotPnl = Number(pos._snapshotPnl ?? pos.pnl ?? 0);
   const snapshotRate = Number(pos._snapshotCurrentRate || pos.currentRate || 0);
   const units = Number(pos.units || 0);
-  if (!positionSupportsLivePnl(pos)) return snapshotPnl;
   if (!Number.isFinite(livePrice) || livePrice <= 0 || !snapshotRate || !units) return snapshotPnl;
   const direction = pos.isBuy === false ? -1 : 1;
-  return snapshotPnl + (livePrice - snapshotRate) * units * direction;
+  const valuationPrice = valuationPriceForDirection(direction, livePrice, priceObj);
+  return snapshotPnl + (valuationPrice - snapshotRate) * units * direction;
 }
 
 function recalcPortfolioLiveSummary(data) {

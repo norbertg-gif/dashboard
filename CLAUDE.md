@@ -377,15 +377,32 @@ These were already in the codebase and need to stay fixed:
    sa prevrátil aj celkový (dashboard začal hlásiť MENEJ než eToro). Systematické
    skreslenie odhadu by tlačilo vždy jedným smerom.
    **Čo z toho ostalo v kóde a prečo to nechať:**
-   (a) `positionSupportsLivePnl()` — krypto sa neextrapoluje; pri ~35 900
-   jednotkách TRX robí tisícina centa $36, takže to je aj tak správne;
    (b) `PORTFOLIO_RESYNC_MS` (5 min) — bráni kumulácii driftu;
    (c) riadok `server $… · rozdiel · vek` pod Equity — objaví sa len pri
    rozdiele nad $1 a robí z porovnania jeden pohľad namiesto workflowu;
    (d) `GET /api/diagnostics/summary` — rozpad equity na členy.
    **Netreba znovu overovať:** serverový vzorec, mirrors, kurzy európskych
-   titulov, WS spread. Ak by rozdiel niekedy narástol a bol STABILNE jedným
-   smerom, až potom ide o skutočný bug.
+   titulov, WS spread.
+   **(a) OPRAVENÉ 2026-08-19, `positionSupportsLivePnl()` odstránená —
+   pôvodná diagnóza „krypto sa nedá extrapolovať" bola nesprávna.** Skutočná
+   príčina toho $37 rozdielu: `onLivePriceUpdate()` v `live.js` uprednostňoval
+   `price.last` (`LastExecution` — cena POSLEDNÉHO obchodu KOHOKOĽVEK na trhu)
+   pred bid/ask, hoci eToro dlhú pozíciu oceňuje BIDOM (krátku askom).
+   Overené naživo cez eToro Public API MCP connector (`get-instruments-overview`
+   vs `get-my-portfolio-summary` v tom istom momente): TRX bid bol 0,33343,
+   ask 0,33348, a eToro portfólio `currentRate` bol **presne** 0,33343 — bid,
+   nie ask, nie last. Pri ~35 900 jednotkách TRX veľký počet jednotiek
+   NEZOSILŇOVAL šum, len robil viditeľnou systematicky zlú stranu spreadu.
+   Fix: `valuationPriceForDirection(direction, livePrice, priceObj)` v
+   `portfolio.js` — long pozícia sa oceňuje bidom, short askom, `livePrice`
+   (skôr `last`) ostáva fallback len keď bid/ask chýba. `estimatePositionLivePnl`
+   aj denný P/L v `updatePositionRowsWithLive` (`live.js`) idú touto cestou;
+   `wsLivePrices[iid]` (`{bid,ask,last,date}`) sa teraz posiela celý namiesto
+   len zbaleného `livePrice` čísla. Krypto už nemá dôvod byť vynechané z
+   odhadu — jeho hlavička equity by inak medzi 5-min resyncmi zaostávala
+   presne o toľko, o koľko sa TRX/BTC (spolu ~celý unrealized P/L účtu 1)
+   medzitým pohli. **Overiť naživo po deployi** — nemám lokálny spôsob spustiť
+   reálnu WS session, takže presnosť treba sledovať v produkcii pár hodín.
 
 -4. **Subpanel oscilátora sa po zapnutí EMA rozišiel s hlavným grafom — SKUTOČNE OPRAVENÉ 2026-08-13 (predchádzajúci záznam nižšie bol predčasný, pokrýval len unsubscribe/cleanup, nie skutočnú príčinu).**
    Koreňová príčina, nájdená priamym meraním v prehliadači (nie čítaním kódu —

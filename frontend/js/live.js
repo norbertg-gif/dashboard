@@ -141,20 +141,18 @@ function rememberLiveInstruments(rows) {
   });
 }
 
-function updatePositionRowsWithLive(rows, sym, livePrice) {
+function updatePositionRowsWithLive(rows, sym, livePrice, priceObj) {
   let touched = false;
   for (const pos of (rows || [])) {
     if ((pos.symbol || '').toUpperCase() !== sym) continue;
     pos.currentRate = livePrice;
-    pos._livePnl = estimatePositionLivePnl(pos, livePrice);
+    pos._livePnl = estimatePositionLivePnl(pos, livePrice, priceObj);
     const previousClose = Number(pos._previousClose ?? pos.previousClose ?? 0);
     const units = Number(pos.units || 0);
-    // Denný P/L má rovnaký problém s extrapoláciou ako celkový — pri krypte sa
-    // preto tiež nechá snapshot hodnota (viď positionSupportsLivePnl).
-    if (positionSupportsLivePnl(pos) &&
-        Number.isFinite(previousClose) && previousClose > 0 && Number.isFinite(units) && units > 0) {
-      const direction = pos.isBuy === false ? -1 : 1;
-      pos._liveDailyPnl = (livePrice - previousClose) * units * direction;
+    const direction = pos.isBuy === false ? -1 : 1;
+    const dailyValuationPrice = valuationPriceForDirection(direction, livePrice, priceObj);
+    if (Number.isFinite(previousClose) && previousClose > 0 && Number.isFinite(units) && units > 0) {
+      pos._liveDailyPnl = (dailyValuationPrice - previousClose) * units * direction;
       pos.dailyPnl = pos._liveDailyPnl;
     }
     touched = true;
@@ -214,9 +212,9 @@ function onLivePriceUpdate(instrumentId) {
   if (activeMainTab === 'rates') updateRatesCells();
 
   if (sym) {
-    updatePositionRowsWithLive(etoroPositions, sym, livePrice);
+    updatePositionRowsWithLive(etoroPositions, sym, livePrice, price);
     for (const rows of Object.values(etoroPositionsAll || {})) {
-      updatePositionRowsWithLive(rows, sym, livePrice);
+      updatePositionRowsWithLive(rows, sym, livePrice, price);
     }
   }
 
@@ -224,7 +222,7 @@ function onLivePriceUpdate(instrumentId) {
   if (sym) {
     for (const [pid, state] of Object.entries(portState)) {
       if (!state?.data) continue;
-      updatePositionRowsWithLive(state.data.positions, sym, livePrice);
+      updatePositionRowsWithLive(state.data.positions, sym, livePrice, price);
       if (typeof updateOrderRowsWithLive === 'function') updateOrderRowsWithLive(state.data.orders, sym, livePrice);
       recalcPortfolioLiveSummary(state.data);
       updatePortfolioSummaryDom(pid, state.data);
@@ -234,7 +232,7 @@ function onLivePriceUpdate(instrumentId) {
     }
     for (const data of Object.values(portfolioAccountData)) {
       if (!data || Object.values(portState).some(state => state?.data === data)) continue;
-      updatePositionRowsWithLive(data.positions, sym, livePrice);
+      updatePositionRowsWithLive(data.positions, sym, livePrice, price);
       if (typeof updateOrderRowsWithLive === 'function') updateOrderRowsWithLive(data.orders, sym, livePrice);
       recalcPortfolioLiveSummary(data);
     }
