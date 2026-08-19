@@ -3820,6 +3820,83 @@ def get_portfolio_holdings():
     return {"holdings": _get_portfolio_holdings(), "order_symbols": sorted(order_symbols)}
 
 
+@app.get("/api/diagnostics/ema200/{symbol}")
+def diagnostics_ema200(symbol: str):
+    """Postaví weekly EMA200 z oboch ciest vedľa seba a oddelí PRÍČINY rozdielu.
+
+    Scanner počíta z yfinance (denné bary prevzorkované na W-FRI), grafy z
+    eToro broker feedu. Ak sa čísla líšia, môže za to buď iný ZDROJ dát, alebo
+    iná DĹŽKA histórie (EMA s adjust=False je citlivá na to, kde séria začína).
+    Bez rozlíšenia sa to nedá opraviť — preto sa tu obe počítajú aj na
+    spoločnom, rovnako dlhom okne (`matched_window`): ak sa čísla na ňom
+    zhodujú, rozdiel robí dĺžka; ak nie, robí ho zdroj.
+    """
+    sym = _validate_ticker_symbol(symbol)
+
+    def _ema_stats(frame, label):
+        if frame is None or len(frame) < 2:
+            return {"source": label, "error": "žiadne dáta"}
+        enriched = add_indicators(frame.copy())
+        ema = _finite_float(enriched["ema200"].iloc[-1])
+        close = _finite_float(enriched["Close"].iloc[-1])
+        return {
+            "source": label,
+            "weeks": int(len(frame)),
+            "first_candle": str(frame.index[0].date()),
+            "last_candle": str(frame.index[-1].date()),
+            "close": round(close, 4) if close is not None else None,
+            "ema200": round(ema, 4) if ema is not None else None,
+            "dist_pct": (round((close - ema) / ema * 100, 2)
+                         if close is not None and ema else None),
+        }
+
+    scanner_frame = None
+    try:
+        scanner_frame = _scanner_download_cached(sym, "max", "1wk")
+    except Exception as exc:
+        scanner_err = f"{type(exc).__name__}: {exc}"
+    else:
+        scanner_err = None
+
+    broker_frame = None
+    broker_err = None
+    try:
+        rows = _etoro_display_candles(sym, "1wk", _FULL_HISTORY_CANDLES)
+        if rows:
+            broker_frame = pd.DataFrame([
+                {"Date": pd.Timestamp(r["time"], unit="s"), "Open": r["open"],
+                 "High": r["high"], "Low": r["low"], "Close": r["close"],
+                 "Volume": r.get("volume") or 0}
+                for r in rows
+            ]).set_index("Date").sort_index()
+        else:
+            broker_err = "eToro sviečky nedostupné"
+    except Exception as exc:
+        broker_err = f"{type(exc).__name__}: {exc}"
+
+    out = {
+        "symbol": sym,
+        "scanner_yfinance": _ema_stats(scanner_frame, "yfinance (W-FRI)") if scanner_err is None else {"source": "yfinance", "error": scanner_err},
+        "chart_etoro": _ema_stats(broker_frame, "eToro broker feed") if broker_err is None else {"source": "eToro", "error": broker_err},
+    }
+
+    # Rovnako dlhé okno z oboch zdrojov → izoluje vplyv zdroja od vplyvu dĺžky.
+    if scanner_frame is not None and broker_frame is not None and len(scanner_frame) and len(broker_frame):
+        n = min(len(scanner_frame), len(broker_frame))
+        out["matched_window"] = {
+            "weeks": int(n),
+            "yfinance": _ema_stats(scanner_frame.iloc[-n:], "yfinance")["ema200"],
+            "etoro": _ema_stats(broker_frame.iloc[-n:], "eToro")["ema200"],
+        }
+        a, b = out["matched_window"]["yfinance"], out["matched_window"]["etoro"]
+        if a and b:
+            out["matched_window"]["diff_pct"] = round((a - b) / b * 100, 2)
+            out["verdict"] = ("rozdiel robí ZDROJ dát"
+                              if abs(out["matched_window"]["diff_pct"]) > 0.5
+                              else "rozdiel robí DĹŽKA histórie")
+    return out
+
+
 @app.get("/api/diagnostics/summary")
 def diagnostics_summary(account: str = Query("1")):
     """Rozpad equity na jednotlivé členy — na porovnanie s eToro UI.
