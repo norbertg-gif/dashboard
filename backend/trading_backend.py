@@ -3861,15 +3861,9 @@ def diagnostics_ema200(symbol: str):
     broker_frame = None
     broker_err = None
     try:
-        rows = _etoro_display_candles(sym, "1wk", _FULL_HISTORY_CANDLES)
-        if rows:
-            broker_frame = pd.DataFrame([
-                {"Date": pd.Timestamp(r["time"], unit="s"), "Open": r["open"],
-                 "High": r["high"], "Low": r["low"], "Close": r["close"],
-                 "Volume": r.get("volume") or 0}
-                for r in rows
-            ]).set_index("Date").sort_index()
-        else:
+        broker_frame = _candles_to_frame(
+            _etoro_display_candles(sym, "1wk", _FULL_HISTORY_CANDLES))
+        if broker_frame is None:
             broker_err = "eToro sviečky nedostupné"
     except Exception as exc:
         broker_err = f"{type(exc).__name__}: {exc}"
@@ -5812,7 +5806,29 @@ def search_ticker_predictive(q: str = ""):
 _CHART_WEEKLY_PERIOD_TO_COUNT = {"1y": 52, "2y": 104, "3y": 156, "5y": 260}
 
 
-def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "1") -> list | None:
+def _candles_to_frame(rows: list) -> pd.DataFrame | None:
+    """`[{time, open, high, low, close, volume}]` → OHLCV DataFrame (yfinance tvar)."""
+    if not rows:
+        return None
+    records = []
+    for r in rows:
+        try:
+            records.append({
+                "Date": pd.Timestamp(r["time"], unit="s"),
+                "Open": float(r["open"]), "High": float(r["high"]),
+                "Low": float(r["low"]), "Close": float(r["close"]),
+                "Volume": float(r.get("volume") or 0),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    if len(records) < 2:
+        return None
+    frame = pd.DataFrame(records).set_index("Date").sort_index()
+    return frame[~frame.index.duplicated(keep="last")]
+
+
+def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "1",
+                           refresh: int = 1) -> list | None:
     """Rovnaké OHLCV dáta ako Grafy panel (eToro broker feed z /api/ohlcv) — LEN
     na vykreslenie sviečok v Analytike. Signály/backtest/predikcia zostávajú
     počítané z yfinance/Massive (nemenené). Fail-soft: None → volajúci použije
@@ -5825,7 +5841,7 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
         # adjust=False je závislá od toho, kde séria začína.
         fetch_period = "max"
         payload = get_ohlcv(symbol=sym, period=fetch_period, interval=interval,
-                            indicators="", ha=0, account=account, refresh=1,
+                            indicators="", ha=0, account=account, refresh=refresh,
                             limit=count, before="")
     except Exception:
         return None
@@ -8341,11 +8357,24 @@ def _scan_ema200_distance(ticker: str) -> dict:
     týždňoch drží úvodná sviečka 60 % váhy a výsledok kopíruje cenu (MSFT
     hlásil EMA200 481.87 pri cene 481.63). Číslo, ktoré sa mýli o desiatky
     percent, nie je menej spoľahlivé — je nepoužiteľné."""
-    # "max" (nie "5y") — inak by _scanner_download_cached orezal na 1830 dní
-    # a EMA200 by sa aj pri hlbokej cache počítala z ~260 týždňov.
-    raw_w = _scanner_download_cached(ticker, "max", "1wk")
-    if len(raw_w) < 200:
-        return {"ticker": ticker, "error": f"História len {len(raw_w)} týždňov (EMA200 potrebuje 200)"}
+    # Zdroj MUSÍ byť eToro, inak sa scanner rozíde s grafom. Zmerané na NFLX
+    # cez /api/diagnostics/ema200: na rovnakom 522-týždňovom okne dal yfinance
+    # EMA200 77.44 a eToro 83.72 — 7.5 % rozdiel, ktorý nerobí dĺžka histórie,
+    # ale samotné dáta. eToro je referencia, lebo na ňom sa obchoduje a ten
+    # graf používateľ vidí. refresh=0: pre weekly EMA200 je pár dní starý
+    # tail bezvýznamný a bulk sken nemá dôvod ťahať proxy pri každom tickeri.
+    source = "etoro"
+    raw_w = _candles_to_frame(
+        _etoro_display_candles(ticker, "1wk", _FULL_HISTORY_CANDLES, refresh=0))
+    if raw_w is None or len(raw_w) < 200:
+        # Ticker mimo eToro univerza (DIP import obsahuje aj netradovateľné) —
+        # radšej yfinance a viditeľná značka než prázdny riadok.
+        source = "yfinance"
+        raw_w = _scanner_download_cached(ticker, "max", "1wk")
+    if raw_w is None or len(raw_w) < 200:
+        weeks_found = 0 if raw_w is None else len(raw_w)
+        return {"ticker": ticker,
+                "error": f"História len {weeks_found} týždňov (EMA200 potrebuje 200)"}
     df_w = add_indicators(raw_w)
     last = df_w.iloc[-1]
     close = _finite_float(last.get("Close"))
@@ -8361,6 +8390,7 @@ def _scan_ema200_distance(ticker: str) -> dict:
         "ema200": round(ema200, 4),
         "dist_pct": dist_pct,
         "weeks": weeks,
+        "source": source,
         "error": None,
     }
 

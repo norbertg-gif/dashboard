@@ -1770,6 +1770,39 @@ class Ema200ConsistencyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(seed_days)
         self.assertGreaterEqual(seed_days / 7, 500, "seed musí pokryť aspoň ~500 týždňov")
 
+    def test_scan_prefers_the_broker_feed_so_it_matches_the_chart(self):
+        """Zmerané na NFLX: yfinance 77.44 vs eToro 83.72 na ROVNAKOM okne."""
+        import numpy as np
+        rows = [{"time": int(ts.timestamp()), "open": 100.0, "high": 101.0,
+                 "low": 99.0, "close": 100.0, "volume": 1000.0}
+                for ts in pd.date_range("2016-01-08", periods=260, freq="W")]
+
+        with (
+            patch.object(tb, "_etoro_display_candles", return_value=rows) as broker,
+            patch.object(tb, "_scanner_download_cached") as yfinance,
+        ):
+            result = tb._scan_ema200_distance("NFLX")
+        self.assertEqual(result["source"], "etoro")
+        broker.assert_called_once()
+        yfinance.assert_not_called()
+
+    def test_scan_falls_back_and_labels_tickers_missing_from_etoro(self):
+        import numpy as np
+        idx = pd.date_range("2016-01-08", periods=260, freq="W")
+        frame = pd.DataFrame({
+            "Open": np.full(260, 100.0), "High": np.full(260, 101.0),
+            "Low": np.full(260, 99.0), "Close": np.full(260, 100.0),
+            "Volume": np.full(260, 1000.0),
+        }, index=idx)
+
+        with (
+            patch.object(tb, "_etoro_display_candles", return_value=None),
+            patch.object(tb, "_scanner_download_cached", return_value=frame),
+        ):
+            result = tb._scan_ema200_distance("SOMEDIP")
+        self.assertEqual(result["source"], "yfinance")
+        self.assertIsNone(result["error"])
+
     def test_add_indicators_uses_the_guarded_ema(self):
         import numpy as np
         closes = self._closes(120)

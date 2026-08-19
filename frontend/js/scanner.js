@@ -1795,7 +1795,9 @@ function ema200ResultsTableHtml() {
       <td class="r">${r.close.toFixed(2)}</td>
       <td class="r">${r.ema200.toFixed(2)}</td>
       <td class="r">${sign}${r.dist_pct.toFixed(2)}%</td>
-      <td class="r" style="color:var(--muted);">${r.weeks}t</td>
+      <td class="r" style="color:var(--muted);">${r.weeks}t${r.source === 'yfinance'
+        ? ' <span title="Ticker nie je na eToro — počítané z yfinance, číslo sa môže líšiť od grafu" style="color:var(--yellow)">yf</span>'
+        : ''}</td>
     </tr>`;
   }).join('');
   return `
