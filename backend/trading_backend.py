@@ -1164,6 +1164,15 @@ def run_backtest(df, weights: dict = None):
         actual_close = float(actual["Close"])
         pred_close   = pred["close"]
 
+        # Rez bez nahriatych indikátorov (napr. ATR na začiatku histórie) dá
+        # NaN predikciu. Preskočiť ju, nie ju hodnotiť: `NaN >= prev_close` je
+        # vždy False, takže by sa každá taká predikcia počítala ako "dole" a
+        # ticho by ťahala direction_accuracy nadol. Zároveň by NaN prešlo do
+        # overlay/avg_error_pct a zhodilo serializáciu celej odpovede
+        # (Starlette serializuje s allow_nan=False).
+        if not math.isfinite(pred_close):
+            continue
+
         # The model predicts the next close relative to the previous closed
         # candle. Evaluate against the same baseline. Using close >= open would
         # score candle color, not price direction, and gaps can flip the result.
@@ -5875,6 +5884,40 @@ def _etoro_display_candles(sym: str, interval: str, count: int, account: str = "
 _FULL_HISTORY_CANDLES = 1000
 
 
+def _json_safe(payload, _path="", _found=None):
+    """NaN/Inf → None, s hlásením do logu.
+
+    Starlette serializuje odpoveď s `allow_nan=False`, takže JEDINÉ NaN kdekoľvek
+    v payloade zhodí celý request na 500 a frontend dostane HTML namiesto JSON
+    ("JSON.parse: unexpected character at line 1 column 1"). Presne to sa stalo,
+    keď indikátory dostali `min_periods` a backtest začal vracať NaN predikcie.
+
+    Sémanticky je NaN = "hodnota nie je k dispozícii", čo je v JSON `null` —
+    prevod je teda správny, nie zakrývajúci. Aby to však nebola tichá poistka,
+    ktorá schová skutočnú chybu, cesty k nájdeným NaN sa vypíšu do logu; oprava
+    vždy patrí k zdroju, nie sem.
+    """
+    top = _found is None
+    if top:
+        _found = []
+    if isinstance(payload, float):
+        if not math.isfinite(payload):
+            _found.append(_path or "<root>")
+            return None
+        return payload
+    if isinstance(payload, dict):
+        out = {k: _json_safe(v, f"{_path}.{k}", _found) for k, v in payload.items()}
+    elif isinstance(payload, (list, tuple)):
+        out = [_json_safe(v, f"{_path}[{i}]", _found) for i, v in enumerate(payload)]
+    else:
+        out = payload
+    if top and _found:
+        preview = ", ".join(sorted({p.split("[")[0] for p in _found})[:8])
+        print(f"[json-safe] {len(_found)} NaN/Inf hodnôt nahradených null: {preview}",
+              flush=True)
+    return out
+
+
 def _trim_indicators_to_candles(indicators: dict, candles: list) -> dict:
     """Zreže indikátorové série na časový rozsah zobrazených sviečok.
 
@@ -6575,7 +6618,7 @@ def get_chart(
                 "signal_outcome_summary": signal_outcome_summary,
                 "signal_outcome_segments": signal_outcome_segments,
             })
-        return response
+        return _json_safe(response)
     except HTTPException:
         raise
     except Exception as e:

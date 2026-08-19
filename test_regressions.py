@@ -1816,6 +1816,61 @@ class Ema200ConsistencyRegressionTests(unittest.TestCase):
         self.assertFalse(pd.isna(enriched["ema50"].iloc[-1]), "EMA50 na 120 sviečkach byť má")
 
 
+class ChartPayloadJsonRegressionTests(unittest.TestCase):
+    """/api/chart nesmie vrátiť NaN — Starlette serializuje s allow_nan=False.
+
+    Keď indikátory dostali min_periods, backtest začal vracať NaN predikcie,
+    serializácia spadla a Analytika hlásila "JSON.parse: unexpected character
+    at line 1 column 1", lebo namiesto JSON prišla 500 stránka.
+    """
+
+    def _frame(self, n, freq):
+        import numpy as np
+        rng = np.random.default_rng(1)
+        close = 100 * np.cumprod(1 + rng.normal(0.001, 0.02, n))
+        return pd.DataFrame({
+            "Open": close * 0.99, "High": close * 1.02, "Low": close * 0.98,
+            "Close": close, "Volume": np.full(n, 1_500_000.0),
+        }, index=pd.date_range("2015-01-05", periods=n, freq=freq))
+
+    def _run(self, weeks):
+        def download(_t, _p, interval, **_kw):
+            return self._frame(weeks, "W") if interval == "1wk" else self._frame(weeks * 5, "B")
+
+        def broker(_sym, interval, count, account="1", refresh=1):
+            frame = self._frame(weeks, "W") if interval == "1wk" else self._frame(weeks * 5, "B")
+            return [{"time": int(ts.timestamp()), "open": r.Open, "high": r.High,
+                     "low": r.Low, "close": r.Close, "volume": r.Volume}
+                    for ts, r in frame.iterrows()][-count:]
+
+        with (
+            patch.object(tb, "_yf_download_cached", side_effect=download),
+            patch.object(tb, "_etoro_display_candles", side_effect=broker),
+        ):
+            return tb.get_chart(ticker="AMD", period="2y", detail="basic")
+
+    def test_payload_is_strict_json_even_before_ema200_warms_up(self):
+        # 120 týždňov = EMA200 ešte neexistuje, 300 = existuje. Oba musia prejsť.
+        for weeks in (120, 300):
+            with self.subTest(weeks=weeks):
+                payload = self._run(weeks)
+                json.dumps(payload, allow_nan=False)
+
+    def test_ema200_is_absent_below_warmup_and_present_above(self):
+        short = (self._run(120).get("indicators") or {}).get("ema200") or []
+        long = (self._run(300).get("indicators") or {}).get("ema200") or []
+        self.assertEqual(len(short), 0, "EMA200 nesmie vzniknúť zo 120 týždňov")
+        self.assertGreater(len(long), 0, "pri 300 týždňoch EMA200 chýbať nesmie")
+
+    def test_json_safe_reports_and_neutralises_nan(self):
+        payload = {"a": float("nan"), "b": [1.0, float("inf")], "c": {"d": 2.5}}
+        cleaned = tb._json_safe(payload)
+        self.assertIsNone(cleaned["a"])
+        self.assertIsNone(cleaned["b"][1])
+        self.assertEqual(cleaned["c"]["d"], 2.5)
+        json.dumps(cleaned, allow_nan=False)
+
+
 class IndicatorWarmupRegressionTests(unittest.TestCase):
     """Žiadny indikátor nesmie vrátiť číslo skôr, než má dosť sviečok.
 
