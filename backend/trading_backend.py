@@ -7370,12 +7370,14 @@ ROIC_MIN_REQUEST_INTERVAL_SECONDS = 13.0
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
 SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
-# Weekly EMA200 potrebuje 200 týždňov ≈ 1000 obchodných dní. Cache sa kedysi
-# seedovala rokom ("1y"), takže po prevzorkovaní zostalo ~52 týždňov a EMA200
-# zo scanneru bola úplne iné číslo než z grafu. Inkrement dopĺňa len dopredu,
-# preto sa plytká cache musí raz reseedovať (značka `seed_period` v attrs).
-SCANNER_DAILY_SEED_PERIOD = "5y"
-SCANNER_DAILY_MIN_HISTORY_ROWS = 1000
+# Weekly EMA200 nestačí "mať 200 týždňov" — EMA s adjust=False sa ustaľuje až
+# okolo 3× periódy. Váha úvodnej sviečky: 200 týždňov 13.5 %, 260 (=5y) 7.4 %,
+# 520 (=10y) 0.5 %, 600 už 0.25 %. Preto scanner na "5y" hlásil iné číslo než
+# graf, ktorý počíta z celej eToro cache — nie kvôli zdroju dát, ale kvôli
+# dĺžke okna. Cache sa seeduje maximom; inkrement dopĺňa len dopredu, takže
+# plytkú cache treba raz reseedovať (značka `seed_period` v attrs).
+SCANNER_DAILY_SEED_PERIOD = "max"
+SCANNER_DAILY_MIN_HISTORY_ROWS = 2400   # ~9.5 roka obchodných dní ≈ 500 týždňov
 SCANNER_DAILY_INCREMENTAL_DAYS = 10
 SCANNER_AUTO_HOUR_UTC = 23
 SCANNER_AUTO_MINUTE_UTC = 30
@@ -8262,7 +8264,9 @@ def _scan_ema200_distance(ticker: str) -> dict:
     týždňoch drží úvodná sviečka 60 % váhy a výsledok kopíruje cenu (MSFT
     hlásil EMA200 481.87 pri cene 481.63). Číslo, ktoré sa mýli o desiatky
     percent, nie je menej spoľahlivé — je nepoužiteľné."""
-    raw_w = _scanner_download_cached(ticker, "5y", "1wk")
+    # "max" (nie "5y") — inak by _scanner_download_cached orezal na 1830 dní
+    # a EMA200 by sa aj pri hlbokej cache počítala z ~260 týždňov.
+    raw_w = _scanner_download_cached(ticker, "max", "1wk")
     if len(raw_w) < 200:
         return {"ticker": ticker, "error": f"História len {len(raw_w)} týždňov (EMA200 potrebuje 200)"}
     df_w = add_indicators(raw_w)

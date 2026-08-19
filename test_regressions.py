@@ -1746,6 +1746,30 @@ class Ema200ConsistencyRegressionTests(unittest.TestCase):
         truncated_first = tb.calc_ema(closes.iloc[-260:], 200).iloc[-1]
         self.assertNotAlmostEqual(correct, truncated_first, places=2)
 
+    def test_scanner_window_must_be_long_enough_to_match_the_charts(self):
+        """Prečo scanner seeduje "max" a nie "5y".
+
+        Grafy počítajú z celej eToro cache. Aby scanner dal to isté číslo,
+        musí byť rovnako skonvergovaný — pri 5 rokoch (260 týždňov) drží
+        úvodná sviečka 7.4 % váhy, takže sa čísla rozídu aj keď sú dáta
+        rovnaké. Pri ~520 týždňoch (10 rokov) je to 0.5 %.
+        """
+        closes = self._closes(1000)
+        reference = tb.calc_ema(closes, 200).iloc[-1]
+        five_years = tb.calc_ema(closes.iloc[-260:], 200).iloc[-1]
+        ten_years = tb.calc_ema(closes.iloc[-520:], 200).iloc[-1]
+
+        drift_5y = abs(five_years - reference) / reference
+        drift_10y = abs(ten_years - reference) / reference
+        self.assertLess(drift_10y, 0.01, "10r okno musí sedieť s plnou históriou do 1 %")
+        self.assertLess(drift_10y, drift_5y, "dlhšie okno musí byť bližšie k referencii")
+
+    def test_scanner_requests_a_window_matching_the_seed(self):
+        """Seed "max" je zbytočný, ak scan pýta kratšiu periódu — orezalo by sa."""
+        seed_days = tb._MASSIVE_PERIOD_DAYS.get(tb.SCANNER_DAILY_SEED_PERIOD)
+        self.assertIsNotNone(seed_days)
+        self.assertGreaterEqual(seed_days / 7, 500, "seed musí pokryť aspoň ~500 týždňov")
+
     def test_add_indicators_uses_the_guarded_ema(self):
         import numpy as np
         closes = self._closes(120)
