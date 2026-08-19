@@ -177,7 +177,10 @@ def calc_atr(df, period=14):
     hc = (df["High"] - df["Close"].shift()).abs()
     lc = (df["Low"]  - df["Close"].shift()).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return tr.ewm(com=period - 1, adjust=False).mean()
+    # min_periods rovnako ako pri EMA a RSI — bez neho vráti ATR číslo aj z
+    # troch sviečok a c1 (ATR-škálovaná blízkosť k EMA20/Kijun) by sa škálovalo
+    # podľa nezmyslu. Scoring má na chýbajúce ATR fallback, na nesprávne nie.
+    return tr.ewm(com=period - 1, adjust=False, min_periods=period).mean()
 
 def add_indicators(df):
     df = df.copy()
@@ -5680,10 +5683,14 @@ def calc_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     return pd.DataFrame({"adx": adx, "di_plus": di_plus, "di_minus": di_minus})
 
 def calc_macd(series: pd.Series, fast=12, slow=26, signal=9):
-    ema_fast   = series.ewm(span=fast,   adjust=False).mean()
-    ema_slow   = series.ewm(span=slow,   adjust=False).mean()
+    # min_periods na všetkých troch EMA. Bez neho MACD existoval od druhej
+    # sviečky — a keďže sa rýchla EMA ustáli skôr než pomalá, rozdiel na
+    # začiatku série nemeria momentum, ale rozdielnu rýchlosť rozbehu oboch
+    # priemerov. Signálna línia dedí warm-up pomalej (26+9-1 = 34 sviečok).
+    ema_fast   = series.ewm(span=fast,   adjust=False, min_periods=fast).mean()
+    ema_slow   = series.ewm(span=slow,   adjust=False, min_periods=slow).mean()
     macd_line  = ema_fast - ema_slow
-    signal_line= macd_line.ewm(span=signal, adjust=False).mean()
+    signal_line= macd_line.ewm(span=signal, adjust=False, min_periods=signal).mean()
     histogram  = macd_line - signal_line
     return macd_line, signal_line, histogram
 

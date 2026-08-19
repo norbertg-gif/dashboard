@@ -1816,6 +1816,58 @@ class Ema200ConsistencyRegressionTests(unittest.TestCase):
         self.assertFalse(pd.isna(enriched["ema50"].iloc[-1]), "EMA50 na 120 sviečkach byť má")
 
 
+class IndicatorWarmupRegressionTests(unittest.TestCase):
+    """Žiadny indikátor nesmie vrátiť číslo skôr, než má dosť sviečok.
+
+    EMA200 sa takto rozišla naprieč tromi pohľadmi (scanner 481.87, Analytika
+    432, graf 393 pre ten istý ticker v ten istý deň). Rovnaká diera bola aj
+    v ATR a MACD. Tento test je poistka pre celú triedu — nový indikátor bez
+    min_periods tu spadne skôr, než sa dostane do UI.
+    """
+
+    def _frame(self, n):
+        import numpy as np
+        rng = np.random.default_rng(3)
+        close = 100 * np.cumprod(1 + rng.normal(0.002, 0.02, n))
+        idx = pd.date_range("2020-01-06", periods=n, freq="W")
+        return pd.DataFrame({
+            "Open": close * 0.995, "High": close * 1.03,
+            "Low": close * 0.97, "Close": close,
+            "Volume": np.full(n, 1_000_000.0),
+        }, index=idx)
+
+    # (stĺpec, koľko sviečok potrebuje) — hodnota MUSÍ chýbať tesne pod prahom
+    WARMUP = [
+        ("ema10", 10), ("ema20", 20), ("ema50", 50), ("ema200", 200),
+        ("rsi", 14), ("atr", 14), ("adx", 14),
+        ("macd", 26), ("macd_sig", 34),
+        ("ichi_tenkan", 9), ("ichi_kijun", 26), ("stoch_k", 14),
+    ]
+
+    def test_every_indicator_stays_empty_below_its_warmup(self):
+        enriched = tb.add_indicators(self._frame(260))
+        for column, needed in self.WARMUP:
+            with self.subTest(column=column):
+                self.assertTrue(
+                    pd.isna(enriched[column].iloc[needed - 2]),
+                    f"{column} vrátil hodnotu skôr než po {needed} sviečkach")
+
+    def test_every_indicator_is_available_once_warm(self):
+        enriched = tb.add_indicators(self._frame(260))
+        for column, _needed in self.WARMUP:
+            with self.subTest(column=column):
+                self.assertFalse(pd.isna(enriched[column].iloc[-1]),
+                                 f"{column} chýba aj pri 260 sviečkach")
+
+    def test_atr_and_macd_were_the_two_that_leaked(self):
+        """Kontrolný test na konkrétnu opravu — nie na správanie ako celok."""
+        short = self._frame(12)
+        self.assertTrue(pd.isna(tb.calc_atr(short).iloc[-1]))
+        macd_line, signal_line, _hist = tb.calc_macd(short["Close"])
+        self.assertTrue(pd.isna(macd_line.iloc[-1]))
+        self.assertTrue(pd.isna(signal_line.iloc[-1]))
+
+
 class MlBaseRateRegressionTests(unittest.TestCase):
     """ML accuracy bez base rate pôsobí ako kvalita modelu, hoci ňou nie je."""
 
