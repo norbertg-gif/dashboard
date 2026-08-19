@@ -664,9 +664,23 @@ Main source sections:
   (rovnaké naimportované univerzum ako klasický scan, Nasdaq-100 fallback bez
   importu), pre každý ticker spočíta weekly EMA200 z `_scan_ema200_distance()`
   cez `_scanner_download_cached(ticker,"5y","1wk")` — zdieľaná daily-history
-  cache, žiadny nový fetch mechanizmus. Zámerne BEZ akejkoľvek server/klient
-  cache (na rozdiel od ostatných scanner sekcií) — je to explicitne "spusti keď
-  chceš", nie denný snapshot.
+  cache, žiadny nový fetch mechanizmus. Zdroj sviečok je od 2026-08-19 eToro
+  (`_etoro_display_candles`, `refresh=0`) s yfinance fallbackom pre tickery
+  mimo eToro univerza — inak sa scanner rozchádzal s grafom, viď pitfall
+  o zameniteľnosti zdrojov.
+  **Server cache NIE JE a nebude** (na rozdiel od ostatných scanner sekcií) —
+  je to explicitne "spusti keď chceš", nie denný snapshot. **Klientská
+  perzistencia ÁNO, od 2026-08-19:** výsledok sa ukladá do localStorage
+  (`td_ema200_scan_result`, tvar `{data, ts}`) a prežije zavretie prehliadača.
+  **Nemá TTL** — drží sa, kým používateľ sám nespustí nový beh; automaticky sa
+  neobnovuje nikdy. Dôvod: pri ~20-30s behu je strata výsledku otravnejšia než
+  jeho vek. Preto ale MUSÍ byť vedľa výsledku vždy vidno čas posledného behu
+  (`⏱` pill v rozbalenom stave, súčasť súhrnu v zbalenom) — starý výsledok je
+  v poriadku, tváriť sa ako čerstvý nesmie. Obnova z localStorage je zámerne
+  lenivá (`ensureEma200Restored()` volaná z oboch render funkcií), nie
+  top-level — `scanner.js` smie obsahovať len deklarácie. Poškodený alebo
+  starý tvar zápisu sa ticho ignoruje (fail-soft na `null`), plná kvóta
+  výsledok nezneplatní.
   **Prvá verzia (modal) bola zlý dizajn — nahlásené hneď pri prvom použití:**
   beh trvá ~20-30s (studená cache), modal ukazoval spinner, ale bez jasného
   vizuálu to pôsobilo ako "nič sa nedeje"; a keď sa modal zavrel (klik mimo,

@@ -1719,13 +1719,56 @@ function openScannerTicker(ticker) {
 // Trvalá karta v scanner-aux-grid (vedľa Investor Inbox), nie modal — modal
 // zmizol bez stopy po zatvorení a pri ~20-30s behu bez viditeľného postupu
 // pôsobil ako "nič sa nedeje" (nahlásené 2026-08-18). Karta drží posledný
-// výsledok v `ema200ScanData` cez celú session (kým sa nespustí nový beh
-// alebo nenačíta stránka), takže sa k nej dá kedykoľvek vrátiť scrollom, nie
-// len hneď po kliknutí. Žiadna server ani klient cache samotného behu — na
-// rozdiel od ostatných scanner sekcií je toto explicitne "spusti keď chceš",
-// nie denný snapshot. Dáta idú z tej istej zdieľanej daily-history cache ako
-// zvyšok scanneru (backend), takže opakovaný beh je lacný.
+// výsledok v `ema200ScanData` a od 2026-08-19 aj v localStorage, takže prežije
+// zavretie prehliadača. Platnosť NEMÁ TTL — drží sa, kým používateľ sám
+// nespustí nový beh tlačidlom "↻ Znova". Je to zámer: pri ~20-30s behu je
+// strata výsledku otravnejšia než jeho vek, a weekly EMA200 sa cez deň nehýbe
+// natoľko, aby to menilo rozhodnutie. Preto sa vedľa výsledku VŽDY zobrazuje
+// čas posledného behu — starý výsledok je v poriadku, ale nesmie sa tváriť
+// ako čerstvý. Automaticky sa nespúšťa nikdy; toto je "spusti keď chceš", nie
+// denný snapshot ako ostatné scanner sekcie.
+const EMA200_SCAN_RESULT_KEY = 'td_ema200_scan_result';
+
+function loadEma200ScanFromStorage() {
+  try {
+    const raw = localStorage.getItem(EMA200_SCAN_RESULT_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    // Tvar sa mohol medzi verziami zmeniť — bez `results` nie je čo kresliť.
+    if (!saved || !saved.data || !Array.isArray(saved.data.results)) return null;
+    return saved;
+  } catch (e) {
+    return null;   // poškodený alebo cudzí zápis nesmie zhodiť Scanner
+  }
+}
+
+function saveEma200ScanToStorage(data) {
+  try {
+    localStorage.setItem(EMA200_SCAN_RESULT_KEY,
+                         JSON.stringify({ data, ts: Date.now() }));
+  } catch (e) {
+    // Plná kvóta výsledok nezneplatňuje — ostane aspoň v pamäti tejto session.
+    console.warn('EMA200 scan sa nepodarilo uložiť:', e);
+  }
+}
+
 let ema200ScanData = null;
+let ema200ScanRanAt = null;
+let ema200ScanRestored = false;
+
+// Obnova z localStorage je ZÁMERNE lenivá, nie na top-level. `scanner.js`
+// smie obsahovať len deklarácie — jediný modul s top-level exec kódom je
+// `main.js` (viď CLAUDE.md). Volá sa z oboch render funkcií karty, takže
+// prvé vykreslenie Scanneru výsledok obnoví.
+function ensureEma200Restored() {
+  if (ema200ScanRestored) return;
+  ema200ScanRestored = true;
+  const saved = loadEma200ScanFromStorage();
+  if (saved) {
+    ema200ScanData = saved.data;
+    ema200ScanRanAt = saved.ts;
+  }
+}
 let ema200ScanLoading = false;
 let ema200ScanError = null;
 let ema200ScanSort = { key: 'dist_pct', dir: 1 };
@@ -1738,6 +1781,7 @@ function toggleEma200CardCollapsed() {
 }
 
 function ema200CardHead() {
+  ensureEma200Restored();
   const collapsed = isEma200CardCollapsed();
   return `<div class="scanner-source-head">
     <button class="btn dca-toggle" onclick="toggleEma200CardCollapsed()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
@@ -1753,10 +1797,25 @@ function ema200CardHead() {
   </div>`;
 }
 
+// Výsledok prežíva reload aj zavretie prehliadača, takže sa môže pozerať na
+// dni staré čísla. Vek preto patrí VŽDY vedľa neho, nie do tooltipu.
+function ema200ScanAgeLabel() {
+  if (!ema200ScanRanAt) return '';
+  const mins = Math.floor((Date.now() - ema200ScanRanAt) / 60000);
+  if (mins < 1) return 'pred chvíľou';
+  if (mins < 60) return `pred ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `pred ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'včera' : `pred ${days} dňami`;
+}
+
 function ema200CardBodyHtml() {
+  ensureEma200Restored();
   if (isEma200CardCollapsed()) {
     if (!ema200ScanData) return 'Zatiaľ nespustené.';
-    return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200 (posledný beh)`;
+    const age = ema200ScanAgeLabel();
+    return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200${age ? ` · ${age}` : ''}`;
   }
   if (ema200ScanLoading) {
     return '<div style="color:var(--muted);font-size:11px;padding:6px 0;"><span class="cl-spinner"></span> Skenujem naimportované univerzum — pri prvom behu môže trvať cca 20-30 sekúnd, opakovaný beh je rýchlejší (zdieľaná cache).</div>';
@@ -1805,6 +1864,7 @@ function ema200ResultsTableHtml() {
       <span class="dca-pill neutral">${escHtml(data.universe_label)}</span>
       <span class="dca-pill neutral">${data.scanned}/${data.total} tickerov</span>
       <span class="dca-pill warn">${data.near_count}× do ±${data.threshold_pct}%</span>
+      ${ema200ScanRanAt ? `<span class="dca-pill neutral" title="Výsledok sa drží, kým nespustíš nový sken — automaticky sa neobnovuje">⏱ ${ema200ScanAgeLabel()}</span>` : ''}
     </div>
     <div style="max-height:360px;overflow:auto;">
     <table class="tool-table"><thead><tr>
@@ -1828,6 +1888,8 @@ async function runEma200Scan() {
     const resp = await fetch(`${API}/api/scanner/ema200-scan`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     ema200ScanData = await resp.json();
+    ema200ScanRanAt = Date.now();
+    saveEma200ScanToStorage(ema200ScanData);
     ema200ScanSort = { key: 'dist_pct', dir: 1 };
   } catch (e) {
     ema200ScanError = e.message;
