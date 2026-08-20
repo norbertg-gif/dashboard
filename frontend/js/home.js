@@ -9,22 +9,36 @@ let _homeLastData = null;       // posledný úspešný payload — pre re-rende
 let _homeLastFetchMs = 0;       // session TTL, nech tab-switch nespúšťa refresh=1 na eToro proxy zakaždým
 const HOME_DATA_TTL_MS = 60 * 1000;
 
-// Výber účtov pre KPI karty — perzistentný. Oba zapnuté = súčet (pôvodné správanie).
+// Výber účtu pre KPI karty — perzistentný, 3-way single-select ('1'|'2'|'both').
 const HOME_ACCTS_KEY = 'td_home_accts';
 
-function homeGetAcctSel() {
+function homeGetAcctMode() {
   try {
-    const saved = JSON.parse(localStorage.getItem(HOME_ACCTS_KEY) || '{}');
-    return { 1: saved['1'] !== false, 2: saved['2'] !== false };
-  } catch (e) { return { 1: true, 2: true }; }
+    const raw = localStorage.getItem(HOME_ACCTS_KEY);
+    if (raw === null) return 'both';
+    const parsed = JSON.parse(raw);
+    if (parsed === '1' || parsed === '2' || parsed === 'both') return parsed;
+    // Legacy tvar {"1":bool,"2":bool} z dvoch nezávislých toggle tlačidiel —
+    // preveď na najbližší zodpovedajúci mode, nech sa staré uložené stavy nestratia.
+    if (parsed && typeof parsed === 'object') {
+      const a1 = parsed['1'] !== false, a2 = parsed['2'] !== false;
+      if (a1 && !a2) return '1';
+      if (a2 && !a1) return '2';
+    }
+    return 'both';
+  } catch (e) { return 'both'; }
 }
 
-function homeToggleAcct(acct) {
-  const sel = homeGetAcctSel();
-  const next = { ...sel, [acct]: !sel[acct] };
-  // Aspoň jeden účet musí ostať zapnutý — klik na posledný aktívny sa ignoruje.
-  if (!next['1'] && !next['2']) return;
-  try { localStorage.setItem(HOME_ACCTS_KEY, JSON.stringify(next)); } catch (e) {}
+function homeGetAcctSel() {
+  const mode = homeGetAcctMode();
+  if (mode === '1') return { 1: true, 2: false };
+  if (mode === '2') return { 1: false, 2: true };
+  return { 1: true, 2: true };
+}
+
+function homeSetAcctMode(mode) {
+  if (mode !== '1' && mode !== '2' && mode !== 'both') return;
+  try { localStorage.setItem(HOME_ACCTS_KEY, JSON.stringify(mode)); } catch (e) {}
   // Prekresliť treba KAŽDÝ blok, ktorý číta homeGetAcctSel() — dnes KPI riadok a
   // koláč príspevku k výnosu. Nič sa nerefetchuje, oba počítajú z _homeLastData.
   // (Movers/plán/earnings/DIP na výbere účtov nezávisia.)
@@ -190,17 +204,19 @@ function homeKpiCards(v) {
 
 function homePortfolioKpiHtml(port1, port2) {
   const v = homeKpiValues(port1, port2);
-  const sel = v.sel;
-  const acctBtn = (acct, label) => `
-    <button type="button" class="home-acct-toggle ${sel[acct] ? 'active' : ''} acct${acct}"
-      onclick="homeToggleAcct('${acct}')"
-      title="${sel[acct] ? 'Skryť' : 'Zobraziť'} účet ${acct} v súhrne">${label}</button>`;
+  const mode = homeGetAcctMode();
+  const modeBtn = (m, label, title) => `
+    <button type="button" class="home-acct-toggle ${mode === m ? 'active' : ''} acct${m}"
+      onclick="homeSetAcctMode('${m}')"
+      title="${title}">${label}</button>`;
+  const hint = mode === 'both' ? 'súčet oboch účtov' : `len účet ${mode}`;
   return `<div id="home-kpi-block">
     <div class="home-acct-row">
       <span class="home-acct-label">Účty</span>
-      ${acctBtn('1', 'Účet 1')}
-      ${acctBtn('2', 'Účet 2')}
-      <span class="home-acct-hint">${sel[1] && sel[2] ? 'súčet oboch účtov' : `len účet ${sel[1] ? '1' : '2'}`}</span>
+      ${modeBtn('1', 'Účet 1', 'Zobraziť len účet 1')}
+      ${modeBtn('2', 'Účet 2', 'Zobraziť len účet 2')}
+      ${modeBtn('both', 'Spolu', 'Zobraziť súčet oboch účtov')}
+      <span class="home-acct-hint">${hint}</span>
     </div>
     <div class="home-kpi-grid">${homeKpiCards(v).map(([key, label, val, cls]) => `
       <div class="home-kpi-item${cls ? ' ' + cls : ''}" data-home-kpi-item="${key}">

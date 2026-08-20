@@ -6202,6 +6202,11 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
   color: var(--acct2-color);
   background: var(--acct2-tint);
 }
+.home-acct-toggle.active.acctboth {
+  border-color: var(--text);
+  color: var(--text);
+  background: var(--bg3);
+}
 .home-acct-hint {
   color: var(--muted2);
   font-size: 11px;
