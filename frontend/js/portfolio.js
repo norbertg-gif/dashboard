@@ -2592,7 +2592,10 @@ function portToggleAttention(pid) {
 }
 function portSort(pid, col) {
   const s = getPortState(pid);
-  if (s.sortCol === col) s.sortDir *= -1; else { s.sortCol = col; s.sortDir = -1; }
+  if (s.sortCol === col) s.sortDir *= -1;
+  // Prvý klik: text (ticker) A-Z, čísla (P/L, váha, ...) najväčšie prvé —
+  // opačné poradie by pri tickeri pôsobilo ako "prehodené" triedenie.
+  else { s.sortCol = col; s.sortDir = col === 'symbol' ? 1 : -1; }
   savePortState(pid); renderPortPanel(pid);
 }
 function portToggleMirrors(pid) {
