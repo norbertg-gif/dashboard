@@ -7706,6 +7706,165 @@ def scanner_universe_from_dip() -> tuple[list[str], str, str]:
     return NASDAQ100_TICKERS[:], "Nasdaq-100 fallback", "nasdaq100"
 
 
+FINVIZ_SCREENERS_FILE = DATA_ROOT / "finviz_screeners.json"
+FINVIZ_DEFAULT_SCREENERS = [
+    "https://finviz.com/screener?v=151&f=idx_ndx&o=ticker",
+    "https://finviz.com/screener?v=150&f=cap_midover,fa_peg_u2,sh_insidertrans_pos&ft=4&o=peg",
+]
+FINVIZ_REQUIRED_TEMPLATE_COLUMNS = {"Sales YoY TTM", "EPS YoY TTM"}
+FINVIZ_REQUEST_DELAY_SECONDS = 2.0
+FINVIZ_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/127.0.0.0 Safari/537.36"
+)
+_FINVIZ_CONFIG_LOCK = threading.Lock()
+
+
+def _load_finviz_screeners() -> list[str]:
+    """Load the local Finviz screener list, seeding the two known base URLs."""
+    with _FINVIZ_CONFIG_LOCK:
+        if not FINVIZ_SCREENERS_FILE.exists():
+            _atomic_write_json(FINVIZ_SCREENERS_FILE, FINVIZ_DEFAULT_SCREENERS)
+        try:
+            configured = json.loads(FINVIZ_SCREENERS_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise HTTPException(
+                500,
+                f"Finviz konfiguracia {FINVIZ_SCREENERS_FILE.name} sa neda nacitat: {_scrub_token(e)}",
+            )
+
+    if not isinstance(configured, list) or not configured:
+        raise HTTPException(500, f"{FINVIZ_SCREENERS_FILE.name} musi obsahovat neprázdny JSON zoznam URL.")
+
+    screeners: list[str] = []
+    for value in configured:
+        url = str(value or "").strip()
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname != "finviz.com" or parsed.path != "/screener":
+            raise HTTPException(
+                500,
+                f"Neplatna Finviz URL v {FINVIZ_SCREENERS_FILE.name}; povolene su iba https://finviz.com/screener URL.",
+            )
+        if parsed.username or parsed.password or parsed.fragment:
+            raise HTTPException(500, f"Neplatna Finviz URL v {FINVIZ_SCREENERS_FILE.name}.")
+        # Pagination is derived from the result total and must never come from config.
+        parsed_query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if any(key == "r" for key, _val in parsed_query):
+            query = [(key, val) for key, val in parsed_query if key != "r"]
+            clean = urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
+        else:
+            clean = url
+        screeners.append(clean)
+    return screeners
+
+
+def _finviz_fix_number(value):
+    """Match scraper4_claude.py's cell conversion exactly."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if stripped in ("", "-", "—", "N/A"):
+        return None
+    is_percent = stripped.endswith("%")
+    if is_percent:
+        stripped = stripped[:-1].strip()
+    stripped = stripped.replace(",", "")
+    try:
+        number = float(stripped)
+    except ValueError:
+        return value
+    return number / 100 if is_percent else number
+
+
+def _parse_finviz_screener_html(html: str, headers: list[str] | None = None) -> tuple[list[str], list[list[str]], int]:
+    """Parse one Finviz page using the user's existing scraper semantics."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table", class_="screener_table")
+    if table is None:
+        raise HTTPException(502, "Finviz odpoved neobsahuje tabulku screener_table.")
+
+    thead = table.find("thead")
+    header_row = thead.find("tr") if thead else table.find("tr")
+    page_headers = [
+        cell.get_text(strip=True)
+        for cell in header_row.find_all(["th", "td"])
+    ] if header_row else []
+    if page_headers and page_headers[0] == "":
+        page_headers = page_headers[1:]
+    output_headers = headers if headers is not None else page_headers
+    if not output_headers:
+        raise HTTPException(502, "Finviz odpoved nema citatelnu hlavicku screenera.")
+
+    rows: list[list[str]] = []
+    for row in table.find_all("tr"):
+        cells = row.find_all("td")
+        if not cells:
+            continue
+        ticker_cell = next((cell for cell in cells if cell.has_attr("data-boxover-ticker")), None)
+        values = [cell.get_text(strip=True) for cell in cells]
+        if values and values[0] == "":
+            values = values[1:]
+        if len(values) != len(output_headers):
+            continue
+        if ticker_cell is not None and "Ticker" in output_headers:
+            values[output_headers.index("Ticker")] = ticker_cell["data-boxover-ticker"]
+        rows.append(values)
+
+    total_match = re.search(r"\b([\d,]+)\s+Total\b", soup.get_text(" ", strip=True), flags=re.I)
+    if not total_match:
+        raise HTTPException(502, "Finviz odpoved neobsahuje celkovy pocet vysledkov ('N Total').")
+    total = int(total_match.group(1).replace(",", ""))
+    return page_headers, rows, total
+
+
+def _require_finviz_template_headers(headers: list[str]) -> None:
+    if not FINVIZ_REQUIRED_TEMPLATE_COLUMNS.issubset(set(headers)):
+        raise HTTPException(
+            401,
+            "Finviz cookie neplatny alebo vyprsany — prihlas sa a obnov FINVIZ_COOKIE.",
+        )
+
+
+def _finviz_page_url(base_url: str, row_offset: int) -> str:
+    separator = "&" if "?" in base_url else "?"
+    return base_url if row_offset == 1 else f"{base_url}{separator}r={row_offset}"
+
+
+def _fetch_finviz_dataframe(screeners: list[str], fetch_page, sleep_fn=_time_module.sleep,
+                            delay_seconds: float = FINVIZ_REQUEST_DELAY_SECONDS) -> pd.DataFrame:
+    """Fetch configured screeners sequentially; fetch_page returns response HTML."""
+    all_rows: list[list[str]] = []
+    headers: list[str] | None = None
+    request_count = 0
+
+    for base_url in screeners:
+        if request_count:
+            sleep_fn(delay_seconds)
+        page_headers, rows, total = _parse_finviz_screener_html(fetch_page(base_url), headers)
+        request_count += 1
+        _require_finviz_template_headers(page_headers)
+        if headers is None:
+            headers = page_headers
+        all_rows.extend(rows)
+
+        for row_offset in range(21, total + 1, 20):
+            sleep_fn(delay_seconds)
+            page_url = _finviz_page_url(base_url, row_offset)
+            _page_headers, page_rows, _page_total = _parse_finviz_screener_html(fetch_page(page_url), headers)
+            request_count += 1
+            all_rows.extend(page_rows)
+
+    if headers is None or not all_rows:
+        raise HTTPException(502, "Finviz nevratil ziadne pouzitelne riadky.")
+    frame = pd.DataFrame(all_rows, columns=headers)
+    if "Ticker" in frame.columns:
+        frame = frame.drop_duplicates(subset="Ticker", keep="first")
+    return frame.apply(lambda column: column.map(_finviz_fix_number))
+
+
 def parse_dip_ranking_xlsx(raw: bytes, filename: str | None = None) -> dict:
     try:
         import openpyxl
@@ -7772,6 +7931,47 @@ async def import_dip_scores(request: Request, filename: str | None = Query(None)
     start_roic_fundamentals_enrichment(scores)
     meta = scores.get("_meta", {})
     return {"ok": True, "count": meta.get("count", 0), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "updated_at": meta.get("updated_at"), "daily_cache_cold": daily_cache_cold}
+
+
+@app.post("/api/scanner/dip/finviz-fetch")
+def fetch_dip_source_from_finviz():
+    if os.getenv("RENDER"):
+        raise HTTPException(403, "Finviz fetch je dostupny iba lokalne na domacom PC.")
+    cookie = os.getenv("FINVIZ_COOKIE", "").strip()
+    if not cookie:
+        raise HTTPException(
+            400,
+            "FINVIZ_COOKIE nie je nastaveny. Prihlas sa do Finvizu a nastav lokalnu premennu FINVIZ_COOKIE.",
+        )
+
+    try:
+        screeners = _load_finviz_screeners()
+
+        def fetch_page(url: str) -> str:
+            response = requests.get(
+                url,
+                headers={"User-Agent": FINVIZ_USER_AGENT, "Cookie": cookie},
+                timeout=30,
+            )
+            response.raise_for_status()
+            return response.text
+
+        frame = _fetch_finviz_dataframe(screeners, fetch_page)
+        output = BytesIO()
+        frame.to_excel(output, index=False)
+        from fastapi.responses import Response
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": 'attachment; filename="finviz_output.xlsx"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Finviz fetch zlyhal: {_scrub_token(e)}")
 
 
 @app.post("/api/scanner/dip/import-html")
@@ -10754,9 +10954,9 @@ def _scrub_token(msg: str) -> str:
     2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
     Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
     msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN"):
+    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN", "FINVIZ_COOKIE"):
         secret = os.getenv(env_name, "").strip()
-        if len(secret) >= 8:
+        if secret and (env_name == "FINVIZ_COOKIE" or len(secret) >= 8):
             msg = msg.replace(secret, "***")
     return msg
 

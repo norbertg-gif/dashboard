@@ -727,6 +727,33 @@ Main source sections:
   používateľ vyhodnocuje vizuálne, zámerne sa nekóduje) je v `⚙` nastaveniach
   ako ďalší tunable. Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani
   scoringu.
+- **Finviz DIP fetch (`POST /api/scanner/dip/finviz-fetch`) — LOKÁLNE IBA, HOTOVO 2026-08-23.**
+  Tlačidlo „Stiahnuť z Finvizu" v Scanner → DIP univerzum nahrádza ručné
+  sťahovanie 11 HTML súborov cez Save Page WE. Stiahne screenery z
+  `DATA_ROOT/finviz_screeners.json` (gitignored, seeduje sa dvoma URL: Nasdaq-100
+  `f=idx_ndx` a GARP+insider `f=cap_midover,fa_peg_u2,sh_insidertrans_pos`),
+  rozparsuje ich rovnakou logikou ako pôvodný `scraper4_claude.py` a vráti
+  `finviz_output.xlsx` na stiahnutie. Downstream Excel workflow ostáva nezmenený.
+  **Endpoint odmieta bežať pri `RENDER=1`** — cookie nesmie ísť do cloudu.
+  **Prihlásenie je NEVYHNUTNÉ a jeho absencia sa NEPREJAVÍ ako chyba.** Overené
+  naživo 2026-08-23: anonymný fetch vráti HTTP 200 a validnú tabuľku, ale len
+  s 11 DEFAULT stĺpcami namiesto 27 z používateľovej uloženej šablóny (v=150/
+  v=151 sú viazané na účet; `preset=` anonymne tiež nefunguje). Preto
+  `_require_finviz_template_headers()` tvrdo vyžaduje prítomnosť
+  **`Sales YoY TTM` + `EPS YoY TTM`** a inak vráti 401. Nie je to kozmetika:
+  tie dva stĺpce majú v `build_v3.py` scoringu hodnotu 12 a 13 bodov, takže
+  tiché prebratie default dát by systematicky pokazilo DIP skóre. Overené aj
+  end-to-end proti reálnemu Finvizu s neplatným cookie → korektne 401.
+  Tieto dva stĺpce sa NEDAJÚ získať cez `c=` parameter (platné indexy sú len
+  0–86 a ani jeden z nich to nie je) — netreba to znova skúmať.
+  **Stránkovanie sa odvodzuje z textu „N Total"** na stránke, nie z pevného
+  zoznamu `&r=`. Pôvodný ručný zoznam mal 11 URL a tíško vynechával poslednú
+  stránku druhého screenera (104 výsledkov → chýbali APTV, ATO, SPGI, SYY).
+  Requesty idú SEKVENČNE s 2 s pauzou — paralelné ťahanie cez Save Page WE
+  spoľahlivo strácalo 2 z 11 stránok, sekvenčné prešlo 12/12.
+  `screener.ashx` je od augusta 2026 301-redirect na `screener`; používaj nový
+  tvar. `FINVIZ_COOKIE` je pridaný do `_scrub_token()`, takže sa nedostane do
+  logov ani chybových hlášok.
 - **DIP univerzum je len US — overené 2026-08-05.** Finviz vo free tieri ponúka iba
   `Any / AMEX / CBOE / NASDAQ / NYSE`; európske burzy sú za `Custom (Elite only)`.
   Dôsledok: európske tituly (`RHM.DE`, `NOVO-B.CO`, `TEP.PA`, `VWCG.L`, `CSG.NV`)

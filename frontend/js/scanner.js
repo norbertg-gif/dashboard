@@ -851,6 +851,47 @@ async function loadDipStatus() {
   }
 }
 
+async function downloadFinvizSourceData() {
+  const button = document.getElementById('finvizFetchBtn');
+  const status = document.getElementById('dipImportStatus');
+  if (button?.dataset.loading === '1') return;
+  if (button) {
+    button.dataset.loading = '1';
+    button.disabled = true;
+    button.textContent = 'Sťahujem…';
+  }
+  if (status) status.innerHTML = '<span class="cl-spinner"></span>Sťahujem Finviz dáta a tvorím XLSX…';
+  setStatus('Finviz: sťahujem dáta…', '');
+  try {
+    const response = await fetch('/api/scanner/dip/finviz-fetch', { method: 'POST' });
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try { message = (await response.json()).detail || message; } catch(e) {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'finviz_output.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    if (status) status.textContent = 'Finviz XLSX je pripravený: finviz_output.xlsx';
+    setStatus('Finviz XLSX stiahnutý', 'ok');
+  } catch (error) {
+    const message = `Finviz export zlyhal: ${error.message}`;
+    if (status) status.textContent = message;
+    setStatus(message, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.dataset.loading = '';
+      button.textContent = 'Stiahnuť z Finvizu';
+    }
+  }
+}
+
 async function importDipExcel() {
   const input = document.getElementById('dipImportInput');
   const status = document.getElementById('dipImportStatus');
@@ -911,6 +952,8 @@ async function renderScannerView() {
               <span class="tb-label">DIP univerzum</span>
               <div class="tb-items">
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
+                <button class="btn" id="finvizFetchBtn" onclick="downloadFinvizSourceData()"
+                  title="Lokálne stiahne nastavené Finviz screenery cez FINVIZ_COOKIE a vytvorí finviz_output.xlsx">Stiahnuť z Finvizu</button>
                 <button class="btn" onclick="importDipExcel()">Import DIP Excel</button>
                 <button class="btn primary" id="nasdaqRescanBtn" onclick="runNasdaqScanner()">Rescan teraz</button>
               </div>

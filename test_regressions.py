@@ -658,6 +658,90 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in ranked], ["SIGNAL", "WATCH"])
 
 
+class FinvizFetchRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _html(ticker="AAPL", total=1, headers=None):
+        headers = headers or ["No.", "Ticker", "Sales YoY TTM", "EPS YoY TTM", "Market Cap"]
+        header_cells = "".join(f"<th>{value}</th>" for value in headers)
+        values = {
+            "No.": "1",
+            "Ticker": f'<a>A</a><a>{ticker}</a>',
+            "Sales YoY TTM": "12.5%",
+            "EPS YoY TTM": "-",
+            "Market Cap": "1,234.5",
+            "Company": "Example Inc",
+            "Sector": "Technology",
+            "Industry": "Software",
+            "Country": "USA",
+            "P/E": "20.1",
+            "Volume": "1,000",
+            "Price": "100.5",
+            "Change %": "1.2%",
+        }
+        cells = []
+        for header in headers:
+            attr = f' data-boxover-ticker="{ticker}"' if header == "Ticker" else ""
+            cells.append(f"<td{attr}>{values.get(header, '')}</td>")
+        return (
+            f"<html><body><div>{total} Total</div>"
+            f"<table class=\"screener_table\"><thead><tr><th></th>{header_cells}</tr></thead>"
+            f"<tbody><tr><td></td>{''.join(cells)}</tr></tbody></table></body></html>"
+        )
+
+    def test_missing_ttm_columns_aborts_before_returning_data(self):
+        default_headers = [
+            "No.", "Ticker", "Company", "Sector", "Industry", "Country",
+            "Market Cap", "P/E", "Volume", "Price", "Change %",
+        ]
+        calls = []
+
+        def fetch_page(url):
+            calls.append(url)
+            return self._html(headers=default_headers, total=104)
+
+        with self.assertRaises(HTTPException) as raised:
+            tb._fetch_finviz_dataframe(
+                ["https://finviz.com/screener?v=150"],
+                fetch_page,
+                sleep_fn=lambda _seconds: None,
+            )
+        self.assertEqual(raised.exception.status_code, 401)
+        self.assertIn("FINVIZ_COOKIE", raised.exception.detail)
+        self.assertEqual(calls, ["https://finviz.com/screener?v=150"])
+
+    def test_ticker_comes_from_data_boxover_attribute(self):
+        headers, rows, total = tb._parse_finviz_screener_html(self._html(ticker="AAPL"))
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0][headers.index("Ticker")], "AAPL")
+
+    def test_fix_number_matches_percent_blank_and_comma_semantics(self):
+        self.assertEqual(tb._finviz_fix_number("12.5%"), 0.125)
+        for blank in ("", "-", "—", "N/A"):
+            self.assertIsNone(tb._finviz_fix_number(blank))
+        self.assertEqual(tb._finviz_fix_number("1,234.50"), 1234.5)
+        self.assertEqual(tb._finviz_fix_number(" Example "), " Example ")
+
+    def test_pagination_is_derived_from_total(self):
+        base = "https://finviz.com/screener?v=151&f=idx_ndx&o=ticker"
+        calls = []
+        sleeps = []
+        tickers = iter(("FIRST", "SECOND", "LAST"))
+
+        def fetch_page(url):
+            calls.append(url)
+            return self._html(ticker=next(tickers), total=41)
+
+        frame = tb._fetch_finviz_dataframe(
+            [base],
+            fetch_page,
+            sleep_fn=sleeps.append,
+            delay_seconds=2.0,
+        )
+        self.assertEqual(calls, [base, f"{base}&r=21", f"{base}&r=41"])
+        self.assertEqual(sleeps, [2.0, 2.0])
+        self.assertEqual(frame["Ticker"].tolist(), ["FIRST", "SECOND", "LAST"])
+
+
 class RoicFundamentalsRegressionTests(unittest.TestCase):
     class _Response:
         def __init__(self, status_code, payload=None, headers=None):
