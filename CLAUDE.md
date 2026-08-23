@@ -727,9 +727,16 @@ Main source sections:
   používateľ vyhodnocuje vizuálne, zámerne sa nekóduje) je v `⚙` nastaveniach
   ako ďalší tunable. Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani
   scoringu.
-- **Finviz DIP fetch (`POST /api/scanner/dip/finviz-fetch`) — LOKÁLNE IBA, HOTOVO 2026-08-23.**
-  Tlačidlo „Stiahnuť z Finvizu" v Scanner → DIP univerzum nahrádza ručné
-  sťahovanie 11 HTML súborov cez Save Page WE. Stiahne screenery z
+- **Finviz DIP fetch (`POST /api/scanner/dip/finviz-fetch`) — LOKÁLNE IBA, HOTOVO 2026-08-23, UI TLAČIDLO ODSTRÁNENÉ V TEN ISTÝ DEŇ.**
+  **Bežná cesta dnes NIE JE tento endpoint** — je to prevzatie používateľovej
+  prihlásenej browser session cez Claude Code (Claude in Chrome rozšírenie
+  v Brave): Claude stiahne stránky priamo z jeho relácie a uloží HTML do
+  `G:\burza\finviz\`. Používateľ výslovne odmietol prácu s `FINVIZ_COOKIE`
+  ako zbytočne komplikovanú (2400-znakový cookie s úvodzovkami, `setx` má
+  limit 1024 znakov a na tom to padlo). Endpoint preto ostáva funkčný ako
+  ZÁLOHA, ale tlačidlo z UI je preč — nemá zmysel držať v Scanneri tlačidlo,
+  ktoré bez nenastaveného cookie len hádže chybu.
+  Endpoint stiahne screenery z
   `DATA_ROOT/finviz_screeners.json` (gitignored, seeduje sa dvoma URL: Nasdaq-100
   `f=idx_ndx` a GARP+insider `f=cap_midover,fa_peg_u2,sh_insidertrans_pos`),
   rozparsuje ich rovnakou logikou ako pôvodný `scraper4_claude.py` a vráti
