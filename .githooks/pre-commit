@@ -8,6 +8,13 @@ HTML=frontend/trading_dashboard.html
 staged=$(git diff --cached --name-only)
 echo "$staged" | grep -qE '^frontend/(js/.*\.js|dashboard\.css)$' || exit 0
 
+# Strážca zdieľaného globálneho scopu: zastaví commit, ktorý zmaže globál, čo
+# sa inde stále volá. Presne táto trieda chýb dvakrát prešla `node --check` aj
+# celým test suite a prejavila sa až kliknutím v prehliadači.
+if command -v python >/dev/null 2>&1; then
+  python scripts/check_global_refs.py --staged || exit 1
+fi
+
 tok_re='s/.*dashboard\.css?v=\([A-Za-z0-9_-]*\).*/\1/p'
 # token zo STAGED verzie HTML (ak HTML nie je staged, zo working tree)
 if echo "$staged" | grep -q "^${HTML}$"; then
