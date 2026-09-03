@@ -558,20 +558,35 @@ function setInvestorInboxKindFilter(kind) {
   if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
 }
 
+// Glyf a title rozbaľovátka žijú v statickom HTML z renderScannerView(), ale
+// toggle funkcie prekresľujú len TELO karty — tlačidlo im ostane mimo dosahu,
+// takže si držalo starý symbol až do ďalšieho prekreslenia celého Scanneru
+// (t.j. do prepnutia tabu). Karta sa pritom zbalila správne, čiže UI klamalo.
+// EMA200 kartu to netrápi, tá si prekresľuje aj hlavičku (ema200CardHead()).
+function syncScannerCollapseToggle(key, collapsed) {
+  const btn = document.querySelector(`.dca-toggle[data-collapse="${key}"]`);
+  if (!btn) return;
+  btn.textContent = collapsed ? '+' : '−';
+  btn.title = collapsed ? 'Rozbaliť' : 'Zbaliť';
+}
+
 function toggleInvestorInboxCollapsed() {
   localStorage.setItem(INVESTOR_INBOX_COLLAPSED_KEY, isInvestorInboxCollapsed() ? '0' : '1');
+  syncScannerCollapseToggle('inbox', isInvestorInboxCollapsed());
   if (window._lastInvestorInboxPayload) renderInvestorInbox(window._lastInvestorInboxPayload);
   else loadInvestorInbox();
 }
 
 function toggleEarningsCalendarCollapsed() {
   localStorage.setItem(EARNINGS_CALENDAR_COLLAPSED_KEY, isEarningsCalendarCollapsed() ? '0' : '1');
+  syncScannerCollapseToggle('calendar', isEarningsCalendarCollapsed());
   if (window._lastEarningsCalendarPayload) renderEarningsCalendar(window._lastEarningsCalendarPayload);
   else loadEarningsCalendarWidget();
 }
 
 function toggleScannerRadarCollapsed() {
   localStorage.setItem(SCANNER_RADAR_COLLAPSED_KEY, isScannerRadarCollapsed() ? '0' : '1');
+  syncScannerCollapseToggle('radar', isScannerRadarCollapsed());
   if (_oppLastRows !== null) renderOpportunities(_oppLastRows, _oppLastDays);
   else refreshOpportunities(false);
 }
@@ -649,6 +664,7 @@ async function loadWeeklyPlan(force = false) {
 
 function toggleWeeklyPlanCollapsed() {
   localStorage.setItem(WEEKLY_PLAN_COLLAPSED_KEY, isWeeklyPlanCollapsed() ? '0' : '1');
+  syncScannerCollapseToggle('plan', isWeeklyPlanCollapsed());
   if (window._lastWeeklyPlanPayload) renderWeeklyPlan(window._lastWeeklyPlanPayload);
   else loadWeeklyPlan();
 }
@@ -1145,7 +1161,7 @@ async function renderScannerView() {
         <section class="investor-week-card weekly-plan-card scanner-aux-card scanner-aux-plan" data-aux-key="plan">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
-            <button class="btn dca-toggle" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
+            <button class="btn dca-toggle" data-collapse="plan" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">▤</span>
               <div>
@@ -1160,7 +1176,7 @@ async function renderScannerView() {
         <section class="investor-week-card scanner-aux-card scanner-aux-inbox" data-aux-key="inbox">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
-            <button class="btn dca-toggle" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
+            <button class="btn dca-toggle" data-collapse="inbox" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">✦</span>
               <div>
@@ -1179,7 +1195,7 @@ async function renderScannerView() {
         <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar" data-aux-key="calendar">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
-            <button class="btn dca-toggle" onclick="toggleEarningsCalendarCollapsed()" title="${isEarningsCalendarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isEarningsCalendarCollapsed() ? '+' : '−'}</button>
+            <button class="btn dca-toggle" data-collapse="calendar" onclick="toggleEarningsCalendarCollapsed()" title="${isEarningsCalendarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isEarningsCalendarCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">◷</span>
               <div>
@@ -1194,7 +1210,7 @@ async function renderScannerView() {
         <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card scanner-aux-radar" data-aux-key="radar">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
-            <button class="btn dca-toggle" onclick="toggleScannerRadarCollapsed()" title="${isScannerRadarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isScannerRadarCollapsed() ? '+' : '−'}</button>
+            <button class="btn dca-toggle" data-collapse="radar" onclick="toggleScannerRadarCollapsed()" title="${isScannerRadarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isScannerRadarCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">◎</span>
               <div>
