@@ -3362,6 +3362,18 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
 @media (max-width: 900px) {
   .scanner-aux-grid { grid-template-columns: minmax(0, 1fr); }
 }
+/* Tri stĺpce až na naozaj širokej ploche. ZMERANÉ na reálnych dátach
+   (2026-09-04, live dashboard, 5 kariet): pri šírke mriežky 1948 px má
+   dvojstĺpcový layout 1432 px a trojstĺpcový 1272 px, teda −160 px. Zisk ale
+   mizne s úzkym oknom, lebo Týždenný plán sa začne zalamovať rýchlejšie, než
+   sa ušetrí na riadkoch — 1600 px: −111, 1400 px: +137, 1200 px: +312 (čiže
+   horšie než dva stĺpce). Prah 2100 px viewportu zodpovedá mriežke ~1530 px,
+   kde je zmena tesne v pluse. Varianty so span-om boli namerané ako HORŠIE
+   než oba (3 stĺpce s plánom cez 2: 1580 px, 4 stĺpce: 1522 px) — neskúšať
+   znova bez nového merania. */
+@media (min-width: 2100px) {
+  .scanner-aux-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 .inbox-headline {
   display: flex;
   align-items: center;
