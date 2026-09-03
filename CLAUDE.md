@@ -154,7 +154,7 @@ These were already in the codebase and need to stay fixed:
    správne postavený ako zákaz DOKUPOVANIA, nie príkaz predávať (viď -7). Len
    to treba vedieť skôr, než sa bude riešiť previazanie `max_weight` na
    `dca_max_weight`, ktoré používateľ 2026-08-11 odložil („zatiaľ nie").
-   **Štvrtý nález — AI export nenesie NIČ z BUILD-u (-7).** Overené na exporte
+   **Štvrtý nález — AI export nenesie NIČ z BUILD-u (-7) — VYRIEŠENÉ 2026-09-04 (commit 0254be1, schéma 1.4, blok `build` z toho istého helpera ako `/api/portfolio/build`).** Pôvodný popis: Overené na exporte
    z 2026-08-15: `position_class`, `target_weight`, `max_weight`, `gap` ani
    `over_max` v ňom nie sú, v žiadnej sekcii. Fáza 1 teda existuje len v UI
    Portfólia, kým **týždenná investičná analýza — čiže miesto, kde sa reálne
