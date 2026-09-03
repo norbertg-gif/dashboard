@@ -2494,8 +2494,9 @@ DASH_SETTINGS_FILE = DATA_ROOT / "dashboard_settings.json"
 _dash_settings_lock = threading.Lock()
 DASH_SETTINGS_DEFAULTS = {
     "dca_loss_pct": 15.0,        # strata pozície ≥ x % → DCA úvaha
+    "dca_last_tranche_pct": 20.0, # posledná tranža ≤ -x % → DCA trigger
     "dca_dip_min": 95.0,         # DIP skóre ≥ x → kvalitný dip (zladené s DIP_STRONG_THRESHOLD, dip_strategy v3)
-    "dca_max_weight": 10.0,      # váha pozície < x % equity → bez koncentračného rizika
+    "dca_max_weight": 10.0,      # váha pozície < x % Stock/ETF knihy → bez koncentračného rizika
     "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
     "risk_per_trade_pct": 1.0,   # riziko na obchod ako % equity — Verdikt kalkulátor
@@ -2510,6 +2511,7 @@ DASH_SETTINGS_DEFAULTS = {
 }
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
+    "dca_last_tranche_pct": (1, 90),
     "dca_dip_min": (0, 200),
     "dca_max_weight": (1, 100),
     "attention_daily_pct": (0.1, 50),
@@ -2560,13 +2562,46 @@ async def save_dash_settings(request: Request):
     return {"ok": True, "settings": current}
 
 
+def _position_weight(amount: float, stock_etf_book_value: float) -> float | None:
+    """Return a position's invested weight in the deliberate Stock/ETF book basis."""
+    return amount / stock_etf_book_value * 100 if stock_etf_book_value else None
+
+
 def _position_dip_metrics(symbol: str, amount: float, denominator: float,
                           dip_scores: dict) -> tuple[float | int | None, float | None]:
     """Return the existing DIP join and invested-position weight calculation."""
     dip = dip_scores.get(str(symbol or "").upper())
     dip_total = _num_or_none(dip.get("total")) if isinstance(dip, dict) else None
-    weight_pct = amount / denominator * 100 if denominator else None
+    weight_pct = _position_weight(amount, denominator)
     return dip_total, weight_pct
+
+
+def _dca_trigger_state(lots: list[dict], dip_total: float | int | None,
+                       chart_state: dict | None, settings: dict) -> dict:
+    """One DCA verdict: last tranche P/L, DIP quality, then chart-health review."""
+    last_lot = max(lots, key=lambda p: str(p.get("openDateTime") or ""), default={})
+    opened_at = last_lot.get("openDateTime")
+    last_lot_pnl_pct = _num_or_none(last_lot.get("pnlPct"))
+    amount = sum(float(p.get("amount") or 0) for p in lots)
+    pnl = sum(float(p.get("pnl") or 0) for p in lots)
+    total_pnl_pct = round(pnl / amount * 100, 2) if amount else None
+    dip_ok = dip_total is not None and float(dip_total) >= float(settings["dca_dip_min"])
+    blocking = [
+        name for name, state in (("daily_bad", (chart_state or {}).get("daily_state")),
+                                 ("weekly_bad", (chart_state or {}).get("weekly_state")))
+        if str(state or "").lower() == "bad"
+    ]
+    unknown = not opened_at or last_lot_pnl_pct is None
+    trigger_met = (not unknown and last_lot_pnl_pct <= -float(settings["dca_last_tranche_pct"]))
+    status = "unknown" if unknown else "not_eligible"
+    if trigger_met and dip_ok:
+        status = "conditional" if blocking else "eligible"
+    return {
+        "status": status, "last_lot": last_lot, "last_lot_pnl_pct": last_lot_pnl_pct,
+        "portfolio_pnl_pct": total_pnl_pct, "trigger_met": trigger_met,
+        "trigger_met_on_total_position": total_pnl_pct is not None and total_pnl_pct <= -float(settings["dca_loss_pct"]),
+        "dip_score_threshold_met": dip_ok, "blocking_conditions": blocking,
+    }
 
 
 POSITION_CLASSES_FILE = DATA_ROOT / "position_classes.json"
@@ -2719,7 +2754,7 @@ def _build_position_rows(positions: list[dict]) -> tuple[list[dict], float, dict
     rows = []
     for sym, e in sorted(by_sym.items()):
         entry = entries[sym]
-        weight = (e["amount"] / book_value * 100) if book_value else None
+        weight = _position_weight(e["amount"], book_value)
         # Ručne zadaný cieľ má vždy prednosť pred odvodeným.
         target = entry.get("target_weight")
         target_source = "manual" if target is not None else None
@@ -2800,17 +2835,17 @@ def get_dca_candidates(
     max_weight: float | None = Query(None, ge=1, le=100),
     refresh: int = Query(0),
 ):
-    """DCA kandidáti — pozície v strate ≥ loss_pct, klasifikované podľa DIP skóre
-    a váhy. Spája agregovaný per-ticker P/L (eToro) s DIP rankingom (Finviz import).
+    """DCA kandidáti — posledná tranža pri alebo pod DCA prahom, klasifikované podľa
+    DIP skóre a Stock/ETF-book váhy. Agregovaný P/L ostáva informatívny údaj.
 
     Prahy default z /api/settings (dashboard_settings.json) — meniteľné cez ⚙
     bez redeployu; explicitné query parametre ich prebijú.
 
     Flagy:
-      dca          → strata ≥ loss_pct, DIP ≥ dip_min, váha < max_weight (kvalitný dip)
-      value_trap   → strata ≥ loss_pct, DIP < dip_min (trigger OK, slabé skóre)
-      no_data      → strata ≥ loss_pct, ticker mimo DIP datasetu
-      concentrated → dca podmienky OK, ALE váha ≥ max_weight (koncentračné riziko)
+      dca          → trigger poslednej tranže, DIP ≥ dip_min, váha < max_weight (kvalitný dip)
+      value_trap   → trigger poslednej tranže, DIP < dip_min (slabé skóre)
+      no_data      → trigger poslednej tranže, ticker mimo DIP datasetu
+      concentrated → DCA podmienky OK, ALE váha ≥ max_weight (koncentračné riziko)
 
     Interpretačná vrstva — NEOVPLYVŇUJE C1–C4, scanner, bota ani portfolio účtovníctvo.
     DCA skóre je z manuálneho importu → vraciame aj vek dát (dip_updated_at)."""
@@ -2820,7 +2855,7 @@ def get_dca_candidates(
     if max_weight is None: max_weight = _s["dca_max_weight"]
     portfolio = get_portfolio(account=account, refresh=refresh)
     positions = portfolio.get("positions", [])
-    equity = (portfolio.get("summary") or {}).get("equity") or 0
+    _, book_value, _ = _build_position_rows(positions)
 
     # Agreguj per ticker (viac tranží jedného titulu = jedna pozícia)
     by_sym: dict[str, dict] = {}
@@ -2830,32 +2865,46 @@ def get_dca_candidates(
             continue
         sym = (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
         entry = by_sym.setdefault(sym, {
-            "symbol": sym, "name": pos.get("name"), "amount": 0.0, "pnl": 0.0, "count": 0,
+            "symbol": sym, "name": pos.get("name"), "amount": 0.0, "pnl": 0.0, "count": 0, "lots": [],
         })
         entry["amount"] += pos.get("amount") or 0
         entry["pnl"] += pos.get("pnl") or 0
         entry["count"] += 1
+        entry["lots"].append(pos)
 
     dip_raw = load_dip_scores()
     dip_scores = {k.upper(): v for k, v in dip_raw.items() if not k.startswith("_")}
     dip_meta = dip_raw.get("_meta") if isinstance(dip_raw.get("_meta"), dict) else {}
     dip_updated_at = (dip_meta or {}).get("updated_at")
 
+    # Chart health musí ísť do helpera aj tu, nie len v AI exporte — inak dostane
+    # tá istá funkcia na dvoch povrchoch iné vstupy a verdikty sa pri pokazenom
+    # grafe rozídu, čo je presne to, čo mala unifikácia odstrániť. Je to čítanie
+    # existujúcej scanner cache z disku, žiadny nový fetch ani sieťové volanie.
+    _scanner_rows = (load_scanner_cache() or {}).get("results") or []
+    _chart_by_symbol = {
+        str(r.get("ticker") or "").upper(): r
+        for r in _scanner_rows if isinstance(r, dict)
+    }
+
     candidates = []
     for sym, e in by_sym.items():
         amount = e["amount"]
         pnl_pct = (e["pnl"] / amount * 100) if amount else 0.0
-        if pnl_pct > -loss_pct:
-            continue  # nie je dosť v strate na DCA úvahu
-        dip_total, weight = _position_dip_metrics(sym, amount, equity, dip_scores)
-        # Preserve the existing DCA contract: missing equity historically returned zero.
-        weight = weight if weight is not None else 0.0
+        dip_total, weight = _position_dip_metrics(sym, amount, book_value, dip_scores)
+        chart_state = _assistant_chart_state(_chart_by_symbol.get(sym) or {})
+        dca_state = _dca_trigger_state(e["lots"], dip_total, chart_state, _s)
+        # Unknown latest-lot data must remain visible for manual review, never become a false negative.
+        if dca_state["status"] not in {"unknown", "eligible", "conditional"}:
+            continue
 
-        if dip_total is None:
+        if dca_state["status"] == "unknown":
+            flag = "unknown"
+        elif dip_total is None:
             flag = "no_data"
         elif dip_total < dip_min:
             flag = "value_trap"
-        elif weight >= max_weight:
+        elif weight is not None and weight >= max_weight:
             flag = "concentrated"
         else:
             flag = "dca"
@@ -2866,20 +2915,22 @@ def get_dca_candidates(
             "pnl": round(e["pnl"], 2),
             "pnl_pct": round(pnl_pct, 2),
             "amount": round(amount, 2),
-            "weight_pct": round(weight, 2),
+            "weight_pct": round(weight, 2) if weight is not None else None,
             "trades": e["count"],
             "dip_total": dip_total,
             "dip_label": _dip_label(dip_total),
             "flag": flag,
+            "dca_status": dca_state["status"],
+            "last_lot_pnl_pct": dca_state["last_lot_pnl_pct"],
         })
 
     # Najhoršie straty hore; v rámci toho DCA pred value_trap
-    flag_order = {"dca": 0, "concentrated": 1, "value_trap": 2, "no_data": 3}
+    flag_order = {"dca": 0, "concentrated": 1, "value_trap": 2, "no_data": 3, "unknown": 4}
     candidates.sort(key=lambda c: (flag_order.get(c["flag"], 9), c["pnl_pct"]))
 
     return {
         "account": account,
-        "thresholds": {"loss_pct": loss_pct, "dip_min": dip_min, "max_weight": max_weight},
+        "thresholds": {"loss_pct": loss_pct, "last_tranche_pct": _s["dca_last_tranche_pct"], "dip_min": dip_min, "max_weight": max_weight, "weight_basis": BUILD_WEIGHT_BASIS},
         "dip_updated_at": dip_updated_at,
         "candidates": candidates,
         "counts": {
@@ -2887,6 +2938,7 @@ def get_dca_candidates(
             "concentrated": sum(1 for c in candidates if c["flag"] == "concentrated"),
             "value_trap": sum(1 for c in candidates if c["flag"] == "value_trap"),
             "no_data": sum(1 for c in candidates if c["flag"] == "no_data"),
+            "unknown": sum(1 for c in candidates if c["flag"] == "unknown"),
         },
     }
 
@@ -9093,10 +9145,10 @@ def get_investor_inbox(refresh: int = Query(0)):
                 flag = row.get("flag")
                 if flag == "dca":
                     add("dca", sym, "DCA kandidát",
-                        f"Účet {account}: pozícia je {row.get('pnl_pct')} %, DIP {row.get('dip_total')} a váha {row.get('weight_pct')} % equity.",
+                        f"Účet {account}: posledná tranža je {row.get('last_lot_pnl_pct')} %, DIP {row.get('dip_total')} a váha {row.get('weight_pct')} % Stock/ETF knihy.",
                         "buy", 10,
-                        summary=(f"{sym} je v strate {row.get('pnl_pct')} %, DIP ranking ostáva silný "
-                                 f"({row.get('dip_total')}) a váha pozície je {row.get('weight_pct')} % equity. "
+                        summary=(f"{sym}: posledná tranža je {row.get('last_lot_pnl_pct')} %, DIP ranking ostáva silný "
+                                 f"({row.get('dip_total')}) a váha pozície je {row.get('weight_pct')} % Stock/ETF knihy. "
                                  "Stojí za kontrolu DCA."),
                         source="portfolio", account=account)
                 elif flag in {"value_trap", "no_data"}:
@@ -9601,7 +9653,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.4"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.5"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -9684,11 +9736,10 @@ def _assistant_days_since(timestamp: str | None) -> int | None:
 
 def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
                                dip: dict, earnings: dict, settings: dict,
-                               total_equity: float, build: dict | None = None) -> dict:
+                               total_equity: float, stock_etf_book_value: float, build: dict | None = None) -> dict:
     amount = sum(float(p.get("amount") or 0) for p in lots)
     pnl = sum(float(p.get("pnl") or 0) for p in lots)
     current_rate = next((p.get("currentRate") for p in reversed(lots) if p.get("currentRate") is not None), None)
-    last_buy = max(lots, key=lambda p: str(p.get("openDateTime") or ""), default={})
     open_lots = [{
         "opened_at": p.get("openDateTime") or None,
         "entry_price": _assistant_number(p.get("openRate")),
@@ -9698,22 +9749,14 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     } for p in lots[:20]]
     signal = scanner_row.get("recent_signal") or {}
     chart_state = _assistant_chart_state(scanner_row)
+    dca_state = _dca_trigger_state(lots, _assistant_number((dip or {}).get("total")), chart_state, settings)
+    last_buy = dca_state["last_lot"]
     last_entry = _assistant_number(last_buy.get("openRate"))
     current_price = _assistant_number(current_rate)
-    total_pnl_pct = round(pnl / amount * 100, 2) if amount else None
-    last_lot_pnl_pct = _assistant_number(last_buy.get("pnlPct"))
+    total_pnl_pct = dca_state["portfolio_pnl_pct"]
+    last_lot_pnl_pct = dca_state["last_lot_pnl_pct"]
     change_from_last_entry = round((current_price - last_entry) / last_entry * 100, 2) if current_price and last_entry else None
     dip_total = _assistant_number((dip or {}).get("total"))
-    trigger_from_last_entry = change_from_last_entry is not None and change_from_last_entry <= -float(settings["dca_loss_pct"])
-    trigger_from_total = total_pnl_pct is not None and total_pnl_pct <= -float(settings["dca_loss_pct"])
-    dip_ok = dip_total is not None and dip_total >= float(settings["dca_dip_min"])
-    blocking = [
-        name for name, state in (("daily_bad", chart_state.get("daily_state")), ("weekly_bad", chart_state.get("weekly_state")))
-        if str(state or "").lower() == "bad"
-    ]
-    dca_status = "not_eligible"
-    if trigger_from_total and dip_ok:
-        dca_status = "conditional" if blocking else "eligible"
     exported = _assistant_compact({
         "ticker": symbol,
         "name": next((p.get("name") for p in lots if p.get("name")), symbol),
@@ -9726,6 +9769,8 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "profit_loss_pct": total_pnl_pct,
             "invested_weight_pct": round(amount / total_equity * 100, 2) if total_equity else None,
             "market_value_weight_pct": round((amount + pnl) / total_equity * 100, 2) if total_equity else None,
+            "invested_weight_stock_etf_book_pct": round(_position_weight(amount, stock_etf_book_value), 2) if _position_weight(amount, stock_etf_book_value) is not None else None,
+            "market_value_weight_stock_etf_book_pct": round(_position_weight(amount + pnl, stock_etf_book_value), 2) if _position_weight(amount + pnl, stock_etf_book_value) is not None else None,
             "last_buy": {
                 "opened_at": last_buy.get("openDateTime") or None,
                 "entry_price": last_entry,
@@ -9751,16 +9796,16 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
         }),
         "solvency": _assistant_solvency(symbol),
         "dca_context": {
-            "status": dca_status,
+            "status": dca_state["status"],
             "portfolio_pnl_pct": total_pnl_pct,
             "last_lot_pnl_pct": last_lot_pnl_pct,
             "change_from_last_entry_pct": change_from_last_entry,
             "dca_drawdown_from_last_entry_pct": change_from_last_entry if change_from_last_entry is not None and change_from_last_entry < 0 else None,
-            "trigger_met_from_last_entry": trigger_from_last_entry,
-            "trigger_met_on_total_position": trigger_from_total,
-            "dip_score_threshold_met": dip_ok,
-            "positive_conditions": [name for name, met in (("portfolio_drawdown", trigger_from_total), ("dip_score", dip_ok)) if met],
-            "blocking_conditions": blocking,
+            "trigger_met_from_last_tranche": dca_state["trigger_met"],
+            "trigger_met_on_total_position": dca_state["trigger_met_on_total_position"],
+            "dip_score_threshold_met": dca_state["dip_score_threshold_met"],
+            "positive_conditions": [name for name, met in (("last_tranche_drawdown", dca_state["trigger_met"]), ("dip_score", dca_state["dip_score_threshold_met"])) if met],
+            "blocking_conditions": dca_state["blocking_conditions"],
         },
     })
     build = build or {"state": "unclassified"}
@@ -9847,7 +9892,7 @@ def get_assistant_export(account: str = "1"):
     }
 
     total_equity = summary["equity"]
-    build_rows, _, _ = _build_position_rows([
+    build_rows, stock_etf_book_value, _ = _build_position_rows([
         position for lots in positions_by_symbol.values() for position in lots
     ])
     build_by_symbol = {row["symbol"]: row for row in build_rows}
@@ -9855,7 +9900,7 @@ def get_assistant_export(account: str = "1"):
     for symbol in sorted(positions_by_symbol):
         row = _assistant_export_position(symbol, positions_by_symbol[symbol], scanner_by_symbol.get(symbol) or {},
                                          dip_scores.get(symbol) or {}, earnings_by_symbol.get(symbol) or {}, settings,
-                                         total_equity, build_by_symbol.get(symbol) or {"state": "unclassified"})
+                                          total_equity, stock_etf_book_value, build_by_symbol.get(symbol) or {"state": "unclassified"})
         portfolio.append(row)
 
     portfolio_by_symbol = {row["ticker"]: row for row in portfolio}
@@ -10008,7 +10053,9 @@ def get_assistant_export(account: str = "1"):
         "current_value": "Invested value plus open P/L. It is the dashboard market-value approximation for concentration review.",
         "invested_weight_pct": "Original invested value divided by total dashboard equity.",
         "market_value_weight_pct": "Current value divided by total dashboard equity, including asset classes excluded from this analysis; use this for concentration review.",
-        "dca_context": "Explicit DCA evidence. eligible means current conditions pass; conditional means positive conditions exist but chart blockers require manual review.",
+        "invested_weight_stock_etf_book_pct": "Original invested value divided by the Stock/ETF book; this is the DCA and BUILD concentration basis, excluding crypto.",
+        "market_value_weight_stock_etf_book_pct": "Current value divided by the Stock/ETF book, excluding crypto.",
+        "dca_context": "Explicit DCA evidence. The decision is the latest lot P/L at or below the configured last-tranche threshold; unknown means latest-lot data is unavailable. eligible means current conditions pass; conditional means chart blockers require manual review.",
         "change_from_last_entry_pct": "Signed price change from the latest open lot entry. Positive means current price is above that entry; negative means below it.",
         "dca_drawdown_from_last_entry_pct": "Negative-only price change from the latest open lot entry. Omitted when the current price is at or above that entry.",
         "solvency": "Balance-sheet risk from the Finnhub metric snapshot: net_debt_to_ebitda and interest_coverage are the two that decide whether a loss is a dip or a solvency problem. Read only from cached insights, so it is absent for tickers whose insights card was never opened; data_age_days says how old the numbers are. Absent means unknown, never healthy.",
@@ -10021,7 +10068,8 @@ def get_assistant_export(account: str = "1"):
         "currency": "USD",
         "strategy": {
             "name": "DIP Strategy v3",
-            "dca_trigger_pct": -float(settings["dca_loss_pct"]),
+            "dca_trigger_pct": -float(settings["dca_last_tranche_pct"]),
+            "dca_aggregate_loss_pct_information_only": -float(settings["dca_loss_pct"]),
             "dca_min_dip_score": settings["dca_dip_min"],
             "holding_horizon": "up to 5 years",
             "buy_only": True,

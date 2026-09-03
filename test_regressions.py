@@ -548,7 +548,7 @@ class AssistantExportRegressionTests(unittest.TestCase):
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.4")
+        self.assertEqual(payload["schema_version"], "1.5")
         # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
         self.assertEqual(requested_accounts, ["1"])
         self.assertEqual(payload["analysis_scope"]["account"], "1")
@@ -609,7 +609,7 @@ class AssistantExportRegressionTests(unittest.TestCase):
               "pnlPct": -20, "openRate": 100, "currentRate": 80, "openDateTime": "2026-07-01T12:00:00Z"}],
             {"recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Good"}, "weekly": {"status": "Good"}}},
             {"total": 100, "rank": 1},
-            {}, {"dca_loss_pct": 15, "dca_dip_min": 90}, 1000,
+            {}, {"dca_loss_pct": 15, "dca_last_tranche_pct": 20, "dca_dip_min": 90}, 1000, 100,
             {"position_class": "CORE", "target_weight": 60, "target_source": "manual", "gap_pct": 40, "state": "build"},
         )
         self.assertEqual(position["dca_context"]["status"], "eligible")
@@ -618,6 +618,91 @@ class AssistantExportRegressionTests(unittest.TestCase):
             "position_class": "CORE", "target_weight": 60, "target_source": "manual",
             "gap_pct": 40, "state": "build",
         })
+
+    def test_dca_last_tranche_rule_rejects_four_ttd_shape(self):
+        # Documented FOUR/TTD failure shape: aggregate loss, but newest tranche is profitable.
+        state = tb._dca_trigger_state([
+            {"amount": 100, "pnl": -30, "pnlPct": -30, "openDateTime": "2026-01-01T00:00:00Z"},
+            {"amount": 100, "pnl": 7.2, "pnlPct": 7.2, "openDateTime": "2026-08-01T00:00:00Z"},
+        ], 100, {}, {"dca_loss_pct": 15, "dca_last_tranche_pct": 20, "dca_dip_min": 95})
+        self.assertEqual(state["portfolio_pnl_pct"], -11.4)
+        self.assertFalse(state["trigger_met"])
+        self.assertEqual(state["status"], "not_eligible")
+
+    def test_dca_last_tranche_at_threshold_with_dip_is_candidate(self):
+        state = tb._dca_trigger_state([
+            {"amount": 100, "pnl": -20, "pnlPct": -20, "openDateTime": "2026-08-01T00:00:00Z"},
+        ], 95, {}, {"dca_loss_pct": 15, "dca_last_tranche_pct": 20, "dca_dip_min": 95})
+        self.assertTrue(state["trigger_met"])
+        self.assertEqual(state["status"], "eligible")
+
+    def test_dca_missing_latest_lot_data_is_explicit_unknown(self):
+        state = tb._dca_trigger_state([
+            {"amount": 100, "pnl": -30, "openDateTime": "2026-08-01T00:00:00Z"},
+        ], 100, {}, {"dca_loss_pct": 15, "dca_last_tranche_pct": 20, "dca_dip_min": 95})
+        self.assertEqual(state["status"], "unknown")
+        self.assertFalse(state["trigger_met"])
+
+    def test_dca_route_and_export_share_same_verdict(self):
+        lots = [
+            {"symbol": "FOUR", "name": "Four", "type": "Stock", "amount": 100, "pnl": -30,
+             "pnlPct": -30, "openDateTime": "2026-01-01T00:00:00Z"},
+            {"symbol": "FOUR", "name": "Four", "type": "Stock", "amount": 100, "pnl": 7.2,
+             "pnlPct": 7.2, "openDateTime": "2026-08-01T00:00:00Z"},
+        ]
+        settings = {**tb.DASH_SETTINGS_DEFAULTS, "dca_dip_min": 95, "dca_last_tranche_pct": 20}
+        with (
+            patch.object(tb, "get_portfolio", return_value={"positions": lots, "summary": {}}),
+            patch.object(tb, "load_dip_scores", return_value={"FOUR": {"total": 100}}),
+            patch.object(tb, "_dash_settings", return_value=settings),
+            patch.object(tb, "_load_position_classes", return_value={}),
+        ):
+            card = tb.get_dca_candidates(account="1")
+        exported = tb._assistant_export_position("FOUR", lots, {}, {"total": 100}, {}, settings, 1000, 200)
+        self.assertEqual(card["candidates"], [])
+        self.assertEqual(exported["dca_context"]["status"], "not_eligible")
+
+    def test_dca_route_and_export_agree_when_chart_health_is_bad(self):
+        """Rovnaké vstupy musia dať rovnaký verdikt aj pri pokazenom grafe.
+
+        Karta pôvodne posielala helperu prázdny chart_state, takže pri
+        `daily_bad` hlásila `eligible`, kým export `conditional` — tá istá
+        funkcia, iné vstupy. Tento test to drží zamknuté."""
+        lots = [
+            {"symbol": "MU", "name": "Micron", "type": "Stock", "amount": 100, "pnl": -25,
+             "pnlPct": -25, "openDateTime": "2026-08-01T00:00:00Z"},
+        ]
+        settings = {**tb.DASH_SETTINGS_DEFAULTS, "dca_dip_min": 95, "dca_last_tranche_pct": 20}
+        scanner_cache = {"results": [{"ticker": "MU", "chart_health": {
+            "daily": {"status": "Bad"}, "weekly": {"status": "OK"}}}]}
+        with (
+            patch.object(tb, "get_portfolio", return_value={"positions": lots, "summary": {}}),
+            patch.object(tb, "load_dip_scores", return_value={"MU": {"total": 110}}),
+            patch.object(tb, "_dash_settings", return_value=settings),
+            patch.object(tb, "_load_position_classes", return_value={}),
+            patch.object(tb, "load_scanner_cache", return_value=scanner_cache),
+        ):
+            # Priame volanie route obchádza FastAPI, takže Query defaulty treba dodať ručne.
+            card = tb.get_dca_candidates(account="1", loss_pct=15, dip_min=95, max_weight=10, refresh=0)
+        chart_state = tb._assistant_chart_state(scanner_cache["results"][0])
+        exported = tb._assistant_export_position(
+            "MU", lots, scanner_cache["results"][0], {"total": 110}, {}, settings, 1000, 200)
+
+        self.assertEqual(len(card["candidates"]), 1)
+        self.assertEqual(card["candidates"][0]["dca_status"], "conditional")
+        self.assertEqual(exported["dca_context"]["status"], "conditional")
+        self.assertEqual(card["candidates"][0]["dca_status"],
+                         exported["dca_context"]["status"])
+
+    def test_weight_helper_keeps_build_weight_identical(self):
+        rows, book_value, _ = tb._build_position_rows([
+            {"symbol": "AAPL", "type": "Stock", "amount": 2000, "pnl": 0},
+            {"symbol": "VWCE", "type": "ETF", "amount": 2000, "pnl": 0},
+            {"symbol": "BTC", "type": "Crypto", "amount": 26000, "pnl": 0},
+        ])
+        self.assertEqual(book_value, 4000)
+        self.assertEqual(tb._position_weight(2000, book_value), 50.0)
+        self.assertEqual(next(row for row in rows if row["symbol"] == "AAPL")["weight_pct"], 50.0)
 
 
 class FairValueRegressionTests(unittest.TestCase):

@@ -373,7 +373,10 @@ function buildPositionSizing(ticker, data) {
   const riskDollars = cash * (riskPct / 100);
   let shares = Math.floor(riskDollars / stopDist);
   let positionUSD = shares * close;
-  const maxPositionUSD = cash * (maxWeight / 100);
+  // dca_max_weight is the Stock/ETF-book concentration ceiling, never account cash/equity.
+  const stockEtfBook = Object.values(_holdings || {}).reduce((sum, holding) => sum + (Number(holding?.amount) || 0), 0);
+  const existingPosition = Number((_holdings || {})[String(ticker || '').toUpperCase()]?.amount) || 0;
+  const maxPositionUSD = Math.max(0, stockEtfBook * (maxWeight / 100) - existingPosition);
   let capped = false;
   if (positionUSD > maxPositionUSD) {
     shares = Math.floor(maxPositionUSD / close);
@@ -440,7 +443,7 @@ function buildVerdictBrakes(ticker, data, insights, market) {
       const weightPct = totalAmount > 0 ? (Number(h.amount) || 0) / totalAmount * 100 : null;
       const maxW = Number(dashSettings?.dca_max_weight) || 10;
       if (weightPct != null && weightPct >= maxW) {
-        brakes.push(`Titul už držíš s váhou ${weightPct.toFixed(1)} % portfólia (prah ${maxW} %) — ďalší nákup zvyšuje koncentráciu.`);
+        brakes.push(`Titul už držíš s váhou ${weightPct.toFixed(1)} % Stock/ETF knihy (prah ${maxW} %) — ďalší nákup zvyšuje koncentráciu.`);
       }
     }
   } catch (e) {}

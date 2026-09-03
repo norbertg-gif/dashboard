@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260904-011258">
+<link rel="stylesheet" href="/dashboard.css?v=20260904-014629">
 </head>
 <body data-main-tab="home">
 
@@ -421,11 +421,13 @@
   <div id="settings-modal">
     <h2>⚙ Nastavenia prahov</h2>
     <div class="settings-rows">
-      <label>DCA — strata pozície ≥ <span class="settings-unit">%</span>
+      <label>DCA — strata celej pozície ≥ <span class="settings-unit">%</span> <span class="settings-unit">(info)</span>
         <input id="set-dca-loss" type="number" min="1" max="90" step="1"></label>
+      <label>DCA — posledná tranža ≤ −<span class="settings-unit">%</span>
+        <input id="set-dca-last-tranche" type="number" min="1" max="90" step="1"></label>
       <label>DCA — minimálne DIP skóre
         <input id="set-dca-dip" type="number" min="0" max="200" step="1"></label>
-      <label>DCA — max. váha pozície <span class="settings-unit">% equity</span>
+      <label>DCA — max. váha pozície <span class="settings-unit">% Stock/ETF knihy</span>
         <input id="set-dca-weight" type="number" min="1" max="100" step="1"></label>
       <label>Pozornosť — denný pohyb ≥ <span class="settings-unit">%</span>
         <input id="set-attention-pct" type="number" min="0.1" max="50" step="0.1"></label>
@@ -501,16 +503,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260904-011258"></script>
-  <script src="/js/live.js?v=20260904-011258"></script>
-  <script src="/js/portfolio.js?v=20260904-011258"></script>
-  <script src="/js/watchlist.js?v=20260904-011258"></script>
-  <script src="/js/scanner-table-sort.js?v=20260904-011258"></script>
-  <script src="/js/scanner.js?v=20260904-011258"></script>
-  <script src="/js/predictive.js?v=20260904-011258"></script>
-  <script src="/js/verdict.js?v=20260904-011258"></script>
-  <script src="/js/home.js?v=20260904-011258"></script>
-  <script src="/js/charts.js?v=20260904-011258"></script>
-  <script src="/js/main.js?v=20260904-011258"></script>
+  <script src="/js/core.js?v=20260904-014629"></script>
+  <script src="/js/live.js?v=20260904-014629"></script>
+  <script src="/js/portfolio.js?v=20260904-014629"></script>
+  <script src="/js/watchlist.js?v=20260904-014629"></script>
+  <script src="/js/scanner-table-sort.js?v=20260904-014629"></script>
+  <script src="/js/scanner.js?v=20260904-014629"></script>
+  <script src="/js/predictive.js?v=20260904-014629"></script>
+  <script src="/js/verdict.js?v=20260904-014629"></script>
+  <script src="/js/home.js?v=20260904-014629"></script>
+  <script src="/js/charts.js?v=20260904-014629"></script>
+  <script src="/js/main.js?v=20260904-014629"></script>
 </body>
 </html>

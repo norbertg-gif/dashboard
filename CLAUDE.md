@@ -141,7 +141,19 @@ These were already in the codebase and need to stay fixed:
    **Návrh:** viacmetrikový prah + sektorová výnimka pre financie/banky. Ak sa
    nechá jednometrikový, používateľ ho prestane sledovať do troch týždňov a pole
    bude zbytočné. Prahy patria medzi ⚙ nastavenia, nie natvrdo.
-   **Druhý nález — `strategy.dca_trigger_pct` je v exporte stále `-15`**, hoci
+   **Druhý nález — VYRIEŠENÉ 2026-09-04.** Rozhoduje `dca_last_tranche_pct`
+   (default 20) na POSLEDNEJ tranži, cez jediný helper `_dca_trigger_state()`,
+   ktorý volá `/api/portfolio/dca` aj AI export. Agregát (`dca_loss_pct`, 15)
+   ostáva informatívny. Chýbajúce P/L poslednej tranže dáva explicitný stav
+   `unknown`, nie tiché `not_eligible`. Do helpera ide chart health na OBOCH
+   povrchoch — karta predtým posielala prázdny stav, takže pri `daily_bad`
+   hlásila `eligible`, kým export `conditional`; regresný test to drží
+   zamknuté. Váhy sa všade porovnávajú voči Stock/ETF knihe (`_position_weight`),
+   nie voči equity — 10 % equity bolo pri krypte ~30 % akciovej knihy, takže
+   brzda `dca_max_weight` na DCA karte prakticky nikdy nezabrala. Export si
+   PONECHAL pôvodné equity polia (číta ich týždenná analýza) a book-based
+   pridal vedľa nich; schéma 1.5. Pôvodný popis:
+   **`strategy.dca_trigger_pct` bol v exporte `-15`**, hoci
    dohodnuté (2026-08-09) a v `CLAUDE_investicna_analyza.md` zapísané je
    **−20 % na POSLEDNEJ TRANŽI**, nie −15 % na celej pozícii. Sú to dve rôzne
    definície, nie iné číslo tej istej — na dátach 2026-08-09 by stará pustila

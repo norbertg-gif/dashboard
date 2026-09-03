@@ -520,7 +520,7 @@ function dcaCardHead(data = null) {
   const collapsed = isPortfolioDcaCollapsed();
   const ageTxt = data?.dip_updated_at ? ` · DIP dáta ${fmtImportTime(data.dip_updated_at)}` : '';
   const metaTxt = data
-    ? `strata ≥ ${th.loss_pct}% · DIP ≥ ${th.dip_min} · váha &lt; ${th.max_weight}%${ageTxt}`
+    ? `posledná tranža ≤ −${th.last_tranche_pct}% · DIP ≥ ${th.dip_min} · váha &lt; ${th.max_weight}% Stock/ETF knihy${ageTxt}`
     : 'DCA kandidáti pre aktuálny účet';
   return `<div class="risk-corr-head dca-head">
     <button class="btn dca-toggle" onclick="togglePortfolioDca()" title="${collapsed ? 'Rozbaliť DCA kandidátov' : 'Zbaliť DCA kandidátov'}">${collapsed ? '+' : '−'}</button>
@@ -583,6 +583,7 @@ const DCA_FLAG_META = {
   concentrated: { cls: 'warn',    label: 'Veľká váha',   tip: 'DCA podmienky OK, ale pozícia je už veľká časť equity — koncentračné riziko' },
   value_trap:   { cls: 'bad',     label: 'Pozor',        tip: 'Trigger splnený, ale slabé DIP skóre — možný value trap' },
   no_data:      { cls: 'neutral', label: 'Mimo dát',     tip: 'V strate, ale ticker nie je v DIP datasete — posúď manuálne' },
+  unknown:      { cls: 'neutral', label: 'Neznáme',      tip: 'Posledná tranža nemá použiteľný dátum alebo P/L; DCA verdikt sa nedá určiť.' },
 };
 
 function renderDcaCard(data) {
@@ -597,13 +598,14 @@ function renderDcaCard(data) {
       c.dca ? `${c.dca} DCA` : '',
       c.concentrated ? `${c.concentrated} veľká váha` : '',
       c.value_trap ? `${c.value_trap} pozor` : '',
-      c.no_data ? `${c.no_data} mimo dát` : '',
+    c.no_data ? `${c.no_data} mimo dát` : '',
+    c.unknown ? `${c.unknown} neznáme` : '',
     ].filter(Boolean).join(' · ') || 'žiadni kandidáti';
     wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
     return;
   }
   if (!list.length) {
-    wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:6px 0;">Žiadna pozícia nie je v strate ≥ ${th.loss_pct}%. Nič na zvažovanie DCA.</div>`;
+    wrap.innerHTML = `${head}<div style="color:var(--muted);font-size:11px;padding:6px 0;">Žiadna pozícia nemá poslednú tranžu pri alebo pod −${th.last_tranche_pct}%. Nič na zvažovanie DCA.</div>`;
     return;
   }
   const c = data.counts || {};
@@ -612,6 +614,7 @@ function renderDcaCard(data) {
     c.concentrated ? `<span class="dca-pill warn">${c.concentrated}× veľká váha</span>` : '',
     c.value_trap ? `<span class="dca-pill bad">${c.value_trap}× pozor</span>` : '',
     c.no_data ? `<span class="dca-pill neutral">${c.no_data}× mimo dát</span>` : '',
+    c.unknown ? `<span class="dca-pill neutral">${c.unknown}× neznáme</span>` : '',
   ].filter(Boolean).join('');
   // Bez kliknutia ostáva backendové poradie (flag priorita, potom strata);
   // triedenie sa aktivuje až explicitným klikom na hlavičku.
@@ -623,7 +626,7 @@ function renderDcaCard(data) {
       <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
       <td><span class="port-sym">${escHtml(x.symbol)}</span></td>
       <td class="r"><span class="port-neg">${x.pnl_pct.toFixed(1)}%</span></td>
-      <td class="r">${x.weight_pct.toFixed(1)}%</td>
+       <td class="r">${x.weight_pct != null ? `${x.weight_pct.toFixed(1)}%` : '—'}</td>
       <td class="r">${escHtml(dipTxt)}</td>
       <td class="r" style="color:var(--muted);">${x.trades}×</td>
     </tr>`;

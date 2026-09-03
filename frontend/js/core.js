@@ -416,6 +416,7 @@ function renderErrorBox(el, msg, retryFn) {
 // kým sa nedotiahne /api/settings.
 let dashSettings = {
   dca_loss_pct: 15,
+  dca_last_tranche_pct: 20,
   dca_dip_min: 95,
   dca_max_weight: 10,
   attention_daily_pct: 2,
@@ -440,6 +441,7 @@ async function loadDashSettings() {
 let dashSettingsDefaults = { ...dashSettings };
 const _SETTINGS_INPUTS = [
   ['set-dca-loss', 'dca_loss_pct'],
+  ['set-dca-last-tranche', 'dca_last_tranche_pct'],
   ['set-dca-dip', 'dca_dip_min'],
   ['set-dca-weight', 'dca_max_weight'],
   ['set-attention-pct', 'attention_daily_pct'],
