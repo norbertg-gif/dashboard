@@ -36,3 +36,12 @@ memtest_data/
 market_scanner_cache.json
 scanner_auto_rescan.json
 scanner_daily_bars/
+
+# Lokálne runtime dáta a pracovné súbory, ktoré nikdy nepatria do repa.
+# presets.json žije na /data disku (viď CLAUDE.md "File touch policy") — bolo
+# len netrackované, nie ignorované, takže jedno `git add .` by ho commitlo.
+presets.json
+ml_accuracy_eval.py
+API Endpoints v2.json
+marketstack API Endpoints v2.json
+Trading Dashboard.html
