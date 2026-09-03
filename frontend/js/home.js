@@ -123,16 +123,15 @@ async function renderHomeView(force = false) {
       fetch(`${API}/api/movers?account=${acct}&n=6&direction=down`).then(r => r.json()),
       fetch(`${API}/api/investor/plan`).then(r => r.json()),
       fetch(`${API}/api/earnings/calendar?days=14`).then(r => r.json()),
-      fetch(`${API}/api/scanner/nasdaq/results`).then(r => r.json()),
       // Home je jednorazový snapshot pri otvorení tabu (nie priebežne live ako
       // Portfólio, ktoré cache dorovnáva WebSocket tickami) — refresh=1 obchádza
       // 24h POSITIONS_CACHE_TTL, aby KPI karty neukazovali starý stav.
       fetch(`${API}/api/etoro/portfolio?account=1&refresh=1`).then(r => r.json()),
       fetch(`${API}/api/etoro/portfolio?account=2&refresh=1`).then(r => r.json()),
     ]);
-    const [moversUp, moversDown, plan, earnings, scan, port1, port2] =
+    const [moversUp, moversDown, plan, earnings, port1, port2] =
       results.map(r => (r.status === 'fulfilled' ? r.value : null));
-    _homeLastData = { moversUp, moversDown, plan, earnings, scan, port1, port2 };
+    _homeLastData = { moversUp, moversDown, plan, earnings, port1, port2 };
     _homeLastFetchMs = Date.now();
     homeCacheWrite(_homeLastData);
     // Nasej čerstvý snapshot do zdieľaného portfolioAccountData — live.js ho
@@ -296,17 +295,12 @@ function homeEarningsHtml(earnings) {
     </div>`).join('')}</div>`;
 }
 
-function homeDipHtml(scan) {
-  const rows = (scan?.cache?.results || [])
-    .filter(r => Number.isFinite(Number(r.dip_total)))
-    .sort((a, b) => Number(b.dip_total) - Number(a.dip_total))
-    .slice(0, 6);
-  if (!rows.length) return '<div class="home-empty">Žiadny DIP import.</div>';
-  return `<div class="home-list">${rows.map(r => `
-    <div class="home-list-row" onclick="homeOpenTicker('${escHtml(r.ticker)}')">
-      <span class="home-plan-ticker">${escHtml(r.ticker)}</span>
-      <span class="scanner-label ${r.dip_label === 'VERY STRONG' || r.dip_label === 'STRONG' ? 'strong' : r.dip_label === 'WATCH' ? 'watch' : 'weak'}">${escHtml(r.dip_label || '')}</span>
-      <span class="home-dip-score mono">${Math.round(Number(r.dip_total))}</span>
+function homePlanRowsHtml(rows, emptyText) {
+  if (!rows?.length) return `<div class="home-empty">${emptyText}</div>`;
+  return `<div class="home-list">${rows.map(it => `
+    <div class="home-list-row" onclick="homeOpenTicker('${escHtml(it.ticker)}')">
+      <span class="home-plan-ticker">${escHtml(it.ticker)}</span>
+      <span class="home-plan-summary">${escHtml(it.summary || '')}</span>
     </div>`).join('')}</div>`;
 }
 
@@ -832,9 +826,11 @@ function homeContentHtml(data) {
       <div class="home-grid">
         ${homeCard('Príspevok k výnosu', homeContributionBlockHtml(data.port1, data.port2), { className: 'home-card-contrib' })}
         ${homeCard('Denné pohyby', homeMoversHtml(data.moversUp, data.moversDown), { className: 'home-card-movers' })}
-        ${homeCard('Pozornosť', homePlanHtml(data.plan), { className: 'home-card-attention' })}
+        ${homeCard('Týždenný plán · Pozri dnes', `${homePlanHtml(data.plan)}
+          <button type="button" class="btn mini" onclick="switchMainTab('scanner')">Otvoriť celý plán</button>`, { className: 'home-card-attention' })}
         ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}
-        ${homeCard('DIP kandidáti', homeDipHtml(data.scan), { className: 'home-card-dip' })}
+        ${homeCard('Možný nákup', homePlanRowsHtml(data.plan?.buy_candidates, 'Plán tento týždeň nenašiel kandidáta na nákup.'), { className: 'home-card-dip' })}
+        ${homeCard('Možné DCA', homePlanRowsHtml(data.plan?.dca, 'Tento týždeň nie je kandidát na DCA.'), { className: 'home-card-dip' })}
       </div>
     </div>`;
 }
