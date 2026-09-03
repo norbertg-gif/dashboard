@@ -96,6 +96,10 @@ const PC_SETUP_CHECKS = [
   },
 ];
 
+// Zoznam nesplnených C1–C4 podmienok. Analytika ho už v texte nevypisuje
+// (zoznam C1–C4 je jediný autoritatívny povrch), ale verdict.js ho používa
+// na svoje vlastné odôvodnenie — klasické skripty zdieľajú globálny scope,
+// takže "nepoužívané v tomto súbore" NIE JE "nepoužívané".
 function predictiveMissingSetup(details) {
   if (!details) return [];
   return PC_SETUP_CHECKS.filter(item => !details[item.key]).map(item => item.label);
@@ -1130,17 +1134,16 @@ function pc_renderDailyExtra(data) {
   const rawScore = Number(data.today_raw_score ?? data.today_score ?? 0) || 0;
   const decision = predictiveDecisionFromData(data);
   const decisionMeta = predictiveDecisionMeta(decision);
-  const missing = predictiveMissingSetup(details);
   const latestSignal = signals.length ? signals[signals.length - 1] : null;
   const latestSignalReturn = predictiveSignalReturn(data, latestSignal);
   const currentNote = (() => {
     if (!data.weekly_bias?.bullish) {
-      return `Weekly bias zatiaľ setup nepotvrdzuje. Technická sila je <strong>${rawScore}/4</strong>${missing.length ? `, chýba ešte: ${missing.join(', ')}.` : '.'}`;
+      return `Weekly bias zatiaľ setup nepotvrdzuje. Technická sila je <strong>${rawScore}/4</strong>.`;
     }
     if (rawScore >= 2) {
       return `Aktuálny setup má rozhodnutie <strong>${decisionMeta.label}</strong> a silu <strong>${rawScore}/4</strong>.`;
     }
-    return `Aktuálne nie je nový signál. Sila je <strong>${rawScore}/4</strong>${missing.length ? `, chýba ešte: ${missing.join(', ')}.` : '.'}`;
+    return `Aktuálne nie je nový signál. Sila je <strong>${rawScore}/4</strong>.`;
   })();
   const fmtSigned = value => {
     const number = Number(value);
@@ -1254,10 +1257,17 @@ function pc_renderDailyExtra(data) {
     const winRateText = row.win_rate != null && Number.isFinite(Number(row.win_rate))
       ? `${Number(row.win_rate).toFixed(0)}%`
       : '--';
+    const pendingCount = Number(row.pending) || 0;
+    if (completedCount === 0) {
+      return `<div class="signal-outcome-card${horizon === 90 ? ' primary-90' : ''}">
+        <div class="signal-outcome-head"><strong>${horizon}D</strong></div>
+        <div class="signal-outcome-note">${pendingCount} signál${pendingCount === 1 ? '' : pendingCount < 5 ? 'y' : 'ov'} čaká na výsledok; zatiaľ nie je vyhodnotený žiadny.</div>
+      </div>`;
+    }
     return `<div class="signal-outcome-card${horizon === 90 ? ' primary-90' : ''}">
       <div class="signal-outcome-head">
         <strong>${horizon}D</strong>
-        <span>${completedCount} vyhodn. · ${Number(row.pending) || 0} pending</span>
+        <span>${completedCount} vyhodn. · ${pendingCount} pending</span>
       </div>
       <div class="signal-outcome-main">
         <span><small>win rate</small>${winRateText}</span>
@@ -1309,6 +1319,8 @@ function pc_renderDailyExtra(data) {
       ${segmentRows(group, pc_signalSegmentHorizon)}
     </div>`;
   };
+  const completedSignalOutcomes = Object.values(outcomeSummary)
+    .some(row => (Number(row?.completed) || 0) > 0);
   const detailRows = evaluated.slice().reverse().slice(0, 5).map(s => {
     const col = s.outcome === 'win'  ? CHART_COLORS.up
              : s.outcome === 'loss' ? CHART_COLORS.down
@@ -1456,12 +1468,13 @@ function pc_renderDailyExtra(data) {
           <span>ANALYTIKA SIGNÁLOV</span>
           <span class="signal-segment-tabs" onclick="event.stopPropagation()">${segmentHorizonButtons}</span>
         </summary>
-        <div class="signal-segment-tables">
+        ${completedSignalOutcomes ? `<div class="signal-segment-tables">
           ${segmentTable('tier')}
           ${segmentTable('score')}
           ${segmentTable('regime')}
         </div>
-        <div class="signal-outcome-note">N = počet vyhodnotených signálov. Vzorka pod 5 je označená ako predbežná.</div>
+        <div class="signal-outcome-note">N = počet vyhodnotených signálov. Vzorka pod 5 je označená ako predbežná.</div>`
+          : '<div class="signal-outcome-note">Zatiaľ nie je vyhodnotený žiadny signál; segmentová analytika sa doplní po uzavretí 90D výsledkov.</div>'}
       </details>
 
       <!-- ── MULTI-TIMEFRAME ALIGNMENT ──────────────────────────── -->
@@ -1853,7 +1866,6 @@ function pc_renderDecisionBar(data) {
   const regime = data.regime || {};
   const latestSignal = (data.daily_buy_signals || []).length ? data.daily_buy_signals[data.daily_buy_signals.length - 1] : null;
   const latestReturn = predictiveSignalReturn(data, latestSignal);
-  const missing = predictiveMissingSetup(details);
   const regimeText = regime.regime
     ? `${regime.regime}${regime.confidence != null ? ` ${Math.round(regime.confidence * 100)}%` : ''}`
     : 'n/a';
@@ -1861,9 +1873,9 @@ function pc_renderDecisionBar(data) {
   const wtShort = weeklyTrendShortText(wt, wb.bullish);
   let summary = '';
   if (!wb.bullish) {
-    summary = `Dlhodobý trend je ${wtShort.toLowerCase()} — nový long vstup zatiaľ nemá potvrdenie. Technická sila ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
+    summary = `Dlhodobý trend je ${wtShort.toLowerCase()} — nový long vstup zatiaľ nemá potvrdenie. Technická sila ${rawScore}/4.`;
   } else if (rawScore < 2) {
-    summary = `Trend ${wtShort.toLowerCase()}, ale nový signál ešte nevznikol. Aktuálna sila ${rawScore}/4${missing.length ? `, chýba ${missing.join(', ')}.` : '.'}`;
+    summary = `Trend ${wtShort.toLowerCase()}, ale nový signál ešte nevznikol. Aktuálna sila ${rawScore}/4.`;
   } else {
     summary = `${meta.label} setup je aktívny v trende ${wtShort.toLowerCase()}. ${latestSignal ? `Posledný uzavretý signál bol ${predictiveSignalAgeLabel(latestSignal)}.` : 'Zatiaľ bez staršieho uzavretého signálu.'}`;
   }

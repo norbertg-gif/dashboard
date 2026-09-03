@@ -2682,19 +2682,10 @@ def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
             "positions": len(symbols)}
 
 
-@app.get("/api/portfolio/build")
-def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
-    """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
-
-    Deterministické odčítanie, ZÁMERNE žiadne nové skóre: gap = target − aktuálna
-    váha. Kompozitné Add Score je fáza 2 a čaká na dátové pokrytie. Kapitál má
-    hierarchiu DCA → BUILD → NEW, takže toto je druhý stupeň, nie náhrada DCA.
-
-    Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
-    nie voči equity účtu — krypto je zo stratégie vylúčené."""
-    portfolio = get_portfolio(account=account, refresh=refresh)
+def _build_position_rows(positions: list[dict]) -> tuple[list[dict], float, dict]:
+    """Compute the shared BUILD state from one processed portfolio position list."""
     by_sym: dict[str, dict] = {}
-    for pos in portfolio.get("positions", []):
+    for pos in positions:
         if str(pos.get("type") or "").lower() not in ("stock", "etf"):
             continue
         sym = (pos.get("symbol") or str(pos.get("instrumentId"))).upper()
@@ -2767,6 +2758,21 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
     # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
     state_order = {"build": 0, "at_target": 1, "over_max": 2, "no_target": 3, "unclassified": 4}
     rows.sort(key=lambda r: (state_order.get(r["state"], 9), -(r["gap_pct"] or 0), r["symbol"]))
+    return rows, book_value, class_ratios
+
+
+@app.get("/api/portfolio/build")
+def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
+    """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
+
+    Deterministické odčítanie, ZÁMERNE žiadne nové skóre: gap = target − aktuálna
+    váha. Kompozitné Add Score je fáza 2 a čaká na dátové pokrytie. Kapitál má
+    hierarchiu DCA → BUILD → NEW, takže toto je druhý stupeň, nie náhrada DCA.
+
+    Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
+    nie voči equity účtu — krypto je zo stratégie vylúčené."""
+    portfolio = get_portfolio(account=account, refresh=refresh)
+    rows, book_value, class_ratios = _build_position_rows(portfolio.get("positions", []))
     classified = [r for r in rows if r["position_class"]]
     return {
         "account": account,
@@ -9595,7 +9601,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.3"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.4"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -9678,7 +9684,7 @@ def _assistant_days_since(timestamp: str | None) -> int | None:
 
 def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
                                dip: dict, earnings: dict, settings: dict,
-                               total_equity: float) -> dict:
+                               total_equity: float, build: dict | None = None) -> dict:
     amount = sum(float(p.get("amount") or 0) for p in lots)
     pnl = sum(float(p.get("pnl") or 0) for p in lots)
     current_rate = next((p.get("currentRate") for p in reversed(lots) if p.get("currentRate") is not None), None)
@@ -9708,7 +9714,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     dca_status = "not_eligible"
     if trigger_from_total and dip_ok:
         dca_status = "conditional" if blocking else "eligible"
-    return _assistant_compact({
+    exported = _assistant_compact({
         "ticker": symbol,
         "name": next((p.get("name") for p in lots if p.get("name")), symbol),
         "asset_type": next((p.get("type") for p in lots if p.get("type")), None),
@@ -9757,6 +9763,16 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "blocking_conditions": blocking,
         },
     })
+    build = build or {"state": "unclassified"}
+    # Keep unavailable BUILD fields explicit: "no target" is not the same as a zero gap.
+    exported["build"] = {
+        "position_class": build.get("position_class"),
+        "target_weight": build.get("target_weight"),
+        "target_source": build.get("target_source"),
+        "gap_pct": build.get("gap_pct"),
+        "state": build.get("state", "unclassified"),
+    }
+    return exported
 
 
 @app.get("/api/assistant/export")
@@ -9831,10 +9847,15 @@ def get_assistant_export(account: str = "1"):
     }
 
     total_equity = summary["equity"]
+    build_rows, _, _ = _build_position_rows([
+        position for lots in positions_by_symbol.values() for position in lots
+    ])
+    build_by_symbol = {row["symbol"]: row for row in build_rows}
     portfolio = []
     for symbol in sorted(positions_by_symbol):
         row = _assistant_export_position(symbol, positions_by_symbol[symbol], scanner_by_symbol.get(symbol) or {},
-                                         dip_scores.get(symbol) or {}, earnings_by_symbol.get(symbol) or {}, settings, total_equity)
+                                         dip_scores.get(symbol) or {}, earnings_by_symbol.get(symbol) or {}, settings,
+                                         total_equity, build_by_symbol.get(symbol) or {"state": "unclassified"})
         portfolio.append(row)
 
     portfolio_by_symbol = {row["ticker"]: row for row in portfolio}

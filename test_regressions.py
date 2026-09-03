@@ -422,6 +422,18 @@ class PortfolioBuildRegressionTests(unittest.TestCase):
         self.assertEqual(rows["VWCE"]["target_weight"], 50.0)
         self.assertEqual(data["manual_targets"], 1)
 
+    def test_shared_helper_matches_build_endpoint_for_same_positions(self):
+        classes = {"AAPL": {"position_class": "CORE", "target_weight": 60}}
+        with (
+            patch.object(tb, "get_portfolio", return_value=self.PORTFOLIO),
+            patch.object(tb, "_load_position_classes", return_value=classes),
+        ):
+            endpoint_rows = {row["symbol"]: row for row in tb.get_build_candidates(account="1")["positions"]}
+            helper_rows = {row["symbol"]: row for row in tb._build_position_rows(self.PORTFOLIO["positions"])[0]}
+        for symbol in endpoint_rows:
+            for key in ("position_class", "target_weight", "target_source", "gap_pct", "state"):
+                self.assertEqual(helper_rows[symbol][key], endpoint_rows[symbol][key])
+
     def test_zero_ratio_class_gets_zero_target_not_a_crash(self):
         with patch.object(tb, "_dash_settings", return_value={
             **tb.DASH_SETTINGS_DEFAULTS, "class_ratio_speculative": 0}):
@@ -532,10 +544,11 @@ class AssistantExportRegressionTests(unittest.TestCase):
             patch.object(tb, "get_investor_inbox", return_value={"generated_at": "now", "items": [{"ticker": "AAPL", "kinds": ["dca", "broken"], "priority": 10, "reasons": [{"title": "Graf potrebuje kontrolu"}]}]}),
             patch.object(tb, "get_earnings_calendar_view", return_value={"items": [{"ticker": "AAPL", "date": "2026-07-15", "days": 4, "in_portfolio": True}]}),
             patch.object(tb, "_read_watchlist_file", return_value=[]),
+            patch.object(tb, "_load_position_classes", return_value={}),
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.3")
+        self.assertEqual(payload["schema_version"], "1.4")
         # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
         self.assertEqual(requested_accounts, ["1"])
         self.assertEqual(payload["analysis_scope"]["account"], "1")
@@ -543,6 +556,10 @@ class AssistantExportRegressionTests(unittest.TestCase):
         self.assertEqual(payload["positions"][0]["ticker"], "AAPL")
         self.assertEqual(payload["positions"][0]["earnings"]["date"], "2026-07-15")
         self.assertEqual(payload["positions"][0]["dca_context"]["change_from_last_entry_pct"], 10.0)
+        self.assertEqual(payload["positions"][0]["build"], {
+            "position_class": None, "target_weight": None, "target_source": None,
+            "gap_pct": None, "state": "unclassified",
+        })
         self.assertNotIn("dca_drawdown_from_last_entry_pct", payload["positions"][0]["dca_context"])
         self.assertEqual(payload["attention_items"][0]["action_type"], "chart_review")
         self.assertEqual(payload["analysis_scope"]["exclude_crypto_from_export"], True)
@@ -561,6 +578,12 @@ class AssistantExportRegressionTests(unittest.TestCase):
         rendered = json.dumps(payload)
         self.assertNotIn("positionId", rendered)
         self.assertNotIn("orderId", rendered)
+
+    def test_export_rejects_non_account_scope(self):
+        for account in ("0", "3", "1,2", "all"):
+            with self.assertRaises(HTTPException) as caught:
+                tb.get_assistant_export(account=account)
+            self.assertEqual(caught.exception.status_code, 400)
 
     def test_solvency_comes_from_insights_cache_and_never_fetches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -587,9 +610,14 @@ class AssistantExportRegressionTests(unittest.TestCase):
             {"recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Good"}, "weekly": {"status": "Good"}}},
             {"total": 100, "rank": 1},
             {}, {"dca_loss_pct": 15, "dca_dip_min": 90}, 1000,
+            {"position_class": "CORE", "target_weight": 60, "target_source": "manual", "gap_pct": 40, "state": "build"},
         )
         self.assertEqual(position["dca_context"]["status"], "eligible")
         self.assertEqual(position["dca_context"]["dca_drawdown_from_last_entry_pct"], -20.0)
+        self.assertEqual(position["build"], {
+            "position_class": "CORE", "target_weight": 60, "target_source": "manual",
+            "gap_pct": 40, "state": "build",
+        })
 
 
 class FairValueRegressionTests(unittest.TestCase):

@@ -9,6 +9,31 @@ const verdictCache = new Map();
 let verdictLastData = null;
 let verdictLastTicker = '';
 let verdictLoadSeq = 0;
+let verdictBuildData = null;
+let verdictBuildPromise = null;
+
+async function loadVerdictBuildData() {
+  if (verdictBuildData) return verdictBuildData;
+  if (!verdictBuildPromise) {
+    verdictBuildPromise = fetch('/api/portfolio/build?account=1')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        verdictBuildData = data;
+        return data;
+      })
+      .catch(() => null);
+  }
+  return verdictBuildPromise;
+}
+
+function verdictBuildContext(ticker) {
+  const symbol = String(ticker || '').trim().toUpperCase();
+  const row = (verdictBuildData?.positions || []).find(item => item.symbol === symbol);
+  if (!row || row.state !== 'build') return null;
+  const gap = Number(row.gap_pct);
+  if (!Number.isFinite(gap) || gap <= 0) return null;
+  return { positionClass: row.position_class, targetWeight: row.target_weight, gapPct: gap };
+}
 
 function initVerdictView(preferredTicker = '') {
   const input = document.getElementById('verdictTickerInput');
@@ -157,6 +182,7 @@ function buildInvestorVerdict(ticker, data, insights, market) {
     confidence, positives: positives.slice(0, 2), risks: risks.slice(0, 2), condition,
     brakes: buildVerdictBrakes(ticker, data, insights, market),
     sizing: buildPositionSizing(ticker, data),
+    build: verdictBuildContext(ticker),
     sources, evaluatedAt: new Date() };
 }
 
@@ -319,10 +345,10 @@ function totalPortfolioCash() {
   // Zámerne len Account 1 (nie súčet oboch účtov) — user rozhodnutie.
   try {
     const c1 = Number(portfolioAccountData?.['1']?.summary?.cash);
-    if (Number.isFinite(c1) && c1 > 0) return c1;
+    if (Number.isFinite(c1)) return { known: true, cash: c1 };
     const s1 = Number(etoroSummary?.['1']?.cash);
-    return Number.isFinite(s1) && s1 > 0 ? s1 : null;
-  } catch (e) { return null; }
+    return Number.isFinite(s1) ? { known: true, cash: s1 } : { known: false, cash: null };
+  } catch (e) { return { known: false, cash: null }; }
 }
 
 function buildPositionSizing(ticker, data) {
@@ -330,13 +356,16 @@ function buildPositionSizing(ticker, data) {
   const last = candles?.at?.(-1);
   const close = Number(last?.close);
   const atr = computeAtr14(candles);
-  const cash = totalPortfolioCash();
+  const cashState = totalPortfolioCash();
+  const cash = cashState.cash;
   const riskPct = Number(dashSettings?.risk_per_trade_pct) || 1;
   const stopMult = Number(dashSettings?.atr_stop_mult) || 1.5;
   const maxWeight = Number(dashSettings?.dca_max_weight) || 10;
   if (!Number.isFinite(close) || close <= 0 || !Number.isFinite(atr) || atr <= 0 || !Number.isFinite(cash) || cash <= 0) {
-    return { available: false, reason: !Number.isFinite(cash) || cash <= 0
-      ? 'Chýba voľný cash — otvor Portfólio tab (alebo je účet plne investovaný).'
+    return { available: false, reason: !cashState.known
+      ? 'Voľný cash Účtu 1 ešte nie je načítaný — otvor Portfólio tab.'
+      : !Number.isFinite(cash) || cash <= 0
+        ? 'Účet 1 je plne investovaný; voľný cash je $0.'
       : 'Málo denných sviečok pre ATR14.' };
   }
   const stopDist = stopMult * atr;
@@ -464,6 +493,10 @@ function renderInvestorVerdict(result) {
       <section><h3>Pre</h3><ul>${bullets(result.positives, 'Žiadne silné potvrdenie navyše.')}</ul></section>
       <section><h3>Proti</h3><ul>${bullets(result.risks, 'Nebolo zistené významné varovanie.')}</ul></section>
     </div>
+    ${result.build ? `<section class="verdict-condition">
+      <span>BUILD kandidát</span>
+      <strong>${escHtml(result.ticker)} je pod cieľovou váhou triedy ${escHtml(result.build.positionClass || '—')} o ${result.build.gapPct.toFixed(2)} p. b.${result.build.targetWeight != null ? ` (cieľ ${Number(result.build.targetWeight).toFixed(2)} %).` : ''}</strong>
+    </section>` : ''}
     <section class="verdict-brakes">
       <h3>Prečo to NEkúpiť</h3>
       ${result.brakes?.length
@@ -499,6 +532,8 @@ async function loadVerdict(force = false) {
   content.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
   if (trendContent) trendContent.innerHTML = '<div class="verdict-empty"><span class="spinner"></span> Vyhodnocujem dostupné dáta…</div>';
   try {
+    await loadVerdictBuildData();
+    if (seq !== verdictLoadSeq) return;
     const cached = verdictCache.get(ticker);
     if (!force && cached && Date.now() - cached.at < VERDICT_CACHE_TTL_MS) {
       if (seq !== verdictLoadSeq) return;
