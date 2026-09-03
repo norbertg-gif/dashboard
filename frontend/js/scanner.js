@@ -24,53 +24,114 @@ function isEarningsCalendarCollapsed() { return localStorage.getItem(EARNINGS_CA
 const SCANNER_RADAR_COLLAPSED_KEY = 'td_scanner_radar_collapsed';
 function isScannerRadarCollapsed() { return localStorage.getItem(SCANNER_RADAR_COLLAPSED_KEY) !== '0'; }
 
-const SCANNER_AUX_ORDER_KEY = 'td_scanner_aux_order';
+const SCANNER_AUX_LAYOUT_KEY = 'td_scanner_aux_layout';
+const SCANNER_AUX_DEFAULT_LAYOUT = [['plan', 'calendar'], ['inbox', 'radar'], ['ema200']];
 let scannerAuxDragState = null;
 
 function scannerAuxGripHtml() {
   return '<span class="scanner-aux-grip" draggable="true" title="Potiahni kartu na inú pozíciu" aria-label="Potiahnuť kartu">⠿</span>';
 }
 
-function getStoredScannerAuxOrder() {
+function getStoredScannerAuxLayout(cardKeys) {
   try {
-    const value = JSON.parse(localStorage.getItem(SCANNER_AUX_ORDER_KEY));
-    return Array.isArray(value) && value.every(key => typeof key === 'string') ? value : [];
+    const value = JSON.parse(localStorage.getItem(SCANNER_AUX_LAYOUT_KEY));
+    if (!Array.isArray(value) || value.length !== 3 || !value.every(column => Array.isArray(column) && column.every(key => typeof key === 'string'))) return null;
+    // Zosúlaď uložené rozloženie s tým, čo je reálne v DOM, namiesto zahodenia
+    // pri nezhode. Prísna kontrola počtu by znamenala, že pridanie šiestej karty
+    // v budúcnosti ticho zresetuje rozloženie, ktoré si používateľ postavil.
+    // Neznáme a duplicitné kľúče zahoď, chýbajúce karty doplň do najkratšieho
+    // stĺpca — nikdy nesmie karta zmiznúť.
+    const seen = new Set();
+    const layout = value.map(column => column.filter(key => {
+      if (!cardKeys.includes(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }));
+    cardKeys.filter(key => !seen.has(key)).forEach(key => {
+      const shortest = layout.reduce((best, column, i) => column.length < layout[best].length ? i : best, 0);
+      layout[shortest].push(key);
+    });
+    return layout.flat().length ? layout : null;
   } catch (_) {
-    return [];
+    return null;
   }
 }
 
-function applyScannerAuxOrder(grid = document.querySelector('.scanner-aux-grid')) {
+function getDefaultScannerAuxLayout(cardKeys) {
+  const layout = SCANNER_AUX_DEFAULT_LAYOUT.map(column => column.filter(key => cardKeys.includes(key)));
+  cardKeys.filter(key => !layout.flat().includes(key)).forEach(key => {
+    const shortestColumn = layout.reduce((shortest, column, index) => column.length < layout[shortest].length ? index : shortest, 0);
+    layout[shortestColumn].push(key);
+  });
+  return layout;
+}
+
+function getScannerAuxColumnCount(grid) {
+  const columns = getComputedStyle(grid).gridTemplateColumns.trim();
+  return columns && columns !== 'none' ? columns.split(/\s+/).length : 1;
+}
+
+function getRenderedScannerAuxLayout(layout, columnCount) {
+  if (columnCount <= 1) return [[...layout[0], ...layout[1], ...layout[2]]];
+  // At two columns, keep canonical column 1 above column 3 on the left and use column 2 on the right.
+  if (columnCount === 2) return [[...layout[0], ...layout[2]], [...layout[1]]];
+  return layout;
+}
+
+function applyScannerAuxLayout(grid = document.querySelector('.scanner-aux-grid')) {
   if (!grid) return;
   const cards = [...grid.querySelectorAll('[data-aux-key]')];
   const byKey = new Map(cards.map(card => [card.dataset.auxKey, card]));
-  const stored = getStoredScannerAuxOrder();
-  const orderedKeys = [];
-  stored.forEach(key => {
-    if (byKey.has(key) && !orderedKeys.includes(key)) orderedKeys.push(key);
+  const cardKeys = cards.map(card => card.dataset.auxKey);
+  const layout = getStoredScannerAuxLayout(cardKeys) || getDefaultScannerAuxLayout(cardKeys);
+  const renderedLayout = getRenderedScannerAuxLayout(layout, getScannerAuxColumnCount(grid));
+  [...grid.querySelectorAll('.scanner-aux-col')].forEach((column, index) => {
+    column.hidden = index >= renderedLayout.length;
+    (renderedLayout[index] || []).forEach(key => column.appendChild(byKey.get(key)));
   });
-  cards.forEach(card => {
-    if (!orderedKeys.includes(card.dataset.auxKey)) orderedKeys.push(card.dataset.auxKey);
+  // Mimo trojstĺpcového zobrazenia sa poradie neukladá (viď saveScannerAuxLayout),
+  // takže úchyt musí vyzerať neaktívne — inak by ťahanie vyzeralo pokazene.
+  const editable = scannerAuxLayoutEditable(grid);
+  grid.classList.toggle('scanner-aux-locked', !editable);
+  grid.querySelectorAll('.scanner-aux-grip').forEach(grip => {
+    grip.draggable = editable;
+    grip.title = editable
+      ? 'Potiahni kartu na inú pozíciu'
+      : 'Presúvanie kariet je dostupné len pri troch stĺpcoch (širšie okno)';
   });
-  orderedKeys.forEach((key, index) => { byKey.get(key).style.order = String(index); });
 }
 
-function saveScannerAuxOrder(grid) {
-  const orderedKeys = [...grid.querySelectorAll('[data-aux-key]')]
-    .sort((a, b) => Number(a.style.order) - Number(b.style.order))
-    .map(card => card.dataset.auxKey);
-  localStorage.setItem(SCANNER_AUX_ORDER_KEY, JSON.stringify(orderedKeys));
+// Persist ONLY from the full three-column view. In a folded view (two columns
+// or one) the rendered columns are not the canonical ones: column 3 is merged
+// into column 1, so writing what is on screen would silently empty canonical
+// column 3 and destroy an arrangement the user built at full width. There is no
+// honest way to map a folded drop back — a card dropped in visible column 1
+// could belong to canonical 1 or 3. So below three columns the arrangement is
+// view-only; `scannerAuxLayoutEditable()` also blocks the drag itself, so this
+// guard is a second line of defence rather than the primary one.
+function saveScannerAuxLayout(grid) {
+  if (!scannerAuxLayoutEditable(grid)) return;
+  const renderedColumns = [...grid.querySelectorAll('.scanner-aux-col')]
+    .map(column => [...column.querySelectorAll(':scope > [data-aux-key]')].map(card => card.dataset.auxKey));
+  const layout = [renderedColumns[0] || [], renderedColumns[1] || [], renderedColumns[2] || []];
+  localStorage.setItem(SCANNER_AUX_LAYOUT_KEY, JSON.stringify(layout));
+}
+
+// Rearranging only makes sense where all three canonical columns are on screen.
+function scannerAuxLayoutEditable(grid = document.querySelector('.scanner-aux-grid')) {
+  return !!grid && getScannerAuxColumnCount(grid) >= 3;
 }
 
 function clearScannerAuxDropIndicator(grid) {
   grid.querySelectorAll('.scanner-aux-drop-before, .scanner-aux-drop-after').forEach(card => {
     card.classList.remove('scanner-aux-drop-before', 'scanner-aux-drop-after');
   });
+  grid.querySelectorAll('.scanner-aux-drop-empty').forEach(column => column.classList.remove('scanner-aux-drop-empty'));
 }
 
 function resetScannerAuxOrder() {
-  localStorage.removeItem(SCANNER_AUX_ORDER_KEY);
-  applyScannerAuxOrder();
+  localStorage.removeItem(SCANNER_AUX_LAYOUT_KEY);
+  applyScannerAuxLayout();
 }
 
 function setupScannerAuxDragAndDrop(grid) {
@@ -79,41 +140,76 @@ function setupScannerAuxDragAndDrop(grid) {
     const grip = event.target.closest('.scanner-aux-grip');
     const card = grip?.closest('[data-aux-key]');
     if (!card) return;
+    if (!scannerAuxLayoutEditable(grid)) { event.preventDefault(); return; }
     scannerAuxDragState = { card, before: true };
     card.classList.add('scanner-aux-dragging');
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', card.dataset.auxKey);
   });
   grid.addEventListener('dragover', event => {
-    const target = event.target.closest('[data-aux-key]');
-    if (!scannerAuxDragState || !target || target === scannerAuxDragState.card) return;
+    const column = event.target.closest('.scanner-aux-col');
+    if (!scannerAuxDragState || !column) return;
     event.preventDefault();
-    const before = event.clientY < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
-    scannerAuxDragState.target = target;
-    scannerAuxDragState.before = before;
+    const target = event.target.closest('[data-aux-key]');
     clearScannerAuxDropIndicator(grid);
+    if (target === scannerAuxDragState.card) {
+      scannerAuxDragState.column = null;
+      scannerAuxDragState.target = null;
+      return;
+    }
+    scannerAuxDragState.column = column;
+    scannerAuxDragState.target = target;
+    if (!target) {
+      column.classList.add('scanner-aux-drop-empty');
+      return;
+    }
+    const before = event.clientY < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+    scannerAuxDragState.before = before;
     target.classList.add(before ? 'scanner-aux-drop-before' : 'scanner-aux-drop-after');
   });
   grid.addEventListener('drop', event => {
-    if (!scannerAuxDragState?.target) return;
+    if (!scannerAuxDragState?.column) return;
     event.preventDefault();
-    const { card, target, before } = scannerAuxDragState;
-    const cards = [...grid.querySelectorAll('[data-aux-key]')]
-      .sort((a, b) => Number(a.style.order) - Number(b.style.order));
-    const keys = cards.map(item => item.dataset.auxKey).filter(key => key !== card.dataset.auxKey);
-    const targetIndex = keys.indexOf(target.dataset.auxKey);
-    keys.splice(targetIndex + (before ? 0 : 1), 0, card.dataset.auxKey);
-    keys.forEach((key, index) => {
-      grid.querySelector(`[data-aux-key="${key}"]`).style.order = String(index);
-    });
-    saveScannerAuxOrder(grid);
-    applyScannerAuxOrder(grid);
+    const { card, column, target, before } = scannerAuxDragState;
+    if (target) column.insertBefore(card, before ? target : target.nextSibling);
+    else column.appendChild(card);
+    saveScannerAuxLayout(grid);
+    applyScannerAuxLayout(grid);
   });
   grid.addEventListener('dragend', () => {
     if (scannerAuxDragState?.card) scannerAuxDragState.card.classList.remove('scanner-aux-dragging');
     clearScannerAuxDropIndicator(grid);
     scannerAuxDragState = null;
   });
+  const resizeObserver = new ResizeObserver(() => {
+    const columnCount = getScannerAuxColumnCount(grid);
+    if (grid._scannerAuxColumnCount === columnCount) return;
+    grid._scannerAuxColumnCount = columnCount;
+    applyScannerAuxLayout(grid);
+  });
+  grid._scannerAuxColumnCount = getScannerAuxColumnCount(grid);
+  resizeObserver.observe(grid);
+  // Poistka k ResizeObserveru. Ten je viazaný na rendering lifecycle, takže sa
+  // v niektorých situáciách (napr. keď panel prehliadača nekompozituje frames)
+  // nemusí doručiť — presne to bolo vidno pri overovaní tejto funkcie, kde sa
+  // prechod cez breakpoint prejavil až pri ďalšom prekreslení. Window resize je
+  // lacný a nezávislý; obe cesty vedú do tej istej idempotentnej funkcie, ktorá
+  // sa pri nezmenenom počte stĺpcov ukončí hneď na začiatku.
+  if (!window._scannerAuxResizeBound) {
+    window._scannerAuxResizeBound = true;
+    let t = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const g = document.querySelector('.scanner-aux-grid');
+        if (!g) return;
+        const count = getScannerAuxColumnCount(g);
+        if (g._scannerAuxColumnCount === count) return;
+        g._scannerAuxColumnCount = count;
+        applyScannerAuxLayout(g);
+      }, 120);
+    });
+  }
 }
 
 const SCANNER_TABLE_STATE_KEY = 'td_scanner_table_state';
@@ -1043,6 +1139,9 @@ async function renderScannerView() {
           <span id="scannerPageStatus"></span>
         </div>
         <div class="scanner-aux-grid">
+        <div class="scanner-aux-col" data-col="0"></div>
+        <div class="scanner-aux-col" data-col="1"></div>
+        <div class="scanner-aux-col" data-col="2"></div>
         <section class="investor-week-card weekly-plan-card scanner-aux-card scanner-aux-plan" data-aux-key="plan">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
@@ -1119,7 +1218,7 @@ async function renderScannerView() {
       </div>
     </div>`;
   const auxGrid = el.querySelector('.scanner-aux-grid');
-  applyScannerAuxOrder(auxGrid);
+  applyScannerAuxLayout(auxGrid);
   setupScannerAuxDragAndDrop(auxGrid);
   const dip = await loadDipStatus();
   const status = document.getElementById('dipImportStatus');
