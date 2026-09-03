@@ -24,6 +24,98 @@ function isEarningsCalendarCollapsed() { return localStorage.getItem(EARNINGS_CA
 const SCANNER_RADAR_COLLAPSED_KEY = 'td_scanner_radar_collapsed';
 function isScannerRadarCollapsed() { return localStorage.getItem(SCANNER_RADAR_COLLAPSED_KEY) !== '0'; }
 
+const SCANNER_AUX_ORDER_KEY = 'td_scanner_aux_order';
+let scannerAuxDragState = null;
+
+function scannerAuxGripHtml() {
+  return '<span class="scanner-aux-grip" draggable="true" title="Potiahni kartu na inú pozíciu" aria-label="Potiahnuť kartu">⠿</span>';
+}
+
+function getStoredScannerAuxOrder() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SCANNER_AUX_ORDER_KEY));
+    return Array.isArray(value) && value.every(key => typeof key === 'string') ? value : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function applyScannerAuxOrder(grid = document.querySelector('.scanner-aux-grid')) {
+  if (!grid) return;
+  const cards = [...grid.querySelectorAll('[data-aux-key]')];
+  const byKey = new Map(cards.map(card => [card.dataset.auxKey, card]));
+  const stored = getStoredScannerAuxOrder();
+  const orderedKeys = [];
+  stored.forEach(key => {
+    if (byKey.has(key) && !orderedKeys.includes(key)) orderedKeys.push(key);
+  });
+  cards.forEach(card => {
+    if (!orderedKeys.includes(card.dataset.auxKey)) orderedKeys.push(card.dataset.auxKey);
+  });
+  orderedKeys.forEach((key, index) => { byKey.get(key).style.order = String(index); });
+}
+
+function saveScannerAuxOrder(grid) {
+  const orderedKeys = [...grid.querySelectorAll('[data-aux-key]')]
+    .sort((a, b) => Number(a.style.order) - Number(b.style.order))
+    .map(card => card.dataset.auxKey);
+  localStorage.setItem(SCANNER_AUX_ORDER_KEY, JSON.stringify(orderedKeys));
+}
+
+function clearScannerAuxDropIndicator(grid) {
+  grid.querySelectorAll('.scanner-aux-drop-before, .scanner-aux-drop-after').forEach(card => {
+    card.classList.remove('scanner-aux-drop-before', 'scanner-aux-drop-after');
+  });
+}
+
+function resetScannerAuxOrder() {
+  localStorage.removeItem(SCANNER_AUX_ORDER_KEY);
+  applyScannerAuxOrder();
+}
+
+function setupScannerAuxDragAndDrop(grid) {
+  if (!grid) return;
+  grid.addEventListener('dragstart', event => {
+    const grip = event.target.closest('.scanner-aux-grip');
+    const card = grip?.closest('[data-aux-key]');
+    if (!card) return;
+    scannerAuxDragState = { card, before: true };
+    card.classList.add('scanner-aux-dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', card.dataset.auxKey);
+  });
+  grid.addEventListener('dragover', event => {
+    const target = event.target.closest('[data-aux-key]');
+    if (!scannerAuxDragState || !target || target === scannerAuxDragState.card) return;
+    event.preventDefault();
+    const before = event.clientY < target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+    scannerAuxDragState.target = target;
+    scannerAuxDragState.before = before;
+    clearScannerAuxDropIndicator(grid);
+    target.classList.add(before ? 'scanner-aux-drop-before' : 'scanner-aux-drop-after');
+  });
+  grid.addEventListener('drop', event => {
+    if (!scannerAuxDragState?.target) return;
+    event.preventDefault();
+    const { card, target, before } = scannerAuxDragState;
+    const cards = [...grid.querySelectorAll('[data-aux-key]')]
+      .sort((a, b) => Number(a.style.order) - Number(b.style.order));
+    const keys = cards.map(item => item.dataset.auxKey).filter(key => key !== card.dataset.auxKey);
+    const targetIndex = keys.indexOf(target.dataset.auxKey);
+    keys.splice(targetIndex + (before ? 0 : 1), 0, card.dataset.auxKey);
+    keys.forEach((key, index) => {
+      grid.querySelector(`[data-aux-key="${key}"]`).style.order = String(index);
+    });
+    saveScannerAuxOrder(grid);
+    applyScannerAuxOrder(grid);
+  });
+  grid.addEventListener('dragend', () => {
+    if (scannerAuxDragState?.card) scannerAuxDragState.card.classList.remove('scanner-aux-dragging');
+    clearScannerAuxDropIndicator(grid);
+    scannerAuxDragState = null;
+  });
+}
+
 const SCANNER_TABLE_STATE_KEY = 'td_scanner_table_state';
 const SCANNER_DEFAULT_TABLE_STATE = {
   sort: { key: 'dip', direction: 'desc' },
@@ -913,6 +1005,13 @@ async function renderScannerView() {
             </div>
             <div class="tb-sep"></div>
             <div class="tb-group">
+              <span class="tb-label">Rozloženie</span>
+              <div class="tb-items">
+                <button class="btn" onclick="resetScannerAuxOrder()" title="Vrátiť karty do pôvodného poradia">Obnoviť karty</button>
+              </div>
+            </div>
+            <div class="tb-sep"></div>
+            <div class="tb-group">
               <span class="tb-label">DIP univerzum</span>
               <div class="tb-items">
                 <input id="dipImportInput" class="scanner-file" type="file" accept=".xlsx,.xlsm">
@@ -944,8 +1043,9 @@ async function renderScannerView() {
           <span id="scannerPageStatus"></span>
         </div>
         <div class="scanner-aux-grid">
-        <section class="investor-week-card weekly-plan-card scanner-aux-card scanner-aux-plan">
+        <section class="investor-week-card weekly-plan-card scanner-aux-card scanner-aux-plan" data-aux-key="plan">
           <div class="scanner-source-head">
+            ${scannerAuxGripHtml()}
             <button class="btn dca-toggle" onclick="toggleWeeklyPlanCollapsed()" title="${isWeeklyPlanCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isWeeklyPlanCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">▤</span>
@@ -958,8 +1058,9 @@ async function renderScannerView() {
           </div>
           <div id="weeklyPlanBox" class="inbox-empty">Skladám syntézu z Inboxu, DCA a scanneru...</div>
         </section>
-        <section class="investor-week-card scanner-aux-card scanner-aux-inbox">
+        <section class="investor-week-card scanner-aux-card scanner-aux-inbox" data-aux-key="inbox">
           <div class="scanner-source-head">
+            ${scannerAuxGripHtml()}
             <button class="btn dca-toggle" onclick="toggleInvestorInboxCollapsed()" title="${isInvestorInboxCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isInvestorInboxCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">✦</span>
@@ -972,12 +1073,13 @@ async function renderScannerView() {
           </div>
           <div id="investorWeekBox" class="inbox-empty">Načítavam týždenný prehľad...</div>
         </section>
-        <section class="investor-week-card scanner-aux-card scanner-aux-ema200" id="ema200-scan-section">
+        <section class="investor-week-card scanner-aux-card scanner-aux-ema200" id="ema200-scan-section" data-aux-key="ema200">
           ${ema200CardHead()}
           <div id="ema200ScanBox" class="inbox-empty">${ema200CardBodyHtml()}</div>
         </section>
-        <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar">
+        <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar" data-aux-key="calendar">
           <div class="scanner-source-head">
+            ${scannerAuxGripHtml()}
             <button class="btn dca-toggle" onclick="toggleEarningsCalendarCollapsed()" title="${isEarningsCalendarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isEarningsCalendarCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">◷</span>
@@ -990,8 +1092,9 @@ async function renderScannerView() {
           </div>
           <div id="earningsCalendarBox" class="earncal-empty">Načítavam earnings...</div>
         </section>
-        <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card scanner-aux-radar">
+        <section class="scanner-candidate-radar scanner-candidate-radar-inline scanner-aux-card scanner-aux-radar" data-aux-key="radar">
           <div class="scanner-source-head">
+            ${scannerAuxGripHtml()}
             <button class="btn dca-toggle" onclick="toggleScannerRadarCollapsed()" title="${isScannerRadarCollapsed() ? 'Rozbaliť' : 'Zbaliť'}">${isScannerRadarCollapsed() ? '+' : '−'}</button>
             <div class="scanner-aux-heading">
               <span class="scanner-aux-icon" aria-hidden="true">◎</span>
@@ -1015,6 +1118,9 @@ async function renderScannerView() {
         <div id="nasdaqScannerInfo" class="scanner-output muted">Načítavam posledný scan...</div>
       </div>
     </div>`;
+  const auxGrid = el.querySelector('.scanner-aux-grid');
+  applyScannerAuxOrder(auxGrid);
+  setupScannerAuxDragAndDrop(auxGrid);
   const dip = await loadDipStatus();
   const status = document.getElementById('dipImportStatus');
   if (status) {
@@ -1789,6 +1895,7 @@ function ema200CardHead() {
   ensureEma200Restored();
   const collapsed = isEma200CardCollapsed();
   return `<div class="scanner-source-head">
+    ${scannerAuxGripHtml()}
     <button class="btn dca-toggle" onclick="toggleEma200CardCollapsed()" title="${collapsed ? 'Rozbaliť' : 'Zbaliť'}">${collapsed ? '+' : '−'}</button>
     <div class="scanner-aux-heading">
       <span class="scanner-aux-icon" aria-hidden="true">◎</span>
