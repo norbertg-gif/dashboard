@@ -58,7 +58,19 @@ scripts/bump_cache_token.sh [token]
 git config core.hooksPath .githooks
 ```
 
-There are two test layers. `python test_regressions.py` contains focused unit/regression checks for cache isolation, atomic disk writes and public API auth/snapshot behavior. `python smoke_test.py` boots the app in-process and hits the core endpoints (200 + response shape). Run both after backend changes; eToro-dependent smoke endpoints are a tolerated tier because they need proxy credentials. For remote: `BASE_URL=https://... SMOKE_AUTH=user:pass python smoke_test.py`. Beyond that, verify by driving the UI.
+There are three test layers. `python frontend_smoke.py` drives a real browser
+(Playwright via system Edge, dev-only, deliberately NOT in `requirements.txt`)
+and is the ONLY thing that exercises frontend code at runtime — it opens all 7
+tabs, loads a ticker in Analytika and Verdikt, and fails on an uncaught
+exception or a rendered error string. It exists because two real regressions on
+2026-09-03 passed `node --check` AND the whole Python suite and only showed up
+on a click. **Opening a tab is not enough** — the decision bar and the Verdikt
+cards only render once a ticker is loaded, and a version of this test without
+that step was green against a deliberately planted regression. `scripts/check_global_refs.py`
+(wired into `.githooks/pre-commit`) is the cheap static half: it blocks a commit
+that deletes a global another module still calls. It cannot see stale bindings
+INSIDE a function — that class needs the browser test.
+`python test_regressions.py` contains focused unit/regression checks for cache isolation, atomic disk writes and public API auth/snapshot behavior. `python smoke_test.py` boots the app in-process and hits the core endpoints (200 + response shape). Run both after backend changes; eToro-dependent smoke endpoints are a tolerated tier because they need proxy credentials. For remote: `BASE_URL=https://... SMOKE_AUTH=user:pass python smoke_test.py`. Beyond that, verify by driving the UI.
 
 ## Working conventions
 
