@@ -417,6 +417,9 @@ function renderErrorBox(el, msg, retryFn) {
 let dashSettings = {
   dca_loss_pct: 15,
   dca_last_tranche_pct: 20,
+  solvency_coverage_max: 3,
+  solvency_debt_equity_min: 3,
+  solvency_current_ratio_max: 2,
   dca_dip_min: 95,
   dca_max_weight: 10,
   attention_daily_pct: 2,
@@ -442,6 +445,9 @@ let dashSettingsDefaults = { ...dashSettings };
 const _SETTINGS_INPUTS = [
   ['set-dca-loss', 'dca_loss_pct'],
   ['set-dca-last-tranche', 'dca_last_tranche_pct'],
+  ['set-solvency-coverage-max', 'solvency_coverage_max'],
+  ['set-solvency-debt-equity-min', 'solvency_debt_equity_min'],
+  ['set-solvency-current-ratio-max', 'solvency_current_ratio_max'],
   ['set-dca-dip', 'dca_dip_min'],
   ['set-dca-weight', 'dca_max_weight'],
   ['set-attention-pct', 'attention_daily_pct'],

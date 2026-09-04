@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260904-014629">
+<link rel="stylesheet" href="/dashboard.css?v=20260904-015903">
 </head>
 <body data-main-tab="home">
 
@@ -425,6 +425,12 @@
         <input id="set-dca-loss" type="number" min="1" max="90" step="1"></label>
       <label>DCA — posledná tranža ≤ −<span class="settings-unit">%</span>
         <input id="set-dca-last-tranche" type="number" min="1" max="90" step="1"></label>
+      <label>Solventnosť — krytie úrokov &lt;
+        <input id="set-solvency-coverage-max" type="number" min="0" max="50" step="0.1"></label>
+      <label>Solventnosť — dlh / vlastné imanie &gt;
+        <input id="set-solvency-debt-equity-min" type="number" min="0" max="100" step="0.1"></label>
+      <label>Solventnosť — current ratio &lt;
+        <input id="set-solvency-current-ratio-max" type="number" min="0.1" max="20" step="0.1"></label>
       <label>DCA — minimálne DIP skóre
         <input id="set-dca-dip" type="number" min="0" max="200" step="1"></label>
       <label>DCA — max. váha pozície <span class="settings-unit">% Stock/ETF knihy</span>
@@ -503,16 +509,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260904-014629"></script>
-  <script src="/js/live.js?v=20260904-014629"></script>
-  <script src="/js/portfolio.js?v=20260904-014629"></script>
-  <script src="/js/watchlist.js?v=20260904-014629"></script>
-  <script src="/js/scanner-table-sort.js?v=20260904-014629"></script>
-  <script src="/js/scanner.js?v=20260904-014629"></script>
-  <script src="/js/predictive.js?v=20260904-014629"></script>
-  <script src="/js/verdict.js?v=20260904-014629"></script>
-  <script src="/js/home.js?v=20260904-014629"></script>
-  <script src="/js/charts.js?v=20260904-014629"></script>
-  <script src="/js/main.js?v=20260904-014629"></script>
+  <script src="/js/core.js?v=20260904-015903"></script>
+  <script src="/js/live.js?v=20260904-015903"></script>
+  <script src="/js/portfolio.js?v=20260904-015903"></script>
+  <script src="/js/watchlist.js?v=20260904-015903"></script>
+  <script src="/js/scanner-table-sort.js?v=20260904-015903"></script>
+  <script src="/js/scanner.js?v=20260904-015903"></script>
+  <script src="/js/predictive.js?v=20260904-015903"></script>
+  <script src="/js/verdict.js?v=20260904-015903"></script>
+  <script src="/js/home.js?v=20260904-015903"></script>
+  <script src="/js/charts.js?v=20260904-015903"></script>
+  <script src="/js/main.js?v=20260904-015903"></script>
 </body>
 </html>

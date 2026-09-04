@@ -548,7 +548,7 @@ class AssistantExportRegressionTests(unittest.TestCase):
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.5")
+        self.assertEqual(payload["schema_version"], "1.6")
         # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
         self.assertEqual(requested_accounts, ["1"])
         self.assertEqual(payload["analysis_scope"]["account"], "1")
@@ -601,6 +601,69 @@ class AssistantExportRegressionTests(unittest.TestCase):
         self.assertEqual(found["interest_coverage"], 22.5)
         self.assertEqual(found["data_age_days"], 0)
         self.assertEqual(missing, {})
+
+    def test_solvency_composite_matches_2026_08_15_validation_dataset(self):
+        # These are the owner's observed figures: only the three complete triples
+        # are attention findings, not the growth-company coverage false positives.
+        dataset = {
+            "NCLH": (2.25, 6.61, 0.21), "CHTR": (2.40, 6.05, 0.39),
+            "FOUR": (1.69, 3.15, 1.66), "NET": (-5.52, 0.2, 5.0),
+            "PLTR": (-1.78, 0.0, 7.11), "WDAY": (-2.54, 0.4, 2.5),
+            "MOH": (0.97, 1.0, 2.1),
+        }
+        settings = dict(tb.DASH_SETTINGS_DEFAULTS)
+        with patch.object(tb, "_ticker_sector_etf_cached_only", return_value=("XLK", "Software")):
+            verdicts = {
+                symbol: tb._assistant_solvency_verdict(symbol, {
+                    "interest_coverage": coverage, "debt_to_equity": debt_equity,
+                    "current_ratio": current_ratio,
+                }, settings)
+                for symbol, (coverage, debt_equity, current_ratio) in dataset.items()
+            }
+        self.assertEqual({symbol for symbol, verdict in verdicts.items() if verdict["flag"]}, {"NCLH", "CHTR", "FOUR"})
+        self.assertTrue(all(verdicts["FOUR"]["conditions"].values()))
+        self.assertFalse(verdicts["PLTR"]["flag"])
+        self.assertEqual(verdicts["PLTR"]["status"], "clear")
+
+    def test_solvency_financials_are_exempt(self):
+        with patch.object(tb, "_ticker_sector_etf_cached_only", return_value=("XLF", "Banks")):
+            verdict = tb._assistant_solvency_verdict("NU", {
+                "interest_coverage": 1.0, "debt_to_equity": 4.17, "current_ratio": 0.20,
+            }, tb.DASH_SETTINGS_DEFAULTS)
+        self.assertFalse(verdict["flag"])
+        self.assertEqual(verdict["status"], "exempt_financials")
+        self.assertIn("not comparable", verdict["reason"])
+
+    def test_solvency_missing_metrics_are_unknown(self):
+        with patch.object(tb, "_ticker_sector_etf_cached_only", return_value=("XLK", "Software")):
+            verdict = tb._assistant_solvency_verdict("NET", {
+                "interest_coverage": 1.0, "debt_to_equity": 4.0,
+            }, tb.DASH_SETTINGS_DEFAULTS)
+        self.assertFalse(verdict["flag"])
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertEqual(verdict["missing_metrics"], ["current_ratio"])
+        self.assertIsNone(verdict["conditions"]["current_ratio_below_max"])
+
+    def test_exported_position_keeps_unknown_solvency_verdict_without_cache(self):
+        with (
+            patch.object(tb, "_assistant_solvency", return_value={}),
+            patch.object(tb, "_ticker_sector_etf_cached_only", return_value=(None, None)),
+        ):
+            position = tb._assistant_export_position(
+                "COLD", [], {}, {}, {}, tb.DASH_SETTINGS_DEFAULTS, 0, 0,
+            )
+        verdict = position["solvency"]["verdict"]
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertFalse(verdict["flag"])
+        self.assertEqual(verdict["missing_metrics"], ["interest_coverage", "debt_to_equity", "current_ratio"])
+
+    def test_solvency_unknown_sector_cannot_fire(self):
+        with patch.object(tb, "_ticker_sector_etf_cached_only", return_value=(None, None)):
+            verdict = tb._assistant_solvency_verdict("NCLH", {
+                "interest_coverage": 2.25, "debt_to_equity": 6.61, "current_ratio": 0.21,
+            }, tb.DASH_SETTINGS_DEFAULTS)
+        self.assertFalse(verdict["flag"])
+        self.assertEqual(verdict["status"], "sector_unknown")
 
     def test_dca_context_can_be_eligible_without_chart_blockers(self):
         position = tb._assistant_export_position(

@@ -2495,6 +2495,9 @@ _dash_settings_lock = threading.Lock()
 DASH_SETTINGS_DEFAULTS = {
     "dca_loss_pct": 15.0,        # strata pozície ≥ x % → DCA úvaha
     "dca_last_tranche_pct": 20.0, # posledná tranža ≤ -x % → DCA trigger
+    "solvency_coverage_max": 3.0,
+    "solvency_debt_equity_min": 3.0,
+    "solvency_current_ratio_max": 2.0,
     "dca_dip_min": 95.0,         # DIP skóre ≥ x → kvalitný dip (zladené s DIP_STRONG_THRESHOLD, dip_strategy v3)
     "dca_max_weight": 10.0,      # váha pozície < x % Stock/ETF knihy → bez koncentračného rizika
     "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
@@ -2512,6 +2515,9 @@ DASH_SETTINGS_DEFAULTS = {
 _DASH_SETTINGS_LIMITS = {
     "dca_loss_pct": (1, 90),
     "dca_last_tranche_pct": (1, 90),
+    "solvency_coverage_max": (0, 50),
+    "solvency_debt_equity_min": (0, 100),
+    "solvency_current_ratio_max": (0.1, 20),
     "dca_dip_min": (0, 200),
     "dca_max_weight": (1, 100),
     "attention_daily_pct": (0.1, 50),
@@ -9653,7 +9659,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.5"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.6"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -9687,6 +9693,42 @@ def _assistant_solvency(symbol: str) -> dict:
         "total_debt_to_ebitda": _assistant_number(solvency.get("total_debt_to_ebitda")),
         "data_age_days": _assistant_days_since(stamp),
     })
+
+
+def _assistant_solvency_verdict(symbol: str, solvency: dict, settings: dict) -> dict:
+    """Interpret cached solvency metrics without fetching or affecting trading logic."""
+    thresholds = {
+        "interest_coverage_max": float(settings.get("solvency_coverage_max", DASH_SETTINGS_DEFAULTS["solvency_coverage_max"])),
+        "debt_to_equity_min": float(settings.get("solvency_debt_equity_min", DASH_SETTINGS_DEFAULTS["solvency_debt_equity_min"])),
+        "current_ratio_max": float(settings.get("solvency_current_ratio_max", DASH_SETTINGS_DEFAULTS["solvency_current_ratio_max"])),
+    }
+    metrics = {
+        "interest_coverage": _assistant_number(solvency.get("interest_coverage")),
+        "debt_to_equity": _assistant_number(solvency.get("debt_to_equity")),
+        "current_ratio": _assistant_number(solvency.get("current_ratio")),
+    }
+    missing_metrics = [name for name, value in metrics.items() if value is None]
+    conditions = {
+        "interest_coverage_below_max": None if metrics["interest_coverage"] is None else metrics["interest_coverage"] < thresholds["interest_coverage_max"],
+        "debt_to_equity_above_min": None if metrics["debt_to_equity"] is None else metrics["debt_to_equity"] > thresholds["debt_to_equity_min"],
+        "current_ratio_below_max": None if metrics["current_ratio"] is None else metrics["current_ratio"] < thresholds["current_ratio_max"],
+    }
+    etf, industry = _ticker_sector_etf_cached_only(symbol)
+    base = {
+        "flag": False, "conditions": conditions, "thresholds": thresholds,
+        "missing_metrics": missing_metrics, "sector": {"etf": etf, "industry": industry},
+    }
+    if missing_metrics:
+        return {**base, "status": "unknown", "reason": "Missing solvency metrics: " + ", ".join(missing_metrics) + "."}
+    if etf == "XLF":
+        return {**base, "status": "exempt_financials", "reason": "Financial-sector exemption: leverage and current ratio are not comparable for banks and insurers."}
+    if etf is None:
+        return {**base, "status": "sector_unknown", "reason": "Sector is not cached, so no solvency flag is evaluated."}
+    flagged = all(conditions.values())
+    return {
+        **base, "flag": flagged, "status": "flagged" if flagged else "clear",
+        "reason": "All three solvency conditions are met; attention flag only, not a sell signal." if flagged else "At least one solvency condition is not met.",
+    }
 
 
 def _assistant_iso_timestamp(value) -> str | None:
@@ -9757,6 +9799,8 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     last_lot_pnl_pct = dca_state["last_lot_pnl_pct"]
     change_from_last_entry = round((current_price - last_entry) / last_entry * 100, 2) if current_price and last_entry else None
     dip_total = _assistant_number((dip or {}).get("total"))
+    solvency = _assistant_solvency(symbol)
+    solvency = {**solvency, "verdict": _assistant_solvency_verdict(symbol, solvency, settings)}
     exported = _assistant_compact({
         "ticker": symbol,
         "name": next((p.get("name") for p in lots if p.get("name")), symbol),
@@ -9794,7 +9838,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "days_remaining": (earnings or {}).get("days"),
             "confirmed": bool((earnings or {}).get("date")),
         }),
-        "solvency": _assistant_solvency(symbol),
+        "solvency": solvency,
         "dca_context": {
             "status": dca_state["status"],
             "portfolio_pnl_pct": total_pnl_pct,
@@ -9808,6 +9852,8 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
             "blocking_conditions": dca_state["blocking_conditions"],
         },
     })
+    # Keep every composite condition explicit, including null/unknown results.
+    exported["solvency"] = solvency
     build = build or {"state": "unclassified"}
     # Keep unavailable BUILD fields explicit: "no target" is not the same as a zero gap.
     exported["build"] = {
@@ -10058,7 +10104,7 @@ def get_assistant_export(account: str = "1"):
         "dca_context": "Explicit DCA evidence. The decision is the latest lot P/L at or below the configured last-tranche threshold; unknown means latest-lot data is unavailable. eligible means current conditions pass; conditional means chart blockers require manual review.",
         "change_from_last_entry_pct": "Signed price change from the latest open lot entry. Positive means current price is above that entry; negative means below it.",
         "dca_drawdown_from_last_entry_pct": "Negative-only price change from the latest open lot entry. Omitted when the current price is at or above that entry.",
-        "solvency": "Balance-sheet risk from the Finnhub metric snapshot: net_debt_to_ebitda and interest_coverage are the two that decide whether a loss is a dip or a solvency problem. Read only from cached insights, so it is absent for tickers whose insights card was never opened; data_age_days says how old the numbers are. Absent means unknown, never healthy.",
+        "solvency": "Cached Finnhub balance-sheet metrics plus an interpretation-only composite verdict. The flag requires all three configured conditions: interest_coverage below solvency_coverage_max, debt_to_equity above solvency_debt_equity_min, and current_ratio below solvency_current_ratio_max. verdict.conditions exposes each result. Financials (XLF, including banks and insurers) are exempt because leverage and current ratio are not comparable; an uncached sector is sector_unknown and cannot fire. Missing metrics are unknown, never healthy. This is an attention flag, never a sell signal; it does not affect C1-C4, ML, scanner, DCA, BUILD, Verdict gates, or accounting.",
         "attention_items": "One normalized list of held tickers that need review. It replaces duplicated weekly-plan and inbox text in this export.",
         "passes_dip_threshold": "Whether the imported DIP score meets the configured DCA minimum. It separates priority candidates from scanner-only watch candidates.",
     }
@@ -10097,6 +10143,7 @@ def get_assistant_export(account: str = "1"):
                 "Scanner and DIP data can be older than the portfolio snapshot; inspect source_timestamps.",
                 "Dashboard recommendations are interpretive aids, not trading instructions.",
                 "Solvency fields come from cached ticker insights and are missing for tickers not yet fetched; treat a missing solvency block as unknown, not as a clean balance sheet.",
+                "Solvency verdicts are interpretation-only attention flags. Financials are exempt and uncached sectors remain unknown rather than producing an alarm.",
             ],
         },
         "portfolio_summary": {

@@ -138,9 +138,20 @@ These were already in the codebase and need to stay fixed:
    To sú vierohodné nálezy — a ani jeden z nich nespĺňa kritérium na zatvorenie,
    lebo napätá súvaha nie je to isté čo riziko TRVALEJ straty kapitálu; NCLH aj
    CHTR sú odvetvia, kde je páka normou.
-   **Návrh:** viacmetrikový prah + sektorová výnimka pre financie/banky. Ak sa
-   nechá jednometrikový, používateľ ho prestane sledovať do troch týždňov a pole
-   bude zbytočné. Prahy patria medzi ⚙ nastavenia, nie natvrdo.
+   **VYRIEŠENÉ 2026-09-04.** `_assistant_solvency_verdict()` — flag padne len pri
+   splnení VŠETKÝCH troch: krytie úrokov < `solvency_coverage_max` (3),
+   dlh/vlastné imanie > `solvency_debt_equity_min` (3), current ratio <
+   `solvency_current_ratio_max` (2). Všetky tri prahy sú v ⚙. Sektor `XLF`
+   (banky/poisťovne) je natvrdo vyňatý, neznámy sektor flag NESPUSTÍ (chýbajúca
+   cache nesmie vyrobiť falošný poplach), chýbajúca metrika dáva `unknown` a
+   vymenuje, ktorá chýba. `conditions` používa `null`, nie `false`, pre
+   nevyhodnotiteľné — „nevieme" a „nesplnené" sa nesmú zlievať. Payload nesie aj
+   použité prahy, takže analýza vie, podľa čoho sa rozhodovalo. Regresný test
+   beží na REÁLNYCH číslach z 2026-08-15 a drží presne {NCLH, CHTR, FOUR};
+   PLTR (D/E 0,0) ani ostatné rastové false positives nepadnú. Sektor sa číta
+   `_ticker_sector_etf_cached_only()` — len disk, žiadny nový fetch. Schéma 1.6.
+   Ostáva interpretačné: NEVSTUPUJE do C1–C4, DCA, BUILD ani Verdiktu, a flag je
+   výslovne pozornosť, nie signál na predaj.
    **Druhý nález — VYRIEŠENÉ 2026-09-04.** Rozhoduje `dca_last_tranche_pct`
    (default 20) na POSLEDNEJ tranži, cez jediný helper `_dca_trigger_state()`,
    ktorý volá `/api/portfolio/dca` aj AI export. Agregát (`dca_loss_pct`, 15)
