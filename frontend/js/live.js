@@ -288,6 +288,7 @@ function initWebSocket() {
 // Cache pozícií pre oba účty { '1': [...], '2': [...] }
 const etoroPositionsAll = { '1': [], '2': [] };
 const etoroPositionsFetchedAt = { '1': 0, '2': 0 };
+const etoroPositionsStale = { '1': false, '2': false };
 // 24h (2026-07-09, raised from 30 min), zrkadlí backend POSITIONS_CACHE_TTL —
 // pri štýle max pár obchodov týždenne sa zoznam pozícií/objednávok mení
 // zriedka, živé ceny idú aj tak nezávisle cez WS. Manuálne obnovenie:
@@ -321,7 +322,8 @@ async function loadPositionsForAccount(accountId, forceRefresh = false) {
         openTimestamp: p.openDateTime || null,
       }));
       etoroOrdersAll[accountId] = data.orders || [];
-      etoroPositionsFetchedAt[accountId] = Date.now();
+      etoroPositionsStale[accountId] = Boolean(data.stale);
+      if (!data.stale) etoroPositionsFetchedAt[accountId] = Date.now();
       return etoroPositionsAll[accountId];
     } catch(e) { return []; }
     finally { _positionsFetchInFlight[accountId] = null; }

@@ -25,6 +25,7 @@ function csvCellSk(v) {
 
 let ratesData = null;
 let historyData = null;
+let historyLoadSeq = 0;
 let historySort = { key: 'closeTimestamp', dir: -1 };
 
 // Cache pre 52w + sentiment dáta
@@ -298,14 +299,25 @@ async function renderHistoryView(force = false) {
   const el = document.getElementById('main-history');
   if (!el) return;
   if (!historyData || force) {
+    const account = String(activeAccount || '1');
+    const seq = ++historyLoadSeq;
     el.innerHTML = '<div class="tool-panel"><div class="tool-toolbar"><div class="tool-title">Historia obchodov</div></div><div style="padding:16px;color:var(--muted);">Nacitavam historiu...</div></div>';
     try {
       const minDate = localStorage.getItem('td_hist_min_date') || new Date(Date.now() - 365*86400000).toISOString().slice(0,10);
       const maxDate = localStorage.getItem('td_hist_max_date') || new Date().toISOString().slice(0,10);
-      const r = await fetch(`${API}/api/etoro/trade-history?account=${activeAccount||'1'}&minDate=${encodeURIComponent(minDate)}&maxDate=${encodeURIComponent(maxDate)}&pageSize=150`);
+      const r = await fetch(`${API}/api/etoro/trade-history?account=${account}&minDate=${encodeURIComponent(minDate)}&maxDate=${encodeURIComponent(maxDate)}&pageSize=150`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      historyData = await r.json();
+      const data = await r.json();
+      if (seq !== historyLoadSeq || account !== String(activeAccount || '1')) {
+        if (account !== String(activeAccount || '1')) renderHistoryView();
+        return;
+      }
+      historyData = data;
     } catch(e) {
+      if (seq !== historyLoadSeq || account !== String(activeAccount || '1')) {
+        if (account !== String(activeAccount || '1')) renderHistoryView();
+        return;
+      }
       el.innerHTML = `<div class="tool-panel"><div class="tool-toolbar"><div class="tool-title">Historia obchodov</div><button class="btn" onclick="renderHistoryView(true)">Retry</button></div><div style="padding:16px;color:var(--red);">${escHtml(e.message)}</div></div>`;
       return;
     }
@@ -1444,17 +1456,26 @@ function loadPortStateFromStorage(pid) {
 async function loadPortData(pid, forceRefresh = false) {
   const s = getPortState(pid);
   if (s.loading) return;
+  const account = String(s.account);
   s.loading = true;
   renderPortPanel(pid);
   try {
-    const r = await fetch(`${API}/api/etoro/portfolio?account=${s.account}${forceRefresh ? '&refresh=1' : ''}`);
+    const r = await fetch(`${API}/api/etoro/portfolio?account=${account}${forceRefresh ? '&refresh=1' : ''}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    s.data = await r.json();
+    const data = await r.json();
+    // Odpoveď patrí inému účtu než tomu, ktorý je práve zvolený — zahoď ju.
+    // POZOR: `return` tu NESMIE obísť upratanie `s.loading`, inak by prepnutie
+    // účtu počas načítavania nechalo panel navždy v stave „načítavam" a každé
+    // ďalšie volanie by padlo na `if (s.loading) return`. Preto je celé
+    // dokončenie vo `finally` nižšie.
+    if (account !== String(s.account)) return;
+    s.data = data;
     preparePortfolioSnapshot(s.data);
     rememberLiveInstruments(s.data.positions);
     rememberLiveInstruments(s.data.orders);   // WS live ceny aj pre tickery limitiek
-    await hydrateOrderRates(s.data, s.account);
-    portfolioAccountData[String(s.account)] = s.data;
+    await hydrateOrderRates(s.data, account);
+    if (account !== String(s.account)) return;
+    portfolioAccountData[account] = s.data;
     // Force refresh nech je vidieť aj v grafoch (etoroPositionsAll/etoroOrdersAll
     // sú samostatná cache pre chart panely) — inak by graf ešte 24h ukazoval
     // staré objednávky/pozície, hoci Portfólio už má čerstvé dáta.
@@ -1463,17 +1484,22 @@ async function loadPortData(pid, forceRefresh = false) {
     // počas výpadku predĺžil platnosť starých dát o ďalších 24h namiesto toho,
     // aby appka skúsila znova pri najbližšej príležitosti.
     if (forceRefresh && !s.data.stale) {
-      const acct = String(s.account);
-      etoroPositionsAll[acct] = s.data.positions || [];
-      etoroOrdersAll[acct] = s.data.orders || [];
-      etoroPositionsFetchedAt[acct] = Date.now();
+      etoroPositionsAll[account] = s.data.positions || [];
+      etoroOrdersAll[account] = s.data.orders || [];
+      etoroPositionsFetchedAt[account] = Date.now();
     }
     updateHeaderEquities();
   } catch(e) {
-    s.data = { error: e.message };
+    if (account === String(s.account)) s.data = { error: e.message };
+  } finally {
+    s.loading = false;
+    if (account !== String(s.account)) {
+      // Používateľ medzitým prepol účet — načítaj ten, ktorý naozaj chce.
+      loadPortData(pid);
+    } else {
+      renderPortPanel(pid);
+    }
   }
-  s.loading = false;
-  renderPortPanel(pid);
 }
 
 function livePriceForInstrument(instrumentId) {

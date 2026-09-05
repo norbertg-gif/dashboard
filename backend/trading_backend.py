@@ -1701,7 +1701,7 @@ def _write_watchlist_file(items):
 
 @app.get("/api/watchlist")
 def get_watchlist():
-    return {"items": _read_watchlist_file()}
+    return {"items": _read_watchlist_file(), "initialized": WATCHLIST_PATH.exists()}
 
 @app.put("/api/watchlist")
 def put_watchlist(body: dict):

@@ -545,7 +545,7 @@ async function loadVerdict(force = false) {
       renderTrendVerdict(buildTrendVerdict(ticker, cached.data, cached.insights, cached.market));
       return;
     }
-    const chartPromise = (pc_lastData && document.getElementById('tickerInput')?.value?.toUpperCase() === ticker)
+    const chartPromise = (pc_lastData && String(pc_lastData.ticker || '').trim().toUpperCase() === ticker)
       ? Promise.resolve(pc_lastData)
       : fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=2y&reoptimize=false`)
           .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`); return r.json(); });

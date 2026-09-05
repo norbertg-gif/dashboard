@@ -258,7 +258,7 @@ async function syncWatchlistFromServer() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     const serverItems = normalizeWatchlistItems(data.items || []);
-    if (serverItems.length) {
+    if (data.initialized === true) {
       watchlist = serverItems;
       localStorage.setItem('td_watchlist', JSON.stringify(watchlist));
       renderSidebar();

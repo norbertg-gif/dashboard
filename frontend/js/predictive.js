@@ -398,6 +398,7 @@ let pc_showBacktest = true;
 const PC_HIDE_MISSES_KEY = 'pc_hide_backtest_misses';
 let pc_hideBacktestMisses = localStorage.getItem(PC_HIDE_MISSES_KEY) === '1';
 let pc_lastData = null;
+let pcLoadSeq = 0;
 const PC_LAST_TICKER_KEY = 'td_predictive_ticker';
 
 // Data-only prefetch (bez initCharts()/renderCharts() — chart séria neexistuje,
@@ -3258,6 +3259,7 @@ async function loadData(reoptimize = false) {
   const ticker = document.getElementById('tickerInput').value.trim().toUpperCase();
   const period = document.getElementById('periodSel').value;
   if (!ticker) return;
+  const seq = ++pcLoadSeq;
   rememberPredictiveTicker(ticker);
   _insightsForTicker = ticker;
   pc_resetEarningsMarkers(ticker);
@@ -3295,6 +3297,7 @@ async function loadData(reoptimize = false) {
       }
       data = await res.json();
     }
+    if (seq !== pcLoadSeq) return;
     pc_lastData = data;
     wsSubscribeSymbol(ticker);
     renderCharts(data);
@@ -3309,7 +3312,7 @@ async function loadData(reoptimize = false) {
           updated = true;
         }
       }
-      if (updated && pc_lastData) {
+      if (updated && pc_lastData && seq === pcLoadSeq) {
         renderCharts(pc_lastData);
         if (pc_currentView === 'daily') renderDailyMain(pc_lastData);
       }
@@ -3318,6 +3321,7 @@ async function loadData(reoptimize = false) {
     status.textContent = `✓ ${ticker} · ${data.candles.length} weekly sviečok`;
     document.getElementById('btBadge').style.display = pc_showBacktest ? '' : 'none';
   } catch (e) {
+    if (seq !== pcLoadSeq) return;
     if (status) status.innerHTML = `<span style="color:var(--bear)">✗ ${e.message}</span>`;
     if (decisionBar) decisionBar.innerHTML = `<div class="pc-decision-empty">Ticker sa nepodarilo vyhodnotiť: ${escHtml(e.message)}</div>`;
     document.getElementById('predInfo').innerHTML = `<div class="error-msg">${e.message}</div>`;
@@ -3329,7 +3333,7 @@ async function loadData(reoptimize = false) {
       accBadge.textContent = 'Úspešnosť —';
     }
   } finally {
-    if (btn) btn.disabled = false;
+    if (seq === pcLoadSeq && btn) btn.disabled = false;
   }
 }
 
