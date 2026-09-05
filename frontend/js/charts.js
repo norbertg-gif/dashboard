@@ -1681,30 +1681,39 @@ function parseEtoroOpenMs(pos) {
   return Number.isNaN(ms) ? Date.parse(raw) : ms;
 }
 
-function binMarkerTime(openMs, points) {
-  const valid = points.filter(p => !Number.isNaN(p.ms)).sort((a, b) => a.ms - b.ms);
-  if (!valid.length || openMs < valid[0].ms) return null;
-  if (valid.length === 1) return openMs === valid[0].ms ? valid[0].time : null;
-  if (valid.length > 1) {
-    const span = valid.slice(1).reduce((smallest, p, index) => {
-      const gap = p.ms - valid[index].ms;
-      return gap > 0 ? Math.min(smallest, gap) : smallest;
-    }, Infinity);
-    if (Number.isFinite(span) && openMs >= valid[valid.length - 1].ms + span) return null;
+function binMarkerTime(openMs, points, interval = '1d') {
+  const valid = points.filter(p => Number.isFinite(p.ms)).sort((a, b) => a.ms - b.ms);
+  if (!Number.isFinite(openMs)) return null;
+  const index = valid.findLastIndex(p => p.ms <= openMs);
+  if (index < 0) return null;
+  const point = valid[index];
+  let endMs;
+  if (interval === '1mo') {
+    const start = new Date(point.ms);
+    endMs = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1);
+  } else {
+    const spans = { '1m': 60000, '5m': 300000, '15m': 900000, '30m': 1800000,
+      '1h': 3600000, '4h': 14400000, '12h': 43200000, '1d': 86400000, '1wk': 604800000 };
+    if (!spans[interval]) return null;
+    endMs = point.ms + spans[interval];
   }
-  return [...valid].reverse().find(p => p.ms <= openMs)?.time || null;
+  // Missing bars must not extend the preceding candle across the gap.
+  if (valid[index + 1]) endMs = Math.min(endMs, valid[index + 1].ms);
+  return openMs < endMs ? point.time : null;
 }
 
-function resolveMarkerTime(pos, chartData) {
+function resolveMarkerTime(pos, chartData, interval = '1d') {
   if (!chartData?.length) return null;
   const openMs = parseEtoroOpenMs(pos);
   const openDay = pos.openDate || (Number.isNaN(openMs) ? null : new Date(openMs).toISOString().slice(0, 10));
   const points = chartData.map(d => ({ time: d.time, ms: chartTimeToMs(d.time), day: timeToDateKey(d.time) }));
   // Date-only sources have no intraday instant: anchor to the first loaded bar that day.
   const raw = pos.openDateTime || pos.openTimestamp || pos.openDate;
-  if (raw && !String(raw).includes('T')) return points.find(p => p.day === openDay)?.time || null;
+  if (raw && !String(raw).includes('T') && !['1d', '1wk', '1mo'].includes(interval)) {
+    return points.find(p => p.day === openDay)?.time ?? null;
+  }
   // Outside loaded history returns null, never an exact-looking guessed marker.
-  return Number.isNaN(openMs) ? null : binMarkerTime(openMs, points);
+  return Number.isNaN(openMs) ? null : binMarkerTime(openMs, points, interval);
 }
 
 // ── EARNINGS MARKERS ──────────────────────────────────────────────────────────
@@ -1725,7 +1734,8 @@ async function applyEarningsMarkers(id, symbol, r, chartData) {
     const hist = (data?.eps_history || []).filter(h => h?.date);
     r._markerMeta ||= {};
     r._earningsMarkers = hist.map((h, index) => {
-      const time = resolveMarkerTime({ openDate: h.date }, chartData);
+      const time = resolveMarkerTime({ openDate: h.date }, chartData,
+        document.getElementById(id)?.querySelector('.interval-sel')?.value);
       if (!time) return null;
       const markerId = `earnings:${id}:${index}:${h.date}`;
       // beat === null znamená "nevieme posúdiť" (backend zneplatnil porovnanie,
@@ -1915,7 +1925,8 @@ async function applyEtoroMarkers(id, symbol, r, chartData, opts = {}) {
   const markers = [];
   r._markerMeta ||= {};
   for (const [index, pos] of allPositions.entries()) {
-    const markerTime = resolveMarkerTime(pos, chartData);
+    const markerTime = resolveMarkerTime(pos, chartData,
+      document.getElementById(id)?.querySelector('.interval-sel')?.value);
     if (!markerTime) continue;
     pos._markerTime = markerTime;
     const colors = ACCT_COLORS[pos._acct];

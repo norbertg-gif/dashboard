@@ -39,10 +39,10 @@ class EtoroProxySecurityRegressionTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=2)
 
-    def _request(self, method, path, token=True):
+    def _request(self, method, path, token=True, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
         headers = {ep.PROXY_TOKEN_HEADER: ep.ETORO_PROXY_TOKEN} if token else {}
-        connection.request(method, path, headers=headers)
+        connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         response.read()
         headers = dict(response.getheaders())
@@ -74,6 +74,24 @@ class EtoroProxySecurityRegressionTests(unittest.TestCase):
             self.assertEqual(status, 204)
             self.assertEqual(forwarded, [(f"{ep.BASE}/watchlists/123/items", "POST")])
             self.assertFalse(any(key.lower().startswith("access-control-") for key in headers))
+
+
+    def test_watchlist_delete_forwards_item_body(self):
+        forwarded = []
+        payload = b'[{"itemId":42,"itemType":"Instrument"}]'
+
+        def fake_proxy(handler, url, method="GET", body=None, **kwargs):
+            forwarded.append((url, method, body))
+            handler.send_response(204)
+            handler.end_headers()
+
+        with patch.object(ep.ProxyHandler, "_proxy", fake_proxy):
+            status, _ = self._request("DELETE", "/etoro/watchlists/123/items?account=2", body=payload)
+            self.assertEqual(status, 204)
+            self.assertEqual(forwarded, [(f"{ep.BASE}/watchlists/123/items", "DELETE", payload)])
+            self.assertEqual(self._request("DELETE", "/etoro/trading/orders", body=payload)[0], 403)
+            self.assertEqual(self._request("DELETE", "/etoro/watchlists/123/items", token=False, body=payload)[0], 401)
+            self.assertEqual(len(forwarded), 1)
 
 
 class IchimokuFutureRegressionTests(unittest.TestCase):
@@ -152,7 +170,7 @@ class ChartLiveAndMarkerRegressionTests(unittest.TestCase):
         source = Path(path).read_text(encoding="utf-8")
         functions = []
         for name in names:
-            match = re.search(rf"^function {name}\(.*?^}}", source, re.S | re.M)
+            match = re.search(rf"^(?:async )?function {name}\(.*?^}}", source, re.S | re.M)
             assert match, f"{name}() sa nenašla"
             functions.append(match.group(0))
         return "\n".join(functions)
@@ -189,6 +207,102 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(payload["onDayTwo"], 2 * 86400)
         self.assertIsNone(payload["before"])
         self.assertIsNone(payload["after"])
+
+
+    def test_marker_calendar_boundaries_single_bar_and_gaps(self):
+        script = self._js_functions("frontend/js/charts.js", [
+            "chartTimeToMs", "timeToDateKey", "parseEtoroOpenMs", "binMarkerTime", "resolveMarkerTime",
+        ]) + """
+const assert = require('node:assert/strict');
+const months = ['2026-01-01','2026-02-01','2026-03-01'].map(time => ({time}));
+assert.equal(resolveMarkerTime({openDateTime:'2026-03-30T12:00:00Z'}, months, '1mo'), '2026-03-01');
+assert.equal(resolveMarkerTime({openDateTime:'2026-04-01T00:00:00Z'}, months, '1mo'), null);
+assert.equal(resolveMarkerTime({openDateTime:'2024-02-29T12:00:00Z'}, [{time:'2024-02-01'}], '1mo'), '2024-02-01');
+assert.equal(resolveMarkerTime({openDateTime:'2026-09-01T14:35:00Z'}, [{time:'2026-09-01'}], '1d'), '2026-09-01');
+assert.equal(resolveMarkerTime({openDateTime:'2026-09-05T12:00:00Z'}, [{time:'2026-09-04'},{time:'2026-09-07'}], '1d'), null);
+assert.equal(resolveMarkerTime({openDate:'2026-09-03'}, [{time:'2026-08-31'}], '1wk'), '2026-08-31');
+const base = Date.parse('2026-09-01T14:00:00Z') / 1000;
+for (const [interval, seconds] of Object.entries({'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'4h':14400,'12h':43200})) {
+  const bar = [{time:base}];
+  assert.equal(resolveMarkerTime({openDateTime:new Date((base+seconds-1)*1000).toISOString()}, bar, interval), base);
+  assert.equal(resolveMarkerTime({openDateTime:new Date((base+seconds)*1000).toISOString()}, bar, interval), null);
+}
+"""
+        subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+    def test_live_dispatch_uses_quote_time_and_rejects_old_quotes(self):
+        script = """
+const fs=require('fs'), vm=require('vm'), assert=require('node:assert/strict');
+const updates=[];
+class Clock extends Date { static now(){ return Date.parse('2026-09-05T12:00:00Z'); } }
+const c={Date:Clock,console,watchlist:[],activeMainTab:'charts',
+  symbolForInstrumentId:()=>null,instrumentIdCache:{AAPL:1},fmtPrice:String,updateChartLiveBadges:()=>{},
+  registry:{p:{indicators:{ha:false},_chartData:[{time:'2026-09-04',open:100,high:110,low:90,close:100}],
+    candleSeries:{update:x=>updates.push(x)}}},
+  document:{getElementById:()=>({querySelector:s=>s==='.p-sym'?{value:'AAPL'}:s==='.interval-sel'?{value:'1d'}:{}})}};
+vm.createContext(c);
+vm.runInContext(fs.readFileSync('frontend/js/live.js','utf8'),c);
+function tick(date,last) {
+  c.quote={date,last};
+  vm.runInContext('wsLivePrices[1]=quote;onLivePriceUpdate(1)',c);
+}
+tick('2026-09-04T20:00:00Z',120);
+tick('2026-09-04T20:00:01Z',105);
+assert.equal(updates.length,2);
+assert.equal(updates[1].time,'2026-09-04');
+assert.equal(updates[1].high,120);
+tick('2026-09-07T13:30:00Z',130);
+assert.equal(updates[2].time,'2026-09-07');
+tick('2026-09-04T20:00:02Z',999);
+tick(null,999);
+tick('invalid',999);
+assert.equal(updates.length,3);
+c.registry.p.indicators.ha=true;
+tick('2026-09-07T13:31:00Z',140);
+assert.equal(updates.length,3);
+assert.equal(vm.runInContext("updateLiveCandle({time:'2026-09-07'}, 1, Date.parse('2026-09-04'), '1d')",c),null);
+"""
+        subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+    def test_stale_snapshot_overrides_recent_timestamp_and_recovers(self):
+        script = """
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const c={API:'',console,stale:true};
+c.fetch=async()=>({ok:true,json:async()=>({stale:c.stale,positions:[],orders:[]})});
+vm.createContext(c);
+vm.runInContext(fs.readFileSync('frontend/js/live.js','utf8'),c);
+(async()=>{
+  vm.runInContext("etoroPositionsFetchedAt['1']=Date.now()",c);
+  await vm.runInContext("loadPositionsForAccount('1',true)",c);
+  assert.equal(vm.runInContext("positionsStale('1')",c),true);
+  c.stale=false;
+  await vm.runInContext("loadPositionsForAccount('1',true)",c);
+  assert.equal(vm.runInContext("positionsStale('1')",c),false);
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+    def test_portfolio_refresh_clears_chart_stale_flag(self):
+        script = self._js_functions("frontend/js/portfolio.js", ["loadPortData"]) + """
+const assert=require('node:assert/strict');
+const s={account:'1'};
+const API='', etoroPositionsStale={'1':true}, etoroPositionsAll={}, etoroOrdersAll={},
+      etoroPositionsFetchedAt={}, portfolioAccountData={};
+const getPortState=()=>s, renderPortPanel=()=>{},preparePortfolioSnapshot=()=>{},
+      rememberLiveInstruments=()=>{},hydrateOrderRates=async()=>{},updateHeaderEquities=()=>{};
+let stale=false;
+const fetch=async()=>({ok:true,json:async()=>({stale,positions:[],orders:[]})});
+(async()=>{
+  await loadPortData('main',true);
+  assert.equal(etoroPositionsStale['1'],false);
+  const freshAt=etoroPositionsFetchedAt['1'];
+  stale=true;
+  await loadPortData('main',true);
+  assert.equal(etoroPositionsStale['1'],true);
+  assert.equal(etoroPositionsFetchedAt['1'],freshAt);
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+        subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
 
 
 class SignalScoringRegressionTests(unittest.TestCase):

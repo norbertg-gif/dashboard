@@ -1483,6 +1483,7 @@ async function loadPortData(pid, forceRefresh = false) {
     // starú cache), nesmieme "potvrdiť" tieto dáta ako čerstvé — inak by ⟳
     // počas výpadku predĺžil platnosť starých dát o ďalších 24h namiesto toho,
     // aby appka skúsila znova pri najbližšej príležitosti.
+    if (forceRefresh) etoroPositionsStale[account] = Boolean(s.data.stale);
     if (forceRefresh && !s.data.stale) {
       etoroPositionsAll[account] = s.data.positions || [];
       etoroOrdersAll[account] = s.data.orders || [];

@@ -532,7 +532,7 @@ function pc_buildEarningsMarkers(view, candles) {
   if (!candles?.length || !pc_earningsHistory.length) return [];
   return pc_earningsHistory.map((h, index) => {
     if (!h?.date) return null;
-    const time = resolveMarkerTime({ openDate: h.date }, candles);
+    const time = resolveMarkerTime({ openDate: h.date }, candles, view === 'weekly' ? '1wk' : '1d');
     if (!time) return null;
     const markerId = `earnings:predictive:${view}:${index}:${h.date}`;
     const color = h.beat == null ? CHART_COLORS.neutral
@@ -921,7 +921,7 @@ function renderCharts(data) {
   const lastClose = candles.length ? candles[candles.length - 1].close : null;
   for (const acct of ['1', '2']) {
     (etoroPositionsAll[acct] || []).filter(p => p.symbol === ticker).forEach((pos, i) => {
-      const mt = resolveMarkerTime({ ...pos, _acct: acct }, candles);
+      const mt = resolveMarkerTime({ ...pos, _acct: acct }, candles, '1wk');
       if (!mt) return;
       // CLAUDE.md pitfall: P/L farba z pos.pnl — openRate porovnanie je zlé pre shorty/páku
       const inProfit = Number.isFinite(pos.pnl) ? pos.pnl >= 0

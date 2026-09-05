@@ -10,6 +10,7 @@ let wsReconnectTimer = null;
 let wsSubscribed = new Set();      // instrumentId-y ktoré sledujeme
 const wsLivePrices = {};           // { instrumentId: { bid, ask, last, date } }
 let wsAuthenticated = false;
+const lastAppliedQuoteMs = {};
 
 let _wsLastTickMs = 0;
 let _wsStatusState = '';
@@ -66,6 +67,8 @@ function wsConnect() {
             const topic = m.topic || '';
             const iid = parseInt(topic.replace('instrument:', ''));
             if (iid) {
+              const quoteMs = liveQuoteTimeMs(c.Date);
+              if (!Number.isFinite(quoteMs) || quoteMs < (lastAppliedQuoteMs[iid] ?? -Infinity)) continue;
               wsLivePrices[iid] = {
                 bid:  parseFloat(c.Bid),
                 ask:  parseFloat(c.Ask),
@@ -184,6 +187,13 @@ function applyPredictiveLivePrice(sym, livePrice) {
   if (status) status.textContent = `✓ ${sym} · live ${fmtPrice(livePrice)} · ${new Date().toLocaleTimeString('sk')}`;
 }
 
+function liveQuoteTimeMs(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? (value < 1e12 ? value * 1000 : value) : NaN;
+  if (typeof value !== 'string' || !value.trim()) return NaN;
+  const text = value.trim();
+  return Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : text + 'Z');
+}
+
 function liveIntervalMs(interval) {
   const units = { '1m': 60e3, '5m': 5 * 60e3, '15m': 15 * 60e3, '30m': 30 * 60e3,
     '1h': 60 * 60e3, '4h': 4 * 60 * 60e3, '12h': 12 * 60 * 60e3,
@@ -208,10 +218,14 @@ function liveCandleBucketStart(lastTime, tickMs, interval) {
 }
 
 function liveChartTimeFromMs(referenceTime, ms) {
-  return typeof referenceTime === 'number' ? ms / 1000 : new Date(ms).toISOString();
+  if (typeof referenceTime === 'number') return ms / 1000;
+  const iso = new Date(ms).toISOString();
+  return String(referenceTime).includes('T') ? iso : iso.slice(0, 10);
 }
 
 function updateLiveCandle(current, livePrice, tickMs, interval) {
+  const currentMs = typeof current.time === 'number' ? current.time * 1000 : Date.parse(current.time);
+  if (!Number.isFinite(tickMs) || tickMs < currentMs) return null;
   const bucketMs = liveCandleBucketStart(current.time, tickMs, interval);
   if (bucketMs != null) return { rolled: true, candle: { time: liveChartTimeFromMs(current.time, bucketMs),
     open: livePrice, high: livePrice, low: livePrice, close: livePrice } };
@@ -226,6 +240,9 @@ function onLivePriceUpdate(instrumentId) {
     .map(Number)
     .find(v => Number.isFinite(v) && v > 0);
   if (!Number.isFinite(livePrice)) return;
+  const tickMs = liveQuoteTimeMs(price.date);
+  if (!Number.isFinite(tickMs) || tickMs < (lastAppliedQuoteMs[instrumentId] ?? -Infinity)) return;
+  lastAppliedQuoteMs[instrumentId] = tickMs;
   const sym = symbolForInstrumentId(instrumentId);
 
   // 1. Watchlist sidebar — patchni len cenu/% bunky, nerob full re-render ani
@@ -293,7 +310,8 @@ function onLivePriceUpdate(instrumentId) {
         try {
           const interval = document.getElementById(pid)?.querySelector('.interval-sel')?.value;
           const state = r._liveCandle?.time === last.time ? r._liveCandle : last;
-          const update = updateLiveCandle(state, livePrice, Date.now(), interval);
+          const update = updateLiveCandle(state, livePrice, tickMs, interval);
+          if (!update) continue;
           if (update.rolled) r._chartData.push(update.candle);
           else r._chartData[r._chartData.length - 1] = update.candle;
           if (r._rawChartData?.length) {
@@ -338,7 +356,7 @@ const ETORO_POSITIONS_TTL_MS = 24 * 60 * 60 * 1000;
 function positionsStale(acct) {
   // Pozor: NEkontrolovať podľa .length — účet bez otvorených pozícií (0 dlžka)
   // by inak vyzeral "stale" navždy a fetchoval by sa pri každom otvorení grafu.
-  return !etoroPositionsFetchedAt[acct] || (Date.now() - etoroPositionsFetchedAt[acct]) > ETORO_POSITIONS_TTL_MS;
+  return etoroPositionsStale[acct] || !etoroPositionsFetchedAt[acct] || (Date.now() - etoroPositionsFetchedAt[acct]) > ETORO_POSITIONS_TTL_MS;
 }
 
 // Cache čakajúcich objednávok pre oba účty — z toho istého fetchu ako pozície

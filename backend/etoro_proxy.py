@@ -199,6 +199,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         path  = parts[0]
         query = parts[1] if len(parts) > 1 else ""
         acc   = get_account(query)
+        body  = self._read_body()
 
         if self._is_watchlist_items_path(path):
             etoro_path = path[7:]
@@ -206,7 +207,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             url = f"{BASE}/{etoro_path}"
             if clean_query:
                 url += f"?{clean_query}"
-            self._proxy(url, method="DELETE", account=acc); return
+            self._proxy(url, method="DELETE", body=body, account=acc); return
 
         self.send_response(403 if path.startswith("/etoro/") else 404); self.end_headers()
 
