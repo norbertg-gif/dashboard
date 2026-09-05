@@ -89,6 +89,53 @@ process.stdout.write(JSON.stringify({asc, desc}));
         self.assertEqual(result["desc"], ["high", "low", "missing-null", "missing-label"])
 
 
+class ChartLiveAndMarkerRegressionTests(unittest.TestCase):
+    """Pure chart helpers: live OHLC must not regress and markers must be binned."""
+
+    @staticmethod
+    def _js_functions(path, names):
+        source = Path(path).read_text(encoding="utf-8")
+        functions = []
+        for name in names:
+            match = re.search(rf"^function {name}\(.*?^}}", source, re.S | re.M)
+            assert match, f"{name}() sa nenašla"
+            functions.append(match.group(0))
+        return "\n".join(functions)
+
+    def test_live_candle_keeps_peak_and_rolls_at_interval_boundary(self):
+        script = self._js_functions("frontend/js/live.js", [
+            "liveIntervalMs", "liveCandleBucketStart", "liveChartTimeFromMs", "updateLiveCandle",
+        ]) + """
+let candle = {time: 1000, open: 100, high: 110, low: 90, close: 100};
+candle = updateLiveCandle(candle, 120, 1000001, '1m').candle;
+candle = updateLiveCandle(candle, 105, 1000002, '1m').candle;
+const rolled = updateLiveCandle(candle, 130, 1060000, '1m');
+process.stdout.write(JSON.stringify({candle, rolled}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["candle"]["high"], 120)
+        self.assertEqual(payload["candle"]["low"], 90)
+        self.assertTrue(payload["rolled"]["rolled"])
+        self.assertEqual(payload["rolled"]["candle"],
+                         {"time": 1060, "open": 130, "high": 130, "low": 130, "close": 130})
+
+    def test_trade_is_binned_to_its_daily_candle_not_the_next_one(self):
+        script = self._js_functions("frontend/js/charts.js", ["binMarkerTime"]) + """
+const day = 24 * 60 * 60 * 1000;
+const points = [1, 2, 3].map(d => ({time: d * 86400, ms: d * day}));
+process.stdout.write(JSON.stringify({
+  onDayTwo: binMarkerTime(2 * day + (14 * 60 + 35) * 60 * 1000, points),
+  before: binMarkerTime(day - 1, points), after: binMarkerTime(4 * day, points),
+}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["onDayTwo"], 2 * 86400)
+        self.assertIsNone(payload["before"])
+        self.assertIsNone(payload["after"])
+
+
 class SignalScoringRegressionTests(unittest.TestCase):
     """C2 (RSI<45) prekrýva C4 (z<=-1.5) na 100 % — zmerané na 1559 z 1559 dní.
     Bez tejto poistky by sa dvojité počítanie mohlo ticho vrátiť."""

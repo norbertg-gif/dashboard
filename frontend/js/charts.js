@@ -1681,19 +1681,30 @@ function parseEtoroOpenMs(pos) {
   return Number.isNaN(ms) ? Date.parse(raw) : ms;
 }
 
+function binMarkerTime(openMs, points) {
+  const valid = points.filter(p => !Number.isNaN(p.ms)).sort((a, b) => a.ms - b.ms);
+  if (!valid.length || openMs < valid[0].ms) return null;
+  if (valid.length === 1) return openMs === valid[0].ms ? valid[0].time : null;
+  if (valid.length > 1) {
+    const span = valid.slice(1).reduce((smallest, p, index) => {
+      const gap = p.ms - valid[index].ms;
+      return gap > 0 ? Math.min(smallest, gap) : smallest;
+    }, Infinity);
+    if (Number.isFinite(span) && openMs >= valid[valid.length - 1].ms + span) return null;
+  }
+  return [...valid].reverse().find(p => p.ms <= openMs)?.time || null;
+}
+
 function resolveMarkerTime(pos, chartData) {
   if (!chartData?.length) return null;
   const openMs = parseEtoroOpenMs(pos);
   const openDay = pos.openDate || (Number.isNaN(openMs) ? null : new Date(openMs).toISOString().slice(0, 10));
   const points = chartData.map(d => ({ time: d.time, ms: chartTimeToMs(d.time), day: timeToDateKey(d.time) }));
-  if (!Number.isNaN(openMs)) {
-    const sameOrNext = points.find(p => !Number.isNaN(p.ms) && p.ms >= openMs);
-    if (sameOrNext) return sameOrNext.time;
-    const lastBefore = [...points].reverse().find(p => !Number.isNaN(p.ms) && p.ms < openMs);
-    if (lastBefore) return lastBefore.time;
-  }
-  const sameDay = points.find(p => p.day === openDay);
-  return sameDay?.time || null;
+  // Date-only sources have no intraday instant: anchor to the first loaded bar that day.
+  const raw = pos.openDateTime || pos.openTimestamp || pos.openDate;
+  if (raw && !String(raw).includes('T')) return points.find(p => p.day === openDay)?.time || null;
+  // Outside loaded history returns null, never an exact-looking guessed marker.
+  return Number.isNaN(openMs) ? null : binMarkerTime(openMs, points);
 }
 
 // ── EARNINGS MARKERS ──────────────────────────────────────────────────────────
@@ -1959,6 +1970,7 @@ function applyPanelSeriesData(r, data) {
     color:d.close >= d.open ? '#00c99a22' : '#ff456022',
   }));
   r._chartData = candleData;
+  r._liveCandle = null;
   r.candleSeries.setData(candleData);
   r.volSeries.setData(volumeData);
 }

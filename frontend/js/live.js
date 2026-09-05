@@ -184,6 +184,41 @@ function applyPredictiveLivePrice(sym, livePrice) {
   if (status) status.textContent = `✓ ${sym} · live ${fmtPrice(livePrice)} · ${new Date().toLocaleTimeString('sk')}`;
 }
 
+function liveIntervalMs(interval) {
+  const units = { '1m': 60e3, '5m': 5 * 60e3, '15m': 15 * 60e3, '30m': 30 * 60e3,
+    '1h': 60 * 60e3, '4h': 4 * 60 * 60e3, '12h': 12 * 60 * 60e3,
+    '1d': 24 * 60 * 60e3, '1wk': 7 * 24 * 60 * 60e3 };
+  return units[interval] || null;
+}
+
+function liveCandleBucketStart(lastTime, tickMs, interval) {
+  const lastMs = typeof lastTime === 'number' ? lastTime * 1000 : Date.parse(lastTime);
+  if (!Number.isFinite(lastMs) || !Number.isFinite(tickMs) || tickMs < lastMs) return null;
+  if (interval === '1mo') {
+    const start = new Date(lastMs), tick = new Date(tickMs);
+    const months = (tick.getUTCFullYear() - start.getUTCFullYear()) * 12 + tick.getUTCMonth() - start.getUTCMonth();
+    const lastDayOfTargetMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months + 1, 0)).getUTCDate();
+    const bucketMs = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months,
+      Math.min(start.getUTCDate(), lastDayOfTargetMonth), start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds());
+    return bucketMs > lastMs ? bucketMs : null;
+  }
+  const span = liveIntervalMs(interval);
+  if (!span || tickMs < lastMs + span) return null;
+  return lastMs + Math.floor((tickMs - lastMs) / span) * span;
+}
+
+function liveChartTimeFromMs(referenceTime, ms) {
+  return typeof referenceTime === 'number' ? ms / 1000 : new Date(ms).toISOString();
+}
+
+function updateLiveCandle(current, livePrice, tickMs, interval) {
+  const bucketMs = liveCandleBucketStart(current.time, tickMs, interval);
+  if (bucketMs != null) return { rolled: true, candle: { time: liveChartTimeFromMs(current.time, bucketMs),
+    open: livePrice, high: livePrice, low: livePrice, close: livePrice } };
+  return { rolled: false, candle: { ...current, high: Math.max(Number(current.high) || livePrice, livePrice),
+    low: Math.min(Number(current.low) || livePrice, livePrice), close: livePrice } };
+}
+
 function onLivePriceUpdate(instrumentId) {
   const price = wsLivePrices[instrumentId];
   if (!price) return;
@@ -250,18 +285,24 @@ function onLivePriceUpdate(instrumentId) {
     // Aktualizuj p-price badge
     const priceEl = document.getElementById(pid)?.querySelector('.p-price');
     if (priceEl) priceEl.textContent = fmtPrice(livePrice);
-    // Aktualizuj poslednú sviečku
-    if (r.candleSeries && r._chartData?.length) {
+    // HA is server-derived from raw OHLC, which the client does not have. Do not
+    // blend a raw live price into a derived candle; a stale HA candle is truthful.
+    if (r.candleSeries && r._chartData?.length && !r.indicators?.ha) {
       const last = r._chartData[r._chartData.length - 1];
       if (last) {
         try {
-          r.candleSeries.update({
-            time:  last.time,
-            open:  last.open,
-            high:  Math.max(last.high, livePrice),
-            low:   Math.min(last.low,  livePrice),
-            close: livePrice,
-          });
+          const interval = document.getElementById(pid)?.querySelector('.interval-sel')?.value;
+          const state = r._liveCandle?.time === last.time ? r._liveCandle : last;
+          const update = updateLiveCandle(state, livePrice, Date.now(), interval);
+          if (update.rolled) r._chartData.push(update.candle);
+          else r._chartData[r._chartData.length - 1] = update.candle;
+          if (r._rawChartData?.length) {
+            if (update.rolled) r._rawChartData.push({ ...update.candle, volume: 0 });
+            else r._rawChartData[r._rawChartData.length - 1] = { ...r._rawChartData[r._rawChartData.length - 1], ...update.candle };
+          }
+          r._liveCandle = update.candle;
+          r.candleSeries.update(update.candle);
+          if (update.rolled) r.volSeries?.update({ time: update.candle.time, value: 0, color: '#00c99a22' });
         } catch(e) {}
       }
     }
