@@ -45,7 +45,8 @@ def fetch_with_retry(url: str, headers: dict = None, timeout: int = 10,
     last_exc = None
     for attempt in range(retries):
         try:
-            resp = requests.get(url, headers=headers or {}, timeout=timeout)
+            client = ETORO_PROXY_SESSION if url.startswith(ETORO_PROXY) else requests
+            resp = client.get(url, headers=headers or {}, timeout=timeout)
             resp.raise_for_status()
             return resp
         except requests.exceptions.Timeout as e:
@@ -1636,6 +1637,12 @@ def search_ticker_yahoo(q: str = Query(..., min_length=1)):
 
 ETORO_PROXY   = "http://localhost:8765"
 ETORO_PROXY_TIMEOUT = 10
+try:
+    from backend import etoro_proxy as _etoro_proxy
+except ImportError:  # direct execution from backend/
+    import etoro_proxy as _etoro_proxy
+ETORO_PROXY_SESSION = requests.Session()
+ETORO_PROXY_SESSION.headers[_etoro_proxy.PROXY_TOKEN_HEADER] = _etoro_proxy.ETORO_PROXY_TOKEN
 
 import time, json as _json, threading, gzip as _gzip, hashlib as _hashlib
 from pathlib import Path as _Path
@@ -1847,7 +1854,7 @@ def load_instruments():
                 return _instruments_cache
 
         try:
-            resp = requests.get(f"{ETORO_PROXY}/instruments", timeout=20)
+            resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/instruments", timeout=20)
             resp.raise_for_status()
             items = resp.json().get("InstrumentDisplayDatas", [])
             compact = {}
@@ -1934,7 +1941,7 @@ def get_etoro_positions(account: str = Query("1"), refresh: int = Query(0)):
 def etoro_accounts():
     """Vráti zoznam dostupných eToro účtov z proxy."""
     try:
-        resp = requests.get(f"{ETORO_PROXY}/accounts", timeout=3)
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/accounts", timeout=3)
         return resp.json() if resp.ok else []
     except Exception as e:
         return []
@@ -1984,7 +1991,7 @@ def get_etoro_daily_gain(
 @app.get("/api/etoro/watchlists")
 def get_etoro_watchlists(account: str = Query("1")):
     try:
-        resp = requests.get(f"{ETORO_PROXY}/etoro/watchlists?ensureBuiltinWatchlists=true&account={account}", timeout=8)
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/etoro/watchlists?ensureBuiltinWatchlists=true&account={account}", timeout=8)
         if not resp.ok: raise HTTPException(502, f"eToro watchlists: {resp.status_code}")
         result = []
         for wl in resp.json().get("watchlists", []):
@@ -2006,7 +2013,7 @@ def add_to_etoro_watchlist(watchlist_id: str, body: dict, account: str = Query("
     import json as _json
     payload = _json.dumps([{"itemId": iid, "itemType": "Instrument"}]).encode()
     try:
-        resp = requests.post(f"{ETORO_PROXY}/etoro/watchlists/{watchlist_id}/items?account={account}",
+        resp = ETORO_PROXY_SESSION.post(f"{ETORO_PROXY}/etoro/watchlists/{watchlist_id}/items?account={account}",
             data=payload, headers={"Content-Type": "application/json"}, timeout=8)
         return {"ok": resp.ok, "status": resp.status_code}
     except Exception as e: raise HTTPException(502, str(e))
@@ -2017,7 +2024,7 @@ def remove_from_etoro_watchlist(watchlist_id: str, instrument_id: int, account: 
     import json as _json
     payload = _json.dumps([{"itemId": instrument_id, "itemType": "Instrument"}]).encode()
     try:
-        resp = requests.delete(f"{ETORO_PROXY}/etoro/watchlists/{watchlist_id}/items?account={account}",
+        resp = ETORO_PROXY_SESSION.delete(f"{ETORO_PROXY}/etoro/watchlists/{watchlist_id}/items?account={account}",
             data=payload, headers={"Content-Type": "application/json"}, timeout=8)
         return {"ok": resp.ok, "status": resp.status_code}
     except Exception as e: raise HTTPException(502, str(e))
@@ -2026,7 +2033,7 @@ def remove_from_etoro_watchlist(watchlist_id: str, instrument_id: int, account: 
 @app.get("/api/etoro/rates")
 def get_etoro_rates(instrument_ids: str = Query(...), account: str = Query("1")):
     try:
-        resp = requests.get(
+        resp = ETORO_PROXY_SESSION.get(
             f"{ETORO_PROXY}/etoro/market-data/instruments/rates?instrumentIds={instrument_ids}&account={account}",
             timeout=8)
         if not resp.ok: raise HTTPException(502, f"eToro rates: {resp.status_code}")
@@ -2063,7 +2070,7 @@ def get_etoro_rates_batch(symbols: str = Query(""), instrument_ids: str = Query(
     try:
         for i in range(0, len(ids), 100):
             chunk = ids[i:i + 100]
-            resp = requests.get(
+            resp = ETORO_PROXY_SESSION.get(
                 f"{ETORO_PROXY}/etoro/market-data/instruments/rates?instrumentIds={','.join(map(str, chunk))}&account={account}",
                 timeout=8
             )
@@ -2103,7 +2110,7 @@ def resolve_instrument_id(symbol: str = Query(...), account: str = Query("1")):
 def get_ws_keys(account: str = Query("1")):
     """Vráti API kľúče pre WebSocket autentifikáciu."""
     try:
-        resp = requests.get(f"{ETORO_PROXY}/keys?account={account}", timeout=3)
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/keys?account={account}", timeout=3)
         if resp.ok:
             return resp.json()
         # /keys endpoint nie je dostupný — vráť prázdne (WS nebude autentifikovaný)
@@ -2140,7 +2147,7 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
     instruments = load_instruments()
 
     try:
-        resp = requests.get(f"{ETORO_PROXY}/pnl/real?account={account}", timeout=ETORO_PROXY_TIMEOUT)
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/pnl/real?account={account}", timeout=ETORO_PROXY_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -3980,7 +3987,7 @@ def diagnostics_summary(account: str = Query("1")):
     # diagnostika ťahá čerstvo z proxy. Je to volanie na vyžiadanie, nie hot
     # path — presnosť je tu dôležitejšia než ušetrený round-trip.
     try:
-        resp = requests.get(f"{ETORO_PROXY}/pnl/real?account={account}",
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/pnl/real?account={account}",
                             timeout=ETORO_PROXY_TIMEOUT)
         resp.raise_for_status()
         port = (resp.json() or {}).get("clientPortfolio") or {}
@@ -4823,7 +4830,7 @@ def prefetch_status():
 def etoro_status():
     """Rýchla kontrola či eToro proxy beží."""
     try:
-        resp = requests.get(f"{ETORO_PROXY}/pnl/real", timeout=3)
+        resp = ETORO_PROXY_SESSION.get(f"{ETORO_PROXY}/pnl/real", timeout=3)
         return {"ok": resp.ok, "status": resp.status_code}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -11070,7 +11077,7 @@ def _scrub_token(msg: str) -> str:
     2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
     Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
     msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN", "FINVIZ_COOKIE"):
+    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
         secret = os.getenv(env_name, "").strip()
         if secret and (env_name == "FINVIZ_COOKIE" or len(secret) >= 8):
             msg = msg.replace(secret, "***")
@@ -14966,7 +14973,7 @@ def dashboard_js_module(fname: str):
 if __name__ == "__main__":
     # ── eToro proxy ako background thread ─────────────────────────────────────
     try:
-        import etoro_proxy as _ep
+        _ep = _etoro_proxy
         _ep.EXT_CALL_LOGGER = _log_ext_api_call  # eToro volá cez urllib, nie requests
         _ep.start_proxy_thread()
     except Exception as e:

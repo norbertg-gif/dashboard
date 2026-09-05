@@ -9,6 +9,7 @@ import urllib.request, urllib.error, urllib.parse
 import json, uuid
 import threading
 import os
+import secrets
 
 # Voliteľný hook na logovanie odchádzajúcich eToro volaní — nastavuje ho
 # trading_backend (_log_ext_api_call) po importe; standalone beh ostáva bez logu.
@@ -32,6 +33,17 @@ ACCOUNTS = {"1": ACCOUNT1, "2": ACCOUNT2}
 BASE     = "https://public-api.etoro.com/api/v1"
 PORT     = 8765
 UA       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+# In-process backend reads this value directly. ETORO_PROXY_TOKEN lets a
+# separately started development proxy/backend pair share the same secret.
+# POZOR na dvojitý import. Token je per-modul, takže `import etoro_proxy` a
+# `from backend import etoro_proxy` vytvoria DVA modulové objekty s DVOMA
+# rôznymi tokenmi — proxy by potom odmietala vlastný backend s 401, čo vyzerá
+# ako výpadok eToro. Overené: v jednom procese naozaj vzniknú dva rôzne tokeny.
+# Dnešné štartovacie cesty sú konzistentné (root shim aj priamy beh použijú ten
+# istý názov a `__main__` znovupoužije už importovaný modul), ale keď sem niekto
+# pridá ďalší import, musí použiť TEN ISTÝ tvar ako `trading_backend.py`.
+ETORO_PROXY_TOKEN = os.getenv("ETORO_PROXY_TOKEN") or secrets.token_urlsafe(32)
+PROXY_TOKEN_HEADER = "X-eToro-Proxy-Token"
 
 ROUTES = {
     "/pnl/real":    f"{BASE}/trading/info/real/pnl",
@@ -62,13 +74,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"  {self.path}  ->  {args[1] if len(args)>1 else ''}")
 
-    def send_cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
-
     def do_OPTIONS(self):
-        self.send_response(200); self.send_cors(); self.end_headers()
+        if not self._authorized():
+            self._reject_unauthorized(); return
+        # This is backend-to-backend only: never advertise browser/CORS access.
+        self.send_response(405); self.end_headers()
+
+    def _authorized(self):
+        return secrets.compare_digest(self.headers.get(PROXY_TOKEN_HEADER, ""), ETORO_PROXY_TOKEN)
+
+    def _reject_unauthorized(self):
+        self.send_response(401); self.end_headers()
+
+    @staticmethod
+    def _is_watchlist_items_path(path):
+        parts = path.split("/")
+        return (len(parts) == 5 and parts[0] == "" and parts[1] == "etoro"
+                and parts[2] == "watchlists" and bool(parts[3]) and parts[4] == "items")
 
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -92,21 +114,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 data = resp.read()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                self.send_cors(); self.end_headers()
+                self.end_headers()
                 self.wfile.write(data)
         except urllib.error.HTTPError as e:
             body_e = e.read()
             self.send_response(e.code)
             self.send_header("Content-Type", "application/json")
-            self.send_cors(); self.end_headers()
+            self.end_headers()
             self.wfile.write(body_e)
         except Exception as e:
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
-            self.send_cors(); self.end_headers()
+            self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode())
 
     def do_GET(self):
+        if not self._authorized():
+            self._reject_unauthorized(); return
         parts = self.path.split("?", 1)
         path  = parts[0]
         query = parts[1] if len(parts) > 1 else ""
@@ -117,7 +141,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data = json.dumps([{"id": k, "name": v["name"]} for k, v in ACCOUNTS.items()]).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_cors(); self.end_headers()
+            self.end_headers()
             self.wfile.write(data); return
 
         # /keys — vráti api_key a user_key pre daný účet (pre WS autentifikáciu)
@@ -128,7 +152,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_cors(); self.end_headers()
+            self.end_headers()
             self.wfile.write(data); return
 
         # Statické routy
@@ -146,17 +170,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 url += f"?{clean_query}"
             self._proxy(url, account=acc); return
 
-        self.send_response(404); self.send_cors(); self.end_headers()
+        self.send_response(404); self.end_headers()
         self.wfile.write(b'{"error":"unknown route"}')
 
     def do_POST(self):
+        if not self._authorized():
+            self._reject_unauthorized(); return
         parts = self.path.split("?", 1)
         path  = parts[0]
         query = parts[1] if len(parts) > 1 else ""
         acc   = get_account(query)
         body  = self._read_body()
 
-        if path.startswith("/etoro/"):
+        if self._is_watchlist_items_path(path):
             etoro_path = path[7:]
             clean_query = "&".join(p for p in query.split("&") if not p.startswith("account="))
             url = f"{BASE}/{etoro_path}"
@@ -164,15 +190,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 url += f"?{clean_query}"
             self._proxy(url, method="POST", body=body, account=acc); return
 
-        self.send_response(404); self.send_cors(); self.end_headers()
+        self.send_response(403 if path.startswith("/etoro/") else 404); self.end_headers()
 
     def do_DELETE(self):
+        if not self._authorized():
+            self._reject_unauthorized(); return
         parts = self.path.split("?", 1)
         path  = parts[0]
         query = parts[1] if len(parts) > 1 else ""
         acc   = get_account(query)
 
-        if path.startswith("/etoro/"):
+        if self._is_watchlist_items_path(path):
             etoro_path = path[7:]
             clean_query = "&".join(p for p in query.split("&") if not p.startswith("account="))
             url = f"{BASE}/{etoro_path}"
@@ -180,7 +208,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 url += f"?{clean_query}"
             self._proxy(url, method="DELETE", account=acc); return
 
-        self.send_response(404); self.send_cors(); self.end_headers()
+        self.send_response(403 if path.startswith("/etoro/") else 404); self.end_headers()
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True   # child thready zaniknú s main procesom
@@ -198,6 +226,8 @@ def start_proxy_thread():
     _server_thread.start()
     print(f"eToro proxy bezi na http://localhost:{PORT}")
 if __name__ == "__main__":
+    if not os.getenv("ETORO_PROXY_TOKEN"):
+        raise SystemExit("ETORO_PROXY_TOKEN must be set when running the proxy standalone so the backend can authenticate to it.")
     print(f"eToro proxy bezi na http://localhost:{PORT}")
     for k, v in ACCOUNTS.items():
         ok = bool(v.get("api_key") and v.get("user_key"))

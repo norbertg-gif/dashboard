@@ -9,6 +9,8 @@ import unittest
 import json
 import re
 import subprocess
+import http.client
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -19,6 +21,59 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import trading_backend as tb
+from backend import etoro_proxy as ep
+
+
+class EtoroProxySecurityRegressionTests(unittest.TestCase):
+    """Exercise the local handler only; no eToro request leaves this process."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ep.ThreadingHTTPServer(("127.0.0.1", 0), ep.ProxyHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=2)
+
+    def _request(self, method, path, token=True):
+        connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
+        headers = {ep.PROXY_TOKEN_HEADER: ep.ETORO_PROXY_TOKEN} if token else {}
+        connection.request(method, path, headers=headers)
+        response = connection.getresponse()
+        response.read()
+        headers = dict(response.getheaders())
+        connection.close()
+        return response.status, headers
+
+    def test_token_is_required_and_responses_do_not_advertise_cors(self):
+        status, headers = self._request("GET", "/accounts", token=False)
+        self.assertEqual(status, 401)
+        self.assertFalse(any(key.lower().startswith("access-control-") for key in headers))
+
+    def test_keys_are_rejected_without_token(self):
+        status, _headers = self._request("GET", "/keys", token=False)
+        self.assertEqual(status, 401)
+
+    def test_only_watchlist_items_writes_are_forwarded(self):
+        forwarded = []
+
+        def fake_proxy(handler, url, method="GET", body=None, extra_headers=None, account=None):
+            forwarded.append((url, method))
+            handler.send_response(204)
+            handler.end_headers()
+
+        with patch.object(ep.ProxyHandler, "_proxy", fake_proxy):
+            status, _headers = self._request("POST", "/etoro/trading/orders")
+            self.assertEqual(status, 403)
+            self.assertEqual(forwarded, [])
+            status, headers = self._request("POST", "/etoro/watchlists/123/items")
+            self.assertEqual(status, 204)
+            self.assertEqual(forwarded, [(f"{ep.BASE}/watchlists/123/items", "POST")])
+            self.assertFalse(any(key.lower().startswith("access-control-") for key in headers))
 
 
 class IchimokuFutureRegressionTests(unittest.TestCase):
