@@ -263,8 +263,7 @@ document.addEventListener('keydown', e => {
 })();
 
 // ── PORTFOLIO SIDE COLUMN RESIZE ─────────────────────────────────────────────
-// Na rozdiel od Scanner poznámok je tu vysúvaný panel VĽAVO od resizera —
-// ťahanie doprava teda šírku zväčšuje (opačné znamienko než scanner).
+// Main portfolio places insights on the right; embedded panels keep the left.
 (function() {
   const MIN_W = 280, DEFAULT_W = 320;
   const maxSideWidth = () => Math.max(MIN_W, Math.floor(window.innerWidth * 0.35));
@@ -290,7 +289,9 @@ document.addEventListener('keydown', e => {
       document.body.style.userSelect = 'none';
 
       function onMove(e) {
-        const w = Math.min(maxSideWidth(), Math.max(MIN_W, startW + (e.clientX - startX)));
+        const reversed = getComputedStyle(panel.parentElement).flexDirection === 'row-reverse';
+        const delta = (e.clientX - startX) * (reversed ? -1 : 1);
+        const w = Math.min(maxSideWidth(), Math.max(MIN_W, startW + delta));
         panel.style.setProperty('--port-side-width', w + 'px');
       }
       function onUp() {

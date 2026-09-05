@@ -698,8 +698,11 @@ function getChartTheme() {
     bg:'#f8fafc', text:'#334155', grid:'#e2e8f0',
     border:'#cbd5e1', crosshair:'#64748b55', crosshairLbl:'#f1f5f9',
   };
-  // Glass Terminal dark — chart canvas o stupeň tmavší než glass karta,
-  // nech sviečky "sedia v skle" (handoff: chart area ~ base bg 13% / 260)
+  // Graphite canvas; indicator and candle colors remain unchanged.
+  if (document.documentElement.dataset.variant === 'glass') return {
+    bg:'#17191c', text:'#a6adb6', grid:'#25282c',
+    border:'#34373c', crosshair:'#528bff88', crosshairLbl:'#23262a',
+  };
   return {
     bg:'#0b0e15', text:'#4d5a70', grid:'#151a26',
     border:'#232b3d', crosshair:'#4a9eff55', crosshairLbl:'#151a26',
@@ -2406,11 +2409,13 @@ function removePanel(id) {
   if (r) {
     clearTimeout(r.viewSaveTimer);
     r.ro.disconnect();
+    // Series cleanup must precede chart disposal; otherwise LWC queues a
+    // repaint against an already disposed canvas.
+    if (r.entryPriceLines) r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
     r.mainChart.remove();
     if (r.rsiChart)  r.rsiChart.remove();
     if (r.adxChart)  r.adxChart.remove();
     if (r.macdChart) r.macdChart.remove();
-    if (r.entryPriceLines) r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
     delete registry[id];
   }
   document.getElementById(id)?.remove();

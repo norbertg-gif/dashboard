@@ -6681,3 +6681,371 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
    dvoch/jednom je zobrazenie zložené a uložiť by sa nedalo bez straty
    kanonického rozloženia (viď saveScannerAuxLayout v scanner.js). */
 .scanner-aux-locked .scanner-aux-grip { opacity: .3; cursor: default; }
+
+/* Graphite workspace. Presentation only; existing table scroll owners stay intact. */
+html[data-variant="glass"] {
+  --bg: #131416;
+  --bg-card: #1b1d20;
+  --bg-input: #23262a;
+  --bg2: #202327;
+  --border: #34373c;
+  --border-focus: #528bff;
+  --text: #edf0f3;
+  --muted: #a6adb6;
+  --muted2: #939ca8;
+  --muted3: #555e69;
+  --up: #54d7a0;
+  --up-soft: rgba(84,215,160,.10);
+  --down: #f27e81;
+  --down-soft: rgba(242,126,129,.10);
+  --accent: #528bff;
+  --accent-soft: rgba(82,139,255,.13);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow: none;
+  --shadow-sm: none;
+  --glass-fill: #1b1d20;
+  --accent-grad: #3265c9;
+}
+
+html[data-variant="glass"] body:not(.light-mode) {
+  color-scheme: dark;
+  font-size: 13px;
+  background: var(--bg);
+}
+html[data-variant="glass"] body:not(.light-mode) :is(button, input, select, textarea) {
+  letter-spacing: 0;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(#hdr, #sidebar, #toolbar, .tool-toolbar, .port-toolbar, #predictiveTab .controls) {
+  background: #17191c;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(#grid, #main-charts, #main-portfolio) {
+  background: var(--bg) !important;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.tb-label, .port-sum-label, .home-kpi-label, .card-title, .home-card-title, .scanner-section-kicker) {
+  letter-spacing: 0;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.btn, .port-filter-btn, .port-view-btn, .port-cols-btn, .port-export-btn, .port-attention-toggle, .tool-toolbar button, #predictiveTab .toggle-btn) {
+  border-radius: 4px;
+  min-height: 28px;
+  font-size: 12px;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.port-toolbar, .tool-toolbar, #predictiveTab .controls) {
+  gap: 10px;
+  padding: 10px 14px;
+}
+html[data-variant="glass"] body:not(.light-mode) .port-toolbar {
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+html[data-variant="glass"] body:not(.light-mode) .port-toolbar .tb-items {
+  flex-wrap: wrap;
+}
+html[data-variant="glass"] body:not(.light-mode) .port-toolbar .tb-group {
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-variant="glass"] body:not(.light-mode) .sb-item {
+  min-height: 49px;
+  border-radius: 0;
+  border-bottom: 1px solid #292c31;
+  padding: 9px 10px;
+}
+html[data-variant="glass"] body:not(.light-mode) .sb-sym { font-size: 12px; }
+html[data-variant="glass"] body:not(.light-mode) :is(.sb-sub, .sb-price, .sb-chg) { font-size: 11px; }
+html[data-variant="glass"] body:not(.light-mode) .sb-dot { box-shadow: none; }
+html[data-variant="glass"] body:not(.light-mode) #sb-input { border-radius: 4px; min-height: 32px; }
+html[data-variant="glass"] body:not(.light-mode) .sb-item:hover { background: var(--bg-input); }
+html[data-variant="glass"] body:not(.light-mode) .tab-popout:focus-visible { opacity: 1; }
+
+/* Summary stays above the independently scrolling table and insights. */
+#port-inner-main > .port-panel > .port-summary {
+  flex-shrink: 0;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+#port-inner-main > .port-panel > .port-summary .port-sum-item {
+  align-items: flex-start;
+  text-align: left;
+  padding: 7px 14px;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+}
+#port-inner-main > .port-panel > .port-summary .port-sum-item:last-child { border-right: 0; }
+#port-inner-main > .port-panel > .port-summary .port-sum-label { font-size: 11px; letter-spacing: 0; }
+#port-inner-main > .port-panel > .port-summary .port-sum-val { font-size: 19px; overflow-wrap: anywhere; }
+#port-inner-main > .port-panel > #port-gain-main { padding: 8px 18px !important; }
+.port-workspace { flex-direction: row-reverse; }
+.port-workspace .port-side-col { background: var(--bg-card); }
+.port-insights-heading {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border);
+  font: 600 13px var(--font-ui);
+  color: var(--text);
+}
+.port-workspace.insights-collapsed > :is(.port-side-col, .port-side-resizer) { display: none; }
+body.dock-open #main-portfolio .port-workspace .port-main-table-wrap { margin-right: 0; }
+#chart-dock { max-width: calc(100vw - 16px); }
+@media (min-width: 1101px) {
+  body.dock-open #main-portfolio .port-workspace {
+    margin-right: var(--dock-width, 420px);
+    width: auto;
+  }
+}
+#port-insights-toggle[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.port-table, .tool-table, .scanner-table) {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.port-table, .tool-table, .scanner-table) th {
+  background: #202327;
+  color: #b9c0ca;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--border);
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.port-table, .tool-table, .scanner-table) td {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  border-bottom-color: #2b2e33;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.port-table, .tool-table, .scanner-table) tbody tr:hover {
+  background: #23272d;
+}
+html[data-variant="glass"] body:not(.light-mode) .port-pct { border-radius: 3px; }
+html[data-variant="glass"] body:not(.light-mode) .port-side-col > :is(#portfolio-dca, #portfolio-build, #portfolio-sectors, #portfolio-corr) {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Flat page sections, with the same hierarchy on all seven views. */
+html[data-variant="glass"] body:not(.light-mode) :is(.tool-panel, #predictiveTab .card, .home-card, .home-card-wide, .investor-week-card, .earnings-calendar-card, .scanner-aux-card) {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+html[data-variant="glass"] body:not(.light-mode) .tool-view { padding: 12px 16px; }
+html[data-variant="glass"] body:not(.light-mode) .home-wrap {
+  width: 100%;
+  max-width: 1800px;
+  padding: 20px 24px;
+  gap: 18px;
+}
+html[data-variant="glass"] body:not(.light-mode) .home-hero h1 {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-grid {
+  gap: 0;
+  border-block: 1px solid var(--border);
+}
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-item {
+  min-height: 84px;
+  padding: 14px 18px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-item:last-child { border-right: 0; }
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-item::after { display: none; }
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-label { font-size: 11px; }
+html[data-variant="glass"] body:not(.light-mode) .home-kpi-val { font-size: 21px; letter-spacing: 0; }
+html[data-variant="glass"] body:not(.light-mode) .home-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 18px 24px;
+}
+html[data-variant="glass"] body:not(.light-mode) :is(.home-card, .home-card-wide) {
+  min-height: 0;
+  padding: 16px 0;
+}
+html[data-variant="glass"] body:not(.light-mode) .home-card-title {
+  font-size: 14px;
+  text-transform: none;
+  color: var(--text);
+}
+html[data-variant="glass"] body:not(.light-mode) .home-card-title::before { display: none; }
+html[data-variant="glass"] body:not(.light-mode) .panel { box-shadow: none; border-radius: 4px; }
+html[data-variant="glass"] body:not(.light-mode) .panel::before { display: none; }
+html[data-variant="glass"] body:not(.light-mode) #predictiveTab .card {
+  padding: 14px 12px;
+}
+html[data-variant="glass"] body:not(.light-mode) #predictiveTab .card-title {
+  font-size: 13px;
+  text-transform: none;
+}
+html[data-variant="glass"] body:not(.light-mode) #predictiveTab .chart-header {
+  background: #1b1d20;
+}
+html[data-variant="glass"] body:not(.light-mode) #predictiveTab .pc-sidebar {
+  background: #17191c;
+  border-left: 1px solid var(--border);
+}
+html[data-variant="glass"] body:not(.light-mode) .scanner-source-title { font-size: 16px; letter-spacing: 0; }
+html[data-variant="glass"] body:not(.light-mode) .scanner-aux-card { padding: 14px 12px; }
+html[data-variant="glass"] body:not(.light-mode) .verdict-content > div {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-variant="glass"] body:not(.light-mode) .verdict-dual { gap: 24px; }
+html[data-variant="glass"] body:not(.light-mode) .verdict-dual > .verdict-content {
+  padding: 16px;
+  border-top: 2px solid var(--border);
+}
+html[data-variant="glass"] body:not(.light-mode) .verdict-view { background: var(--bg); }
+html[data-variant="glass"] body:not(.light-mode) .verdict-shell { container-type: inline-size; }
+html[data-variant="glass"] body:not(.light-mode) .verdict-hero {
+  padding: 18px;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-card);
+}
+html[data-variant="glass"] body:not(.light-mode) .verdict-hero::after { display: none; }
+html[data-variant="glass"] body:not(.light-mode) .verdict-label {
+  font-size: 30px;
+  letter-spacing: 0;
+}
+html[data-variant="glass"] body:not(.light-mode) .verdict-evidence section {
+  padding: 12px 0;
+  border-radius: 0;
+  border-inline: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+html[data-variant="glass"] body:not(.light-mode) .verdict-toolbar {
+  border-radius: 0;
+  border-inline: 0;
+  background: transparent;
+  flex-wrap: wrap;
+}
+@container (max-width: 640px) {
+  .verdict-dual { flex-direction: column; }
+  .verdict-dual > .verdict-content { width: 100%; }
+}
+
+@media (min-width: 1180px) {
+  html[data-variant="glass"] body:not(.light-mode) { grid-template-columns: 178px minmax(0, 1fr); }
+  html[data-variant="glass"] body:not(.light-mode) #hdr { background: #151719; position: relative; }
+  html[data-variant="glass"] body:not(.light-mode) .main-tab {
+    min-height: 42px;
+    font-size: 13px;
+    border-radius: 4px;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .main-tab.active {
+    background: #244e9c;
+    color: #fff;
+    border-color: #528bff;
+    box-shadow: none;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .logo { padding-right: 26px; }
+  html[data-variant="glass"] body:not(.light-mode) .sidebar-toggle { opacity: 1; }
+  html[data-variant="glass"] body:not(.light-mode) :is(.header-equity, #ws-status, #ui-mode-btn) {
+    border-radius: 4px;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+@media (max-width: 1100px) {
+  .port-workspace { flex-direction: column; overflow-y: auto; }
+  .port-workspace > .port-content-col { flex: 1 0 320px; order: 0; }
+  .port-workspace > .port-side-col { max-height: 320px; min-width: 0; order: 1; }
+  #port-inner-main > .port-panel > .port-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  html[data-variant="glass"] body:not(.light-mode) .home-grid { grid-template-columns: minmax(0, 1fr); }
+  html[data-variant="glass"] body:not(.light-mode) .home-card-wide { grid-column: auto; }
+  html[data-variant="glass"] body:not(.light-mode) .home-wrap { padding: 14px; }
+}
+@media (max-width: 600px) {
+  #port-inner-main > .port-panel > .port-summary { padding: 8px; }
+  #port-inner-main > .port-panel > .port-summary .port-sum-item { padding: 6px; }
+  #port-inner-main > .port-panel > .port-summary .port-sum-val { font-size: 14px; }
+  #port-inner-main > .port-panel > .port-summary .port-sum-label { font-size: 10px; }
+  html[data-variant="glass"] body:not(.light-mode) .tool-view { padding: 8px; }
+  html[data-variant="glass"] body:not(.light-mode) .home-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-variant="glass"] body:not(.light-mode) .home-kpi-item { padding: 12px; }
+  html[data-variant="glass"] body:not(.light-mode) .home-kpi-val { font-size: 18px; }
+}
+
+@media (max-width: 1179px) {
+  html[data-variant="glass"] body:not(.light-mode) #hdr {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  html[data-variant="glass"] body:not(.light-mode) #main-tabs {
+    flex: 1 0 100%;
+    order: 4;
+    max-width: 100%;
+    border-radius: 4px;
+    background: transparent;
+    box-shadow: none;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .main-tab { flex-shrink: 0; }
+  html[data-variant="glass"] body:not(.light-mode) #hdr-right { margin-left: auto; flex-wrap: wrap; }
+  html[data-variant="glass"] body:not(.light-mode):not([data-main-tab="charts"]) :is(#toolbar, #active-hint) { display: none; }
+}
+@media (max-width: 760px) {
+  html[data-variant="glass"] body:not(.light-mode) #body { flex-direction: column; min-height: 0; }
+  html[data-variant="glass"] body:not(.light-mode) #sidebar {
+    width: 100%;
+    max-width: 100%;
+    height: 164px;
+    flex: 0 0 164px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  html[data-variant="glass"] body.sidebar-collapsed:not(.light-mode) #sidebar {
+    height: 0;
+    flex-basis: 0;
+    border: 0;
+  }
+  html[data-variant="glass"] body:not(.light-mode) #sb-search { padding: 6px 10px; }
+  html[data-variant="glass"] body:not(.light-mode) #sb-list {
+    display: flex;
+    flex-direction: row;
+    min-height: 52px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .sb-item { flex: 0 0 170px; }
+  html[data-variant="glass"] body:not(.light-mode) #sb-add { padding: 4px 10px; }
+  html[data-variant="glass"] body:not(.light-mode) #sb-resizer { display: none; }
+  html[data-variant="glass"] body:not(.light-mode) #main { min-height: 0; min-width: 0; width: 100%; }
+  html[data-variant="glass"] body:not(.light-mode) #header-equities {
+    order: 2;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  html[data-variant="glass"] body:not(.light-mode) #hdr-right {
+    flex: 1 0 100%;
+    justify-content: flex-start;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .port-toolbar { gap: 6px; padding: 8px; }
+  html[data-variant="glass"] body:not(.light-mode) .port-toolbar .tb-sep { display: none; }
+  html[data-variant="glass"] body:not(.light-mode) #port-inner-main > .port-panel {
+    overflow-y: auto;
+  }
+  html[data-variant="glass"] body:not(.light-mode) .port-workspace { flex: 1 0 360px; }
+}

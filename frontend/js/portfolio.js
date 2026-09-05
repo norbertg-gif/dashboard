@@ -2301,6 +2301,15 @@ function exportPortCSV(pid) {
   a.click();
 }
 
+function portToggleInsights() {
+  const row = document.querySelector('#port-inner-main .port-workspace');
+  if (!row) return;
+  const collapsed = row.classList.toggle('insights-collapsed');
+  localStorage.setItem('td_port_insights_collapsed', collapsed ? '1' : '0');
+  const button = document.getElementById('port-insights-toggle');
+  if (button) button.setAttribute('aria-expanded', String(!collapsed));
+}
+
 function renderPortPanel(pid) {
   const cont = document.getElementById('port-inner-' + pid);
   if (!cont) return;
@@ -2367,9 +2376,12 @@ function renderPortPanel(pid) {
   if (s.data?.stale) {
     html += `<span style="font-size:10px;color:var(--yellow);white-space:nowrap;" title="eToro proxy nedostupný — zobrazujú sa posledné známe dáta">⚠ zastarané dáta</span>`;
   }
+  if (pid === 'main') {
+    html += `<button id="port-insights-toggle" class="port-cols-btn" onclick="portToggleInsights()" aria-controls="port-insights-main" aria-expanded="${localStorage.getItem('td_port_insights_collapsed') !== '1'}" title="Zobraziť alebo skryť analýzu portfólia">Analýza</button>`;
+  }
   html += `</div></div></div></div>`;
 
-  html += `<div class="port-main-row"><aside class="port-side-col">`;
+  if (pid !== 'main') html += `<div class="port-main-row"><aside class="port-side-col">`;
 
   // Summary bar
   const liveSummaryPnl = Number(sum._liveTotalPnl ?? sum.total_pnl ?? 0);
@@ -2410,6 +2422,7 @@ function renderPortPanel(pid) {
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
   if (pid === 'main') {
+    html += `<div class="port-main-row port-workspace${localStorage.getItem('td_port_insights_collapsed') === '1' ? ' insights-collapsed' : ''}"><aside id="port-insights-main" class="port-side-col"><div class="port-insights-heading">Analýza portfólia</div>`;
     html += `<div id="portfolio-dca">
     ${dcaCardHead()}
     <div style="color:var(--muted);font-size:11px;padding:8px 0;">Načítavam…</div>
