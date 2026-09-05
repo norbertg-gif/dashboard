@@ -2,6 +2,7 @@
 """Focused regression tests for cache and public portfolio contracts."""
 
 import asyncio
+import csv
 import io
 import sys
 import tempfile
@@ -303,6 +304,129 @@ const fetch=async()=>({ok:true,json:async()=>({stale,positions:[],orders:[]})});
 })().catch(e=>{console.error(e);process.exitCode=1});
 """
         subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+
+
+class HistoryExportRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _run_js(body):
+        source = ChartLiveAndMarkerRegressionTests._js_functions("frontend/js/portfolio.js", [
+            "csvCellSk", "fmtMoney", "historyTypeMatches", "historyGroupBySymbol",
+            "historyViewRows", "historyExportRows", "historyStatusHtml", "historySummaryFor",
+            "compareHistoryRows", "renderHistoryView", "exportHistoryCSV",
+        ])
+        harness = """
+let clockMs = globalThis.Date.parse('2026-09-05T10:00:00Z');
+class Date extends globalThis.Date {
+  constructor(...args) { super(...(args.length ? args : [clockMs])); }
+  static now() { return clockMs; }
+}
+const store = {};
+const localStorage = {getItem:key=>store[key]??null,setItem:(key,value)=>{store[key]=value;}};
+const HIST_TYPE_KEY='type', HIST_GROUP_KEY='group', HIST_TYPES=[['all','All'],['stock','Stock']];
+const API='', historyEl={innerHTML:''};
+let historyData=null, historyLoadSeq=0, historySort={key:'netProfit',dir:-1}, activeAccount='2';
+let payload={}, fetchCount=0, failed=false;
+const fetch=async()=>{fetchCount++;return {ok:!failed,status:502,json:async()=>payload};};
+const escHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+const fmtPrice=value=>String(value);
+const downloads=[];
+let pendingBlob;
+class Blob { constructor(parts){ this.text=parts.join(''); } }
+const URL={createObjectURL:blob=>{pendingBlob=blob;return 'blob:test';},revokeObjectURL:()=>{}};
+const document={
+  getElementById:id=>id==='main-history'?historyEl:null,
+  createElement:()=>({click(){downloads.push({name:this.download,text:pendingBlob.text});}})
+};
+const trades=[
+  {symbol:'AAA',name:'A;"quoted"',type:'Stock',netProfit:-10,investment:100,positionId:1,isBuy:true},
+  {symbol:'BBB',type:'Stock',netProfit:30,investment:100,positionId:2,isBuy:false},
+  {symbol:'AAA',type:'Stock',netProfit:50,investment:100,positionId:3,isBuy:true},
+  {symbol:'BTC',type:'Crypto',netProfit:100,investment:100,positionId:4,isBuy:true}
+];
+"""
+        result = subprocess.run(
+            ["node", "-e", harness + source + "\n(async()=>{\n" + body +
+             "\n})().catch(e=>{console.error(e);process.exitCode=1;});"],
+            check=True, capture_output=True, text=True,
+        )
+        return json.loads(result.stdout)
+
+    def test_detailed_export_matches_filtered_and_grouped_order(self):
+        result = self._run_js("""
+const rows=trades.filter(t=>historyTypeMatches(t,'stock'));
+const original=JSON.stringify(rows);
+const descending=historyExportRows(rows).map(t=>t.positionId);
+const grouped=historyExportRows(rows,true).map(t=>t.positionId);
+historySort.dir=1;
+const ascending=historyExportRows(rows).map(t=>t.positionId);
+console.log(JSON.stringify({descending,grouped,ascending,unchanged:JSON.stringify(rows)===original}));
+""")
+        self.assertEqual(result["descending"], [3, 2, 1])
+        self.assertEqual(result["grouped"], [3, 1, 2])
+        self.assertEqual(result["ascending"], [1, 2, 3])
+        self.assertTrue(result["unchanged"])
+
+    def test_partial_csv_marks_filename_and_rows_without_losing_trade_fields(self):
+        result = self._run_js("""
+store.type='stock';store.group='symbol';
+historyData={trades,truncated:true,account:'2',loadedAt:'2026-09-05T10:00:00.000Z',minDate:'2026-01-01',maxDate:'2026-09-05'};
+activeAccount='1';
+exportHistoryCSV();
+console.log(JSON.stringify(downloads[0]));
+""")
+        self.assertIn("account_2_", result["name"])
+        self.assertTrue(result["name"].endswith("_INCOMPLETE.csv"))
+        self.assertTrue(result["text"].startswith("\ufeff"))
+        rows = list(csv.DictReader(io.StringIO(result["text"].lstrip("\ufeff")), delimiter=";"))
+        self.assertEqual([r["Position ID"] for r in rows], ["3", "1", "2"])
+        self.assertEqual(rows[1]["Name"], 'A;"quoted"')
+        for row in rows:
+            self.assertEqual(row["Incomplete history"], "YES")
+            self.assertEqual(row["History loaded at"], "2026-09-05T10:00:00.000Z")
+            self.assertEqual(row["Account"], "2")
+            self.assertIn("Open Time", row)
+            self.assertIn("Close Time", row)
+            self.assertIn("Trailing SL", row)
+
+    def test_successful_reload_changes_timestamp_but_sort_does_not(self):
+        result = self._run_js("""
+payload={trades,truncated:true};
+await renderHistoryView();
+const loadedAt=historyData.loadedAt;
+const partial=historyEl.innerHTML.includes('history-incomplete') && historyEl.innerHTML.includes('history-summary-scope');
+clockMs+=60000;historySort.dir=1;
+await renderHistoryView(false);
+const same=loadedAt===historyData.loadedAt && fetchCount===1;
+clockMs+=60000;payload={trades,truncated:false};
+await renderHistoryView(true);
+exportHistoryCSV();
+console.log(JSON.stringify({partial,same,newTime:historyData.loadedAt!==loadedAt,
+  complete:!historyEl.innerHTML.includes('history-incomplete'),csv:downloads[0]}));
+""")
+        self.assertTrue(result["partial"])
+        self.assertTrue(result["same"])
+        self.assertTrue(result["newTime"])
+        self.assertTrue(result["complete"])
+        self.assertNotIn("_INCOMPLETE", result["csv"]["name"])
+        rows = list(csv.DictReader(io.StringIO(result["csv"]["text"].lstrip("\ufeff")), delimiter=";"))
+        self.assertTrue(all(r["Incomplete history"] == "NO" for r in rows))
+
+    def test_empty_partial_history_keeps_warning_and_disables_export(self):
+        result = self._run_js("""
+payload={trades:[],truncated:true};
+await renderHistoryView();
+const warning=historyEl.innerHTML.includes('history-incomplete');
+const disabled=historyEl.innerHTML.includes('onclick="exportHistoryCSV()" disabled');
+const loadedAt=historyData.loadedAt;
+exportHistoryCSV();
+clockMs+=60000;failed=true;
+await renderHistoryView(true);
+console.log(JSON.stringify({warning,disabled,downloads:downloads.length,keptTimestamp:historyData.loadedAt===loadedAt}));
+""")
+        self.assertTrue(result["warning"])
+        self.assertTrue(result["disabled"])
+        self.assertEqual(result["downloads"], 0)
+        self.assertTrue(result["keptTimestamp"])
 
 
 class SignalScoringRegressionTests(unittest.TestCase):

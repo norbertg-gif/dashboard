@@ -269,6 +269,34 @@ function historyGroupBySymbol(rows) {
   }));
 }
 
+function historyViewRows(rows, grouped = false) {
+  return (grouped ? historyGroupBySymbol(rows) : [...rows]).sort(compareHistoryRows);
+}
+
+function historyExportRows(rows, grouped = false) {
+  const ordered = historyViewRows(rows);
+  if (!grouped) return ordered;
+  // Keep every trade, but follow the visible aggregate order between symbols.
+  const bySymbol = new Map();
+  for (const row of ordered) {
+    const symbol = row.symbol || '?';
+    if (!bySymbol.has(symbol)) bySymbol.set(symbol, []);
+    bySymbol.get(symbol).push(row);
+  }
+  return historyViewRows(rows, true).flatMap(row => bySymbol.get(row.symbol) || []);
+}
+
+function historyStatusHtml(data) {
+  const loadedAt = data.loadedAt ? new Date(data.loadedAt) : null;
+  const loadedLabel = loadedAt && Number.isFinite(loadedAt.getTime())
+    ? loadedAt.toLocaleString('sk-SK') : '—';
+  return `<div class="history-meta">
+      <span>Účet ${escHtml(data.account || '')}</span>
+      <span>Načítané: <time datetime="${escHtml(data.loadedAt || '')}">${escHtml(loadedLabel)}</time></span>
+    </div>
+    ${data.truncated ? '<div class="history-incomplete" role="status"><strong>Neúplná história</strong><span>Súhrny aj CSV obsahujú iba načítanú časť obchodov.</span></div>' : ''}`;
+}
+
 function setHistoryGroup(v) {
   localStorage.setItem(HIST_GROUP_KEY, v);
   renderHistoryView(false);
@@ -312,7 +340,7 @@ async function renderHistoryView(force = false) {
         if (account !== String(activeAccount || '1')) renderHistoryView();
         return;
       }
-      historyData = data;
+      historyData = { ...data, account, loadedAt: new Date().toISOString() };
     } catch(e) {
       if (seq !== historyLoadSeq || account !== String(activeAccount || '1')) {
         if (account !== String(activeAccount || '1')) renderHistoryView();
@@ -332,8 +360,7 @@ async function renderHistoryView(force = false) {
   // KPI vždy z jednotlivých obchodov — zoskupenie mení pohľad na tabuľku, nie
   // to, koľko obchodov si spravil a aký mali win rate.
   const s = historySummaryFor(filtered, historyData.summary);
-  const trades = (grouped ? historyGroupBySymbol(filtered) : filtered)
-    .sort((a, b) => compareHistoryRows(a, b));
+  const trades = historyViewRows(filtered, grouped);
   const histHeaders = grouped ? [
     ['symbol', 'Symbol'],
     ['trades', 'Obchodov'],
@@ -392,9 +419,11 @@ async function renderHistoryView(force = false) {
       <div class="tb-sep"></div>
       <div class="tb-group">
         <span class="tb-label">Export</span>
-        <div class="tb-items"><button class="btn" onclick="exportHistoryCSV()">Export CSV</button></div>
+        <div class="tb-items"><button class="btn" onclick="exportHistoryCSV()" ${filtered.length ? '' : 'disabled'}>${historyData.truncated ? 'Export CSV (neúplné)' : 'Export CSV'}</button></div>
       </div>
     </div>
+    ${historyStatusHtml(historyData)}
+    ${historyData.truncated ? '<div class="history-summary-scope">Súhrny z načítanej časti histórie</div>' : ''}
     <div class="tool-kpis">
       <div class="tool-kpi"><div class="tool-kpi-label">Trades</div><div class="tool-kpi-val">${s.count || 0}</div></div>
       <div class="tool-kpi"><div class="tool-kpi-label">Win rate</div><div class="tool-kpi-val">${(s.winRate || 0).toFixed(1)}%</div></div>
@@ -465,7 +494,9 @@ function exportHistoryCSV() {
   // Export ide z rovnakej filtrovanej množiny ako tabuľka — inak by človek
   // vyfiltroval akcie, klikol Export a dostal aj krypto.
   const typeFilter = localStorage.getItem(HIST_TYPE_KEY) || 'all';
-  const trades = (historyData?.trades || []).filter(t => historyTypeMatches(t, typeFilter));
+  const grouped = localStorage.getItem(HIST_GROUP_KEY) === 'symbol';
+  const trades = historyExportRows(
+    (historyData?.trades || []).filter(t => historyTypeMatches(t, typeFilter)), grouped);
   if (!trades.length) return;
   const cols = [
     ['symbol', 'Symbol'],
@@ -489,23 +520,29 @@ function exportHistoryCSV() {
     ['stopLossRate', 'Stop Loss'],
     ['takeProfitRate', 'Take Profit'],
     ['trailingStopLoss', 'Trailing SL'],
+    ['_historyIncomplete', 'Incomplete history'],
+    ['_historyLoadedAt', 'History loaded at'],
+    ['_historyAccount', 'Account'],
   ];
   // SK-friendly CSV: separátor ;, čísla s desatinnou čiarkou, BOM pre UTF-8
   const SEP = ';';
   const lines = [cols.map(c => csvCellSk(c[1])).join(SEP)];
   for (const t of trades) {
     lines.push(cols.map(([key]) => {
-      const val = key === 'isBuy' ? (t[key] ? 'BUY' : 'SELL') : t[key];
+      let val = key === 'isBuy' ? (t[key] ? 'BUY' : 'SELL') : t[key];
+      if (key === '_historyIncomplete') val = historyData.truncated ? 'YES' : 'NO';
+      if (key === '_historyLoadedAt') val = historyData.loadedAt || '';
+      if (key === '_historyAccount') val = historyData.account || '';
       return csvCellSk(val);
     }).join(SEP));
   }
   const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
-  const acct = activeAccount || '1';
+  const acct = historyData.account || activeAccount || '1';
   const minDate = historyData?.minDate || 'history';
   const maxDate = historyData?.maxDate || '';
   a.href = URL.createObjectURL(blob);
-  a.download = `trade_history_account_${acct}_${minDate}_${maxDate}.csv`;
+  a.download = `trade_history_account_${acct}_${minDate}_${maxDate}${historyData.truncated ? '_INCOMPLETE' : ''}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
