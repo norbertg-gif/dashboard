@@ -55,14 +55,25 @@ FATAL_TEXT = [
 # Záložky, ktoré treba rozhýbať, aby sa vôbec vykreslil ich hlavný obsah.
 # Ticker je zámerne veľký likvidný titul, aby `/api/chart` (yfinance/Massive,
 # nie eToro) vrátil dáta aj lokálne bez proxy.
+# POZOR na názvy: `pc_selectTicker()` je skutočný vstupný bod Analytiky (nastaví
+# input a zavolá loadData()); `pc_load` NEEXISTUJE. Vo Verdikte je input
+# `verdictTickerInput`, nie `verdictTicker`. Prvá verzia tohto súboru volala
+# oba neexistujúce názvy pod `typeof === 'function'` strážou, takže ticho
+# nespravila nič — a test bol zelený len vďaka tickeru zapamätanému v profile
+# prehliadača z ručného testovania. Na čistom profile nechytil nič. Preto sa
+# tieto akcie NESMÚ strážiť cez typeof: keď názov prestane existovať, test má
+# spadnúť, nie stíchnuť.
 TAB_ACTIONS = {
-    "predictive": "(() => { const i = document.getElementById('tickerInput');"
-                  " if (i) i.value = 'AAPL';"
-                  " if (typeof pc_load === 'function') pc_load('AAPL'); })()",
-    "verdict": "(() => { const i = document.getElementById('verdictTicker');"
-               " if (i) i.value = 'AAPL';"
-               " if (typeof loadVerdict === 'function') loadVerdict(); })()",
+    "predictive": "pc_selectTicker('AAPL')",
+    "verdict": "(() => { document.getElementById('verdictTickerInput').value = 'AAPL';"
+               " loadVerdict(); })()",
 }
+
+# Minimálny počet znakov, ktorý musí záložka vykresliť, aby sa rátala za živú.
+# Len pre záložky, ktoré lokálne bez eToro proxy dáta MAJÚ — Prehľad, Portfólio
+# a História závisia od eToro, takže sa lokálne obsahovo overiť nedajú a
+# kontroluje sa pri nich len absencia výnimky.
+MIN_CONTENT = {"predictive": 2000, "verdict": 800, "scanner": 1500, "charts": 300}
 
 # Chyby siete, ktoré lokálny beh bez eToro proxy generuje vždy. Nie sú to chyby
 # frontendu; test by bez tejto výnimky hlásil zlyhanie na každom stroji.
@@ -73,9 +84,15 @@ def main() -> int:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("frontend_smoke: playwright nie je nainštalovaný "
-              "(pip install playwright) — preskakujem", file=sys.stderr)
-        return 0
+        # Tichý úspech pri chýbajúcej závislosti je horší než žiadny test —
+        # vyzerá to ako zelená kontrola, ktorá nikdy nebežala. Preskočiť sa dá
+        # len vedome cez FRONTEND_SMOKE_OPTIONAL=1.
+        msg = "frontend_smoke: playwright nie je nainštalovaný (pip install playwright)"
+        if os.environ.get("FRONTEND_SMOKE_OPTIONAL") == "1":
+            print(msg + " — preskakujem (FRONTEND_SMOKE_OPTIONAL=1)", file=sys.stderr)
+            return 0
+        print(msg, file=sys.stderr)
+        return 1
 
     failures: list[str] = []
 
@@ -111,7 +128,17 @@ def main() -> int:
                     page.evaluate(action)
                 except Exception as exc:
                     failures.append(f"{tab}: akcia zlyhala — {str(exc)[:160]}")
-                page.wait_for_timeout(9000)
+                # Čakaj na obsah, nie pevný čas. `/api/chart` beží pri studenej
+                # cache aj 10-15 s, takže pevná pauza je buď zbytočne pomalá,
+                # alebo (horšie) prikrátka a test skončí na prázdnej záložke.
+                target = MIN_CONTENT.get(tab, 0)
+                for _ in range(30):
+                    page.wait_for_timeout(1000)
+                    grown = page.evaluate(
+                        "(() => (document.querySelector('#main')?.innerText || '').length)()"
+                    )
+                    if grown >= target:
+                        break
 
             if page_errors:
                 failures.append(f"{tab}: nezachytená výnimka — {page_errors[0][:200]}")
@@ -129,6 +156,12 @@ def main() -> int:
                     line = next((ln.strip() for ln in text.splitlines() if marker in ln), marker)
                     failures.append(f"{tab}: v obsahu je chybová hláška — {line[:160]}")
                     break
+
+            minimum = MIN_CONTENT.get(tab)
+            if minimum is not None and len(text) < minimum:
+                failures.append(
+                    f"{tab}: vykreslených len {len(text)} znakov, očakávaných aspoň "
+                    f"{minimum} — záložka sa pravdepodobne nevykreslila")
 
             print(f"  {tab:11} ok ({len(text)} znakov)")
 
