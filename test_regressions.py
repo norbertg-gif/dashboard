@@ -2598,8 +2598,6 @@ class LogEncodingRegressionTests(unittest.TestCase):
             tb._massive_splits_disabled = False
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class OhlcvBatchCacheKeyRegressionTests(unittest.TestCase):
@@ -2704,3 +2702,44 @@ class MlDriversRegressionTests(unittest.TestCase):
             self.assertEqual((acc, bull, drivers), (55.0, 0.6, []))
         finally:
             tb._MODEL_CACHE.pop(("ml", "LEGACY"), None)
+
+
+class SuiteIntegrityRegressionTests(unittest.TestCase):
+    """Každý napísaný test sa musí aj spustiť.
+
+    `unittest.main()` pozbiera len to, čo je definované nad ním, a potom proces
+    ukončí. Keď sa pod ten blok omylom dostane trieda, jej testy v súbore
+    vyzerajú ako hotové pokrytie a pritom nikdy nebežia — presne to sa stalo so
+    šiestimi testami (148 metód v súbore, 142 spustených). Tichá diera v teste
+    je horšia než chýbajúci test, lebo vyzerá ako istota.
+    """
+
+    def test_no_test_class_is_defined_below_the_main_block(self):
+        source = Path(__file__).read_text(encoding="utf-8")
+        lines = source.splitlines()
+        main_line = next((i for i, ln in enumerate(lines)
+                          if ln.startswith('if __name__ == "__main__"')), None)
+        self.assertIsNotNone(main_line, "__main__ blok sa nenašiel")
+        below = [ln for ln in lines[main_line:] if ln.startswith("class ")]
+        self.assertEqual(below, [], f"triedy pod __main__ blokom sa nikdy nespustia: {below}")
+
+    def test_every_declared_test_method_is_collected(self):
+        source = Path(__file__).read_text(encoding="utf-8")
+        declared = len(re.findall(r"^    def test_", source, re.M))
+        collected = sum(
+            unittest.TestLoader().loadTestsFromTestCase(obj).countTestCases()
+            for obj in list(globals().values())
+            if isinstance(obj, type) and issubclass(obj, unittest.TestCase)
+        )
+        self.assertEqual(collected, declared,
+                         f"v súbore je {declared} testov, ale pozbieraných {collected}")
+
+
+# POZOR: tento blok MUSÍ zostať úplne na konci súboru. Python vykonáva modul
+# zhora nadol, takže `unittest.main()` pozbiera len triedy definované NAD ním a
+# potom proces ukončí — triedy pod ním sa nikdy ani nevytvoria. Presne to sa
+# stalo: `OhlcvBatchCacheKeyRegressionTests` a `MlDriversRegressionTests` boli
+# omylom pod týmto blokom a 6 testov nikdy nebežalo, hoci v súbore vyzerali ako
+# hotové pokrytie (148 metód v súbore, 142 spustených).
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
