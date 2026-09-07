@@ -75,6 +75,13 @@ TAB_ACTIONS = {
 # kontroluje sa pri nich len absencia výnimky.
 MIN_CONTENT = {"predictive": 2000, "verdict": 800, "scanner": 1500, "charts": 300}
 
+# Aj záložka závislá od eToro musí vykresliť NIEČO — bez proxy je to chybová
+# hláška, a tá je tiež obsah. Bez tohto minima by úplne prázdna (rozbitá)
+# záložka prešla ako „ok", čo sa raz už stalo: Portfólio hlásilo 0 znakov a
+# vyzeralo to ako regresia, hoci išlo len o prikrátke čakanie. Nula nesmie byť
+# nikdy v poriadku.
+MIN_ANY = 10
+
 # Chyby siete, ktoré lokálny beh bez eToro proxy generuje vždy. Nie sú to chyby
 # frontendu; test by bez tejto výnimky hlásil zlyhanie na každom stroji.
 TOLERATED_NETWORK = ("/api/ohlcv", "/api/etoro/", "/api/portfolio/", "favicon")
@@ -123,6 +130,13 @@ def main() -> int:
             # vôbec nevykreslia, takže test by bol zelený a nechytil by nič.
             # Overené: bez tohto kroku prejde aj zámerne nasadená regresia.
             action = TAB_ACTIONS.get(tab)
+            if not action:
+                # Aj bez akcie počkaj na obsah — Portfólio a História dopĺňajú
+                # svoj (chybový) render až po dobehnutí fetchu.
+                for _ in range(12):
+                    if page.evaluate("(() => (document.querySelector('#main')?.innerText || '').length)()") >= MIN_ANY:
+                        break
+                    page.wait_for_timeout(1000)
             if action:
                 try:
                     page.evaluate(action)
@@ -157,8 +171,8 @@ def main() -> int:
                     failures.append(f"{tab}: v obsahu je chybová hláška — {line[:160]}")
                     break
 
-            minimum = MIN_CONTENT.get(tab)
-            if minimum is not None and len(text) < minimum:
+            minimum = MIN_CONTENT.get(tab, MIN_ANY)
+            if len(text) < minimum:
                 failures.append(
                     f"{tab}: vykreslených len {len(text)} znakov, očakávaných aspoň "
                     f"{minimum} — záložka sa pravdepodobne nevykreslila")
