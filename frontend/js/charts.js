@@ -176,6 +176,18 @@ function onChartPanelContextMenu(event, id) {
     { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
     { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
   ];
+  // Hromadné nastavenie má zmysel len pre panely v mriežke Grafov — dock a
+  // Verdikt panel sú samostatné pohľady mimo nej.
+  if (gridChartPanelIds().includes(id)) {
+    const others = gridChartPanelIds().length - 1;
+    items.push(
+      { sep: true },
+      others > 0
+        ? { label: `Použiť toto zobrazenie na všetky grafy (${others})`, action: () => applyViewToAllCharts(id) }
+        : { label: 'Použiť toto zobrazenie na všetky grafy (žiadne ďalšie)', disabled: true },
+      { label: 'Všetky grafy na predvolené (1D, bez indikátorov)', action: () => resetAllChartsToDefault() },
+    );
+  }
   // Dock a Verdikt panel majú vlastný uzatvárací tok (closeChartDock,
   // resetuje dockPanelId) — priamy removePanel(id) by ho obišiel a nechal
   // dockPanelId ukazovať na už zmazaný panel.
@@ -185,6 +197,62 @@ function onChartPanelContextMenu(event, id) {
     items.push({ sep: true }, { label: '✕ Zavrieť graf', action: () => removePanel(id) });
   }
   showContextMenu(event.clientX, event.clientY, items);
+}
+
+// ── Hromadné zobrazenie grafov ───────────────────────────────────────────────
+// Kopíruje sa interval + HA + čiarové/oscilátorové indikátory. Wizard a Správy
+// ZÁMERNE nie: sú to detailové panely k jednému tickeru a Správy navyše míňajú
+// Alpha Vantage kvótu (25 req/deň) — skopírovanie na 8 grafov by ju zjedlo
+// naraz. Zoom sa tiež nekopíruje: pri inom intervale ho loadChart aj tak
+// resetuje a pri rovnakom má každý ticker vlastnú rozumnú výšku/rozsah.
+const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd'];
+const PANEL_DEFAULT_INTERVAL = '1d';
+
+function gridChartPanelIds() {
+  return [...document.querySelectorAll('#grid .panel')]
+    .map(p => p.id)
+    .filter(pid => registry[pid] && pid !== dockPanelId && pid !== verdictPanelId
+      && document.getElementById(pid)?.querySelector('.p-sym'));
+}
+
+// Nastaví stav panela BEZ načítania — načíta sa až raz hromadne cez loadAll(),
+// inak by každý prepnutý indikátor spustil vlastný loadChart.
+function setPanelView(pid, interval, inds) {
+  const r = registry[pid];
+  const panel = document.getElementById(pid);
+  if (!r || !panel) return;
+  const sel = panel.querySelector('.interval-sel');
+  if (sel && interval && [...sel.options].some(o => o.value === interval)) sel.value = interval;
+  for (const k of PANEL_VIEW_KEYS) {
+    r.indicators[k] = !!inds[k];
+    if (k === 'ha') document.getElementById('ha-' + pid)?.classList.toggle('active', r.indicators.ha);
+    else document.getElementById(`ind-${pid}-${k}`)?.classList.toggle(`active-${k}`, r.indicators[k]);
+  }
+  updateSubVisibility(pid);
+}
+
+function applyViewToAllCharts(sourceId) {
+  const src = registry[sourceId];
+  const interval = document.getElementById(sourceId)?.querySelector('.interval-sel')?.value;
+  if (!src || !interval) return;
+  const targets = gridChartPanelIds().filter(pid => pid !== sourceId);
+  targets.forEach(pid => setPanelView(pid, interval, src.indicators));
+  saveLayout();
+  setStatus(`Zobrazenie použité na ${targets.length} grafov`, 'ok');
+  loadAll();
+}
+
+function resetAllChartsToDefault() {
+  const ids = gridChartPanelIds();
+  ids.forEach(pid => {
+    setPanelView(pid, PANEL_DEFAULT_INTERVAL, {});
+    // Zatvorenie Wizardu/Správ nič nesťahuje, takže tu stačí existujúci toggle.
+    if (registry[pid]?.indicators.wizard) toggleWizard(pid);
+    if (registry[pid]?.indicators.news) toggleNews(pid);
+  });
+  saveLayout();
+  setStatus(`${ids.length} grafov nastavených na predvolené`, 'ok');
+  loadAll();
 }
 
 function applyThemeToAllCharts() {
