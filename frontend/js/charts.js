@@ -200,11 +200,11 @@ function onChartPanelContextMenu(event, id) {
 }
 
 // ── Hromadné zobrazenie grafov ───────────────────────────────────────────────
-// Kopíruje sa interval + HA + čiarové/oscilátorové indikátory. Wizard a Správy
-// ZÁMERNE nie: sú to detailové panely k jednému tickeru a Správy navyše míňajú
-// Alpha Vantage kvótu (25 req/deň) — skopírovanie na 8 grafov by ju zjedlo
-// naraz. Zoom sa tiež nekopíruje: pri inom intervale ho loadChart aj tak
-// resetuje a pri rovnakom má každý ticker vlastnú rozumnú výšku/rozsah.
+// Kopíruje sa interval, HA, čiarové/oscilátorové indikátory, Wizard aj Správy.
+// Správy v grafoch idú cez Yahoo vyhľadávanie (`/api/news`), NIE cez Alpha
+// Vantage — kvótu 25 req/deň míňajú len Správy v Analytike, takže kopírovanie
+// na všetky grafy nič nestojí. Zoom sa nekopíruje: pri inom intervale ho
+// loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
 const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd'];
 const PANEL_DEFAULT_INTERVAL = '1d';
 
@@ -236,7 +236,11 @@ function applyViewToAllCharts(sourceId) {
   const interval = document.getElementById(sourceId)?.querySelector('.interval-sel')?.value;
   if (!src || !interval) return;
   const targets = gridChartPanelIds().filter(pid => pid !== sourceId);
-  targets.forEach(pid => setPanelView(pid, interval, src.indicators));
+  targets.forEach(pid => {
+    setPanelView(pid, interval, src.indicators);
+    setPanelWizard(pid, src.indicators.wizard, { load: false });
+    setPanelNews(pid, src.indicators.news);
+  });
   saveLayout();
   setStatus(`Zobrazenie použité na ${targets.length} grafov`, 'ok');
   loadAll();
@@ -246,9 +250,8 @@ function resetAllChartsToDefault() {
   const ids = gridChartPanelIds();
   ids.forEach(pid => {
     setPanelView(pid, PANEL_DEFAULT_INTERVAL, {});
-    // Zatvorenie Wizardu/Správ nič nesťahuje, takže tu stačí existujúci toggle.
-    if (registry[pid]?.indicators.wizard) toggleWizard(pid);
-    if (registry[pid]?.indicators.news) toggleNews(pid);
+    setPanelWizard(pid, false);
+    setPanelNews(pid, false);
   });
   saveLayout();
   setStatus(`${ids.length} grafov nastavených na predvolené`, 'ok');
@@ -1398,25 +1401,28 @@ function applyOverlays(id, data, r) {
 }
 
 // ── WIZARD ───────────────────────────────────────────────────────────────────
-function toggleWizard(id) {
+// Nastaví Wizard na konkrétny stav. `load:false` použije hromadné nastavenie,
+// ktoré potom načíta všetky grafy naraz cez loadAll() — inak by každý panel
+// spustil ešte vlastný loadChart navyše.
+function setPanelWizard(id, on, { load = true } = {}) {
   const r = registry[id]; if (!r) return;
-  r.indicators.wizard = !r.indicators.wizard;
+  r.indicators.wizard = !!on;
   const btn = document.getElementById(`wiz-btn-${id}`);
   const wiz = document.getElementById(`wizard-${id}`);
-  if (r.indicators.wizard) {
-    btn.style.borderColor = 'var(--blue)';
-    btn.style.color = 'var(--blue)';
-    btn.style.background = 'var(--blue-dim)';
-    wiz.classList.remove('hidden');
-    // Wizard potrebuje širšiu sadu indikátorov, ktorú pri zatvorenom paneli
-    // zámerne nepočítame.
-    loadChart(id);
-  } else {
-    btn.style.borderColor = '';
-    btn.style.color = '';
-    btn.style.background = '';
-    wiz.classList.add('hidden');
+  if (btn) {
+    btn.style.borderColor = on ? 'var(--blue)' : '';
+    btn.style.color = on ? 'var(--blue)' : '';
+    btn.style.background = on ? 'var(--blue-dim)' : '';
   }
+  wiz?.classList.toggle('hidden', !on);
+  // Wizard potrebuje širšiu sadu indikátorov, ktorú pri zatvorenom paneli
+  // zámerne nepočítame.
+  if (on && load) loadChart(id);
+}
+
+function toggleWizard(id) {
+  const r = registry[id]; if (!r) return;
+  setPanelWizard(id, !r.indicators.wizard);
   saveLayout();
 }
 
@@ -1659,23 +1665,25 @@ function renderWizard(id, data) {
 }
 
 // ── NEWS ─────────────────────────────────────────────────────────────────────
-function toggleNews(id) {
+function setPanelNews(id, on) {
   const r = registry[id]; if (!r) return;
-  r.indicators.news = !r.indicators.news;
+  const changed = !!r.indicators.news !== !!on;
+  r.indicators.news = !!on;
   const btn = document.getElementById('news-btn-' + id);
   const panel = document.getElementById('news-' + id);
-  if (r.indicators.news) {
-    btn.style.borderColor = 'var(--muted2)';
-    btn.style.color = 'var(--text)';
-    btn.style.background = 'var(--bg)';
-    panel?.classList.remove('hidden');
-    loadNews(id);
-  } else {
-    btn.style.borderColor = '';
-    btn.style.color = '';
-    btn.style.background = '';
-    panel?.classList.add('hidden');
+  if (btn) {
+    btn.style.borderColor = on ? 'var(--muted2)' : '';
+    btn.style.color = on ? 'var(--text)' : '';
+    btn.style.background = on ? 'var(--bg)' : '';
   }
+  panel?.classList.toggle('hidden', !on);
+  // Už otvorené správy sa znova nesťahujú — ticker sa nezmenil.
+  if (on && changed) loadNews(id);
+}
+
+function toggleNews(id) {
+  const r = registry[id]; if (!r) return;
+  setPanelNews(id, !r.indicators.news);
   saveLayout();
 }
 
