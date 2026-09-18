@@ -1881,7 +1881,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 }
 
 /* ── MODAL ── */
-#modal-bg, #settings-modal-bg {
+#modal-bg, #settings-modal-bg, #ticker-tags-modal-bg {
   display: none;
   position: fixed;
   inset: 0;
@@ -1892,10 +1892,10 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   justify-content: center;
   transition: var(--transition);
 }
-#modal-bg.open, #settings-modal-bg.open {
+#modal-bg.open, #settings-modal-bg.open, #ticker-tags-modal-bg.open {
   display: flex;
 }
-#modal, #settings-modal {
+#modal, #settings-modal, #ticker-tags-modal {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -7049,3 +7049,16 @@ html[data-variant="glass"] body:not(.light-mode) .verdict-toolbar {
   }
   html[data-variant="glass"] body:not(.light-mode) .port-workspace { flex: 1 0 360px; }
 }
+
+/* Tags use a cell-edge marker, separate from profit/loss text and logos. */
+.port-table td.port-ticker-tag {
+  box-shadow: inset 4px 0 0 var(--ticker-tag-color);
+  background: color-mix(in srgb, var(--ticker-tag-color) 13%, transparent);
+}
+body.light-mode .port-table td.port-ticker-tag {
+  background: color-mix(in srgb, var(--ticker-tag-color) 10%, transparent);
+}
+#ticker-tags-modal { width: min(560px, 95vw); min-width: 0; max-height: 90vh; overflow-y: auto; }
+.ticker-tag-row { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+.ticker-tag-row input:not([type="color"]) { min-width:0; flex:1; background:var(--bg-input); color:var(--text); border:1px solid var(--border); padding:7px; border-radius:var(--radius-sm); }
+.ticker-tag-row input[type="color"] { width:36px; height:32px; padding:2px; flex-shrink:0; }

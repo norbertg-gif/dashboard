@@ -1,3 +1,152 @@
+// Ticker tags are a separate presentation layer, never part of position data.
+let portfolioTickerTags = { tags: [], assignments: {} };
+let portfolioTagDraft = [];
+let portfolioTagsBusy = false;
+
+function portTagEscape(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function portTagColor(color) {
+  if (!/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color || '')) return null;
+  return color.length === 4 ? '#' + [...color.slice(1)].map(ch => ch + ch).join('') : color;
+}
+
+function portTickerTagTitle(sym) {
+  const tag = portfolioTickerTags.tags.find(item => item.id === portfolioTickerTags.assignments[normalizePortSymbol(sym)]);
+  return portTagEscape(tag ? `${tag.label} — Zobraziť graf v bočnom paneli` : 'Zobraziť graf v bočnom paneli');
+}
+
+function portTickerTagAttrs(sym) {
+  const id = portfolioTickerTags.assignments[normalizePortSymbol(sym)];
+  const tag = portfolioTickerTags.tags.find(item => item.id === id);
+  const color = tag && portTagColor(tag.color);
+  return color ? `class="port-ticker-tag" style="--ticker-tag-color:${color}" title="${portTagEscape(tag.label)}"` : '';
+}
+
+function renderTaggedPortfolioPanels() {
+  for (const pid of Object.keys(portState)) if (portState[pid]?.data) renderPortPanel(pid);
+}
+
+async function loadPortfolioTickerTags() {
+  try {
+    const r = await fetch(`${API}/api/portfolio/tags`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    portfolioTickerTags = await r.json();
+    renderTaggedPortfolioPanels();
+    return true;
+  } catch (e) {
+    setStatus(`Štítky sa nepodarilo načítať: ${e.message}`, 'err');
+    return false;
+  }
+}
+
+async function writePortfolioTickerTags(body, { seq = null } = {}) {
+  const r = await fetch(`${API}/api/portfolio/tags`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let message = `HTTP ${r.status}`;
+    try { message = (await r.json()).detail || message; } catch (e) {}
+    throw new Error(message);
+  }
+  const fresh = await r.json();
+  // Odpoveď na medzitým prekonaný klik sa zahodí — inak by pomalší starší
+  // request prepísal to, čo používateľ vybral neskôr.
+  if (seq !== null && seq !== portfolioTagAssignSeq) return;
+  portfolioTickerTags = fresh;
+  renderTaggedPortfolioPanels();
+}
+
+// Optimistický zápis: farba naskočí hneď, server sa dorovná až potom. Dôvod je
+// meraný — POST na štítky vie čakať v rade za načítavaním grafov (v teste 9 s,
+// v produkcii kľudne viac, eToro volania majú 15 s timeout). Predtým bol zápis
+// pod globálnym `portfolioTagsBusy`, takže po dobu čakania sa každý ďalší klik
+// TICHO zahodil a v bunke sa nedialo nič — vyzeralo to ako rozbitá funkcia.
+// Štítok je čisto vizuálna vrstva, takže predbehnúť server je tu bezpečné; pri
+// chybe sa zmena vráti späť. `portfolioTagAssignSeq` zaručí, že odpoveď na
+// starší klik neprepíše novší výber.
+let portfolioTagAssignSeq = 0;
+
+async function assignPortfolioTickerTag(sym, id) {
+  const key = normalizePortSymbol(sym);
+  const previous = portfolioTickerTags.assignments[key];
+  const seq = ++portfolioTagAssignSeq;
+  if (id) portfolioTickerTags.assignments[key] = id;
+  else delete portfolioTickerTags.assignments[key];
+  renderTaggedPortfolioPanels();
+  try {
+    await writePortfolioTickerTags({assignments: {[key]: id}}, { seq });
+  } catch (e) {
+    if (seq === portfolioTagAssignSeq) {
+      if (previous) portfolioTickerTags.assignments[key] = previous;
+      else delete portfolioTickerTags.assignments[key];
+      renderTaggedPortfolioPanels();
+    }
+    setStatus(`Štítok sa nepodarilo uložiť: ${e.message}`, 'err');
+  }
+}
+
+async function openPortfolioTagsModal() {
+  if (portfolioTagsBusy) return;
+  if (!await loadPortfolioTickerTags()) return;
+  portfolioTagDraft = portfolioTickerTags.tags.map(tag => ({...tag}));
+  renderPortfolioTagDraft();
+  document.getElementById('ticker-tags-modal-bg').classList.add('open');
+  document.querySelector('#ticker-tags-modal input, #ticker-tags-add')?.focus();
+}
+
+function closePortfolioTagsModal() {
+  if (!portfolioTagsBusy) document.getElementById('ticker-tags-modal-bg').classList.remove('open');
+}
+
+function renderPortfolioTagDraft() {
+  document.getElementById('ticker-tags-rows').innerHTML = portfolioTagDraft.map((tag, i) => `
+    <div class="ticker-tag-row">
+      <input aria-label="Názov štítku" maxlength="24" value="${portTagEscape(tag.label)}" oninput="portfolioTagDraft[${i}].label=this.value">
+      <input aria-label="Farba štítku" type="color" value="${portTagColor(tag.color) || '#8b5cf6'}" oninput="portfolioTagDraft[${i}].color=this.value">
+      <button class="btn" aria-label="Posunúť nahor" ${i === 0 ? 'disabled' : ''} onclick="movePortfolioTagDraft(${i},-1)">↑</button>
+      <button class="btn" aria-label="Posunúť nadol" ${i === portfolioTagDraft.length - 1 ? 'disabled' : ''} onclick="movePortfolioTagDraft(${i},1)">↓</button>
+      <button class="btn" onclick="deletePortfolioTagDraft(${i})">Zmaž</button>
+    </div>`).join('');
+  document.getElementById('ticker-tags-add').disabled = portfolioTagDraft.length >= 12;
+}
+
+function addPortfolioTagDraft() {
+  if (portfolioTagsBusy || portfolioTagDraft.length >= 12) return;
+  portfolioTagDraft.push({label:'Nový štítok',color:'#8b5cf6'});
+  renderPortfolioTagDraft();
+}
+
+function deletePortfolioTagDraft(i) {
+  if (portfolioTagsBusy) return;
+  portfolioTagDraft.splice(i,1);
+  renderPortfolioTagDraft();
+}
+
+function movePortfolioTagDraft(i, delta) {
+  if (portfolioTagsBusy || !portfolioTagDraft[i + delta]) return;
+  [portfolioTagDraft[i],portfolioTagDraft[i + delta]] = [portfolioTagDraft[i + delta],portfolioTagDraft[i]];
+  renderPortfolioTagDraft();
+}
+
+async function savePortfolioTagsModal() {
+  if (portfolioTagsBusy) return;
+  portfolioTagsBusy = true;
+  const controls = [...document.querySelectorAll('#ticker-tags-modal input, #ticker-tags-modal button')];
+  controls.forEach(el => el.disabled = true);
+  try {
+    await writePortfolioTickerTags({tags:portfolioTagDraft});
+    document.getElementById('ticker-tags-modal-bg').classList.remove('open');
+    setStatus('Štítky uložené', 'ok');
+  } catch (e) { setStatus(`Štítky sa nepodarilo uložiť: ${e.message}`, 'err'); }
+  finally {
+    portfolioTagsBusy = false;
+    controls.forEach(el => el.disabled = false);
+    renderPortfolioTagDraft();
+  }
+}
+
 // ── PORTFÓLIO ────────────────────────────────────────────────────────────────
 // eToro portfólio: účty, panel so stĺpcami (poradie/šírky/drag), per ticker/trade,
 // filter Pozornosť, DCA karta, gain cache, analyst target lazy-load, holdings
@@ -2368,6 +2517,7 @@ function renderPortPanel(pid) {
   if (s._symFilter) {
     html += `<div class="tb-sep"></div><button class="port-filter-btn active" onclick="portClearDrillDown('${pid}')" style="border-color:var(--blue);color:var(--blue);align-self:center;">← ${s._symFilter}</button>`;
   }
+  html += `<div class="tb-sep"></div><div class="tb-group"><span class="tb-label">Štítky</span><div class="tb-items"><button class="port-cols-btn" onclick="openPortfolioTagsModal()">Spravovať</button></div></div>`;
   html += `<div class="port-actions"><div class="tb-group"><span class="tb-label">Tabuľka</span><div class="tb-items">`;
   html += `<button class="port-cols-btn" onclick="portToggleColDrop('${pid}')">⚙ Stĺpce</button>`;
   html += `<button class="port-cols-btn" onclick="portSaveCols('${pid}')" title="Uložiť konfiguráciu stĺpcov" style="border-color:var(--green);color:var(--green);">💾</button>`;
@@ -2469,7 +2619,7 @@ function renderPortPanel(pid) {
       for (const col of cols) {
         if (col.key === 'symbol') {
           const count = row._count > 1 ? ` <span style="color:var(--muted);font-size:9px;">(${row._count})</span>` : '';
-          html += `<td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;cursor:pointer;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${sym}')">
+          html += `<td ${portTickerTagAttrs(sym)}><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;cursor:pointer;" title="${portTickerTagTitle(sym)}" onclick="event.stopPropagation();openChartDock('${sym}')">
             ${getLogoWrapper(sym, 26, (row.pnl||0)>=0?'var(--green)':'var(--red)')}
             <div style="display:flex;flex-direction:column;gap:1px;flex:1;">
               <span class="port-sym">${sym}${count}${gfLinkHtml(sym)}</span>
@@ -2581,7 +2731,7 @@ function renderPortPanel(pid) {
                       o.takeProfit ? `TP ${o.takeProfit}` : null].filter(Boolean).join(' · ') || '—';
         html += `<tr class="port-order-row" onclick="portRowClick('${pid}','${o.symbol}')"
           oncontextmenu="onPortRowContextMenu(event,'${pid}','${o.symbol}',false)" style="cursor:pointer;">
-          <td><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="Zobraziť graf v bočnom paneli" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
+          <td ${portTickerTagAttrs(o.symbol)}><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="${portTickerTagTitle(o.symbol)}" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
             ${getLogoWrapper(o.symbol, 22)}
             <div style="display:flex;flex-direction:column;gap:1px;">
               <span class="port-sym">${o.symbol}</span>
@@ -2721,6 +2871,15 @@ function onPortRowContextMenu(event, pid, sym, isTickerView) {
     { label: 'Google Finance ↗', action: () => window.open(gfHref, '_blank', 'noopener') },
     { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') },
   ];
+  const assigned = portfolioTickerTags.assignments[normalizePortSymbol(sym)];
+  items.push({sep:true});
+  for (const tag of portfolioTickerTags.tags) {
+    items.push({label:tag.label, checked:assigned === tag.id,
+      action:() => assignPortfolioTickerTag(sym, tag.id)});
+  }
+  items.push({label:'Bez štítku', checked:!assigned,
+    action:() => assignPortfolioTickerTag(sym, null)});
+  items.push({label:'Spravovať štítky…', action:openPortfolioTagsModal});
   showContextMenu(event.clientX, event.clientY, items);
 }
 

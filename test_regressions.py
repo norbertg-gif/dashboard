@@ -844,6 +844,88 @@ class PortfolioBuildRegressionTests(unittest.TestCase):
                 self.assertEqual(tb._load_position_classes(), {})
 
 
+class TickerTagsRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "ticker_tags.json"
+        self.mock_path = patch.object(tb, "TICKER_TAGS_FILE", self.path)
+        self.mock_path.start()
+        self.addCleanup(self.mock_path.stop)
+
+    def save(self, body):
+        return asyncio.run(tb.save_ticker_tags(_JsonRequest(body)))
+
+    def seed(self):
+        result = self.save({"tags": [{"label": " Nešahať ", "color": "#85F"},
+                                     {"label": "Pozri", "color": "#d99a28"}]})
+        a, b = [tag["id"] for tag in result["tags"]]
+        self.save({"assignments": {"aapl": a, "MSFT": a, "AMD": b}})
+        return a, b
+
+    def test_invalid_color_rejected_without_writing(self):
+        for color in ["red", "#12345", "#fff;display:none", None]:
+            with self.assertRaises(HTTPException) as caught:
+                self.save({"tags": [{"label": "Test", "color": color}]})
+            self.assertEqual(caught.exception.status_code, 400)
+            self.assertIn(repr(color), caught.exception.detail)
+        self.assertFalse(self.path.exists())
+
+    def test_deletion_clears_every_reference_in_same_write(self):
+        a, b = self.seed()
+        remaining = [tag for tag in tb.get_ticker_tags()["tags"] if tag["id"] == b]
+        self.save({"tags": remaining})
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["assignments"], {"AMD": b})
+        self.assertEqual(tb.get_ticker_tags(), stored)
+
+    def test_null_assignment_is_partial(self):
+        a, b = self.seed()
+        self.save({"assignments": {"aapl": None}})
+        self.assertEqual(tb.get_ticker_tags()["assignments"], {"MSFT": a, "AMD": b})
+
+    def test_get_drops_dangling_and_invalid_disk_records(self):
+        a, b = self.seed()
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        stored["assignments"]["BAD"] = "does-not-exist"
+        stored["assignments"]["LIST"] = []
+        stored["tags"].append({"id": "unsafe", "label": "Bad", "color": "red;"})
+        stored["assignments"]["UNSAFE"] = "unsafe"
+        self.path.write_text(json.dumps(stored), encoding="utf-8")
+        self.assertEqual(tb.get_ticker_tags()["assignments"], {"AAPL": a, "MSFT": a, "AMD": b})
+
+    def test_rename_reorder_preserves_server_ids_and_assignments(self):
+        a, b = self.seed()
+        tags = tb.get_ticker_tags()["tags"][::-1]
+        tags[1]["label"] = "Premenované"
+        self.save({"tags": tags})
+        result = tb.get_ticker_tags()
+        self.assertEqual([tag["id"] for tag in result["tags"]], [b, a])
+        self.assertEqual(result["assignments"]["AAPL"], a)
+        self.assertEqual(result["tags"][1]["color"], "#85f")
+
+    def test_invalid_label_id_count_and_assignment_are_atomic(self):
+        self.seed()
+        before = self.path.read_bytes()
+        for body in [
+            {"tags": [{"label": "  ", "color": "#fff"}]},
+            {"tags": [{"label": "x" * 25, "color": "#fff"}]},
+            {"tags": [{"label": "x", "color": "#fff", "id": "client-id"}]},
+            {"tags": [{"label": "x", "color": "#fff"}] * 13},
+            {"tags": [], "assignments": {"AAPL": "missing"}},
+        ]:
+            with self.assertRaises(HTTPException):
+                self.save(body)
+            self.assertEqual(self.path.read_bytes(), before)
+
+    def test_missing_corrupt_and_empty_file_are_tolerated(self):
+        self.assertEqual(len(tb.get_ticker_tags()["tags"]), 2)
+        self.path.write_text("broken", encoding="utf-8")
+        self.assertEqual(tb.get_ticker_tags()["assignments"], {})
+        self.save({"tags": []})
+        self.assertEqual(tb.get_ticker_tags(), {"tags": [], "assignments": {}})
+
+
 class _JsonRequest:
     def __init__(self, payload):
         self._payload = payload

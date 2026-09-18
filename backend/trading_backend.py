@@ -7,6 +7,7 @@ pip install fastapi uvicorn yfinance pandas requests
 import asyncio
 import csv, gc, json, os, math, sys, tempfile, threading, zipfile
 import re
+import uuid
 import hashlib
 import hmac
 from io import BytesIO, TextIOWrapper
@@ -2615,6 +2616,101 @@ def _dca_trigger_state(lots: list[dict], dip_total: float | int | None,
         "trigger_met_on_total_position": total_pnl_pct is not None and total_pnl_pct <= -float(settings["dca_loss_pct"]),
         "dip_score_threshold_met": dip_ok, "blocking_conditions": blocking,
     }
+
+
+TICKER_TAGS_FILE = DATA_ROOT / "ticker_tags.json"
+_ticker_tags_lock = threading.Lock()
+_TICKER_TAG_COLOR = re.compile(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?")
+
+
+def _read_ticker_tags() -> dict:
+    """Called under the tag lock; sanitize disk data without trusting styles/ids."""
+    try:
+        data = json.loads(TICKER_TAGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        data = {"tags": [
+            {"id": "default-hold", "label": "Nešahať", "color": "#8b5cf6"},
+            {"id": "default-review", "label": "Pozri analytiku", "color": "#d99a28"},
+        ], "assignments": {}}
+    if not isinstance(data, dict):
+        data = {}
+    tags, ids = [], set()
+    for raw in data.get("tags", []) if isinstance(data.get("tags"), list) else []:
+        if not isinstance(raw, dict):
+            continue
+        tag_id, label, color = raw.get("id"), raw.get("label"), raw.get("color")
+        if (isinstance(tag_id, str) and tag_id and tag_id not in ids
+                and isinstance(label, str) and 0 < len(label.strip()) <= 24
+                and isinstance(color, str) and _TICKER_TAG_COLOR.fullmatch(color)):
+            tags.append({"id": tag_id, "label": label.strip(), "color": color.lower()})
+            ids.add(tag_id)
+        if len(tags) >= 12:
+            break
+    assignments = data.get("assignments", {})
+    return {"tags": tags, "assignments": {
+        str(sym).strip().upper(): tag_id for sym, tag_id in assignments.items()
+        if str(sym).strip() and isinstance(tag_id, str) and tag_id in ids
+    } if isinstance(assignments, dict) else {}}
+
+
+def _load_ticker_tags() -> dict:
+    with _ticker_tags_lock:
+        return _read_ticker_tags()
+
+
+@app.get("/api/portfolio/tags")
+def get_ticker_tags():
+    """Presentation only; deliberately absent from strategy/accounting exports."""
+    return _load_ticker_tags()
+
+
+@app.post("/api/portfolio/tags")
+async def save_ticker_tags(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or not ({"tags", "assignments"} & body.keys()):
+        raise HTTPException(400, f"Invalid tags payload: {body!r}")
+    with _ticker_tags_lock:
+        stored = _read_ticker_tags()
+        if "tags" in body:
+            definitions = body["tags"]
+            if not isinstance(definitions, list) or len(definitions) > 12:
+                raise HTTPException(400, f"tags must be a list of at most 12: {definitions!r}")
+            existing = {tag["id"] for tag in stored["tags"]}
+            tags, seen = [], set()
+            for raw in definitions:
+                if not isinstance(raw, dict):
+                    raise HTTPException(400, f"Invalid tag: {raw!r}")
+                label, color = raw.get("label"), raw.get("color")
+                if not isinstance(label, str) or not 0 < len(label.strip()) <= 24:
+                    raise HTTPException(400, f"Invalid label (1–24 characters): {label!r}")
+                if not isinstance(color, str) or not _TICKER_TAG_COLOR.fullmatch(color):
+                    raise HTTPException(400, f"Invalid color (#rgb or #rrggbb): {color!r}")
+                tag_id = raw.get("id")
+                if tag_id is None:
+                    tag_id = uuid.uuid4().hex
+                elif not isinstance(tag_id, str) or tag_id not in existing or tag_id in seen:
+                    raise HTTPException(400, f"Invalid or duplicate tag id: {tag_id!r}")
+                seen.add(tag_id)
+                tags.append({"id": tag_id, "label": label.strip(), "color": color.lower()})
+            stored["tags"] = tags
+        ids = {tag["id"] for tag in stored["tags"]}
+        stored["assignments"] = {sym: tag_id for sym, tag_id in stored["assignments"].items() if tag_id in ids}
+        if "assignments" in body:
+            updates = body["assignments"]
+            if not isinstance(updates, dict):
+                raise HTTPException(400, f"assignments must be an object: {updates!r}")
+            for symbol, tag_id in updates.items():
+                sym = str(symbol).strip().upper()
+                if not sym:
+                    raise HTTPException(400, f"Invalid ticker: {symbol!r}")
+                if tag_id is None:
+                    stored["assignments"].pop(sym, None)
+                elif not isinstance(tag_id, str) or tag_id not in ids:
+                    raise HTTPException(400, f"{sym}: unknown tag id {tag_id!r}")
+                else:
+                    stored["assignments"][sym] = tag_id
+        _atomic_write_json(TICKER_TAGS_FILE, stored)
+    return stored
 
 
 POSITION_CLASSES_FILE = DATA_ROOT / "position_classes.json"

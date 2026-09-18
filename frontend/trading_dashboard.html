@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260917-165402">
+<link rel="stylesheet" href="/dashboard.css?v=20260918-163054">
 </head>
 <body data-main-tab="home">
 
@@ -417,6 +417,19 @@
     </div>
   </div>
 </div>
+<div id="ticker-tags-modal-bg" onclick="if(event.target===this)closePortfolioTagsModal()" onkeydown="if(event.key==='Escape')closePortfolioTagsModal()">
+  <div id="ticker-tags-modal" role="dialog" aria-modal="true" aria-labelledby="ticker-tags-title">
+    <h2 id="ticker-tags-title">Štítky tickerov</h2>
+    <div class="settings-note">Jedna farba na ticker, iba vizuálna pomôcka. Červená a zelená už v tabuľke označujú P/L — zvoľ radšej inú farbu.</div>
+    <div id="ticker-tags-rows"></div>
+    <div class="settings-note">Zmazanie štítku pri uložení odstráni aj všetky jeho priradenia.</div>
+    <div class="modal-btns">
+      <button id="ticker-tags-add" class="btn" onclick="addPortfolioTagDraft()">+ Pridaj</button>
+      <button class="btn" onclick="closePortfolioTagsModal()">Zruš</button>
+      <button class="btn primary" onclick="savePortfolioTagsModal()">Ulož</button>
+    </div>
+  </div>
+</div>
 <div id="settings-modal-bg">
   <div id="settings-modal">
     <h2>⚙ Nastavenia prahov</h2>
@@ -509,16 +522,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260917-165402"></script>
-  <script src="/js/live.js?v=20260917-165402"></script>
-  <script src="/js/portfolio.js?v=20260917-165402"></script>
-  <script src="/js/watchlist.js?v=20260917-165402"></script>
-  <script src="/js/scanner-table-sort.js?v=20260917-165402"></script>
-  <script src="/js/scanner.js?v=20260917-165402"></script>
-  <script src="/js/predictive.js?v=20260917-165402"></script>
-  <script src="/js/verdict.js?v=20260917-165402"></script>
-  <script src="/js/home.js?v=20260917-165402"></script>
-  <script src="/js/charts.js?v=20260917-165402"></script>
-  <script src="/js/main.js?v=20260917-165402"></script>
+  <script src="/js/core.js?v=20260918-163054"></script>
+  <script src="/js/live.js?v=20260918-163054"></script>
+  <script src="/js/portfolio.js?v=20260918-163054"></script>
+  <script src="/js/watchlist.js?v=20260918-163054"></script>
+  <script src="/js/scanner-table-sort.js?v=20260918-163054"></script>
+  <script src="/js/scanner.js?v=20260918-163054"></script>
+  <script src="/js/predictive.js?v=20260918-163054"></script>
+  <script src="/js/verdict.js?v=20260918-163054"></script>
+  <script src="/js/home.js?v=20260918-163054"></script>
+  <script src="/js/charts.js?v=20260918-163054"></script>
+  <script src="/js/main.js?v=20260918-163054"></script>
 </body>
 </html>
