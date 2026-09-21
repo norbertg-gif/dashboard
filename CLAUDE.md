@@ -133,6 +133,46 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-12. **DIP `rank` zo zošita je nepoužiteľný — OPRAVENÉ 2026-09-21 v parseri, zošit NEOPRAVENÝ.**
+   **Príznak:** v exporte z 2026-09-21 malo NVDA najvyššie TOTAL (122) a rank 68;
+   MU so 116 malo rank 160; GPGI so 44 malo rank 10. Korelácia `rank` ↔ `TOTAL`
+   bola **−0,029** (7. 9. ešte −0,985), 51 z 99 susedných dvojíc porušovalo
+   zostupné poradie. Rozbilo sa to medzi 7. a 21. septembrom.
+   **Príčina (overené priamo v `G:\burza\finviz\dip_strategy_v3.xlsx`):** list
+   `Ranking` NIE JE zoradený pohľad. Je to prepis listu `Scoring` cez **natvrdo
+   zapísané** referencie — `=IF(Scoring!B119="","",Scoring!B119)`, ďalší riadok
+   `Scoring!B76`, potom `B147`, `B110`, `B144`, `B15`, `B4`… A stĺpec `Rank` je
+   iba `=ROW()-1`, teda **pozícia riadku, nie poradie podľa skóre**.
+   Tie referencie sú zamrznutou snímkou poradia z minulosti. `Scoring` sa ťahá
+   z `finviz_output.xlsx` po riadkoch, takže po každom obnovení Finviz dát
+   ukazujú na iné tickery. **Preto sa to v Exceli ani nedá zotriediť** — `ROW()-1`
+   sa po každom triedení prepočíta na novú pozíciu, a relatívne referencie sa
+   navyše posunú s riadkom, čím sa to pokazí ešte viac.
+   **Čo NIE JE rozbité (overené, netreba znova):** `Scoring` stĺpce E, F, G sú
+   v poriadku — `G=E+F` sedí v 200 z 200 riadkov, `E=SUM(I:W)`, `F=SUM(Y:AD)`,
+   žiadne prázdne ani textové hodnoty. Referencie v `Ranking` sú navyše **úplná
+   permutácia** (200 referencií, 0 duplicít, 0 vynechaných), takže sa nikdy nič
+   nestratilo — zlé bolo výhradne poradie. Scanner universe tiež zasiahnutý
+   nebol, lebo `SCANNER_DIP_UNIVERSE_MAX` je 300 a tickerov je 195.
+   **Oprava (`parse_dip_ranking_xlsx`, `trading_backend.py`):** `rank` sa zo
+   zošita už nečíta, ale odvodzuje z `TOTAL` zostupne. Pôvodná hodnota sa
+   zachováva ako `sheet_rank` na diagnostiku. Zoradenie je stabilné (pri zhode
+   TOTAL rozhoduje poradie zo zošita) a chýbajúce TOTAL idú na koniec.
+   **Zoradenie patrí do parsera, nie ku konzumentom** — poradie riadkov je
+   vstupom aj pre `_dip_universe` (spolieha sa na insertion order dictu) aj pre
+   `top_ranked_not_selected` (berie prvých 25); keby si každý triedil sám,
+   povrchy sa rozídu.
+   **Overené po oprave:** korelácia **−0,983** (zvyšok do −1,0 sú zhody v TOTAL,
+   to je správne), **0 porušení** zostupného poradia zo 194, 195 tickerov, žiadne
+   duplicity. Nové top 5: NVDA 122, SNDK 117, ONON 117, MU 116, ISRG 114.
+   157 regresných testov prechádza.
+   **Zošit ostáva rozbitý a to je vedomé rozhodnutie** — backend mu už neverí,
+   takže to nič nekazí. Ak ho niekto bude chcieť opraviť aj pre ručné
+   prezeranie: pomocný stĺpec v `Scoring` do prvého voľného stĺpca (`AE`, nie
+   `H` — ten je zámerný oddeľovač) `=IF(G2="","",G2*10000-ROW())` na rozbitie
+   zhôd, a v `Ranking` potom `INDEX`+`MATCH`+`LARGE` nad ním namiesto natvrdo
+   zapísaných referencií.
+
 -11. **Solvency filter kričí vlka + `dca_trigger_pct` sa stále rozchádza — NÁLEZY Z TÝŽDENNEJ ANALÝZY 2026-08-15.**
    Prvý týždeň, čo sú `solvency` polia v exporte (pribudli s -6). Fungujú, dáta
    sú pri 41 z 56 pozícií, `data_age_days: 1`. Ale naivný prah na JEDNU metriku

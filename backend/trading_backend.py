@@ -8062,14 +8062,27 @@ def parse_dip_ranking_xlsx(raw: bytes, filename: str | None = None) -> dict:
     if idx_ticker is None or idx_total is None:
         raise HTTPException(400, "Zalozka Ranking musi obsahovat aspon stlpce Ticker a TOTAL")
 
-    scores = {}
+    # Rank sa NEBERIE zo zosita — odvodzuje sa z TOTAL zostupne.
+    # Dovod (2026-09-21): list Ranking v dip_strategy_v3.xlsx nie je zoradeny pohlad,
+    # ale prepis listu Scoring cez NATVRDO zapisane referencie (=Scoring!B119, B76, B147...),
+    # a stlpec Rank je iba =ROW()-1, teda pozicia riadku. Tie referencie su snimkou
+    # poradia z minulosti; ked sa Scoring obnovi z finviz_output.xlsx, ukazuju na ine
+    # tickery a poradie sa rozsype. Preto sa v zosite ani neda zotriedit — ROW()-1 sa
+    # po kazdom triedeni prepocita na novu poziciu.
+    # Namerane 2026-09-21: korelacia rank vs TOTAL = -0.029 (7.9. este -0.985),
+    # NVDA s najvyssim TOTAL 122 malo rank 68, MU so 116 rank 160.
+    # Poradie riadkov je zaroven vstup pre scanner universe (_dip_universe, ktory sa
+    # spolieha na insertion order dictu) a pre top_ranked_not_selected (berie prvych 25),
+    # takze zoradenie patri SEM, nie k jednotlivym konzumentom — inak sa povrchy rozidu.
+    parsed: list[dict] = []
     for row in rows[1:]:
         ticker = str(row[idx_ticker] or "").strip().upper() if idx_ticker < len(row) else ""
         if not ticker:
             continue
         total = _num_or_none(row[idx_total] if idx_total < len(row) else None)
-        scores[ticker] = {
-            "rank": _num_or_none(row[idx_rank] if idx_rank is not None and idx_rank < len(row) else None),
+        parsed.append({
+            "rank": None,  # doplni sa az po zoradeni
+            "sheet_rank": _num_or_none(row[idx_rank] if idx_rank is not None and idx_rank < len(row) else None),
             "ticker": ticker,
             "company": str(row[idx_company] or "").strip() if idx_company is not None and idx_company < len(row) and row[idx_company] is not None else "",
             "price": _num_or_none(row[idx_price] if idx_price is not None and idx_price < len(row) else None),
@@ -8077,7 +8090,19 @@ def parse_dip_ranking_xlsx(raw: bytes, filename: str | None = None) -> dict:
             "ta": _num_or_none(row[idx_ta] if idx_ta is not None and idx_ta < len(row) else None),
             "total": total,
             "label": _dip_label(total),
-        }
+        })
+
+    # Stabilne zoradenie: vyssie TOTAL prve, chybajuce TOTAL uplne na koniec.
+    # Pri zhode TOTAL rozhoduje povodne poradie zo zosita (Python sort je stabilny).
+    parsed.sort(key=lambda item: (item["total"] is None, -(item["total"] or 0)))
+
+    scores = {}
+    for position, item in enumerate(parsed, start=1):
+        item["rank"] = position
+        # Pri duplicitnom tickeri vyhrava posledny vyskyt — rovnako ako povodne
+        # priame priradenie do dictu.
+        scores[item["ticker"]] = item
+
     scores["_meta"] = {
         "sheet": sheet_name,
         "filename": filename or "",
