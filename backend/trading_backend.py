@@ -2826,7 +2826,7 @@ def seed_position_classes(account: str = Query("1"), overwrite: int = Query(0)):
             "positions": len(symbols)}
 
 
-def _build_position_rows(positions: list[dict]) -> tuple[list[dict], float, dict]:
+def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None = None) -> tuple[list[dict], float, dict]:
     """Compute the shared BUILD state from one processed portfolio position list."""
     by_sym: dict[str, dict] = {}
     for pos in positions:
@@ -2898,6 +2898,7 @@ def _build_position_rows(positions: list[dict]) -> tuple[list[dict], float, dict
             # percentách sa to zle prekladá na objednávku.
             "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
             "state": state,
+            "entry_zone": ((scanner_by_symbol or {}).get(sym) or {}).get("entry_zone"),
         })
     # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
     state_order = {"build": 0, "at_target": 1, "over_max": 2, "no_target": 3, "unclassified": 4}
@@ -2916,7 +2917,10 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
     Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
     nie voči equity účtu — krypto je zo stratégie vylúčené."""
     portfolio = get_portfolio(account=account, refresh=refresh)
-    rows, book_value, class_ratios = _build_position_rows(portfolio.get("positions", []))
+    scan = load_scanner_cache() or {}
+    scanner_by_symbol = {str(r.get("ticker") or "").upper(): r
+                         for r in (scan.get("results") or []) if isinstance(r, dict)}
+    rows, book_value, class_ratios = _build_position_rows(portfolio.get("positions", []), scanner_by_symbol)
     classified = [r for r in rows if r["position_class"]]
     return {
         "account": account,
@@ -8710,10 +8714,41 @@ def _scanner_download_cached(ticker: str, period: str, interval: str) -> pd.Data
     return bars[bars.index >= cutoff].copy()
 
 
+def _scanner_entry_zone(ticker: str) -> dict:
+    """Expose existing weekly ML features; independent of trend/health and scoring."""
+    zone = {"timeframe": "weekly", "ema20_dist_pct": None, "pos_52w": None,
+            "atr_pct": None, "bars": 0}
+    try:
+        # Cached daily history, resampled only: EMA20 needs ~70 weekly bars.
+        # Keep the scanner's existing 1y trend/health frame unchanged.
+        raw = _scanner_download_cached(ticker, "5y", "1wk")
+        if raw is None:
+            return zone
+        zone["bars"] = len(raw)
+        if len(raw) < 20:
+            return zone
+        latest = add_indicators(raw).iloc[-1]  # Full history before selecting tail.
+        distance = _num_or_none(latest.get("ema20_dist"))
+        position = _num_or_none(latest.get("pos_52w"))
+        atr = _num_or_none(latest.get("atr"))
+        close = _num_or_none(latest.get("Close"))
+        if len(raw) >= 70 and distance is not None and close is not None and close > 0:
+            zone["ema20_dist_pct"] = round(distance * 100, 2)
+        if position is not None and 0 <= position <= 1:
+            zone["pos_52w"] = round(position, 3)
+        if atr is not None and atr >= 0 and close is not None and close > 0:
+            zone["atr_pct"] = round(atr / close * 100, 2)
+    except Exception:
+        # Interpretive context must never prevent scanning a ticker.
+        pass
+    return zone
+
+
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
     raw_d = _scanner_download_cached(ticker, "6mo", "1d")
     if len(raw_d) < 20:
-        return {"ticker": ticker, "error": "Nedostatok dat"}
+        return {"ticker": ticker, "error": "Nedostatok dat",
+                "entry_zone": _scanner_entry_zone(ticker)}
 
     df_d = add_indicators(raw_d)
     daily_health = chart_health(df_d, "daily")
@@ -8788,6 +8823,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
         pass
     return {
         "ticker": ticker,
+        "entry_zone": _scanner_entry_zone(ticker),
         "weekly_bullish": weekly_bullish,
         "weekly_status": weekly_status,
         "weekly_trend": weekly_trend,
@@ -9801,7 +9837,7 @@ def get_home_heatmap():
     return data
 
 
-ASSISTANT_EXPORT_SCHEMA_VERSION = "1.6"
+ASSISTANT_EXPORT_SCHEMA_VERSION = "1.7"
 
 
 def _assistant_snapshot(account: str) -> dict:
@@ -9996,6 +10032,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     })
     # Keep every composite condition explicit, including null/unknown results.
     exported["solvency"] = solvency
+    exported["entry_zone"] = scanner_row.get("entry_zone")
     build = build or {"state": "unclassified"}
     # Keep unavailable BUILD fields explicit: "no target" is not the same as a zero gap.
     exported["build"] = {
@@ -10004,6 +10041,9 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
         "target_source": build.get("target_source"),
         "gap_pct": build.get("gap_pct"),
         "state": build.get("state", "unclassified"),
+        # entry_zone zamerne LEN na urovni pozicie — v jednom exporte by inak
+        # to iste cislo bolo dvakrat. /api/portfolio/build ho nesie na riadku,
+        # lebo tam ziadna nadradena uroven nie je.
     }
     return exported
 
@@ -10082,7 +10122,7 @@ def get_assistant_export(account: str = "1"):
     total_equity = summary["equity"]
     build_rows, stock_etf_book_value, _ = _build_position_rows([
         position for lots in positions_by_symbol.values() for position in lots
-    ])
+    ], scanner_by_symbol)
     build_by_symbol = {row["symbol"]: row for row in build_rows}
     portfolio = []
     for symbol in sorted(positions_by_symbol):

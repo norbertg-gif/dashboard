@@ -699,6 +699,94 @@ class PublicRateLimitRegressionTests(unittest.TestCase):
         self.assertEqual(set(tb._public_rate), {"new-client"})
 
 
+class EntryZoneRegressionTests(unittest.TestCase):
+    @staticmethod
+    def frame(count=100, last=110.0):
+        close = [100.0] * (count - 1) + [last]
+        return pd.DataFrame({"Open": close, "High": [120.0] * count,
+                             "Low": [80.0] * count, "Close": close,
+                             "Volume": [1000.0] * count},
+                            index=pd.date_range("2020-01-03", periods=count, freq="W-FRI"))
+
+    def zone(self, frame):
+        with patch.object(tb, "_scanner_download_cached", return_value=frame) as download:
+            result = tb._scanner_entry_zone("TEST")
+        download.assert_called_once_with("TEST", "5y", "1wk")
+        return result
+
+    def test_known_ema_distance_and_atr(self):
+        for close in (110.0, 90.0):
+            with self.subTest(close=close):
+                zone = self.zone(self.frame(last=close))
+                ema = 100 + (close - 100) * 2 / 21
+                self.assertEqual(zone["ema20_dist_pct"], round((close - ema) / close * 100, 2))
+                self.assertEqual(zone["atr_pct"], round(40 / close * 100, 2))
+                self.assertEqual(zone["bars"], 100)
+
+    def test_range_extremes(self):
+        self.assertEqual(self.zone(self.frame(last=120))["pos_52w"], 1.0)
+        self.assertEqual(self.zone(self.frame(last=80))["pos_52w"], 0.0)
+
+    def test_short_missing_and_failed_history(self):
+        for frame in (None, pd.DataFrame(), self.frame(19)):
+            zone = self.zone(frame)
+            self.assertEqual(zone["bars"], 0 if frame is None else len(frame))
+            for field in ("ema20_dist_pct", "pos_52w", "atr_pct"):
+                self.assertIsNone(zone[field])
+        self.assertIsNone(self.zone(self.frame(52))["ema20_dist_pct"])
+        with patch.object(tb, "_scanner_download_cached", side_effect=RuntimeError("unavailable")):
+            self.assertEqual(tb._scanner_entry_zone("TEST")["bars"], 0)
+
+    def test_nonfinite_features_are_null_independently(self):
+        frame = tb.add_indicators(self.frame())
+        frame.loc[frame.index[-1], ["ema20_dist", "pos_52w", "atr"]] = [float("nan"), float("inf"), float("nan")]
+        with patch.object(tb, "add_indicators", return_value=frame):
+            zone = self.zone(self.frame())
+        self.assertEqual(zone, {"timeframe": "weekly", "bars": 100,
+                               "ema20_dist_pct": None, "pos_52w": None, "atr_pct": None})
+        json.dumps(zone, allow_nan=False)
+
+    def test_scan_preserves_original_trend_and_health_windows(self):
+        daily, weekly, long_weekly = self.frame(120), self.frame(52), self.frame(200, 80)
+        expected_trend = tb._weekly_trend(tb.add_indicators(weekly))
+        expected_health = {"daily": tb.chart_health(tb.add_indicators(daily), "daily"),
+                           "weekly": tb.chart_health(tb.add_indicators(weekly), "weekly")}
+        def download(ticker, period, interval):
+            return {("6mo", "1d"): daily, ("1y", "1wk"): weekly,
+                    ("5y", "1wk"): long_weekly}[(period, interval)].copy()
+        with patch.object(tb, "_scanner_download_cached", side_effect=download) as cached:
+            row = tb._scan_buy_signal_for_ticker("TEST", 30)
+        self.assertEqual(json.dumps(row["weekly_trend"], sort_keys=True), json.dumps(expected_trend, sort_keys=True))
+        self.assertEqual(json.dumps(row["chart_health"], sort_keys=True), json.dumps(expected_health, sort_keys=True))
+        self.assertEqual(row["entry_zone"], self.zone(long_weekly))
+        self.assertEqual(cached.call_args_list, [unittest.mock.call("TEST", "6mo", "1d"),
+                                               unittest.mock.call("TEST", "1y", "1wk"),
+                                               unittest.mock.call("TEST", "5y", "1wk")])
+
+    def test_build_and_export_preserve_scanner_block_including_nulls(self):
+        zone = self.zone(self.frame(52))
+        scanner = {"ticker": "TEST", "entry_zone": zone}
+        lots = [{"symbol": "TEST", "type": "Stock", "amount": 100, "pnl": 0}]
+        with (
+            patch.object(tb, "get_portfolio", return_value={"positions": lots}),
+            patch.object(tb, "load_scanner_cache", return_value={"results": [scanner]}),
+            patch.object(tb, "_load_position_classes", return_value={}),
+            patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS),
+            patch.object(tb, "_assistant_solvency", return_value={}),
+            patch.object(tb, "_ticker_sector_etf_cached_only", return_value=(None, None)),
+            patch.object(tb, "_scanner_download_cached", side_effect=AssertionError("no recomputation")),
+            patch.object(tb, "add_indicators", side_effect=AssertionError("no recomputation")),
+        ):
+            build = tb.get_build_candidates(account="1", refresh=0)["positions"][0]
+            exported = tb._assistant_export_position("TEST", lots, scanner, {}, {},
+                         tb.DASH_SETTINGS_DEFAULTS, 100, 100, build)
+        self.assertIs(build["entry_zone"], zone)
+        self.assertIs(exported["entry_zone"], zone)
+        # V exporte zamerne LEN na urovni pozicie, nie aj v build bloku —
+        # jeden payload nesmie niest to iste cislo dvakrat.
+        self.assertNotIn("entry_zone", exported["build"])
+
+
 class PortfolioBuildRegressionTests(unittest.TestCase):
     """Fáza 1 modulu BUILD: gap = cieľ − váha, žiadne skóre."""
 
@@ -936,6 +1024,8 @@ class _JsonRequest:
 
 class AssistantExportRegressionTests(unittest.TestCase):
     def test_export_has_versioned_schema_and_redacts_internal_ids(self):
+        zone = {"timeframe": "weekly", "bars": 52, "ema20_dist_pct": None,
+                "pos_52w": 0.75, "atr_pct": 3.25}
         snapshot = {
             "ts": 1_784_000_000,
             "summary": {"cash": 100, "invested": 200, "equity": 320, "total_pnl": 20, "daily_pnl": 2},
@@ -960,7 +1050,7 @@ class AssistantExportRegressionTests(unittest.TestCase):
                 "CTSH": {"rank": 3, "total": 100, "fa": 67, "ta": 33, "label": "VERY STRONG"},
             }),
             patch.object(tb, "load_scanner_cache", return_value={"results": [
-                {"ticker": "AAPL", "recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Bad"}}},
+                {"ticker": "AAPL", "entry_zone": zone, "recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Bad"}}},
                 {"ticker": "MSFT", "name": "Microsoft", "recent_signal": {"score": 3, "tier": "buy"}},
             ]}),
             patch.object(tb, "get_investor_inbox", return_value={"generated_at": "now", "items": [{"ticker": "AAPL", "kinds": ["dca", "broken"], "priority": 10, "reasons": [{"title": "Graf potrebuje kontrolu"}]}]}),
@@ -970,7 +1060,9 @@ class AssistantExportRegressionTests(unittest.TestCase):
         ):
             payload = tb.get_assistant_export()
 
-        self.assertEqual(payload["schema_version"], "1.6")
+        self.assertEqual(payload["schema_version"], "1.7")
+        self.assertEqual(payload["positions"][0]["entry_zone"], zone)
+        self.assertNotIn("entry_zone", payload["positions"][0]["build"])
         # Účty sa nikdy nezlučujú — účet 2 je iná stratégia (Nelkin, ~15 rokov).
         self.assertEqual(requested_accounts, ["1"])
         self.assertEqual(payload["analysis_scope"]["account"], "1")

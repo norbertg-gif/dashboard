@@ -101,7 +101,7 @@ These were already in the codebase and need to stay fixed:
 - **C1–C4 zostávajú na yfinance — ZMERANÉ rozhodnutie, neprepínať bez nového podnetu (2026-08-19).** Všetky štyri podmienky sú pomery alebo normalizované veličiny (c1 `|close−ema20|/close` s ATR-škálovanou toleranciou, c2 RSI, c3 smer sviečky + `vol/vol_ma`, c4 z-score), takže **cenová hladina na skóre nemá vplyv: posun cien o 7,5 % pri rovnakom tvare krivky dal 100 % zhodu skóre**. Jediný citlivý vstup je OBJEM v c3 — a ten sa vykráti len ak je meraný konzistentne (konštantný podiel brokerského objemu na burzovom → tiež 100 % zhoda; ±25 % vlastného šumu → 80 %). Prechod na eToro by teda na cenovej strane nezískal nič, na objemovej by vymenil veličinu za inú (nie lepšiu), **rozdelil by 90D validáciu na dve metodiky** (rovnaký problém ako miešanie `rules_version`) a stratil tickery mimo eToro. Používateľ signál zo scannera aj tak overuje na grafe a v Analytike — scanner je vyhľadávacia vrstva, nie zdroj čísla, podľa ktorého sa obchoduje.
 - **Secrets stay in env.** `etoro_proxy.py` previously had `api_key` / `user_key` hard-coded → leaked when repo was public. Read from `os.getenv("ETORO_API_KEY_1")` etc. with no in-source fallback containing real values. `PUBLIC_API_TOKEN` likewise. The public portfolio endpoint reuses the same processed snapshot as the Portfolio tab; do not add a parallel raw-cache calculation path.
 - **Cache identity and writes matter.** Backtest cache identity includes an OHLCV fingerprint, not only the last date/row count. Disk JSON/gzip cache writes must remain temp-file + `os.replace()` atomic and use the striped file lock shared with reads.
-- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). **Exportuje sa VŽDY len jeden účet, default `?account=1`; zlúčenie účtov je zakázané** — účet 2 (Nelkin, ~15 rokov, pasívne ETF) má inú stratégiu a zlúčenie podľa tickeru je stratové (loty sa už nedajú rozlíšiť). Parameter prijíma iba `1`/`2`, inak 400. `analysis_scope.account` + `accounts_merged:false` nesú túto identitu v payloade. Schema `1.3` is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
+- **AI export is private and read-only.** `GET /api/assistant/export` remains behind normal Basic Auth (never add it under `/api/public/*`). **Exportuje sa VŽDY len jeden účet, default `?account=1`; zlúčenie účtov je zakázané** — účet 2 (Nelkin, ~15 rokov, pasívne ETF) má inú stratégiu a zlúčenie podľa tickeru je stratové (loty sa už nedajú rozlíšiť). Parameter prijíma iba `1`/`2`, inak 400. `analysis_scope.account` + `accounts_merged:false` nesú túto identitu v payloade. Schema `1.7` adds unchanged scanner `entry_zone` to positions and their shared BUILD block; it is a single full weekly diagnostic for Stock/ETF only: keep `open_lots`, but use one normalized `attention_items` list instead of exporting overlapping Plan/Inbox prose. Separate priority candidates from scanner-only watch candidates, retain a reason for highly ranked-but-not-selected tickers, and keep total/exported position counts plus cash reserved for pending buys explicit. Do not expose eToro API keys, account IDs, `positionId`, `orderId`, raw cache payloads, or force a portfolio refresh from this route.
 - **Don't duplicate `/api/search`.** There were two routes with the same path returning different shapes (`list` vs `{results: [...]}`). FastAPI keeps the first; the second is dead, and clients expecting the other shape silently break (predictive autocomplete).
 - **Don't redefine `calc_adx` / `calc_rsi` / `calc_macd` / `calc_ichimoku` / `calc_stoch_rsi`.** The file had two sets — the second `calc_adx` returns a DataFrame, the first returns a tuple. Anything unpacking `_adx, _di, _di2 = calc_adx(df)` will silently get column-name strings → NaN columns → ADX disabled. Keep one definition each, near the top, used by both predictive and `/api/ohlcv`.
 - **Profit/loss colouring uses `pos.pnl >= 0`, not rate comparison.** `pos.openRate <= lastClose` is wrong for short positions, leveraged trades, and ignores fees. The `pos.pnl` field from eToro is the source of truth.
@@ -145,15 +145,20 @@ These were already in the codebase and need to stay fixed:
    „nenastane", len trvá. Preto BUILD potrebuje kalendár ako spúšťač — bez neho
    má len dva režimy: kupovať stále, alebo nikdy (dnes platí to druhé).
 
-   **(a) Odkryť `ema20_dist` a `pos_52w` do exportu a do BUILD.**
-   Obe sa UŽ POČÍTAJÚ v `add_indicators()` (`trading_backend.py:218` a `:225`),
-   ale žijú len v ML feature sete (zoznamy na `:308-309` a `:611-621`) a von sa
-   nedostanú. Toto nie je stavba novej rúry, je to odkrytie existujúceho.
-   `pos_52w` = pozícia v 52-periódovom rozsahu, 0 = dno, 1 = vrchol.
-   **Pozor:** `pos_52w` NIE JE to isté čo drawdown od maxima — pri širokom
-   ročnom rozpätí sa správa inak. Pred nasadením porovnať na pár tickeroch.
-   ATR je tiež k dispozícii (`:194`), komentár na `:183` už hovorí o
-   ATR-škálovanej blízkosti k EMA20.
+   **(a) DONE 2026-09-22: weekly `entry_zone` exposed in scanner, AI export 1.7 and BUILD.**
+   Existing ML features: `ema20_dist` * 100 (2dp), `pos_52w` (3dp),
+   `atr / Close` * 100 (2dp), `timeframe: weekly`, `bars` always present.
+   Separate `_scanner_download_cached(ticker, "5y", "1wk")`: cached daily
+   history resampled, no new fetch; indicators on full frame before tail selection.
+   EMA20 needs ~70 weekly bars to settle (1y ~52 is insufficient); below 70
+   distance is null, below 20 all three fields null. Existing 1y trend/health
+   window unchanged. Export and shared `_build_position_rows` pass the scanner
+   block unchanged (LEN na urovni pozicie, nie aj v jej `build` bloku — jeden
+   payload nesmie niest to iste cislo dvakrat); interpretive only, no scoring/gates. Measured on 10 tickers
+   (5y weekly): `pos_52w` vs drawdown-from-52w-high correlation **+0.934**;
+   largely redundant, not identical with wide ranges: MU 0.831 vs ASML 0.741
+   at drawdowns -14.8% / -13.8%. Weekly EMA20 distance distinguishes trend
+   proximity (LMT -3.5%, NU -1.2%) from extension (AMD +21.5%, NET +20.7%).
 
    **(b) Relative strength voči benchmarku.** Jediná naozaj chýbajúca vec
    (`grep relative_strength` = 0 výskytov). Kvalitný titul, ktorý v rastúcom
