@@ -787,6 +787,74 @@ class EntryZoneRegressionTests(unittest.TestCase):
         self.assertNotIn("entry_zone", exported["build"])
 
 
+class BuildReadinessRegressionTests(unittest.TestCase):
+    def build(self, classes=None, scanner=None, settings=None):
+        positions = [{"symbol": sym, "type": "Stock", "amount": amount}
+                     for sym, amount in (("A", 10), ("B", 20), ("C", 70))]
+        if classes is None:
+            classes = {s: {"position_class": "CORE", "target_weight": 50} for s in "ABC"}
+        with (patch.object(tb, "get_portfolio", return_value={"positions": positions}),
+              patch.object(tb, "_load_position_classes", return_value=classes),
+              patch.object(tb, "_dash_settings", return_value={**tb.DASH_SETTINGS_DEFAULTS, **(settings or {})}),
+              patch.object(tb, "load_scanner_cache", return_value={"results": scanner or []})):
+            return tb.get_build_candidates(account="1", refresh=0)
+
+    def test_missing_class_and_target_precede_bad_chart(self):
+        for classes, settings, reason in [({}, {}, "trieda"),
+                ({"A": {"position_class": "CORE"}}, {"class_ratio_core": 0}, "cieľová váha")]:
+            with self.subTest(reason=reason):
+                data = self.build(classes, [{"ticker": "A", "chart_health": {"daily": {"status": "Bad"}}}], settings)
+                row = next(r for r in data["positions"] if r["symbol"] == "A")
+                self.assertEqual(row["readiness"], "no_data")
+                self.assertIn(reason, row["readiness_reason"])
+
+    def test_weight_blocks_precede_missing_data(self):
+        for extra, reason in [({"max_weight": 5}, "nad stropom"), ({"target_weight": 10}, "na cieli")]:
+            with self.subTest(reason=reason):
+                data = self.build({"A": {"position_class": "CORE", "target_weight": 50, **extra}})
+                row = next(r for r in data["positions"] if r["symbol"] == "A")
+                self.assertEqual((row["readiness"], row["readiness_reason"]), ("blocked", reason))
+
+    def test_bad_chart_either_timeframe_precedes_missing_zone(self):
+        for frame, label in [("daily", "denný"), ("weekly", "týždenný")]:
+            data = self.build(scanner=[{"ticker": "A", "chart_health": {frame: {"status": "Bad"}}}])
+            row = next(r for r in data["positions"] if r["symbol"] == "A")
+            self.assertEqual(row["readiness"], "blocked")
+            self.assertIn(label, row["readiness_reason"])
+
+    def test_missing_scanner_zone_distance_and_atr_fail_soft(self):
+        for scanner in [[], [{"ticker": "A"}], [{"ticker": "A", "entry_zone": {"ema20_dist_pct": None}}],
+                        [{"ticker": "A", "entry_zone": {"ema20_dist_pct": 1, "atr_pct": None}}]]:
+            with self.subTest(scanner=scanner):
+                data = self.build(scanner=scanner)
+                row = next(r for r in data["positions"] if r["symbol"] == "A")
+                self.assertEqual(row["readiness"], "no_data")
+                self.assertIsNone(data["next_step"])
+
+    def test_atr_gate_inclusive_tunable_and_risk_is_not_bad(self):
+        for distance, expected in [(-3, "ready"), (10, "ready"), (10.01, "wait")]:
+            data = self.build(scanner=[{"ticker": "A", "entry_zone": {"ema20_dist_pct": distance, "atr_pct": 5},
+                                       "chart_health": {"daily": {"status": "Risk"}}}],
+                              settings={"build_entry_atr_mult": 2})
+            row = next(r for r in data["positions"] if r["symbol"] == "A")
+            self.assertEqual(row["readiness"], expected)
+            self.assertEqual(row["state"], "build")
+            if expected == "wait":
+                self.assertIsNone(data["next_step"])
+
+    def test_next_step_largest_ready_gap_and_default_order(self):
+        scanner = [{"ticker": s, "entry_zone": {"ema20_dist_pct": 2, "atr_pct": 5}} for s in "AB"]
+        data = self.build(scanner=scanner)
+        self.assertEqual([r["symbol"] for r in data["positions"]], ["A", "B", "C"])
+        row = data["positions"][0]
+        self.assertEqual(data["next_step"], {"symbol": "A", "gap_amount": 40, "gap_pct": 40,
+                         "readiness": "ready", "reason": row["readiness_reason"]})
+        scanner[0]["entry_zone"]["ema20_dist_pct"] = 20
+        data = self.build(scanner=scanner)
+        self.assertEqual([r["readiness"] for r in data["positions"]], ["ready", "wait", "blocked"])
+        self.assertEqual(data["next_step"]["symbol"], "B")
+
+
 class PortfolioBuildRegressionTests(unittest.TestCase):
     """Fáza 1 modulu BUILD: gap = cieľ − váha, žiadne skóre."""
 
@@ -1059,6 +1127,10 @@ class AssistantExportRegressionTests(unittest.TestCase):
             patch.object(tb, "_load_position_classes", return_value={}),
         ):
             payload = tb.get_assistant_export()
+            with patch.object(tb, "get_portfolio", return_value={"positions": snapshot["data"]}):
+                build_rows = tb.get_build_candidates(account="1", refresh=0)["positions"]
+            self.assertEqual(payload["positions"][0]["build"]["readiness"], build_rows[0]["readiness"])
+            self.assertEqual(payload["positions"][0]["build"]["readiness_reason"], build_rows[0]["readiness_reason"])
 
         self.assertEqual(payload["schema_version"], "1.7")
         self.assertEqual(payload["positions"][0]["entry_zone"], zone)
@@ -1073,6 +1145,7 @@ class AssistantExportRegressionTests(unittest.TestCase):
         self.assertEqual(payload["positions"][0]["build"], {
             "position_class": None, "target_weight": None, "target_source": None,
             "gap_pct": None, "state": "unclassified",
+            "readiness": "no_data", "readiness_reason": "chýba trieda",
         })
         self.assertNotIn("dca_drawdown_from_last_entry_pct", payload["positions"][0]["dca_context"])
         self.assertEqual(payload["attention_items"][0]["action_type"], "chart_review")
@@ -1187,13 +1260,14 @@ class AssistantExportRegressionTests(unittest.TestCase):
             {"recent_signal": {"score": 3, "tier": "buy"}, "chart_health": {"daily": {"status": "Good"}, "weekly": {"status": "Good"}}},
             {"total": 100, "rank": 1},
             {}, {"dca_loss_pct": 15, "dca_last_tranche_pct": 20, "dca_dip_min": 90}, 1000, 100,
-            {"position_class": "CORE", "target_weight": 60, "target_source": "manual", "gap_pct": 40, "state": "build"},
+            {"position_class": "CORE", "target_weight": 60, "target_source": "manual", "gap_pct": 40, "state": "build", "readiness": "no_data", "readiness_reason": "málo týždennej histórie"},
         )
         self.assertEqual(position["dca_context"]["status"], "eligible")
         self.assertEqual(position["dca_context"]["dca_drawdown_from_last_entry_pct"], -20.0)
         self.assertEqual(position["build"], {
             "position_class": "CORE", "target_weight": 60, "target_source": "manual",
             "gap_pct": 40, "state": "build",
+            "readiness": "no_data", "readiness_reason": "málo týždennej histórie",
         })
 
     def test_dca_last_tranche_rule_rejects_four_ttd_shape(self):

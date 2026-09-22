@@ -166,13 +166,22 @@ These were already in the codebase and need to stay fixed:
    Čiastočný základ existuje: `GET /api/portfolio/benchmark` porovnáva každú
    otvorenú pozíciu s QQQ a SPY od jej otvorenia (položka -3).
 
-   **(c) Štyri stavy v karte „Dobudovanie pozícií".**
-   `PRIPRAVENÉ / ČAKAJ / BLOKOVANÉ / BEZ DÁT`, zoradené podľa `gap_pct`, a hore
-   jednoriadkový verdikt „ĎALŠÍ KROK: <ticker> · <suma> · <stav>".
-   Cieľom je, aby mesačné rozhodnutie boli tri kroky: otvoriť kartu, prečítať
-   prvý riadok, kúpiť. Dnes karta ukáže tabuľku s medzerami a používateľ si
-   musí sám dohľadať graf, Typ B a kvalitu — a výsledok je, že nekúpi nič alebo
-   otvorí ďalší nový ticker.
+   **(c) DONE 2026-09-22: štyri readiness stavy v karte „Dobudovanie pozícií“.**
+   `_build_position_rows()` je jediný výpočet pre kartu aj AI export (schema 1.7 bez zmeny).
+   Prvý splnený krok rozhoduje:
+   1. `unclassified` / `no_target` → `no_data` (chýba trieda / cieľová váha).
+   2. `over_max` → `blocked` (nad stropom).
+   3. `at_target` alebo gap nie je kladný → `blocked` (na cieli).
+   4. Denný alebo týždenný graf `Bad` → `blocked`, dôvod uvádza timeframe.
+   5. Chýba scanner / entry_zone / EMA20 vzdialenosť → `no_data`; chýbajúce ATR tiež fail-soft.
+   6. Vzdialenosť ≤ `build_entry_atr_mult × atr_pct` → `ready` (hranica inkluzívna).
+   7. Inak → `wait` (vzdialenosť nad týždennou EMA20).
+   ⚙ `build_entry_atr_mult`: default **1.0**, rozsah **0.25–5**, široká brána, nie nákupný signál.
+   **Kvalita je binárna brána, medzera je poradie; žiadne kompozitné skóre.**
+   Default `ready → wait → blocked → no_data`, v skupine `gap_pct` zostupne;
+   kliknutie na stĺpec je používateľský override. Pôvodný `state` ostáva zachovaný.
+   `next_step` vyberá ready s najväčším gapom, inak null. Rozbalená aj zbalená karta
+   ukazujú „ĎALŠÍ KROK: <ticker> · <suma> · PRIPRAVENÉ“, alebo počty dôvodov nepripravenosti.
 
    **Poradie prác:** (a) → (c) → (b). Scanner coverage (priorita 1 v
    `CLAUDE_investicna_analyza.md`) je NADRADENÁ všetkému — `ema20_dist` aj

@@ -851,7 +851,7 @@ function renderDcaCard(data) {
 let _buildCache = { account: null, data: null };
 const PORT_BUILD_COLLAPSED_KEY = 'td_portfolio_build_collapsed';
 // key:null = žiadne kliknutie ešte nebolo — ostáva poradie z backendu
-// (build/over_max/no_target/unclassified priorita, potom najväčší odstup).
+// (ready/wait/blocked/no_data priorita, potom najväčší odstup).
 let buildSort = { key: null, dir: 1 };
 // 'all' = bez filtra. Filtruje LEN zobrazené riadky, nie počty v hlavičke
 // karty ani v zbalenom zhrnutí — tie musia ukazovať celé portfólio.
@@ -859,7 +859,7 @@ let buildClassFilter = 'all';
 
 function sortBuild(key) {
   if (buildSort.key === key) buildSort.dir *= -1;
-  else buildSort = { key, dir: (key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
+  else buildSort = { key, dir: (key === 'readiness' || key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
   renderBuildCard(_buildCache.data);
 }
 
@@ -876,6 +876,21 @@ const BUILD_STATE_META = {
   unclassified: { cls: 'neutral', label: 'Nezaradené', tip: 'Bez triedy a cieľa — BUILD o tejto pozícii nevie rozhodnúť' },
 };
 
+const BUILD_READINESS_META = {
+  ready: { cls: 'good', label: 'PRIPRAVENÉ' },
+  wait: { cls: 'warn', label: 'ČAKAJ' },
+  blocked: { cls: 'bad', label: 'BLOKOVANÉ' },
+  no_data: { cls: 'neutral', label: 'BEZ DÁT' },
+};
+
+function buildNextStepText(data) {
+  if (!data) return '';
+  const next = data.next_step;
+  if (next) return `ĎALŠÍ KROK: ${next.symbol} · $${Number(next.gap_amount).toLocaleString('sk-SK', { maximumFractionDigits: 0 })} · PRIPRAVENÉ`;
+  const c = data.counts || {};
+  return `ĎALŠÍ KROK: Žiadna pozícia nie je pripravená vo vstupnej zóne — čakajú: ${c.wait || 0}, blokované: ${c.blocked || 0}, bez dát: ${c.no_data || 0}.`;
+}
+
 function isPortfolioBuildCollapsed() {
   const v = localStorage.getItem(PORT_BUILD_COLLAPSED_KEY);
   return v == null ? true : v === '1';
@@ -888,6 +903,7 @@ function togglePortfolioBuild() {
 }
 
 function buildCardHead(data = null) {
+  const next = buildNextStepText(data);
   const collapsed = isPortfolioBuildCollapsed();
   const c = data?.counts || {};
   const sub = data
@@ -903,7 +919,7 @@ function buildCardHead(data = null) {
     <div class="tool-title" style="margin:0;">Dobudovanie pozícií
       <span style="color:var(--muted2);font-weight:400;font-size:10px;margin-left:6px;">${sub}</span>
     </div>${refresh}
-  </div>`;
+  </div>${next ? `<div class="dca-collapsed-summary">${escHtml(next)}</div>` : ''}`;
 }
 
 async function loadBuildCard(force = false) {
@@ -981,12 +997,7 @@ function renderBuildCard(data) {
   const head = buildCardHead(data);
   const c = data.counts || {};
   if (isPortfolioBuildCollapsed()) {
-    const parts = [
-      c.build ? `${c.build} na dokúpenie` : '',
-      c.over_max ? `${c.over_max} nad stropom` : '',
-      c.unclassified ? `${c.unclassified} nezaradených` : '',
-    ].filter(Boolean).join(' · ') || 'nič na dokúpenie';
-    wrap.innerHTML = `${head}<div class="dca-collapsed-summary">${parts}</div>`;
+    wrap.innerHTML = head;
     return;
   }
   const allPositions = data.positions || [];
@@ -999,13 +1010,16 @@ function renderBuildCard(data) {
     ? [...filtered].sort((a, b) => compareSortableRows(buildSort, a, b)) : filtered;
   const rows = sortedPositions.map(x => {
     const meta = BUILD_STATE_META[x.state] || BUILD_STATE_META.unclassified;
+    const readiness = BUILD_READINESS_META[x.readiness] || BUILD_READINESS_META.no_data;
     const opts = ['', 'CORE', 'STANDARD', 'SPECULATIVE'].map(v =>
       `<option value="${v}"${v === (x.position_class || '') ? ' selected' : ''}>${v || '—'}</option>`).join('');
     const gapTxt = x.gap_pct == null ? '—'
       : `<span style="color:${x.gap_pct > 0 ? 'var(--up)' : 'var(--muted)'}">${x.gap_pct > 0 ? '+' : ''}${x.gap_pct.toFixed(1)}%</span>`;
     const addTxt = x.gap_amount ? `$${x.gap_amount.toLocaleString('sk-SK', { maximumFractionDigits: 0 })}` : '—';
-    return `<tr title="${escHtml(meta.tip)}">
-      <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
+    // Starý stav (váha vs cieľ) ostáva v tooltipe, nie ako viditeľný druhý
+    // label — "BLOKOVANÉ / Dokúpiť" v jednej bunke sú dva protirečiace príkazy.
+    return `<tr title="${escHtml(meta.label + ' — ' + meta.tip)}">
+      <td><span class="dca-pill ${readiness.cls}" title="${escHtml((x.readiness_reason || '') + ' · váha vs cieľ: ' + meta.label)}">${readiness.label}</span></td>
       <td><span class="port-sym" style="cursor:pointer;" onclick="onSbTickerClick('${escHtml(x.symbol)}')">${escHtml(x.symbol)}</span></td>
       <td class="r">${x.weight_pct == null ? '—' : x.weight_pct.toFixed(1) + '%'}</td>
       <td><select class="build-input" onchange="saveBuildClass('${escHtml(x.symbol)}','position_class',this.value)">${opts}</select></td>
@@ -1014,6 +1028,7 @@ function renderBuildCard(data) {
         placeholder="${x.target_source === 'class' ? x.target_weight.toFixed(1) : '—'}"
         title="${x.target_source === 'class' ? 'Odvodené z pomeru tried v ⚙ — napíš vlastné číslo, ak chceš prebiť.' : x.target_source === 'manual' ? 'Nastavené ručne — zmaž pole a odvodí sa znova z triedy.' : 'Bez triedy sa cieľ nedá odvodiť.'}"
         onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
+      <td class="r" style="color:var(--muted);">${x.entry_zone?.ema20_dist_pct == null ? '—' : x.entry_zone.ema20_dist_pct.toFixed(2) + ' %'}</td>
       <td class="r">${gapTxt}</td>
       <td class="r" style="color:var(--muted);">${addTxt}</td>
     </tr>`;
@@ -1037,8 +1052,8 @@ function renderBuildCard(data) {
   wrap.innerHTML = `${head}
     ${filterBar}
     <table class="tool-table"><thead><tr>
-      ${buildTh('state', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
-      ${buildTh('target_weight', 'Cieľ %', 'r')}${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
+      ${buildTh('readiness', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
+      ${buildTh('target_weight', 'Cieľ %', 'r')}<th class="r">Vzdial. EMA20</th>${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
     </tr></thead><tbody>${rows}</tbody></table>
     ${!sortedPositions.length ? `<div style="color:var(--muted);font-size:11px;padding:6px 0;">Filtru nezodpovedá žiadna pozícia.</div>` : ''}
     <div class="signal-outcome-note" style="margin-top:6px;">

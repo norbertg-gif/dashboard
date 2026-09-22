@@ -2511,6 +2511,9 @@ DASH_SETTINGS_DEFAULTS = {
     "attention_daily_pct": 2.0,  # denný pohyb ≥ x % → dôvod Pohyb v Pozornosti
     "earnings_warn_days": 7,     # earnings ≤ x dní → ⚠ badge v scanneri
     "risk_per_trade_pct": 1.0,   # riziko na obchod ako % equity — Verdikt kalkulátor
+    # ATR-scaled like signal rules v2: fixed % differs on 5% vs 14% ATR titles.
+    # Wide gate, not a buy signal.
+    "build_entry_atr_mult": 1.0,
     "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
     # Pomer cieľových váh medzi triedami pozícií. Nie percentá — relatívne diely,
     # ktoré sa normalizujú na 100 % cez držané pozície, takže cieľ sa prepočíta
@@ -2532,6 +2535,7 @@ _DASH_SETTINGS_LIMITS = {
     "earnings_warn_days": (1, 60),
     "risk_per_trade_pct": (0.1, 10),
     "atr_stop_mult": (0.5, 5),
+    "build_entry_atr_mult": (0.25, 5),
     "class_ratio_core": (0, 20),
     "class_ratio_standard": (0, 20),
     "class_ratio_speculative": (0, 20),
@@ -2882,6 +2886,32 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             state = "build"
         else:
             state = "at_target"
+        scanner = (scanner_by_symbol or {}).get(sym)
+        zone = (scanner or {}).get("entry_zone")
+        health = (scanner or {}).get("chart_health") or {}
+        bad_frames = [label for key, label in (("daily", "denný"), ("weekly", "týždenný"))
+                      if (health.get(key) or {}).get("status") == "Bad"]
+        distance = (zone or {}).get("ema20_dist_pct")
+        atr = (zone or {}).get("atr_pct")
+        # First match wins: binary quality gate, continuous gap ordering.
+        if state in ("unclassified", "no_target"):
+            readiness, reason = "no_data", "chýba trieda" if state == "unclassified" else "chýba cieľová váha"
+        elif state == "over_max":
+            readiness, reason = "blocked", "nad stropom"
+        elif state == "at_target" or gap is None or gap <= 0:
+            readiness, reason = "blocked", "na cieli"
+        elif bad_frames:
+            readiness, reason = "blocked", "zlý graf: " + " / ".join(bad_frames)
+        elif scanner is None:
+            readiness, reason = "no_data", "scanner titul nepokrýva"
+        elif not zone or distance is None:
+            readiness, reason = "no_data", "málo týždennej histórie"
+        elif atr is None:
+            readiness, reason = "no_data", "chýba týždenné ATR"
+        elif distance <= settings["build_entry_atr_mult"] * atr:
+            readiness, reason = "ready", f"vzdialenosť od týždennej EMA20: {distance:+.2f} %"
+        else:
+            readiness, reason = "wait", f"{distance:.2f} % nad týždennou EMA20"
         rows.append({
             "symbol": sym, "name": e["name"],
             "amount": round(e["amount"], 2), "pnl": round(e["pnl"], 2),
@@ -2898,11 +2928,12 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             # percentách sa to zle prekladá na objednávku.
             "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
             "state": state,
-            "entry_zone": ((scanner_by_symbol or {}).get(sym) or {}).get("entry_zone"),
+            "entry_zone": zone,
+            "readiness": readiness, "readiness_reason": reason,
         })
     # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
-    state_order = {"build": 0, "at_target": 1, "over_max": 2, "no_target": 3, "unclassified": 4}
-    rows.sort(key=lambda r: (state_order.get(r["state"], 9), -(r["gap_pct"] or 0), r["symbol"]))
+    state_order = {"ready": 0, "wait": 1, "blocked": 2, "no_data": 3}
+    rows.sort(key=lambda r: (state_order.get(r["readiness"], 9), -(r["gap_pct"] or 0), r["symbol"]))
     return rows, book_value, class_ratios
 
 
@@ -2911,7 +2942,7 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
     """Ktorá kvalitná pozícia je najviac pod cieľovou váhou.
 
     Deterministické odčítanie, ZÁMERNE žiadne nové skóre: gap = target − aktuálna
-    váha. Kompozitné Add Score je fáza 2 a čaká na dátové pokrytie. Kapitál má
+    váha. Kvalita je binárna brána, medzera určuje poradie. Kapitál má
     hierarchiu DCA → BUILD → NEW, takže toto je druhý stupeň, nie náhrada DCA.
 
     Váha sa počíta z investovanej sumy voči Stock/ETF knihe (BUILD_WEIGHT_BASIS),
@@ -2922,12 +2953,18 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
                          for r in (scan.get("results") or []) if isinstance(r, dict)}
     rows, book_value, class_ratios = _build_position_rows(portfolio.get("positions", []), scanner_by_symbol)
     classified = [r for r in rows if r["position_class"]]
+    next_ready = next((r for r in rows if r["readiness"] == "ready"), None)
     return {
         "account": account,
         "weight_basis": BUILD_WEIGHT_BASIS,
         "book_value": round(book_value, 2),
         "positions": rows,
+        "next_step": {"symbol": next_ready["symbol"], "gap_amount": next_ready["gap_amount"],
+                      "gap_pct": next_ready["gap_pct"], "readiness": next_ready["readiness"],
+                      "reason": next_ready["readiness_reason"]} if next_ready else None,
         "counts": {
+            **{key: sum(r["readiness"] == key for r in rows)
+               for key in ("ready", "wait", "blocked", "no_data")},
             "total": len(rows), "classified": len(classified),
             "unclassified": len(rows) - len(classified),
             "build": sum(1 for r in rows if r["state"] == "build"),
@@ -10041,6 +10078,8 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
         "target_source": build.get("target_source"),
         "gap_pct": build.get("gap_pct"),
         "state": build.get("state", "unclassified"),
+        "readiness": build.get("readiness"),
+        "readiness_reason": build.get("readiness_reason"),
         # entry_zone zamerne LEN na urovni pozicie — v jednom exporte by inak
         # to iste cislo bolo dvakrat. /api/portfolio/build ho nesie na riadku,
         # lebo tam ziadna nadradena uroven nie je.
