@@ -134,6 +134,10 @@ These were already in the codebase and need to stay fixed:
 ## Backlog (priority order)
 
 -13. **BUILD v1.1 — dobudovávanie pozícií v rastúcom trhu. ZADANIE 2026-09-22.**
+   **STAV: (a), (c) aj (b) HOTOVÉ 2026-09-22.** Zostáva jediná vec, a nie je
+   technická: kalendár ako spúšťač. BUILD je STAVOVÉ pravidlo (pozícia je pod
+   cieľom), takže stav nikdy „nenastane", len trvá — karta vie povedať ČO kúpiť,
+   nie KEDY sa spýtať. Bez toho má naďalej dva režimy: kupovať stále, alebo nikdy.
    **Prečo:** medzi 2026-08-09 a 2026-09-22 nebol ANI JEDEN týždeň s platným DCA
    kandidátom — v rastúcom trhu kvalitné firmy nespadnú o 20 %. Voľná hotovosť
    medzitým klesla z $1 028 na nulu, celá do NOVÝCH tickerov (APP, GILT, ADI,
