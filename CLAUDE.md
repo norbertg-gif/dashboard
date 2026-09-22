@@ -133,6 +133,64 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
+-13. **BUILD v1.1 — dobudovávanie pozícií v rastúcom trhu. ZADANIE 2026-09-22.**
+   **Prečo:** medzi 2026-08-09 a 2026-09-22 nebol ANI JEDEN týždeň s platným DCA
+   kandidátom — v rastúcom trhu kvalitné firmy nespadnú o 20 %. Voľná hotovosť
+   medzitým klesla z $1 028 na nulu, celá do NOVÝCH tickerov (APP, GILT, ADI,
+   AVGO), teda do najnižšej vetvy hierarchie kapitálu. BUILD má byť vetva, ktorá
+   v tomto režime pracuje. Pravidlo je zapísané v `CLAUDE_investicna_analyza.md`,
+   sekcia „BUILD v1.1".
+   **Kľúčová vlastnosť, ktorá určuje dizajn:** DCA je UDALOSTNÉ pravidlo (cena
+   padne → reaguješ), BUILD je STAVOVÉ (pozícia je pod cieľom). Stav nikdy
+   „nenastane", len trvá. Preto BUILD potrebuje kalendár ako spúšťač — bez neho
+   má len dva režimy: kupovať stále, alebo nikdy (dnes platí to druhé).
+
+   **(a) Odkryť `ema20_dist` a `pos_52w` do exportu a do BUILD.**
+   Obe sa UŽ POČÍTAJÚ v `add_indicators()` (`trading_backend.py:218` a `:225`),
+   ale žijú len v ML feature sete (zoznamy na `:308-309` a `:611-621`) a von sa
+   nedostanú. Toto nie je stavba novej rúry, je to odkrytie existujúceho.
+   `pos_52w` = pozícia v 52-periódovom rozsahu, 0 = dno, 1 = vrchol.
+   **Pozor:** `pos_52w` NIE JE to isté čo drawdown od maxima — pri širokom
+   ročnom rozpätí sa správa inak. Pred nasadením porovnať na pár tickeroch.
+   ATR je tiež k dispozícii (`:194`), komentár na `:183` už hovorí o
+   ATR-škálovanej blízkosti k EMA20.
+
+   **(b) Relative strength voči benchmarku.** Jediná naozaj chýbajúca vec
+   (`grep relative_strength` = 0 výskytov). Kvalitný titul, ktorý v rastúcom
+   trhu stagnuje, nie je dobrý BUILD kandidát napriek peknému pullbacku.
+   Čiastočný základ existuje: `GET /api/portfolio/benchmark` porovnáva každú
+   otvorenú pozíciu s QQQ a SPY od jej otvorenia (položka -3).
+
+   **(c) Štyri stavy v karte „Dobudovanie pozícií".**
+   `PRIPRAVENÉ / ČAKAJ / BLOKOVANÉ / BEZ DÁT`, zoradené podľa `gap_pct`, a hore
+   jednoriadkový verdikt „ĎALŠÍ KROK: <ticker> · <suma> · <stav>".
+   Cieľom je, aby mesačné rozhodnutie boli tri kroky: otvoriť kartu, prečítať
+   prvý riadok, kúpiť. Dnes karta ukáže tabuľku s medzerami a používateľ si
+   musí sám dohľadať graf, Typ B a kvalitu — a výsledok je, že nekúpi nič alebo
+   otvorí ďalší nový ticker.
+
+   **Poradie prác:** (a) → (c) → (b). Scanner coverage (priorita 1 v
+   `CLAUDE_investicna_analyza.md`) je NADRADENÁ všetkému — `ema20_dist` aj
+   `pos_52w` sa počítajú zo sviečok, takže budú chýbať pri tých istých 41 zo 60
+   pozícií, čo dnes nemajú `daily_state`. A sú to zhodou okolností pozície
+   s najväčšou medzerou (LMT +2,45 %, GFS +1,84 %, NU a ON +1,66 %). Nový model
+   nad rozbitou rúrou dá ten istý výsledok, len s viac stĺpcami.
+
+   **ZAMIETNUTÉ, NEOTVÁRAŤ ZNOVA:** kompozitné BUILD skóre (návrh 2026-09-22:
+   30 % kvalita / 25 % trend / 20 % vstupná kvalita / 15 % medzera / 10 %
+   relative strength). Ten istý dôvod ako pri Add Score v položke -7: vážený
+   súčet prekrývajúcich sa komponentov s váhami, ktoré sa nedajú obhájiť —
+   „trend" a „vstupná kvalita" merajú obe cenové správanie a budú korelovať.
+   **Kvalita ostáva binárnou bránou, medzera spojitým poradím.**
+   Rovnako zamietnuté: cenové časovanie ako ďalšia tvrdá brána. Benchmark
+   z 2026-08-23 ukázal výber titulov +12,3 pb nad QQQ, ale rozdelenie kapitálu
+   −20,7 pb ($1 639) — slabina nie je „kedy", ale „koľko a do čoho". Pri tranži
+   $100 je rozdiel medzi nákupom na trhu a na EMA $3–5. Vstupná zóna je široká
+   BRÁNA, nie signál.
+   Pozn.: weekly EMA200 je na toto zlý nástroj (200 týždňov ≈ 4 roky, čiara sa
+   pohne raz za rok). Pre pozíciu, do ktorej sa pridáva párkrát ročne, je
+   správny nástroj weekly EMA20 alebo daily EMA50.
+
 -12. **DIP `rank` zo zošita je nepoužiteľný — OPRAVENÉ 2026-09-21 v parseri, zošit NEOPRAVENÝ.**
    **Príznak:** v exporte z 2026-09-21 malo NVDA najvyššie TOTAL (122) a rank 68;
    MU so 116 malo rank 160; GPGI so 44 malo rank 10. Korelácia `rank` ↔ `TOTAL`
