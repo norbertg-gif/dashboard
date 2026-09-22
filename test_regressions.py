@@ -1235,6 +1235,71 @@ class FairValueRegressionTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["range_model_count"], 0)
 
 
+class ScannerUniverseRegressionTests(unittest.TestCase):
+    def test_held_only_symbols_are_normalized_filtered_and_sorted_after_dip(self):
+        with (
+            patch.object(tb, "load_dip_scores", return_value={"MSFT": {}, "AAPL": {}}),
+            patch.object(tb, "_get_portfolio_holdings", return_value={
+                " vti ": {}, "brk.b": {}, "BRK.B": {}, "abc-d": {},
+                "bad/sym": {}, "TOOLONGSYMBOL123": {}, "": {}, None: {},
+            }),
+        ):
+            self.assertEqual(tb.scanner_universe_from_dip(), (
+                ["MSFT", "AAPL", "ABC-D", "BRK.B", "VTI"],
+                "DIP import + portfólio", "dip_import",
+            ))
+
+    def test_held_symbol_in_import_is_not_duplicated(self):
+        with (
+            patch.object(tb, "load_dip_scores", return_value={"MSFT": {}, "AAPL": {}}),
+            patch.object(tb, "_get_portfolio_holdings", return_value={" aapl ": {}}),
+        ):
+            self.assertEqual(tb.scanner_universe_from_dip(), (
+                ["MSFT", "AAPL"], "DIP import", "dip_import",
+            ))
+
+    def test_dip_cap_does_not_exclude_holdings(self):
+        cap = tb.SCANNER_DIP_UNIVERSE_MAX
+        imported = {f"T{i:04d}": {} for i in range(cap + 5)}
+        held_beyond_cap = f"T{cap:04d}"
+        with (
+            patch.object(tb, "load_dip_scores", return_value=imported),
+            patch.object(tb, "_get_portfolio_holdings", return_value={
+                "VTI": {}, held_beyond_cap: {},
+            }),
+        ):
+            self.assertEqual(tb.scanner_universe_from_dip(), (
+                list(imported)[:cap] + [held_beyond_cap, "VTI"],
+                "DIP import + portfólio", "dip_import",
+            ))
+
+    def test_empty_or_raising_holdings_preserve_original_universe(self):
+        for imported, expected in (
+            ({"MSFT": {}, "aapl": {}, "AAPL": {}, "_meta": {}, "bad/sym": {}},
+             (["MSFT", "AAPL"], "DIP import", "dip_import")),
+            ({}, (tb.NASDAQ100_TICKERS[:], "Nasdaq-100 fallback", "nasdaq100")),
+        ):
+            for raises in (False, True):
+                with (
+                    self.subTest(imported=bool(imported), raises=raises),
+                    patch.object(tb, "load_dip_scores", return_value=imported),
+                    patch.object(tb, "_get_portfolio_holdings", return_value={},
+                                 side_effect=RuntimeError("cache unavailable") if raises else None),
+                ):
+                    self.assertEqual(tb.scanner_universe_from_dip(), expected)
+
+    def test_nasdaq_fallback_also_appends_holdings_without_mutating_constant(self):
+        with (
+            patch.object(tb, "load_dip_scores", return_value={}),
+            patch.object(tb, "NASDAQ100_TICKERS", ["MSFT", "AAPL"]),
+            patch.object(tb, "_get_portfolio_holdings", return_value={"VTI": {}, "AAPL": {}}),
+        ):
+            self.assertEqual(tb.scanner_universe_from_dip(), (
+                ["MSFT", "AAPL", "VTI"], "Nasdaq-100 fallback + portfólio", "nasdaq100",
+            ))
+            self.assertEqual(tb.NASDAQ100_TICKERS, ["MSFT", "AAPL"])
+
+
 class ScannerVisibilityRegressionTests(unittest.TestCase):
     def test_high_dip_title_is_visible_without_recent_signal(self):
         self.assertTrue(tb._include_scanner_result(

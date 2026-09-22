@@ -7843,13 +7843,14 @@ def _scanner_result_sort_key(row: dict) -> tuple:
 
 
 def scanner_universe_from_dip() -> tuple[list[str], str, str]:
-    """Scanner universe = imported DIP ranking, with Nasdaq-100 fallback.
+    """Scanner universe = imported DIP ranking (or Nasdaq-100) plus holdings.
 
     When a DIP Excel is imported, that file is the user's curated universe and
     can include NYSE/non-Nasdaq stocks. Scanning Nasdaq-100 on top of it doubles
     request volume, hides the imported names in timeout noise, and is wasteful on
     the Render free/low-memory tier. Without an import we keep the old Nasdaq-100
-    behavior as a sensible fallback.
+    behavior as a sensible fallback. Cached Stock/ETF holdings are appended
+    beyond the DIP cap so held positions have scanner coverage in AI exports.
     """
     dip_scores = load_dip_scores()
     imported = [
@@ -7868,9 +7869,22 @@ def scanner_universe_from_dip() -> tuple[list[str], str, str]:
             if sym not in seen:
                 out.append(sym)
                 seen.add(sym)
-        return out, "DIP import", "dip_import"
+        label, key = "DIP import", "dip_import"
+    else:
+        out = NASDAQ100_TICKERS[:]
+        label, key = "Nasdaq-100 fallback", "nasdaq100"
 
-    return NASDAQ100_TICKERS[:], "Nasdaq-100 fallback", "nasdaq100"
+    # Cache only: never fetch a portfolio from eToro on the scan-start path.
+    try:
+        held = {str(sym or "").strip().upper() for sym in _get_portfolio_holdings()}
+        extras = sorted(sym for sym in held - set(out)
+                        if re.fullmatch(r"[A-Z0-9.\-]{1,12}", sym))
+    except Exception:
+        extras = []
+    if extras:
+        out.extend(extras)
+        label += " + portfólio"
+    return out, label, key
 
 
 FINVIZ_SCREENERS_FILE = DATA_ROOT / "finviz_screeners.json"
