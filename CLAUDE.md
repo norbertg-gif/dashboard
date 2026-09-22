@@ -160,11 +160,24 @@ These were already in the codebase and need to stay fixed:
    at drawdowns -14.8% / -13.8%. Weekly EMA20 distance distinguishes trend
    proximity (LMT -3.5%, NU -1.2%) from extension (AMD +21.5%, NET +20.7%).
 
-   **(b) Relative strength voči benchmarku.** Jediná naozaj chýbajúca vec
-   (`grep relative_strength` = 0 výskytov). Kvalitný titul, ktorý v rastúcom
-   trhu stagnuje, nie je dobrý BUILD kandidát napriek peknému pullbacku.
-   Čiastočný základ existuje: `GET /api/portfolio/benchmark` porovnáva každú
-   otvorenú pozíciu s QQQ a SPY od jej otvorenia (položka -3).
+   **(b) DONE 2026-09-22: relative_strength voči QQQ v scanneri, BUILD a AI exporte.**
+   Helper používa iba `_scanner_download_cached(ticker, "1y", "1d")` a rovnakú
+   cache pre QQQ, zdieľanú cez ticker lock medzi workermi.
+   Formula ako `/api/ticker/rs`: `perf = (close[-1] - close[-days-1]) / close[-days-1] * 100`;
+   `RS = ticker_perf - QQQ_perf` v percentuálnych bodoch, okná **63 / 126 obchodných dní**
+   (3M / 6M), zaokrúhlenie až výsledku na 2 desatinné miesta. `bars` = počet denných
+   barov tickera; nedostatočná história daného okna → null, nikdy odhad.
+   Blok obsahuje benchmark, rs_3m_pp, rs_6m_pp, ticker_perf_3m_pct a bars;
+   export ho nesie LEN na úrovni pozície, nie duplicitne v build; schema ostáva 1.7.
+   ⚙ `build_rs_min_pp`: default **−20.0 pp**, rozsah **−100 až 0**. Iba RS 3M striktne
+   pod prahom blokuje, za kontrolou chart health a pred kontrolou entry_zone.
+   Fail-soft: chýbajúce RS neblokuje ani nevytvára no_data — „teraz sa nepodarilo“
+   nie je „zaostáva“; pokračuje pôvodná logika vstupnej zóny. Binárna brána, nie skóre.
+   Meranie na 15 reálnych tituloch (1y daily): QQQ +4.6 % za 3M / +27.1 % za 6M;
+   RS 3M medián **−0.5 pp**, rozsah **−45.5 … +59.2 pp**. Pod −15 aj −25 pp sú iba
+   **GFS −45.5, ON −42.6, NCLH −33.0**; ON patrí medzi štyri najväčšie gapy.
+   LMT: RS 3M **−0.5 pp**, RS 6M **−41.5 pp** — zotavenie po slabom období.
+   Preto brána používa kratšie okno: či titul zaostáva teraz, nie či zaostával kedysi.
 
    **(c) DONE 2026-09-22: štyri readiness stavy v karte „Dobudovanie pozícií“.**
    `_build_position_rows()` je jediný výpočet pre kartu aj AI export (schema 1.7 bez zmeny).
@@ -173,9 +186,10 @@ These were already in the codebase and need to stay fixed:
    2. `over_max` → `blocked` (nad stropom).
    3. `at_target` alebo gap nie je kladný → `blocked` (na cieli).
    4. Denný alebo týždenný graf `Bad` → `blocked`, dôvod uvádza timeframe.
-   5. Chýba scanner / entry_zone / EMA20 vzdialenosť → `no_data`; chýbajúce ATR tiež fail-soft.
-   6. Vzdialenosť ≤ `build_entry_atr_mult × atr_pct` → `ready` (hranica inkluzívna).
-   7. Inak → `wait` (vzdialenosť nad týždennou EMA20).
+   5. RS 3M < `build_rs_min_pp` → `blocked`; null pokračuje ďalej.
+   6. Chýba scanner / entry_zone / EMA20 vzdialenosť → `no_data`; chýbajúce ATR tiež fail-soft.
+   7. Vzdialenosť ≤ `build_entry_atr_mult × atr_pct` → `ready` (hranica inkluzívna).
+   8. Inak → `wait` (vzdialenosť nad týždennou EMA20).
    ⚙ `build_entry_atr_mult`: default **1.0**, rozsah **0.25–5**, široká brána, nie nákupný signál.
    **Kvalita je binárna brána, medzera je poradie; žiadne kompozitné skóre.**
    Default `ready → wait → blocked → no_data`, v skupine `gap_pct` zostupne;

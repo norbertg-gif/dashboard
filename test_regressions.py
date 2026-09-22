@@ -753,7 +753,7 @@ class EntryZoneRegressionTests(unittest.TestCase):
                            "weekly": tb.chart_health(tb.add_indicators(weekly), "weekly")}
         def download(ticker, period, interval):
             return {("6mo", "1d"): daily, ("1y", "1wk"): weekly,
-                    ("5y", "1wk"): long_weekly}[(period, interval)].copy()
+                    ("5y", "1wk"): long_weekly, ("1y", "1d"): daily}[(period, interval)].copy()
         with patch.object(tb, "_scanner_download_cached", side_effect=download) as cached:
             row = tb._scan_buy_signal_for_ticker("TEST", 30)
         self.assertEqual(json.dumps(row["weekly_trend"], sort_keys=True), json.dumps(expected_trend, sort_keys=True))
@@ -761,11 +761,15 @@ class EntryZoneRegressionTests(unittest.TestCase):
         self.assertEqual(row["entry_zone"], self.zone(long_weekly))
         self.assertEqual(cached.call_args_list, [unittest.mock.call("TEST", "6mo", "1d"),
                                                unittest.mock.call("TEST", "1y", "1wk"),
-                                               unittest.mock.call("TEST", "5y", "1wk")])
+                                               unittest.mock.call("TEST", "5y", "1wk"),
+                                               unittest.mock.call("TEST", "1y", "1d"),
+                                               unittest.mock.call("QQQ", "1y", "1d")])
 
     def test_build_and_export_preserve_scanner_block_including_nulls(self):
         zone = self.zone(self.frame(52))
-        scanner = {"ticker": "TEST", "entry_zone": zone}
+        rs = {"benchmark": "QQQ", "rs_3m_pp": -42.6, "rs_6m_pp": None,
+              "ticker_perf_3m_pct": -38, "bars": 100}
+        scanner = {"ticker": "TEST", "entry_zone": zone, "relative_strength": rs}
         lots = [{"symbol": "TEST", "type": "Stock", "amount": 100, "pnl": 0}]
         with (
             patch.object(tb, "get_portfolio", return_value={"positions": lots}),
@@ -785,6 +789,55 @@ class EntryZoneRegressionTests(unittest.TestCase):
         # V exporte zamerne LEN na urovni pozicie, nie aj v build bloku —
         # jeden payload nesmie niest to iste cislo dvakrat.
         self.assertNotIn("entry_zone", exported["build"])
+        self.assertIs(build["relative_strength"], rs)
+        self.assertIs(exported["relative_strength"], build["relative_strength"])
+        self.assertNotIn("relative_strength", exported["build"])
+
+
+class ScannerRelativeStrengthRegressionTests(unittest.TestCase):
+    def test_math_matches_endpoint_formula_without_intermediate_rounding(self):
+        ticker = pd.DataFrame({"Close": [83.7 + i * 0.43 for i in range(160)]})
+        bench = pd.DataFrame({"Close": [201.3 + i * 0.81 for i in range(160)]})
+        def perf(df, days):
+            c = df["Close"].astype(float)
+            return (c.iloc[-1] - c.iloc[-days - 1]) / c.iloc[-days - 1] * 100
+        with patch.object(tb, "_scanner_download_cached", side_effect=[ticker, bench]) as cached:
+            rs = tb._scanner_relative_strength("TEST")
+        self.assertEqual(cached.call_args_list, [unittest.mock.call("TEST", "1y", "1d"),
+                                               unittest.mock.call("QQQ", "1y", "1d")])
+        self.assertEqual(rs, {"benchmark": "QQQ", "bars": 160,
+            "rs_3m_pp": round(perf(ticker, 63) - perf(bench, 63), 2),
+            "rs_6m_pp": round(perf(ticker, 126) - perf(bench, 126), 2),
+            "ticker_perf_3m_pct": round(perf(ticker, 63), 2)})
+
+    def test_history_boundaries_and_invalid_prices(self):
+        for count in (0, 63, 64, 126, 127):
+            frame = pd.DataFrame({"Close": [100.0] * count})
+            with self.subTest(count=count), patch.object(tb, "_scanner_download_cached", return_value=frame):
+                rs = tb._scanner_relative_strength("TEST")
+                self.assertEqual(rs["bars"], count)
+                self.assertEqual(rs["rs_3m_pp"], 0 if count >= 64 else None)
+                self.assertEqual(rs["rs_6m_pp"], 0 if count >= 127 else None)
+        for bad in (0, float("nan"), float("inf")):
+            frame = pd.DataFrame({"Close": [100.0] * 127})
+            frame.loc[63, "Close"] = bad
+            with patch.object(tb, "_scanner_download_cached", return_value=frame):
+                rs = tb._scanner_relative_strength("TEST")
+            self.assertIsNone(rs["rs_3m_pp"])
+            self.assertEqual(rs["rs_6m_pp"], 0)
+            json.dumps(rs, allow_nan=False)
+
+    def test_benchmark_failure_preserves_ticker_perf_and_early_scan_has_block(self):
+        frame = pd.DataFrame({"Close": [100.0] * 127})
+        with patch.object(tb, "_scanner_download_cached", side_effect=[frame, RuntimeError("offline")]):
+            rs = tb._scanner_relative_strength("TEST")
+        self.assertEqual(rs["ticker_perf_3m_pct"], 0)
+        self.assertIsNone(rs["rs_3m_pp"])
+        with patch.object(tb, "_scanner_download_cached", return_value=frame.iloc[:10]):
+            row = tb._scan_buy_signal_for_ticker("TEST", 30)
+        self.assertEqual(row["error"], "Nedostatok dat")
+        self.assertEqual(row["relative_strength"]["bars"], 10)
+        self.assertIsNone(row["relative_strength"]["rs_3m_pp"])
 
 
 class BuildReadinessRegressionTests(unittest.TestCase):
@@ -821,6 +874,30 @@ class BuildReadinessRegressionTests(unittest.TestCase):
             row = next(r for r in data["positions"] if r["symbol"] == "A")
             self.assertEqual(row["readiness"], "blocked")
             self.assertIn(label, row["readiness_reason"])
+
+    def test_rs_gate_exclusive_tunable_and_unknown_falls_through(self):
+        for threshold in (-20, -25):
+            for rs, expected in ((-42.6, "blocked"), (threshold - 0.01, "blocked"),
+                                 (threshold, "ready"), (threshold + 0.01, "ready"), (None, "ready")):
+                with self.subTest(threshold=threshold, rs=rs):
+                    data = self.build(scanner=[{"ticker": "A", "relative_strength": {"rs_3m_pp": rs},
+                        "entry_zone": {"ema20_dist_pct": 1, "atr_pct": 5}}],
+                        settings={"build_rs_min_pp": threshold})
+                    row = next(r for r in data["positions"] if r["symbol"] == "A")
+                    self.assertEqual(row["readiness"], expected)
+                    if rs == -42.6:
+                        self.assertEqual(row["readiness_reason"], "zaostáva za QQQ o 42.6 pp za 3M")
+        data = self.build(scanner=[{"ticker": "A", "relative_strength": {"rs_3m_pp": None},
+                                   "entry_zone": {"ema20_dist_pct": 10, "atr_pct": 5}}])
+        self.assertEqual(next(r for r in data["positions"] if r["symbol"] == "A")["readiness"], "wait")
+
+    def test_rs_gate_after_health_before_missing_zone(self):
+        scanner = {"ticker": "A", "relative_strength": {"rs_3m_pp": -42.6}}
+        for health, reason in (({}, "zaostáva"), ({"daily": {"status": "Bad"}}, "zlý graf")):
+            data = self.build(scanner=[{**scanner, "chart_health": health}])
+            row = next(r for r in data["positions"] if r["symbol"] == "A")
+            self.assertEqual(row["readiness"], "blocked")
+            self.assertIn(reason, row["readiness_reason"])
 
     def test_missing_scanner_zone_distance_and_atr_fail_soft(self):
         for scanner in [[], [{"ticker": "A"}], [{"ticker": "A", "entry_zone": {"ema20_dist_pct": None}}],

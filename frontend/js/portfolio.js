@@ -1015,6 +1015,10 @@ function renderBuildCard(data) {
       `<option value="${v}"${v === (x.position_class || '') ? ' selected' : ''}>${v || '—'}</option>`).join('');
     const gapTxt = x.gap_pct == null ? '—'
       : `<span style="color:${x.gap_pct > 0 ? 'var(--up)' : 'var(--muted)'}">${x.gap_pct > 0 ? '+' : ''}${x.gap_pct.toFixed(1)}%</span>`;
+    const rs = x.relative_strength?.rs_3m_pp;
+    const rsColor = rs == null ? 'var(--muted)' : rs > 0 ? 'var(--up)'
+      : rs < dashSettings.build_rs_min_pp ? 'var(--down)' : 'var(--muted)';
+    const rsTxt = rs == null ? '—' : `${rs >= 0 ? '+' : ''}${rs.toFixed(2)} pp`;
     const addTxt = x.gap_amount ? `$${x.gap_amount.toLocaleString('sk-SK', { maximumFractionDigits: 0 })}` : '—';
     // Starý stav (váha vs cieľ) ostáva v tooltipe, nie ako viditeľný druhý
     // label — "BLOKOVANÉ / Dokúpiť" v jednej bunke sú dva protirečiace príkazy.
@@ -1029,6 +1033,7 @@ function renderBuildCard(data) {
         title="${x.target_source === 'class' ? 'Odvodené z pomeru tried v ⚙ — napíš vlastné číslo, ak chceš prebiť.' : x.target_source === 'manual' ? 'Nastavené ručne — zmaž pole a odvodí sa znova z triedy.' : 'Bez triedy sa cieľ nedá odvodiť.'}"
         onchange="saveBuildClass('${escHtml(x.symbol)}','target_weight',this.value)"></td>
       <td class="r" style="color:var(--muted);">${x.entry_zone?.ema20_dist_pct == null ? '—' : x.entry_zone.ema20_dist_pct.toFixed(2) + ' %'}</td>
+      <td class="r" style="color:${rsColor};white-space:nowrap;">${rsTxt}</td>
       <td class="r">${gapTxt}</td>
       <td class="r" style="color:var(--muted);">${addTxt}</td>
     </tr>`;
@@ -1053,7 +1058,7 @@ function renderBuildCard(data) {
     ${filterBar}
     <table class="tool-table"><thead><tr>
       ${buildTh('readiness', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
-      ${buildTh('target_weight', 'Cieľ %', 'r')}<th class="r">Vzdial. EMA20</th>${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
+      ${buildTh('target_weight', 'Cieľ %', 'r')}<th class="r">Vzdial. EMA20</th><th class="r" title="Relatívny výkon voči QQQ za 3 mesiace v percentuálnych bodoch; široká brána, nie nákupný signál">RS 3M</th>${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
     </tr></thead><tbody>${rows}</tbody></table>
     ${!sortedPositions.length ? `<div style="color:var(--muted);font-size:11px;padding:6px 0;">Filtru nezodpovedá žiadna pozícia.</div>` : ''}
     <div class="signal-outcome-note" style="margin-top:6px;">

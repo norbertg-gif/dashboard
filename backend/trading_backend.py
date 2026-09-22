@@ -2514,6 +2514,7 @@ DASH_SETTINGS_DEFAULTS = {
     # ATR-scaled like signal rules v2: fixed % differs on 5% vs 14% ATR titles.
     # Wide gate, not a buy signal.
     "build_entry_atr_mult": 1.0,
+    "build_rs_min_pp": -20.0,  # Wide laggard gate vs QQQ over 3M, percentage points.
     "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
     # Pomer cieľových váh medzi triedami pozícií. Nie percentá — relatívne diely,
     # ktoré sa normalizujú na 100 % cez držané pozície, takže cieľ sa prepočíta
@@ -2536,6 +2537,7 @@ _DASH_SETTINGS_LIMITS = {
     "risk_per_trade_pct": (0.1, 10),
     "atr_stop_mult": (0.5, 5),
     "build_entry_atr_mult": (0.25, 5),
+    "build_rs_min_pp": (-100, 0),
     "class_ratio_core": (0, 20),
     "class_ratio_standard": (0, 20),
     "class_ratio_speculative": (0, 20),
@@ -2888,6 +2890,8 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             state = "at_target"
         scanner = (scanner_by_symbol or {}).get(sym)
         zone = (scanner or {}).get("entry_zone")
+        relative_strength = (scanner or {}).get("relative_strength")
+        rs_3m = (relative_strength or {}).get("rs_3m_pp")
         health = (scanner or {}).get("chart_health") or {}
         bad_frames = [label for key, label in (("daily", "denný"), ("weekly", "týždenný"))
                       if (health.get(key) or {}).get("status") == "Bad"]
@@ -2902,6 +2906,10 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             readiness, reason = "blocked", "na cieli"
         elif bad_frames:
             readiness, reason = "blocked", "zlý graf: " + " / ".join(bad_frames)
+        # Chýbajúce RS je doplnkový kontext: „teraz sa nepodarilo“ nie je „zaostáva“.
+        # Unknown falls through to entry-zone logic, never blocks or adds no_data.
+        elif rs_3m is not None and rs_3m < settings["build_rs_min_pp"]:
+            readiness, reason = "blocked", f"zaostáva za QQQ o {abs(rs_3m):.1f} pp za 3M"
         elif scanner is None:
             readiness, reason = "no_data", "scanner titul nepokrýva"
         elif not zone or distance is None:
@@ -2929,6 +2937,7 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
             "state": state,
             "entry_zone": zone,
+            "relative_strength": relative_strength,
             "readiness": readiness, "readiness_reason": reason,
         })
     # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
@@ -8781,11 +8790,44 @@ def _scanner_entry_zone(ticker: str) -> dict:
     return zone
 
 
+def _scanner_relative_strength(ticker: str) -> dict:
+    """Supplementary QQQ comparison from shared daily cache; no scoring changes."""
+    result = {"benchmark": "QQQ", "rs_3m_pp": None, "rs_6m_pp": None,
+              "ticker_perf_3m_pct": None, "bars": 0}
+
+    def perf(frame, days):
+        if frame is None or len(frame) <= days:
+            return None
+        close = _num_or_none(frame["Close"].iloc[-1])
+        base = _num_or_none(frame["Close"].iloc[-days - 1])
+        if close is None or base is None or base <= 0:
+            return None
+        return _num_or_none((close - base) / base * 100)
+
+    try:
+        raw = _scanner_download_cached(ticker, "1y", "1d")
+        result["bars"] = len(raw) if raw is not None else 0
+        ticker_3m = perf(raw, 63)
+        if ticker_3m is not None:
+            result["ticker_perf_3m_pct"] = round(ticker_3m, 2)
+        # The ticker lock/cache shares QQQ across the scanner worker pool.
+        benchmark = _scanner_download_cached("QQQ", "1y", "1d")
+        for days, key in ((63, "rs_3m_pp"), (126, "rs_6m_pp")):
+            tp, bp = perf(raw, days), perf(benchmark, days)
+            if tp is not None and bp is not None:
+                result[key] = round(tp - bp, 2)
+    except Exception:
+        # Interpretive context must never prevent scanning a ticker.
+        pass
+    return result
+
+
 def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None = None) -> dict:
     raw_d = _scanner_download_cached(ticker, "6mo", "1d")
     if len(raw_d) < 20:
         return {"ticker": ticker, "error": "Nedostatok dat",
-                "entry_zone": _scanner_entry_zone(ticker)}
+                "entry_zone": _scanner_entry_zone(ticker),
+                "relative_strength": _scanner_relative_strength(ticker)}
 
     df_d = add_indicators(raw_d)
     daily_health = chart_health(df_d, "daily")
@@ -8861,6 +8903,7 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     return {
         "ticker": ticker,
         "entry_zone": _scanner_entry_zone(ticker),
+        "relative_strength": _scanner_relative_strength(ticker),
         "weekly_bullish": weekly_bullish,
         "weekly_status": weekly_status,
         "weekly_trend": weekly_trend,
@@ -10070,6 +10113,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
     # Keep every composite condition explicit, including null/unknown results.
     exported["solvency"] = solvency
     exported["entry_zone"] = scanner_row.get("entry_zone")
+    exported["relative_strength"] = scanner_row.get("relative_strength")
     build = build or {"state": "unclassified"}
     # Keep unavailable BUILD fields explicit: "no target" is not the same as a zero gap.
     exported["build"] = {
@@ -10080,7 +10124,7 @@ def _assistant_export_position(symbol: str, lots: list[dict], scanner_row: dict,
         "state": build.get("state", "unclassified"),
         "readiness": build.get("readiness"),
         "readiness_reason": build.get("readiness_reason"),
-        # entry_zone zamerne LEN na urovni pozicie — v jednom exporte by inak
+        # entry_zone a relative_strength zamerne LEN na urovni pozicie — v jednom exporte by inak
         # to iste cislo bolo dvakrat. /api/portfolio/build ho nesie na riadku,
         # lebo tam ziadna nadradena uroven nie je.
     }
