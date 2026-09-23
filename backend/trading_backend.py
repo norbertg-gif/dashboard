@@ -5,7 +5,7 @@ pip install fastapi uvicorn yfinance pandas requests
 """
 
 import asyncio
-import csv, gc, json, os, math, sys, tempfile, threading, zipfile
+import csv, gc, json, os, math, shutil, sys, tempfile, threading, zipfile
 import re
 import uuid
 import hashlib
@@ -247,14 +247,24 @@ def save_weights_log(log: dict):
     cutoff = str((datetime.now(timezone.utc) - timedelta(days=180)).date())
     pruned = {t: v for t, v in log.items()
               if isinstance(v, dict) and str(v.get("optimized_at", "9999")) >= cutoff}
-    WEIGHTS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write_json(WEIGHTS_LOG, pruned)
 
 def load_signals_log() -> dict:
     if SIGNALS_LOG.exists():
         try:
             return json.loads(SIGNALS_LOG.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            # Poškodený log sa NESMIE ticho zmeniť na {} — ďalší save_signals_log
+            # by ho prepísal a 90D história (outcomes, regime kontext) by bola
+            # nenávratne preč. Kópia ostane na disku na ručnú obnovu.
+            backup = SIGNALS_LOG.with_name(
+                f"{SIGNALS_LOG.stem}.corrupt-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.json")
+            try:
+                if not any(SIGNALS_LOG.parent.glob(f"{SIGNALS_LOG.stem}.corrupt-*.json")):
+                    shutil.copy2(SIGNALS_LOG, backup)
+                print(f"  WARN: signals log poškodený ({e}); kópia: {backup.name}")
+            except Exception as copy_err:
+                print(f"  WARN: signals log poškodený a kópia zlyhala: {copy_err}")
     return {}
 
 def _archive_pruned_signals(archived: dict):
@@ -275,7 +285,7 @@ def _archive_pruned_signals(archived: dict):
                     pass
         for ticker, entries in archived.items():
             existing.setdefault(ticker, {}).update(entries)
-        SIGNALS_ARCHIVE.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+        _atomic_write_json(SIGNALS_ARCHIVE, existing)
     except Exception as e:
         print(f"  WARN: failed to archive pruned signals: {e}")
 
@@ -286,6 +296,34 @@ def load_signals_archive() -> dict:
         except Exception:
             pass
     return {}
+
+_signals_log_lock = threading.Lock()
+
+
+def _merge_save_signals_log(changed: dict) -> None:
+    """Zlúč zmenené tickery do AKTUÁLNEHO logu na disku, nie do starej snímky.
+
+    Scanner si log načíta na začiatku a zapisuje ho po minútach; /api/chart ho
+    medzitým môže doplniť (nové signály, regime kontext). Zápis celej snímky zo
+    začiatku scanu tie doplnky ticho zmazal. Zlučuje sa po dňoch a po poliach,
+    a None nikdy neprepíše existujúcu hodnotu — chýbajúci kontext v jednej
+    kópii nesmie vymazať kontext, ktorý druhá kópia už má."""
+    if not changed:
+        return
+    with _signals_log_lock:
+        current = load_signals_log()
+        for ticker, entries in changed.items():
+            if not isinstance(entries, dict):
+                continue
+            target = current.setdefault(ticker, {})
+            for day, value in entries.items():
+                old = target.get(day)
+                if isinstance(old, dict) and isinstance(value, dict):
+                    target[day] = {**old, **{k: v for k, v in value.items() if v is not None}}
+                else:
+                    target[day] = value
+        save_signals_log(current)
+
 
 def save_signals_log(log: dict):
     # Prunovanie: zachovaj len záznamy z posledných 90 dní; staršie presuň do archívu
@@ -302,7 +340,7 @@ def save_signals_log(log: dict):
         if old:
             archived[ticker] = old
     _archive_pruned_signals(archived)
-    SIGNALS_LOG.write_text(json.dumps(pruned, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write_json(SIGNALS_LOG, pruned)
 
 ML_FEATURES = ["ret_1", "ret_3", "ret_5", "body", "range",
                "volatility", "ema20_dist", "rsi", "macd_hist", "vol_ratio",
@@ -2578,7 +2616,12 @@ async def save_dash_settings(request: Request):
                 raise HTTPException(400, f"{k}: mimo rozsahu {lo}–{hi}")
             current[k] = int(v) if k == "earnings_warn_days" else v
     with _dash_settings_lock:
-        DASH_SETTINGS_FILE.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(DASH_SETTINGS_FILE, current)
+    # Inbox a Týždenný plán sú kešované 24 h pod kľúčom podľa DÁTUMU, nie podľa
+    # prahov — bez tohto by zmena dca_dip_min / earnings_warn_days v ⚙ ukázala
+    # "Nastavenia uložené" a potom ten istý výsledok počítaný so starými prahmi.
+    with _investor_view_cache_lock:
+        _investor_view_cache.clear()
     return {"ok": True, "settings": current}
 
 
@@ -2939,6 +2982,9 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             "entry_zone": zone,
             "relative_strength": relative_strength,
             "readiness": readiness, "readiness_reason": reason,
+            # Číselné poradie pre klik na stĺpec — abecedne by išlo blocked < no_data
+            # < ready < wait, čiže BLOKOVANÉ navrchu, presný opak účelu karty.
+            "readiness_rank": {"ready": 0, "wait": 1, "blocked": 2, "no_data": 3}.get(readiness, 9),
         })
     # Najväčší odstup od cieľa hore; nezaradené na koniec, nech nekradnú pozornosť.
     state_order = {"ready": 0, "wait": 1, "blocked": 2, "no_data": 3}
@@ -6626,7 +6672,8 @@ def get_chart(
                 # Persist any new signals
                 if ticker_slog:
                     slog[ticker.upper()] = ticker_slog
-                    save_signals_log(slog)
+                    # Zlúčiť, nie prepísať — scanner môže práve bežať s vlastnou snímkou.
+                    _merge_save_signals_log({ticker.upper(): ticker_slog})
 
                 # Today's score (informational only — not saved, candle not closed)
                 # Weekly bias must still confirm for today's live marker
@@ -7785,7 +7832,7 @@ def load_scanner_cache():
 
 
 def save_scanner_cache(data):
-    SCANNER_CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(SCANNER_CACHE_FILE, data)
 
 
 def load_dip_scores():
@@ -7798,7 +7845,7 @@ def load_dip_scores():
 
 
 def save_dip_scores(data):
-    DIP_SCORES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(DIP_SCORES_FILE, data)
 
 
 def _num_or_none(value):
@@ -9022,6 +9069,7 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
     results, errors = [], []
     slog_source = load_signals_log()
     slog_work = {k: dict(v) if isinstance(v, dict) else v for k, v in slog_source.items()}
+    slog_changed: dict = {}
     tickers, universe_label, universe_key = scanner_universe_from_dip()
     dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
     scanner_memory_start = _process_memory_mb().get("rss_mb")
@@ -9075,6 +9123,7 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
                         slog_update = row.pop("slog_update", None)
                         if isinstance(slog_update, dict) and slog_update:
                             slog_work[ticker] = slog_update
+                            slog_changed[ticker] = slog_update
                         if row.get("error"):
                             errors.append(row)
                         elif _include_scanner_result(row, dip_scores):
@@ -9097,8 +9146,8 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 
-        save_signals_log(slog_work)
-        del slog_work, slog_source
+        _merge_save_signals_log(slog_changed)
+        del slog_work, slog_source, slog_changed
         gc.collect()
         results = [enrich_with_dip(r, dip_scores) for r in results]
         results.sort(key=_scanner_result_sort_key, reverse=True)
@@ -9453,24 +9502,36 @@ def get_investor_inbox(refresh: int = Query(0)):
     except Exception:
         pass
 
-    # Scanner: silné nové príležitosti mimo portfólia + zlé grafy pri držaných tituloch.
+    # Zlé grafy pri DRŽANÝCH tituloch — cez VŠETKY scanner riadky. Pôvodne to
+    # bežalo v tej istej slučke ako nové príležitosti nad _scanner_candidate_rows(30),
+    # ktorá triedi podľa DIP skóre: držaný titul mimo top-30 alebo bez DIP sa do
+    # nej nikdy nedostal. Pri ~195 DIP tituloch v cache to bolo prakticky celé
+    # portfólio — a rovnaký výpadok zdedili Týždenný plán (Riziko) aj Pozornosť.
     try:
-        for row in _scanner_candidate_rows(30):
+        for row in (enrich_scanner_payload(load_scanner_cache()).get("results") or []):
             sym = str(row.get("ticker") or "").upper()
-            sig = row.get("recent_signal") or {}
-            in_port = sym in holdings
-            dip_total = _num_or_none(row.get("dip_total"))
+            if sym not in holdings:
+                continue
             health = row.get("chart_health") or {}
             daily_status = ((health.get("daily") or {}).get("status") or "").lower()
             weekly_status = ((health.get("weekly") or {}).get("status") or "").lower()
-            if in_port and ("bad" in {daily_status, weekly_status}):
+            if "bad" in {daily_status, weekly_status}:
                 add("broken", sym, "Graf potrebuje kontrolu",
                     "Držaný titul má chart health Bad na daily alebo weekly grafe.",
                     "counter", 25,
                     summary=(f"{sym} držíš v portfóliu, ale daily alebo weekly graf vyzerá poškodený. "
                              "Najprv over, či nejde o zmenu trendu alebo value trap."),
                     source="scanner")
-            elif not in_port and sig and (dip_total is not None and dip_total >= DIP_STRONG_THRESHOLD):
+    except Exception:
+        pass
+    # Scanner: silné nové príležitosti mimo portfólia (tu top-N podľa DIP dáva zmysel).
+    try:
+        for row in _scanner_candidate_rows(30):
+            sym = str(row.get("ticker") or "").upper()
+            sig = row.get("recent_signal") or {}
+            in_port = sym in holdings
+            dip_total = _num_or_none(row.get("dip_total"))
+            if not in_port and sig and (dip_total is not None and dip_total >= DIP_STRONG_THRESHOLD):
                 score = sig.get("score") or row.get("setup_score")
                 add("opportunity", sym, "Nová príležitosť",
                     f"Scanner našiel {score}/4 a DIP {dip_total}. Nie je v portfóliu.",
@@ -10531,8 +10592,7 @@ def backfill_regime_context(target: str = Query("log"), ticker: str = Query(None
             store = load_signals_log(); save = save_signals_log
         elif tgt == "archive":
             store = load_signals_archive()
-            save = lambda d: SIGNALS_ARCHIVE.write_text(
-                json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+            save = lambda d: _atomic_write_json(SIGNALS_ARCHIVE, d)
         else:
             continue
         # tickery s aspoň jedným signálom bez kontextu

@@ -3131,5 +3131,101 @@ class SuiteIntegrityRegressionTests(unittest.TestCase):
 # stalo: `OhlcvBatchCacheKeyRegressionTests` a `MlDriversRegressionTests` boli
 # omylom pod týmto blokom a 6 testov nikdy nebežalo, hoci v súbore vyzerali ako
 # hotové pokrytie (148 metód v súbore, 142 spustených).
+class ReviewFindingsRegressionTests(unittest.TestCase):
+    """Nálezy z revízie 2026-09-23 — každý test drží jednu konkrétnu dieru zavretú."""
+
+    # ── Inbox: zlý graf držaného titulu mimo top-30 DIP ──────────────────────
+    def _inbox(self, rows, holdings):
+        with (patch.object(tb, "load_scanner_cache", return_value={"results": rows}),
+              patch.object(tb, "enrich_scanner_payload", side_effect=lambda x: x),
+              patch.object(tb, "_get_portfolio_holdings", return_value=holdings),
+              patch.object(tb, "get_dca_candidates", return_value={"candidates": []}),
+              patch.object(tb, "get_earnings_calendar_view", return_value={"items": []})):
+            return tb.get_investor_inbox(refresh=1)
+
+    @staticmethod
+    def _row(ticker, dip, daily="OK"):
+        return {"ticker": ticker, "dip_total": dip,
+                "chart_health": {"daily": {"status": daily}, "weekly": {"status": "OK"}}}
+
+    def test_broken_chart_on_held_title_outside_top30_reaches_inbox(self):
+        # Produkcia má ~195 DIP riadkov; stará slučka nad top-30 držaný titul
+        # bez DIP skóre nikdy nevidela.
+        rows = [self._row(f"D{i:02d}", 120 - i) for i in range(60)] + [self._row("HELD", None, "Bad")]
+        items = self._inbox(rows, {"HELD": {"pnl": -5, "amount": 100, "pnl_pct": -5}})["items"]
+        held = [i for i in items if i["ticker"] == "HELD"]
+        self.assertTrue(held, "držaný titul so zlým grafom chýba v Inboxe")
+        self.assertIn("broken", held[0]["kinds"])
+
+    def test_broken_needs_both_held_and_bad(self):
+        rows = [self._row("OKHELD", None, "OK"), self._row("BADFREE", None, "Bad")]
+        items = self._inbox(rows, {"OKHELD": {"pnl": 1, "amount": 100, "pnl_pct": 1}})["items"]
+        broken = {i["ticker"] for i in items if "broken" in i.get("kinds", [])}
+        self.assertEqual(broken, set())
+
+    # ── Signal log: zlúčenie namiesto prepísania snímky ──────────────────────
+    def test_merge_save_keeps_concurrent_updates(self):
+        today = datetime.now(timezone.utc).date().isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path, arch = Path(tmp, "log.json"), Path(tmp, "arch.json")
+            # Stav na disku: /api/chart medzitým doplnil kontext k A a pridal C.
+            log_path.write_text(json.dumps({
+                "A": {today: {"score": 3, "context": {"regime": "bull"}}},
+                "C": {today: {"score": 2}},
+            }), encoding="utf-8")
+            with (patch.object(tb, "SIGNALS_LOG", log_path), patch.object(tb, "SIGNALS_ARCHIVE", arch)):
+                # Scanner zapisuje svoju snímku zo ZAČIATKU scanu: A bez kontextu, nové B.
+                tb._merge_save_signals_log({"A": {today: {"score": 3, "context": None}},
+                                            "B": {today: {"score": 4}}})
+                saved = json.loads(log_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["A"][today]["context"], {"regime": "bull"}, "None zmazal existujúci kontext")
+        self.assertIn("B", saved)
+        self.assertIn("C", saved, "ticker, ktorého sa scan nedotkol, zmizol")
+
+    def test_corrupt_signal_log_is_preserved_not_silently_dropped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp, "predictive_signals_log.json")
+            broken = '{"AAPL": {"2026-09-01": {"score": 3'   # useknutý zápis
+            log_path.write_text(broken, encoding="utf-8")
+            with patch.object(tb, "SIGNALS_LOG", log_path):
+                self.assertEqual(tb.load_signals_log(), {})
+            backups = list(Path(tmp).glob("predictive_signals_log.corrupt-*.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), broken)
+
+    def test_user_state_files_are_written_atomically(self):
+        # Priamy write_text by pri reštarte počas zápisu (OOM na Render) nechal
+        # useknutý JSON; load by ticho vrátil prázdno a používateľ by prišiel
+        # o prahy, DIP import alebo 90D históriu.
+        src = Path(tb.__file__).read_text(encoding="utf-8")
+        for name in ("SIGNALS_LOG", "SIGNALS_ARCHIVE", "WEIGHTS_LOG", "DASH_SETTINGS_FILE",
+                     "SCANNER_CACHE_FILE", "DIP_SCORES_FILE"):
+            with self.subTest(file=name):
+                self.assertFalse(name + ".write_text(" in src,
+                                 f"{name} sa zapisuje neatomicky cez write_text")
+
+    # ── ⚙ uloženie musí zahodiť 24h cache Inboxu/Plánu ───────────────────────
+    def test_saving_settings_clears_investor_view_cache(self):
+        class FakeRequest:
+            async def json(self):
+                return {"dca_dip_min": 90}
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(tb, "DASH_SETTINGS_FILE", Path(tmp, "s.json")):
+                tb._investor_cache_set("investor_inbox:2026-09-23", {"items": []})
+                asyncio.run(tb.save_dash_settings(FakeRequest()))
+                self.assertIsNone(tb._investor_cache_get("investor_inbox:2026-09-23", 86400))
+
+    # ── BUILD: klik na Stav triedi podľa zmyslu, nie abecedy ─────────────────
+    def test_readiness_rank_orders_ready_first(self):
+        ranks = {"ready": 0, "wait": 1, "blocked": 2, "no_data": 3}
+        positions = [{"symbol": s, "type": "Stock", "amount": 10} for s in "AB"]
+        with (patch.object(tb, "get_portfolio", return_value={"positions": positions}),
+              patch.object(tb, "_load_position_classes", return_value={}),
+              patch.object(tb, "load_scanner_cache", return_value={"results": []})):
+            rows = tb.get_build_candidates(account="1", refresh=0)["positions"]
+        for row in rows:
+            self.assertEqual(row["readiness_rank"], ranks[row["readiness"]])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

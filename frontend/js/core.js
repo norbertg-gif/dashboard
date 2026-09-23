@@ -7,7 +7,14 @@
 // loadEtoroPositions/renderEtoroList sú fail-soft no-op, ostávajú kvôli
 // call-sites pri prepínaní účtov (portfolio.js) a loadEtoroAccounts flow.
 
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+// Stránku servíruje sám backend, takže API je rovnaký origin. Absolútna adresa
+// len pre stránku z INÉHO lokálneho portu (statický dev server). Pôvodne
+// platila pre každý localhost — lenže 127.0.0.1 a localhost sú pre prehliadač
+// dva originy, takže na 127.0.0.1:8766 (adresa z CLAUDE.md) každý POST
+// s JSON hlavičkou padol na CORS preflight: ⚙, triedy BUILD aj štítky sa
+// ticho neuložili.
+const API = ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    && window.location.port !== '8766')
   ? 'http://localhost:8766' : '';
 
 // Zdieľaná candle/tier paleta pre chart canvas a inline štýly.
@@ -506,6 +513,9 @@ async function saveSettingsModal() {
     _dcaCache = { account: null, data: null };
     _buildCache = { account: null, data: null };
     portfolioAttentionLoadedAt = 0;
+    // Server už Inbox/Plán zahodil; klientska 24h kópia by ich inak podržala.
+    clearScannerClientCache('investorInbox');
+    clearScannerClientCache('weeklyPlan');
     if (portState.main?.data) renderPortPanel('main');
     applyScannerBadges();
     setStatus('Nastavenia uložené', 'ok');

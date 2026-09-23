@@ -859,7 +859,7 @@ let buildClassFilter = 'all';
 
 function sortBuild(key) {
   if (buildSort.key === key) buildSort.dir *= -1;
-  else buildSort = { key, dir: (key === 'readiness' || key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
+  else buildSort = { key, dir: (key === 'readiness_rank' || key === 'state' || key === 'symbol' || key === 'position_class') ? 1 : -1 };
   renderBuildCard(_buildCache.data);
 }
 
@@ -1057,7 +1057,7 @@ function renderBuildCard(data) {
   wrap.innerHTML = `${head}
     ${filterBar}
     <table class="tool-table"><thead><tr>
-      ${buildTh('readiness', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
+      ${buildTh('readiness_rank', 'Stav')}${buildTh('symbol', 'Ticker')}${buildTh('weight_pct', 'Váha', 'r')}${buildTh('position_class', 'Trieda')}
       ${buildTh('target_weight', 'Cieľ %', 'r')}<th class="r">Vzdial. EMA20</th><th class="r" title="Relatívny výkon voči QQQ za 3 mesiace v percentuálnych bodoch; široká brána, nie nákupný signál">RS 3M</th>${buildTh('gap_pct', 'Odstup', 'r')}<th class="r">Dokúpiť</th>
     </tr></thead><tbody>${rows}</tbody></table>
     ${!sortedPositions.length ? `<div style="color:var(--muted);font-size:11px;padding:6px 0;">Filtru nezodpovedá žiadna pozícia.</div>` : ''}
