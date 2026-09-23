@@ -179,6 +179,24 @@ def main() -> int:
 
             print(f"  {tab:11} ok ({len(text)} znakov)")
 
+        # The read-only smoke missed a real localhost/127.0.0.1 POST-origin bug.
+        # This invalid value is rejected BEFORE any write: exercises origin,
+        # CORS and JSON POST with zero side effects, even on production BASE_URL.
+        try:
+            status = page.evaluate("""async () => {
+                const response = await fetch(API + '/api/settings', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({dca_dip_min: -999})
+                });
+                return response.status;
+            }""")
+            if status != 400:
+                failures.append(f"POST /api/settings: expected HTTP 400, got {status}")
+            else:
+                print("  settings POST ok (HTTP 400, validation rejected; no write)")
+        except Exception as exc:
+            failures.append(f"POST /api/settings: network/POST check failed: {exc}")
+
         fatal_console = [
             e for e in console_errors
             if not any(t in e for t in TOLERATED_NETWORK)

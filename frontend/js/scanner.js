@@ -374,7 +374,7 @@ function weeklyPlanReviewed() {
 function weeklyPlanQueue(plan = window._lastWeeklyPlanPayload) {
   const seen = new Set();
   const queue = [];
-  for (const group of [plan?.focus, plan?.buy_candidates, plan?.dca, plan?.risks]) {
+  for (const group of [plan?.focus, plan?.dca, plan?.build, plan?.buy_candidates, plan?.risks]) {
     for (const row of (group || [])) {
       const ticker = String(row?.ticker || '').toUpperCase();
       if (ticker && !seen.has(ticker)) {
@@ -680,6 +680,12 @@ function weeklyPlanRow(row, cls, reviewed) {
   </div>`;
 }
 
+function buildFirstBarrierHtml(plan) {
+  const first = plan?.build_first;
+  if (!first) return '';
+  return `<div class="plan-quiet">Pred novým titulom: ${escHtml(first.ticker)} je pripravený na ďalšiu tranžu $${Number(first.amount).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}.</div>`;
+}
+
 function renderWeeklyPlan(plan) {
   window._lastWeeklyPlanPayload = plan || null;
   const box = document.getElementById('weeklyPlanBox');
@@ -688,7 +694,7 @@ function renderWeeklyPlan(plan) {
   if (head) head.textContent = plan.headline || 'Týždenný plán';
 
   if (isWeeklyPlanCollapsed()) {
-    const n = (plan.focus?.length || 0) + (plan.buy_candidates?.length || 0) + (plan.dca?.length || 0) + (plan.risks?.length || 0);
+    const n = (plan.focus?.length || 0) + (plan.dca?.length || 0) + (plan.build?.length || 0) + (plan.buy_candidates?.length || 0) + (plan.risks?.length || 0);
     box.innerHTML = `<div class="inbox-collapsed-summary">${n ? `${n} položiek v pláne` : 'Pokojný týždeň'}</div>`;
     return;
   }
@@ -698,9 +704,9 @@ function renderWeeklyPlan(plan) {
   weeklyPlanQueueIndex = Math.max(0, Math.min(queue.length - 1, weeklyPlanQueueIndex));
   const doneCount = queue.filter(ticker => reviewed.has(ticker)).length;
   const sections = [];
-  const block = (title, rows, cls, emptyNote) => {
+  const block = (title, rows, cls, emptyNote, intro = '') => {
     if (!rows?.length) return emptyNote ? `<div class="plan-section"><h4>${title}</h4><div class="plan-quiet">${emptyNote}</div></div>` : '';
-    return `<div class="plan-section"><h4>${title}</h4>${rows.map(r => weeklyPlanRow(r, cls, reviewed)).join('')}</div>`;
+    return `<div class="plan-section"><h4>${title}</h4>${intro}${rows.map(r => weeklyPlanRow(r, cls, reviewed)).join('')}</div>`;
   };
   sections.push(`<div class="plan-review-toolbar">
     <span><b>${doneCount}/${queue.length}</b> prejdených · ${Math.max(0, queue.length - doneCount)} zostáva</span>
@@ -711,8 +717,9 @@ function renderWeeklyPlan(plan) {
     </div>
   </div>`);
   sections.push(block('Pozri dnes', plan.focus, 'sev-mixed'));
-  sections.push(block('Možný nákup', plan.buy_candidates, 'sev-buy'));
   sections.push(block('Možné DCA', plan.dca, 'sev-buy'));
+  sections.push(block('Dobudovať', plan.build, 'sev-buy'));
+  sections.push(block('Možný nákup', plan.buy_candidates, 'sev-buy', null, buildFirstBarrierHtml(plan)));
   sections.push(block('Riziko / pozor', plan.risks, 'sev-counter'));
 
   const q = plan.quiet || {};

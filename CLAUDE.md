@@ -133,11 +133,35 @@ These were already in the codebase and need to stay fixed:
 
 ## Backlog (priority order)
 
--13. **BUILD v1.1 — dobudovávanie pozícií v rastúcom trhu. ZADANIE 2026-09-22.**
-   **STAV: (a), (c) aj (b) HOTOVÉ 2026-09-22.** Zostáva jediná vec, a nie je
-   technická: kalendár ako spúšťač. BUILD je STAVOVÉ pravidlo (pozícia je pod
-   cieľom), takže stav nikdy „nenastane", len trvá — karta vie povedať ČO kúpiť,
-   nie KEDY sa spýtať. Bez toho má naďalej dva režimy: kupovať stále, alebo nikdy.
+-13. **BUILD v1.1 — dobudovávanie pozícií v rastúcom trhu. UZAVRETÉ 2026-09-23.**
+   **HOTOVO:** jednotka akcie je jedna tranža `build_tranche_usd` (default $100,
+   ⚙ rozsah $10–$10 000). Medzera menšia než tranža blokuje readiness, lebo nákup
+   by presiahol cieľ; váhový `state` ostáva `build`. Rovnosť je prípustná.
+   `suggested_amount` a `next_step.amount` označujú tranžu, nie celú medzeru.
+   Týždenný plán používa výhradne `get_build_candidates(account="1")`, ready
+   riadky v existujúcom gap poradí, najviac 3; pri výpadku ostáva BUILD prázdny.
+   Poradie: Pozri dnes → Možné DCA → Dobudovať → Možný nákup → Riziko / pozor.
+   Predtým bol nový nákup pred DCA, opačne než hierarchia kapitálu; dedup teraz
+   dáva DCA prednosť pred BUILD a BUILD pred nákupom. Rovnaké poradie má fronta.
+   **Poradie DEDUPLIKÁCIE nie je poradie ZOBRAZENIA:** Pozri dnes > DCA > Riziko >
+   BUILD > nový nákup. Riziko (earnings/zlý graf) musí vyhrať nad BUILD aj nákupom,
+   inak plán odporučí tranžu dva dni pred earnings a varovanie potlačí ako duplicitu.
+   Prvá verzia to mala naopak (dedup podľa zobrazenia) — chytené pri review.
+   `build_first` (bariéra) je prvý ZOBRAZENÝ riadok Dobudovať, nie prvý pripravený
+   pred deduplikáciou. BUILD v pláne volá `get_build_candidates(account="1", refresh=0)`.
+   **Pasca pri volaní endpointu ako funkcie:** vynechaný parameter s default
+   `Query(0)` nie je 0, ale objekt `Query` — a ten je PRAVDIVÝ, takže `if not refresh`
+   ticho obíde cache. Plán by takto volal eToro pri každom zostavení; `/api/movers`
+   to mal od začiatku a fungoval len NÁHODOU (backendová cache drží `currentRate`
+   až 24 h, takže movers čerstvý snapshot naozaj potrebujú — teraz je tam
+   `refresh=1` explicitne). `EndpointQueryDefaultRegressionTests` skenuje AST
+   celého backendu a zlyhá pri každom internom volaní, ktoré Query parameter vynechá.
+   Pri nových tituloch v pláne aj na Prehľade je informačná bariéra „Pred novým
+   titulom…“ s top ready pozíciou a tranžou; kandidátov neskrýva. Účet 2 sa nemieša.
+   `frontend_smoke.py` po záložkách skúša JSON POST `/api/settings` s
+   `dca_dip_min: -999` a vyžaduje HTTP 400. Validácia odmieta pred zápisom,
+   bezpečne aj na produkcii; starý read-only smoke prehliadol POST origin chybu.
+   Bez nového skóre a bez zmien C1–C4, DIP, DCA prahov, tieru či Verdiktu.
    **Prečo:** medzi 2026-08-09 a 2026-09-22 nebol ANI JEDEN týždeň s platným DCA
    kandidátom — v rastúcom trhu kvalitné firmy nespadnú o 20 %. Voľná hotovosť
    medzitým klesla z $1 028 na nulu, celá do NOVÝCH tickerov (APP, GILT, ADI,
@@ -146,8 +170,8 @@ These were already in the codebase and need to stay fixed:
    sekcia „BUILD v1.1".
    **Kľúčová vlastnosť, ktorá určuje dizajn:** DCA je UDALOSTNÉ pravidlo (cena
    padne → reaguješ), BUILD je STAVOVÉ (pozícia je pod cieľom). Stav nikdy
-   „nenastane", len trvá. Preto BUILD potrebuje kalendár ako spúšťač — bez neho
-   má len dva režimy: kupovať stále, alebo nikdy (dnes platí to druhé).
+   „nenastane", len trvá. Spúšťačom kontroly je teraz pravidelný Týždenný plán;
+   bariéra pri novom titule pripomína existujúcu príležitosť aj mimo tejto rutiny.
 
    **(a) DONE 2026-09-22: weekly `entry_zone` exposed in scanner, AI export 1.7 and BUILD.**
    Existing ML features: `ema20_dist` * 100 (2dp), `pos_52w` (3dp),
@@ -188,7 +212,8 @@ These were already in the codebase and need to stay fixed:
    Prvý splnený krok rozhoduje:
    1. `unclassified` / `no_target` → `no_data` (chýba trieda / cieľová váha).
    2. `over_max` → `blocked` (nad stropom).
-   3. `at_target` alebo gap nie je kladný → `blocked` (na cieli).
+   3. `at_target` alebo gap nie je kladný → `blocked` (na cieli); kladná dolárová
+      medzera menšia než `build_tranche_usd` tiež blokuje s dôvodom o tranži.
    4. Denný alebo týždenný graf `Bad` → `blocked`, dôvod uvádza timeframe.
    5. RS 3M < `build_rs_min_pp` → `blocked`; null pokračuje ďalej.
    6. Chýba scanner / entry_zone / EMA20 vzdialenosť → `no_data`; chýbajúce ATR tiež fail-soft.
@@ -199,7 +224,8 @@ These were already in the codebase and need to stay fixed:
    Default `ready → wait → blocked → no_data`, v skupine `gap_pct` zostupne;
    kliknutie na stĺpec je používateľský override. Pôvodný `state` ostáva zachovaný.
    `next_step` vyberá ready s najväčším gapom, inak null. Rozbalená aj zbalená karta
-   ukazujú „ĎALŠÍ KROK: <ticker> · <suma> · PRIPRAVENÉ“, alebo počty dôvodov nepripravenosti.
+   ukazujú „ĎALŠÍ KROK: <ticker> · $100 · PRIPRAVENÉ (medzera $392)“
+   (s aktuálnou tranžou a medzerou), alebo počty dôvodov nepripravenosti.
 
    **Poradie prác:** (a) → (c) → (b). Scanner coverage (priorita 1 v
    `CLAUDE_investicna_analyza.md`) je NADRADENÁ všetkému — `ema20_dist` aj

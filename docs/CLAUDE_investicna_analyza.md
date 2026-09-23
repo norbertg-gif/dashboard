@@ -84,7 +84,9 @@ Nový kapitál má tri možné ciele, v poradí priority:
 
 Default je 1 alebo 2. **Nový titul je výnimka, ktorá sa musí obhájiť:** musí byť lepší než najlepšia existujúca príležitosť, nie len samostatne zaujímavý. Dôvod nie je nedostatok nápadov, ale to, že pri ~56 tituloch je limitujúcim zdrojom pozornosť.
 
-Bod 2 dnes v dashboarde neexistuje a je to diera. Klasické DCA dokupuje len pri poklese, takže nový kapitál tečie prednostne do horších pozícií — 9. 8. 2026 mal HLNE DIP 107 pri váhe 1,4 %, kým FOUR mal DIP 51 pri váhe 3,0 %. Modul je v backlogu repa ako položka **-7**.
+**BUILD v dashboarde (2026-09-23):** Týždenný plán už nesie BUILD pre účet 1 v poradí DCA → Dobudovať → Možný nákup, s jednou $100 tranžou (nastaviteľnou cez ⚙); medzera pod tranžou nie je pripravená na nákup.
+
+Pôvodná medzera v dashboarde: Klasické DCA dokupuje len pri poklese, takže nový kapitál tečie prednostne do horších pozícií — 9. 8. 2026 mal HLNE DIP 107 pri váhe 1,4 %, kým FOUR mal DIP 51 pri váhe 3,0 %. Modul je v backlogu repa ako položka **-7**.
 
 ### Typ A vs Typ B
 

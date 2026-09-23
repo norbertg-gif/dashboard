@@ -886,7 +886,7 @@ const BUILD_READINESS_META = {
 function buildNextStepText(data) {
   if (!data) return '';
   const next = data.next_step;
-  if (next) return `ĎALŠÍ KROK: ${next.symbol} · $${Number(next.gap_amount).toLocaleString('sk-SK', { maximumFractionDigits: 0 })} · PRIPRAVENÉ`;
+  if (next) return `ĎALŠÍ KROK: ${next.symbol} · $${Number(next.amount).toLocaleString('sk-SK', { maximumFractionDigits: 0 })} · PRIPRAVENÉ (medzera $${Number(next.gap_amount).toLocaleString('sk-SK', { maximumFractionDigits: 0 })})`;
   const c = data.counts || {};
   return `ĎALŠÍ KROK: Žiadna pozícia nie je pripravená vo vstupnej zóne — čakajú: ${c.wait || 0}, blokované: ${c.blocked || 0}, bez dát: ${c.no_data || 0}.`;
 }

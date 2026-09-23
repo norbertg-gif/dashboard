@@ -829,7 +829,7 @@ function homeContentHtml(data) {
         ${homeCard('Týždenný plán · Pozri dnes', `${homePlanHtml(data.plan)}
           <button type="button" class="btn mini" onclick="switchMainTab('scanner')">Otvoriť celý plán</button>`, { className: 'home-card-attention' })}
         ${homeCard('Najbližšie výsledky', homeEarningsHtml(data.earnings), { className: 'home-card-earnings' })}
-        ${homeCard('Možný nákup', homePlanRowsHtml(data.plan?.buy_candidates, 'Plán tento týždeň nenašiel kandidáta na nákup.'), { className: 'home-card-dip' })}
+        ${homeCard('Možný nákup', buildFirstBarrierHtml(data.plan) + homePlanRowsHtml(data.plan?.buy_candidates, 'Plán tento týždeň nenašiel kandidáta na nákup.'), { className: 'home-card-dip' })}
         ${homeCard('Možné DCA', homePlanRowsHtml(data.plan?.dca, 'Tento týždeň nie je kandidát na DCA.'), { className: 'home-card-dip' })}
       </div>
     </div>`;

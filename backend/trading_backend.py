@@ -2552,6 +2552,7 @@ DASH_SETTINGS_DEFAULTS = {
     # ATR-scaled like signal rules v2: fixed % differs on 5% vs 14% ATR titles.
     # Wide gate, not a buy signal.
     "build_entry_atr_mult": 1.0,
+    "build_tranche_usd": 100,  # One actionable BUILD order.
     "build_rs_min_pp": -20.0,  # Wide laggard gate vs QQQ over 3M, percentage points.
     "atr_stop_mult": 1.5,        # stop = x × ATR14 pod vstupnou cenou
     # Pomer cieľových váh medzi triedami pozícií. Nie percentá — relatívne diely,
@@ -2575,6 +2576,7 @@ _DASH_SETTINGS_LIMITS = {
     "risk_per_trade_pct": (0.1, 10),
     "atr_stop_mult": (0.5, 5),
     "build_entry_atr_mult": (0.25, 5),
+    "build_tranche_usd": (10, 10000),
     "build_rs_min_pp": (-100, 0),
     "class_ratio_core": (0, 20),
     "class_ratio_standard": (0, 20),
@@ -2940,6 +2942,8 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
                       if (health.get(key) or {}).get("status") == "Bad"]
         distance = (zone or {}).get("ema20_dist_pct")
         atr = (zone or {}).get("atr_pct")
+        gap_amount = round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None
+        tranche = settings["build_tranche_usd"]
         # First match wins: binary quality gate, continuous gap ordering.
         if state in ("unclassified", "no_target"):
             readiness, reason = "no_data", "chýba trieda" if state == "unclassified" else "chýba cieľová váha"
@@ -2947,6 +2951,10 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             readiness, reason = "blocked", "nad stropom"
         elif state == "at_target" or gap is None or gap <= 0:
             readiness, reason = "blocked", "na cieli"
+        # A fixed tranche would overshoot a smaller gap: effectively on target
+        # at the user's trading granularity, without changing the weight state.
+        elif gap_amount is not None and gap_amount < tranche:
+            readiness, reason = "blocked", f"medzera ${gap_amount:g} je menšia než jedna tranža ${tranche:g}"
         elif bad_frames:
             readiness, reason = "blocked", "zlý graf: " + " / ".join(bad_frames)
         # Chýbajúce RS je doplnkový kontext: „teraz sa nepodarilo“ nie je „zaostáva“.
@@ -2977,7 +2985,8 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
             "is_seed": entry.get("note") == "seed",
             # Koľko dokúpiť, aby pozícia sedela na cieli — v peniazoch, lebo v
             # percentách sa to zle prekladá na objednávku.
-            "gap_amount": round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None,
+            "gap_amount": gap_amount,
+            "suggested_amount": tranche if readiness == "ready" else None,
             "state": state,
             "entry_zone": zone,
             "relative_strength": relative_strength,
@@ -3014,7 +3023,8 @@ def get_build_candidates(account: str = Query("1"), refresh: int = Query(0)):
         "weight_basis": BUILD_WEIGHT_BASIS,
         "book_value": round(book_value, 2),
         "positions": rows,
-        "next_step": {"symbol": next_ready["symbol"], "gap_amount": next_ready["gap_amount"],
+        "next_step": {"symbol": next_ready["symbol"], "amount": next_ready["suggested_amount"],
+                      "gap_amount": next_ready["gap_amount"],
                       "gap_pct": next_ready["gap_pct"], "readiness": next_ready["readiness"],
                       "reason": next_ready["readiness_reason"]} if next_ready else None,
         "counts": {
@@ -3172,7 +3182,10 @@ def get_movers(
         if sym:
             universe[sym] = "watchlist"
     try:
-        portfolio = get_portfolio(account=account)
+        # refresh=1 ZÁMERNE: backendová cache drží currentRate až 24 h, takže denný
+        # pohyb potrebuje čerstvý snapshot. Doteraz to fungovalo len náhodou — vynechaný
+        # refresh bol objekt Query(0), ktorý je pravdivý. refresh=0 by rozbil Top pohyby.
+        portfolio = get_portfolio(account=account, refresh=1)
         for pos in portfolio.get("positions", []):
             typ = str(pos.get("type") or "").lower()
             if typ not in ("stock", "etf"):
@@ -9674,10 +9687,10 @@ def _passes_weekly_buy_rule(row: dict, held_symbols, dip_min: float) -> bool:
 @app.get("/api/investor/plan")
 def get_investor_plan(refresh: int = Query(0)):
     """Týždenný plán: ľudská syntéza NAD Investor Inboxom — nie nový analytický
-    engine, len prioritizácia do 5 sekcií so šablónovými vetami (žiadny LLM):
-    Pozri dnes / Možný nákup / Možné DCA / Riziko / Drž bez akcie.
+    engine, len prioritizácia do 6 sekcií so šablónovými vetami (žiadny LLM):
+    Pozri dnes / Možné DCA / Dobudovať / Možný nákup / Riziko / Drž bez akcie.
     Cieľ je menej mentálneho hluku, nie viac dát. Nespúšťa nový scan."""
-    cache_key = f"investor_plan:{datetime.now(timezone.utc).date().isoformat()}"
+    cache_key = f"investor_plan_build_v1:{datetime.now(timezone.utc).date().isoformat()}"
     cached = _investor_cache_get(cache_key, WEEKLY_PLAN_CACHE_TTL, refresh)
     if cached:
         return cached
@@ -9726,12 +9739,40 @@ def get_investor_plan(refresh: int = Query(0)):
                              "summary": f"{t} je DCA kandidát so zdravým grafom — strata v pásme, DIP drží."})
             used_tickers.add(t)
             continue
+        # Riziko musí vyhrať nad BUILD aj nad novým nákupom — inak plán odporučí
+        # tranžu dva dni pred earnings a samotné varovanie potlačí ako duplicitu.
+        # Poradie DEDUPLIKÁCIE je poradie priority, nie poradie zobrazenia.
         if kinds & {"broken", "earnings"}:
             reason = next((r for r in (it.get("reasons") or []) if r.get("kind") in ("broken", "earnings")), None)
             risk_rows.append({"ticker": t,
                               "summary": (reason or {}).get("summary") or (reason or {}).get("detail")
                                          or it.get("summary") or ""})
             used_tickers.add(t)
+    # Account 1 only. Reuse the shared readiness and gap order, never score again.
+    build_rows: list = []
+    build_first = None
+    try:
+        ready = [r for r in get_build_candidates(account="1", refresh=0).get("positions", [])
+                 if r.get("readiness") == "ready"]
+        for row in ready:
+            t = row["symbol"]
+            if t in used_tickers:
+                continue
+            gap_text = f"{row['gap_pct']:g}".replace(".", ",")
+            build_rows.append({
+                "ticker": t, "amount": row["suggested_amount"],
+                "summary": f"{t} je {gap_text} % pod cieľom (${row['gap_amount']:g}) "
+                           f"a vo vstupnej zóne — tranža ${row['suggested_amount']:g}.",
+            })
+            if len(build_rows) == 3:
+                break
+    except Exception:
+        build_rows, build_first = [], None
+    used_tickers.update(r["ticker"] for r in build_rows)
+    # Bariéra ukazuje ten istý titul, ktorý je v sekcii Dobudovať — nie taký,
+    # čo deduplikácia presunula do DCA alebo Rizika (earnings).
+    if build_rows:
+        build_first = {"ticker": build_rows[0]["ticker"], "amount": build_rows[0]["amount"]}
 
     # Možný nákup: PRIENIK buy signál + DIP kvalita + zdravý graf (nie len jedno
     # kritérium), len nedržané tituly. Z posledného scanner behu (cache).
@@ -9754,7 +9795,7 @@ def get_investor_plan(refresh: int = Query(0)):
         pass
     buy_rows = buy_rows[:6]
 
-    quiet = sorted(t for t in holdings.keys() if t not in inbox_tickers)
+    quiet = sorted(t for t in holdings.keys() if t not in inbox_tickers and t not in used_tickers)
 
     focus_syms = [r["ticker"] for r in focus_rows if r.get("ticker")]
     if focus_syms:
@@ -9767,6 +9808,8 @@ def get_investor_plan(refresh: int = Query(0)):
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "headline": headline,
         "focus": focus_rows,
+        "build": build_rows,
+        "build_first": build_first,
         "buy_candidates": buy_rows,
         "dca": dca_rows,
         "risks": risk_rows,

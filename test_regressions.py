@@ -843,7 +843,7 @@ class ScannerRelativeStrengthRegressionTests(unittest.TestCase):
 class BuildReadinessRegressionTests(unittest.TestCase):
     def build(self, classes=None, scanner=None, settings=None):
         positions = [{"symbol": sym, "type": "Stock", "amount": amount}
-                     for sym, amount in (("A", 10), ("B", 20), ("C", 70))]
+                     for sym, amount in (("A", 100), ("B", 200), ("C", 700))]
         if classes is None:
             classes = {s: {"position_class": "CORE", "target_weight": 50} for s in "ABC"}
         with (patch.object(tb, "get_portfolio", return_value={"positions": positions}),
@@ -924,12 +924,111 @@ class BuildReadinessRegressionTests(unittest.TestCase):
         data = self.build(scanner=scanner)
         self.assertEqual([r["symbol"] for r in data["positions"]], ["A", "B", "C"])
         row = data["positions"][0]
-        self.assertEqual(data["next_step"], {"symbol": "A", "gap_amount": 40, "gap_pct": 40,
+        self.assertEqual(data["next_step"], {"symbol": "A", "amount": 100, "gap_amount": 400, "gap_pct": 40,
                          "readiness": "ready", "reason": row["readiness_reason"]})
         scanner[0]["entry_zone"]["ema20_dist_pct"] = 20
         data = self.build(scanner=scanner)
         self.assertEqual([r["readiness"] for r in data["positions"]], ["ready", "wait", "blocked"])
         self.assertEqual(data["next_step"]["symbol"], "B")
+
+
+class BuildTrancheRegressionTests(unittest.TestCase):
+    def build(self, gap=40, tranche=100):
+        positions = [{"symbol": "A", "type": "Stock", "amount": 100},
+                     {"symbol": "B", "type": "Stock", "amount": 900}]
+        with (patch.object(tb, "get_portfolio", return_value={"positions": positions}),
+              patch.object(tb, "_load_position_classes", return_value={
+                  "A": {"position_class": "CORE", "target_weight": 10 + gap / 10}}),
+              patch.object(tb, "_dash_settings", return_value={**tb.DASH_SETTINGS_DEFAULTS, "build_tranche_usd": tranche}),
+              patch.object(tb, "load_scanner_cache", return_value={"results": [
+                  {"ticker": "A", "entry_zone": {"ema20_dist_pct": 1, "atr_pct": 5}}]})):
+            return tb.get_build_candidates(account="1", refresh=0)
+
+    def test_small_gap_blocks_without_changing_weight_state(self):
+        row = next(r for r in self.build()["positions"] if r["symbol"] == "A")
+        self.assertEqual(row["state"], "build")
+        self.assertEqual(row["readiness"], "blocked")
+        self.assertEqual(row["readiness_reason"], "medzera $40 je menšia než jedna tranža $100")
+        self.assertIsNone(row["suggested_amount"])
+
+    def test_exact_tranche_is_ready_and_suggested(self):
+        row = self.build(gap=100)["positions"][0]
+        self.assertEqual(row["gap_amount"], 100)
+        self.assertEqual(row["readiness"], "ready")
+        self.assertEqual(row["suggested_amount"], 100)
+
+    def test_tranche_is_tunable(self):
+        self.assertEqual(self.build(gap=100, tranche=101)["positions"][0]["readiness"], "blocked")
+        self.assertEqual(self.build(gap=100, tranche=50)["positions"][0]["suggested_amount"], 50)
+
+    def test_next_step_names_one_tranche(self):
+        self.assertEqual(self.build(gap=400, tranche=75)["next_step"]["amount"], 75)
+
+
+class WeeklyBuildRegressionTests(unittest.TestCase):
+    @staticmethod
+    def ready(ticker, gap=10):
+        return {"symbol": ticker, "readiness": "ready", "gap_pct": gap,
+                "gap_amount": gap * 100, "suggested_amount": 100}
+
+    def plan(self, rows=None, items=None, error=None):
+        with (patch.object(tb, "_investor_cache_get", return_value=None),
+              patch.object(tb, "_investor_cache_set", side_effect=lambda key, data: data),
+              patch.object(tb, "get_investor_inbox", return_value={"items": items or []}),
+              patch.object(tb, "_get_portfolio_holdings", return_value={"HELD": {}}),
+              patch.object(tb, "get_build_candidates", return_value={"positions": rows or []}, side_effect=error) as build,
+              patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS),
+              patch.object(tb, "load_scanner_cache", return_value={"results": [{"ticker": t, "dip_total": 95} for t in ["B", "NEW"]]}),
+              patch.object(tb, "enrich_scanner_payload", side_effect=lambda data: data),
+              patch.object(tb, "_passes_weekly_buy_rule", return_value=True)):
+            result = tb.get_investor_plan(refresh=1)
+        return result, build
+
+    def test_earnings_risk_wins_over_build_and_barrier_follows(self):
+        # Titul s earnings o dva dni nesmie dostať "tranža $100" a zároveň
+        # prísť o varovanie ako o duplicitu. Bariéra ukazuje ďalší BUILD titul.
+        # Tri silnejšie položky obsadia "Pozri dnes" (top-3, skóre 9); SOON má
+        # skóre 3 < polovica, takže o ňom rozhoduje až deduplikácia riziko vs. BUILD.
+        # Bez nich by SOON skončil v Pozri dnes a test by nič neoveroval.
+        filler = [{"ticker": f"F{i}", "kinds": ["profit"], "severity": "mixed",
+                   "reasons": [{"kind": "profit"}] * 3} for i in range(3)]
+        items = filler + [{"ticker": "SOON", "kinds": ["earnings"], "severity": "watch", "reasons": [
+            {"kind": "earnings", "summary": "SOON hlási výsledky o 2 dni."}]}]
+        result, _ = self.plan([self.ready("SOON", 12), self.ready("LATER", 8)], items)
+        self.assertNotIn("SOON", [r["ticker"] for r in result["focus"]], "fixture: SOON nesmie byť v Pozri dnes")
+        self.assertEqual([r["ticker"] for r in result["risks"]], ["SOON"])
+        self.assertEqual([r["ticker"] for r in result["build"]], ["LATER"])
+        self.assertEqual(result["build_first"]["ticker"], "LATER")
+
+    def test_build_account_one_order_limit_and_summary(self):
+        plan, build = self.plan([self.ready(t, 10-i) for i, t in enumerate("BCDE")])
+        build.assert_called_once_with(account="1", refresh=0)
+        self.assertEqual([r["ticker"] for r in plan["build"]], list("BCD"))
+        self.assertIn("tranža $100", plan["build"][0]["summary"])
+        self.assertEqual(plan["build_first"], {"ticker": "B", "amount": 100})
+
+    def test_dca_wins_build_and_build_wins_buy(self):
+        # Seven urgent rows occupy focus; the weaker DCA row reaches its own section.
+        items = [{"ticker": f"F{i}", "reasons": [{}, {}, {}], "severity": "mixed"} for i in range(7)]
+        items.append({"ticker": "DCA", "kinds": ["dca"], "reasons": [{}]})
+        plan, _ = self.plan([self.ready("DCA"), self.ready("B")], items)
+        self.assertEqual([r["ticker"] for r in plan["dca"]], ["DCA"])
+        self.assertEqual([r["ticker"] for r in plan["build"]], ["B"])
+        self.assertEqual([r["ticker"] for r in plan["buy_candidates"]], ["NEW"])
+
+    def test_no_ready_means_no_barrier(self):
+        plan, _ = self.plan([{**self.ready("B"), "readiness": "wait"}])
+        self.assertIsNone(plan["build_first"])
+        self.assertEqual(plan["build"], [])
+        self.assertEqual(len(plan["buy_candidates"]), 2)
+
+    def test_build_failure_keeps_other_sections(self):
+        plan, build = self.plan(error=RuntimeError("portfolio unavailable"))
+        build.assert_called_once_with(account="1", refresh=0)
+        self.assertEqual(plan["build"], [])
+        self.assertIsNone(plan["build_first"])
+        self.assertEqual(len(plan["buy_candidates"]), 2)
+        self.assertEqual(plan["quiet"]["tickers"], ["HELD"])
 
 
 class PortfolioBuildRegressionTests(unittest.TestCase):
@@ -3225,6 +3324,34 @@ class ReviewFindingsRegressionTests(unittest.TestCase):
             rows = tb.get_build_candidates(account="1", refresh=0)["positions"]
         for row in rows:
             self.assertEqual(row["readiness_rank"], ranks[row["readiness"]])
+
+
+class EndpointQueryDefaultRegressionTests(unittest.TestCase):
+    """Endpoint volaný ako obyčajná funkcia dostane za vynechaný parameter objekt
+    Query(0), nie 0 — a ten je PRAVDIVÝ. `if not refresh` potom ticho obíde
+    cache. Takto plán volal eToro pri každom zostavení a Top pohyby fungovali
+    len náhodou. Kontrola beží nad celým backendom, takže chytí aj budúce volania."""
+
+    def test_internal_calls_pass_every_query_default(self):
+        import ast
+        tree = ast.parse(Path(tb.__file__).read_text(encoding="utf-8"))
+        funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        query_params = {}
+        for name, fn in funcs.items():
+            args, defaults = fn.args.args, fn.args.defaults
+            params = [a.arg for a, d in zip(args[len(args) - len(defaults):], defaults)
+                      if isinstance(d, ast.Call) and getattr(d.func, "id", "") == "Query"]
+            if params:
+                query_params[name] = params
+        problems = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in query_params:
+                positional = [a.arg for a in funcs[node.func.id].args.args][:len(node.args)]
+                passed = {k.arg for k in node.keywords} | set(positional)
+                missing = [q for q in query_params[node.func.id] if q not in passed]
+                if missing:
+                    problems.append(f"riadok {node.lineno}: {node.func.id}() bez {', '.join(missing)}")
+        self.assertEqual(problems, [], chr(10).join(problems))
 
 
 if __name__ == "__main__":

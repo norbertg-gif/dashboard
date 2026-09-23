@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260923-152533">
+<link rel="stylesheet" href="/dashboard.css?v=20260923-build-tranche">
 </head>
 <body data-main-tab="home">
 
@@ -460,6 +460,8 @@
         <input id="set-build-entry-atr-mult" type="number" min="0.25" max="5" step="0.25"></label>
       <label>BUILD — široká brána zaostávania voči QQQ za 3 mesiace (pp), nie nákupný signál
         <input id="set-build-rs-min-pp" type="number" min="-100" max="0" step="1"></label>
+      <label>Veľkosť tranže pri dobudovaní ($)
+        <input id="set-build-tranche-usd" type="number" min="10" max="10000" step="1"></label>
       <label>Cieľová váha — pomer CORE
         <input id="set-class-ratio-core" type="number" min="0" max="20" step="0.5"></label>
       <label>Cieľová váha — pomer STANDARD
@@ -526,16 +528,16 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260923-152533"></script>
-  <script src="/js/live.js?v=20260923-152533"></script>
-  <script src="/js/portfolio.js?v=20260923-152533"></script>
-  <script src="/js/watchlist.js?v=20260923-152533"></script>
-  <script src="/js/scanner-table-sort.js?v=20260923-152533"></script>
-  <script src="/js/scanner.js?v=20260923-152533"></script>
-  <script src="/js/predictive.js?v=20260923-152533"></script>
-  <script src="/js/verdict.js?v=20260923-152533"></script>
-  <script src="/js/home.js?v=20260923-152533"></script>
-  <script src="/js/charts.js?v=20260923-152533"></script>
-  <script src="/js/main.js?v=20260923-152533"></script>
+  <script src="/js/core.js?v=20260923-build-tranche"></script>
+  <script src="/js/live.js?v=20260923-build-tranche"></script>
+  <script src="/js/portfolio.js?v=20260923-build-tranche"></script>
+  <script src="/js/watchlist.js?v=20260923-build-tranche"></script>
+  <script src="/js/scanner-table-sort.js?v=20260923-build-tranche"></script>
+  <script src="/js/scanner.js?v=20260923-build-tranche"></script>
+  <script src="/js/predictive.js?v=20260923-build-tranche"></script>
+  <script src="/js/verdict.js?v=20260923-build-tranche"></script>
+  <script src="/js/home.js?v=20260923-build-tranche"></script>
+  <script src="/js/charts.js?v=20260923-build-tranche"></script>
+  <script src="/js/main.js?v=20260923-build-tranche"></script>
 </body>
 </html>
