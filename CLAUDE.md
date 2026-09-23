@@ -916,6 +916,17 @@ Main source sections:
   appke (backlog položka o context menu). Prah "nebezpečne blízko"
   (`ema200_scan_threshold_pct`, default 5 %, len ABSOLÚTNA vzdialenosť — smer
   používateľ vyhodnocuje vizuálne, zámerne sa nekóduje) je v `⚙` nastaveniach
+  **Rozsah `?scope=all|portfolio` (2026-09-23).** Prepínač v hlavičke karty
+  „Všetko / Portfólio + ordery". `portfolio` skenuje LEN držané Stock/ETF tituly
+  oboch účtov + tituly s čakajúcim Stock/ETF orderom (`_portfolio_order_rates()`,
+  RAM/disk snapshot portfólia, žiadne eToro volanie). Je to rozsah na SERVERI,
+  nie filter hotového výsledku: titul len s orderom a mimo DIP importu by v celom
+  skene vôbec nebol. Každý riadok nesie `held` a `order_rates`; stĺpec Order
+  (limitná cena, tooltip = odstup od EMA200) sa kreslí len keď ho nejaký riadok má.
+  Každý rozsah má vlastný localStorage výsledok (`all` na pôvodnom kľúči
+  `td_ema200_scan_result`, aby sa uložený beh nestratil; `portfolio` na
+  `…:portfolio`), voľba v `td_ema200_scan_scope`. Rozsah sa fixuje pri štarte
+  behu — prepnutie počas behu neukáže cudzí spinner, výsledok ani chybu.
   ako ďalší tunable. Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani
   scoringu.
 - **Finviz DIP fetch (`POST /api/scanner/dip/finviz-fetch`) — LOKÁLNE IBA, HOTOVO 2026-08-23, UI TLAČIDLO ODSTRÁNENÉ V TEN ISTÝ DEŇ.**

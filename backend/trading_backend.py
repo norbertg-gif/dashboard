@@ -10554,14 +10554,60 @@ def get_assistant_export(account: str = "1"):
     }
 
 
+EMA200_SCAN_SCOPES = ("all", "portfolio")
+
+
+def _portfolio_order_rates() -> dict[str, list[float]]:
+    """Stock/ETF čakajúce ordery oboch účtov → {SYMBOL: [limitné ceny]}.
+
+    Číta len RAM/disk snapshot portfólia (ten istý ako `_get_portfolio_holdings`),
+    nikdy nevolá eToro. Market order bez ceny dá ticker bez ceny — titul sa
+    sleduje aj tak, len nie je čo ukázať vedľa EMA200."""
+    out: dict[str, list[float]] = {}
+    for acct in ("1", "2"):
+        try:
+            cached = _positions_cache.get(acct) or cache_read(_portfolio_disk_path(acct))
+            for order in (cached or {}).get("orders") or []:
+                if order.get("type") not in ("Stock", "ETF"):
+                    continue
+                sym = str(order.get("symbol") or "").strip().upper()
+                if not sym:
+                    continue
+                rates = out.setdefault(sym, [])
+                rate = _num_or_none(order.get("rate"))
+                if rate is not None and rate > 0 and rate not in rates:
+                    rates.append(rate)
+        except Exception as e:
+            print(f"  [ema200-scan] orders account {acct} error: {e}")
+    for rates in out.values():
+        rates.sort()
+    return out
+
+
 @app.get("/api/scanner/ema200-scan")
-def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50)):
+def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50),
+                        scope: str = Query("all")):
     """Ad-hoc: naimportované DIP univerzum vs weekly EMA200. Žiadny scheduled
     job, žiadna server cache — spúšťa sa výhradne na klik z UI a číta z tej
     istej zdieľanej daily-history cache ako ostatné scanner operácie
     (_scanner_download_cached), takže pre už poskenované tickery je to takmer
     zadarmo. Interpretačné, NEVSTUPUJE do C1-C4/DIP/scoringu."""
-    tickers, universe_label, universe_key = scanner_universe_from_dip()
+    # scope=portfolio skenuje LEN držané tituly + tituly s orderom. Nie je to filter
+    # nad celým výsledkom: titul, na ktorý je len order a nie je v DIP importe,
+    # by v celom skene vôbec nebol. Je to aj ~4× rýchlejšie.
+    if scope not in EMA200_SCAN_SCOPES:
+        raise HTTPException(400, f"scope musí byť jedno z: {', '.join(EMA200_SCAN_SCOPES)}")
+    try:
+        held = {str(sym or "").strip().upper() for sym in _get_portfolio_holdings()}
+    except Exception:
+        held = set()
+    order_rates = _portfolio_order_rates()
+    if scope == "portfolio":
+        tickers = sorted(sym for sym in (held | set(order_rates))
+                         if re.fullmatch(r"[A-Z0-9.-]{1,12}", sym))
+        universe_label, universe_key = "Portfólio + ordery", "portfolio"
+    else:
+        tickers, universe_label, universe_key = scanner_universe_from_dip()
     thr = threshold if threshold is not None else float(_dash_settings().get("ema200_scan_threshold_pct", 5.0))
     results: list[dict] = []
     errors: list[dict] = []
@@ -10578,11 +10624,14 @@ def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50)):
                 errors.append(row)
             else:
                 row["near"] = abs(row["dist_pct"]) <= thr
+                row["held"] = ticker in held
+                row["order_rates"] = order_rates.get(ticker, [])
                 results.append(row)
             if SCANNER_GC_INTERVAL > 0 and i % SCANNER_GC_INTERVAL == 0:
                 gc.collect()
     results.sort(key=lambda r: abs(r["dist_pct"]))
     return {
+        "scope": scope,
         "universe": universe_key,
         "universe_label": universe_label,
         "threshold_pct": thr,

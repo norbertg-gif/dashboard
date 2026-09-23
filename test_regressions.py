@@ -3354,5 +3354,59 @@ class EndpointQueryDefaultRegressionTests(unittest.TestCase):
         self.assertEqual(problems, [], chr(10).join(problems))
 
 
+class Ema200ScopeRegressionTests(unittest.TestCase):
+    """EMA200 sken s rozsahom portfólio + ordery."""
+
+    CACHE = {
+        "1": {"orders": [
+            {"symbol": "ordonly", "type": "Stock", "rate": 50.0},    # len order, mimo DIP
+            {"symbol": "HELD", "type": "Stock", "rate": 90.0},
+            {"symbol": "HELD", "type": "Stock", "rate": 85.0},
+            {"symbol": "BTC", "type": "Crypto", "rate": 1.0},        # krypto sa nesleduje
+        ]},
+        "2": {"orders": [{"symbol": "ETF2", "type": "ETF", "rate": None}]},  # market bez ceny
+    }
+
+    def scan(self, scope):
+        def fake_distance(ticker):
+            return {"ticker": ticker, "close": 100.0, "ema200": 95.0, "dist_pct": 5.26, "weeks": 300}
+        with (patch.dict(tb._positions_cache, self.CACHE, clear=True),
+              patch.object(tb, "_get_portfolio_holdings", return_value={"HELD": {}, "held2": {}}),
+              patch.object(tb, "scanner_universe_from_dip", return_value=(["DIP1", "HELD"], "DIP import", "dip_import")),
+              patch.object(tb, "_scan_ema200_distance", side_effect=fake_distance),
+              patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS)):
+            return tb.scanner_ema200_scan(threshold=None, scope=scope)
+
+    def test_order_rates_from_cache_only_stock_etf(self):
+        with patch.dict(tb._positions_cache, self.CACHE, clear=True):
+            rates = tb._portfolio_order_rates()
+        self.assertEqual(rates, {"ORDONLY": [50.0], "HELD": [85.0, 90.0], "ETF2": []})
+
+    def test_portfolio_scope_scans_held_and_order_titles_only(self):
+        data = self.scan("portfolio")
+        # Titul len s orderom musí byť v skene, aj keď nie je v DIP univerze —
+        # preto je to rozsah na serveri, nie filter hotového výsledku.
+        self.assertEqual(sorted(r["ticker"] for r in data["results"]), ["ETF2", "HELD", "HELD2", "ORDONLY"])
+        self.assertEqual(data["scope"], "portfolio")
+        self.assertEqual(data["universe"], "portfolio")
+        rows = {r["ticker"]: r for r in data["results"]}
+        self.assertTrue(rows["HELD"]["held"])
+        self.assertEqual(rows["HELD"]["order_rates"], [85.0, 90.0])
+        self.assertFalse(rows["ORDONLY"]["held"])
+        self.assertNotIn("BTC", rows)
+
+    def test_all_scope_keeps_dip_universe_and_adds_flags(self):
+        data = self.scan("all")
+        self.assertEqual([r["ticker"] for r in data["results"]], ["DIP1", "HELD"])
+        rows = {r["ticker"]: r for r in data["results"]}
+        self.assertFalse(rows["DIP1"]["held"])
+        self.assertEqual(rows["HELD"]["order_rates"], [85.0, 90.0])
+
+    def test_unknown_scope_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            self.scan("everything")
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

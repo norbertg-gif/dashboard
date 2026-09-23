@@ -1961,10 +1961,19 @@ function openScannerTicker(ticker) {
 // ako čerstvý. Automaticky sa nespúšťa nikdy; toto je "spusti keď chceš", nie
 // denný snapshot ako ostatné scanner sekcie.
 const EMA200_SCAN_RESULT_KEY = 'td_ema200_scan_result';
+// Rozsah skenu: 'all' = DIP univerzum (+ portfólio), 'portfolio' = len držané
+// tituly a tituly s orderom. Každý rozsah má VLASTNÝ uložený výsledok, takže
+// prepnutie hneď ukáže posledný beh toho rozsahu a nemieša sa s druhým.
+// 'all' ostáva na pôvodnom kľúči, aby sa existujúci uložený výsledok nestratil.
+const EMA200_SCAN_SCOPE_KEY = 'td_ema200_scan_scope';
+let ema200ScanScope = localStorage.getItem(EMA200_SCAN_SCOPE_KEY) === 'portfolio' ? 'portfolio' : 'all';
+function ema200ScanStorageKey(scope = ema200ScanScope) {
+  return scope === 'portfolio' ? `${EMA200_SCAN_RESULT_KEY}:portfolio` : EMA200_SCAN_RESULT_KEY;
+}
 
 function loadEma200ScanFromStorage() {
   try {
-    const raw = localStorage.getItem(EMA200_SCAN_RESULT_KEY);
+    const raw = localStorage.getItem(ema200ScanStorageKey());
     if (!raw) return null;
     const saved = JSON.parse(raw);
     // Tvar sa mohol medzi verziami zmeniť — bez `results` nie je čo kresliť.
@@ -1975,9 +1984,9 @@ function loadEma200ScanFromStorage() {
   }
 }
 
-function saveEma200ScanToStorage(data) {
+function saveEma200ScanToStorage(data, scope = ema200ScanScope) {
   try {
-    localStorage.setItem(EMA200_SCAN_RESULT_KEY,
+    localStorage.setItem(ema200ScanStorageKey(scope),
                          JSON.stringify({ data, ts: Date.now() }));
   } catch (e) {
     // Plná kvóta výsledok nezneplatňuje — ostane aspoň v pamäti tejto session.
@@ -2003,6 +2012,7 @@ function ensureEma200Restored() {
   }
 }
 let ema200ScanLoading = false;
+let ema200ScanLoadingScope = null;   // rozsah, ktorý práve beží — spinner patrí len jemu
 let ema200ScanError = null;
 let ema200ScanSort = { key: 'dist_pct', dir: 1 };
 
@@ -2026,8 +2036,13 @@ function ema200CardHead() {
       <div class="scanner-source-title">EMA200 sledovanie (weekly)</div>
       </div>
     </div>
+    <span style="display:inline-flex;gap:2px;">
+      ${[['all', 'Všetko', 'DIP univerzum + držané tituly'], ['portfolio', 'Portfólio + ordery', 'Len držané tituly a tituly s čakajúcim orderom']]
+        .map(([key, label, tip]) => `<button class="btn${ema200ScanScope === key ? ' primary' : ''}" style="font-size:10px;padding:3px 7px;"
+          onclick="setEma200ScanScope('${key}')" title="${tip}">${label}</button>`).join('')}
+    </span>
     <button class="btn" id="ema200ScanBtn" style="font-size:10px;padding:3px 9px;" onclick="runEma200Scan()"${ema200ScanLoading ? ' disabled' : ''}
-      title="Ad-hoc: aktuálna cena vs weekly EMA200 pre celé naimportované DIP univerzum">${ema200ScanLoading ? 'Skenujem…' : (ema200ScanData ? '↻ Znova' : 'Spustiť sken')}</button>
+      title="Ad-hoc: aktuálna cena vs weekly EMA200 pre zvolený rozsah">${ema200ScanLoading ? 'Skenujem…' : (ema200ScanData ? '↻ Znova' : 'Spustiť sken')}</button>
   </div>`;
 }
 
@@ -2051,8 +2066,10 @@ function ema200CardBodyHtml() {
     const age = ema200ScanAgeLabel();
     return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200${age ? ` · ${age}` : ''}`;
   }
-  if (ema200ScanLoading) {
-    return '<div style="color:var(--muted);font-size:11px;padding:6px 0;"><span class="cl-spinner"></span> Skenujem naimportované univerzum — pri prvom behu môže trvať cca 20-30 sekúnd, opakovaný beh je rýchlejší (zdieľaná cache).</div>';
+  if (ema200ScanLoading && ema200ScanLoadingScope === ema200ScanScope) {
+    return `<div style="color:var(--muted);font-size:11px;padding:6px 0;"><span class="cl-spinner"></span> ${ema200ScanScope === 'portfolio'
+      ? 'Skenujem portfólio a ordery — pár sekúnd.'
+      : 'Skenujem naimportované univerzum — pri prvom behu môže trvať cca 20-30 sekúnd, opakovaný beh je rýchlejší (zdieľaná cache).'}</div>`;
   }
   if (ema200ScanError) {
     return `<div style="color:var(--red);font-size:11px;">Chyba: ${escHtml(ema200ScanError)}</div>`;
@@ -2066,7 +2083,9 @@ function ema200CardBodyHtml() {
 function ema200ResultsTableHtml() {
   const data = ema200ScanData;
   if (!data.results.length) {
-    return '<div style="color:var(--muted);font-size:11px;">Žiadne dáta — importuj DIP Excel v Scanneri.</div>';
+    return `<div style="color:var(--muted);font-size:11px;">${data.scope === 'portfolio'
+      ? 'V cache nie sú žiadne pozície ani ordery — otvor raz záložku Portfólio.'
+      : 'Žiadne dáta — importuj DIP Excel v Scanneri.'}</div>`;
   }
   // dist_pct sa triedi podľa ABSOLÚTNEJ hodnoty (najbližšie k EMA200 hore),
   // ostatné stĺpce normálne — preto vlastný komparátor namiesto compareSortableRows.
@@ -2079,8 +2098,16 @@ function ema200ResultsTableHtml() {
     const arrow = active ? (ema200ScanSort.dir === 1 ? ' ▲' : ' ▼') : '';
     return `<th class="${cls}" onclick="sortEma200Scan('${key}')" style="cursor:pointer;">${label}${arrow}</th>`;
   };
+  // Stĺpec Order len keď ho nejaký riadok má — v celom univerze je väčšina prázdna.
+  const showOrders = data.results.some(r => (r.order_rates || []).length);
   const rows = sorted.map(r => {
     const near = r.near ? ' class="ema-scan-row-near"' : '';
+    const orderCell = !showOrders ? '' : `<td class="r">${(r.order_rates || []).length
+      ? r.order_rates.map(rate => {
+          const vsEma = (rate - r.ema200) / r.ema200 * 100;
+          return `<span title="Limit ${rate} je ${vsEma >= 0 ? '+' : ''}${vsEma.toFixed(1)} % od EMA200">${rate.toFixed(2)}</span>`;
+        }).join(', ')
+      : (r.held ? '' : '—')}</td>`;
     const sign = r.dist_pct > 0 ? '+' : '';
     return `<tr${near} onclick="openScannerTicker('${escHtml(r.ticker)}')"
         oncontextmenu="onEma200ScanRowContextMenu(event,'${escHtml(r.ticker)}')" style="cursor:pointer;">
@@ -2090,7 +2117,7 @@ function ema200ResultsTableHtml() {
       <td class="r">${sign}${r.dist_pct.toFixed(2)}%</td>
       <td class="r" style="color:var(--muted);">${r.weeks}t${r.source === 'yfinance'
         ? ' <span title="Ticker nie je na eToro — počítané z yfinance, číslo sa môže líšiť od grafu" style="color:var(--yellow)">yf</span>'
-        : ''}</td>
+        : ''}</td>${orderCell}
     </tr>`;
   }).join('');
   return `
@@ -2102,7 +2129,7 @@ function ema200ResultsTableHtml() {
     </div>
     <div style="max-height:360px;overflow:auto;">
     <table class="tool-table"><thead><tr>
-      ${th('ticker', 'Ticker')}${th('close', 'Cena', 'r')}${th('ema200', 'EMA200', 'r')}${th('dist_pct', 'Odstup', 'r')}${th('weeks', 'História', 'r')}
+      ${th('ticker', 'Ticker')}${th('close', 'Cena', 'r')}${th('ema200', 'EMA200', 'r')}${th('dist_pct', 'Odstup', 'r')}${th('weeks', 'História', 'r')}${showOrders ? '<th class="r" title="Limitná cena čakajúceho orderu; tooltip ukáže odstup od EMA200">Order</th>' : ''}
     </tr></thead><tbody>${rows}</tbody></table>
     </div>`;
 }
@@ -2118,19 +2145,40 @@ async function runEma200Scan() {
   ema200ScanLoading = true;
   ema200ScanError = null;
   renderEma200Card();
+  // Rozsah sa zafixuje pri štarte — ak ho počas behu prepneš, výsledok patrí
+  // rozsahu, pre ktorý bežal, a nesmie sa zobraziť pod druhým.
+  const scope = ema200ScanScope;
+  ema200ScanLoadingScope = scope;
   try {
-    const resp = await fetch(`${API}/api/scanner/ema200-scan`);
+    const resp = await fetch(`${API}/api/scanner/ema200-scan?scope=${scope}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    ema200ScanData = await resp.json();
-    ema200ScanRanAt = Date.now();
-    saveEma200ScanToStorage(ema200ScanData);
-    ema200ScanSort = { key: 'dist_pct', dir: 1 };
+    const data = await resp.json();
+    saveEma200ScanToStorage(data, scope);
+    if (scope === ema200ScanScope) {
+      ema200ScanData = data;
+      ema200ScanRanAt = Date.now();
+      ema200ScanSort = { key: 'dist_pct', dir: 1 };
+    }
   } catch (e) {
-    ema200ScanError = e.message;
+    if (scope === ema200ScanScope) ema200ScanError = e.message;
   } finally {
     ema200ScanLoading = false;
+    ema200ScanLoadingScope = null;
     renderEma200Card();
   }
+}
+
+function setEma200ScanScope(scope) {
+  if (scope !== 'all' && scope !== 'portfolio') return;
+  if (scope === ema200ScanScope) return;
+  ema200ScanScope = scope;
+  localStorage.setItem(EMA200_SCAN_SCOPE_KEY, scope);
+  const saved = loadEma200ScanFromStorage();
+  ema200ScanData = saved ? saved.data : null;
+  ema200ScanRanAt = saved ? saved.ts : null;
+  ema200ScanError = null;
+  ema200ScanSort = { key: 'dist_pct', dir: 1 };
+  renderEma200Card();
 }
 
 function sortEma200Scan(key) {
