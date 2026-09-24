@@ -26,6 +26,83 @@ from backend import etoro_proxy as ep
 
 
 
+class PortfolioPerformanceRegressionTests(unittest.TestCase):
+    def fixture(self):
+        dates = [date(2025, 1, d) for d in (3, 6, 7)]
+        histories = {s: list(zip(dates, prices)) for s, prices in {
+            "AMD": [100, 110, 120], "NET": [40, 50, 60],
+            "QQQ": [100, 120, 150], "SPY": [100, 110, 121]}.items()}
+        lots = [{"symbol": "AMD", "amount": 100, "opened": dates[0], "pnl": 20},
+                {"symbol": "NET", "amount": 300, "opened": dates[1], "pnl": 60}]
+        return lots, histories
+
+    def test_two_lots_value_over_invested(self):
+        lots, histories = self.fixture()
+        points = tb._portfolio_performance_series(lots, histories)["points"]
+        self.assertEqual([p["portfolio_pct"] for p in points], [0, 2.5, 20])
+
+    def test_real_entry_price_is_used_so_last_point_matches_broker_pnl(self):
+        # AMD kúpené cez deň za 95, close v ten deň 100, dnes 120. Broker P/L
+        # je +26,3 %; close/close by ukázal len +20 % a graf by sa rozišiel
+        # s kartou "Moje výbery vs index", ktorá počíta zo skutočného P/L.
+        lots, histories = self.fixture()
+        lots = [dict(lots[0], open_rate=95.0)]
+        last = tb._portfolio_performance_series(lots, histories)["points"][-1]
+        self.assertAlmostEqual(last["portfolio_pct"], round((120 / 95 - 1) * 100, 2))
+
+    def test_entry_price_in_other_units_falls_back_to_close(self):
+        # Londýnsky titul: yfinance v pencách, eToro v librách (100×) — bez
+        # poistky by graf ukázal ~+12 000 %. Rovnako neupravená cena po splite.
+        lots, histories = self.fixture()
+        for rate in (1.0, 250.0):
+            with self.subTest(rate=rate):
+                last = tb._portfolio_performance_series([dict(lots[0], open_rate=rate)], histories)["points"][-1]
+                self.assertAlmostEqual(last["portfolio_pct"], 20.0)
+
+    def test_shadow_uses_same_amounts_and_dates(self):
+        lots, histories = self.fixture()
+        last = tb._portfolio_performance_series(lots, histories)["points"][-1]
+        self.assertEqual(last["qqq_pct"], 31.25)
+        self.assertEqual(last["spy_pct"], 12.75)
+
+    def test_weekend_uses_next_trading_day(self):
+        lots, histories = self.fixture()
+        lots[1]["opened"] = date(2025, 1, 4)
+        self.assertEqual(tb._portfolio_performance_series(lots, histories)["points"][-1]["portfolio_pct"], 20)
+
+    def test_missing_history_reduces_coverage(self):
+        lots, histories = self.fixture()
+        histories["NET"] = histories["NET"][-1:]
+        result = tb._portfolio_performance_series(lots, histories)
+        self.assertEqual(result["coverage_pct"], 25)
+        self.assertEqual(result["excluded"], ["NET"])
+        self.assertEqual(result["lots"], 1)
+
+    def test_account_two_never_included(self):
+        positions = {a: {"data": [{"type": "Stock", "symbol": sym, "amount": 100,
+                     "pnl": 0, "openDateTime": "2025-01-03"}]} for a, sym in [("1", "AMD"), ("2", "NET")]}
+        with patch.object(tb, "_positions_cache", positions):
+            self.assertEqual([l["symbol"] for l in tb._portfolio_benchmark_lots()], ["AMD"])
+
+    def test_last_point_matches_benchmark_with_consistent_pnl(self):
+        lots, histories = self.fixture()
+        positions = [{**l, "type": "Stock", "openDateTime": l["opened"].isoformat()} for l in lots]
+        with patch.object(tb, "_positions_cache", {"1": {"data": positions}}), \
+             patch.object(tb, "_benchmark_cache", {"key": None, "ts": 0}), \
+             patch.object(tb, "_benchmark_closes", side_effect=lambda s: histories[s]):
+            benchmark = tb.get_portfolio_benchmark()
+            last = tb._portfolio_performance_series(tb._portfolio_benchmark_lots(), histories)["points"][-1]
+        self.assertAlmostEqual(last["portfolio_pct"], benchmark["portfolio_return_pct"], delta=0.05)
+        self.assertAlmostEqual(last["qqq_pct"], benchmark["benchmarks"]["QQQ"]["return_pct"], delta=0.05)
+
+    def test_nan_and_missing_sessions_are_safe(self):
+        lots, histories = self.fixture()
+        histories["AMD"][1] = (date(2025, 1, 6), float("nan"))
+        result = tb._portfolio_performance_series(lots, histories)
+        json.dumps(result, allow_nan=False)
+        self.assertEqual(result["points"][1]["portfolio_pct"], 0)
+
+
 class PortfolioDropsRegressionTests(unittest.TestCase):
     def frame(self, close=None, high=None):
         close = close or [100, 100, 110, 130, 120, 85]

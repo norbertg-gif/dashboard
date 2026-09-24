@@ -4416,11 +4416,8 @@ def get_portfolio_benchmark_closed(months: int = Query(24, ge=1, le=120)):
     return data
 
 
-@app.get("/api/portfolio/benchmark")
-def get_portfolio_benchmark():
-    """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
-    od otvorenia každej pozície. Viď blok komentárov vyššie — hlavne výhradu, že
-    zatvorené obchody sa nezapočítavajú."""
+def _portfolio_benchmark_lots():
+    """Shared account-1 open Stock/ETF selection from processed cache only."""
     # Zámerne LEN účet 1 (rozhodnutie 2026-08-05): účet 2 má inú povahu a
     # miešanie oboch dávalo číslo, ktoré nesedelo so žiadnym z nich.
     lots = []
@@ -4440,9 +4437,113 @@ def get_portfolio_benchmark():
                 except Exception:
                     continue
                 lots.append({"symbol": pos.get("symbol"), "amount": amount,
-                             "pnl": pnl, "opened": opened_d})
+                             "pnl": pnl, "opened": opened_d,
+                             "open_rate": _num_or_none(pos.get("openRate"))})
         except Exception as e:
             print(f"  [benchmark] account {acct}: {_scrub_token(e)}")
+
+    return lots
+
+
+_performance_cache = {"key": None, "data": None, "ts": 0.0}
+
+
+def _lot_entry_price(lot, entries):
+    """Skutočná nákupná cena (eToro openRate), ak je v rovnakých jednotkách ako
+    história; inak close dňa nákupu.
+
+    Bez openRate sa posledný bod grafu nezhodne s kartou „Moje výbery vs index",
+    ktorá počíta zo skutočného P/L — nákup cez deň a close sa bežne líšia o
+    jednotky %. Poistka ±20 % voči close dňa nákupu chytá jednotky, ktoré sa
+    NEZHODUJÚ: londýnske tituly má yfinance v pencách, eToro môže mať libry
+    (100×), a split po nákupe vie rozdeliť neupravenú cenu od upravenej histórie.
+    Skutočný pohyb ceny za jeden deň sa do ±20 % zmestí."""
+    close = entries[lot["symbol"]][1]
+    rate = lot.get("open_rate")
+    if rate and rate > 0 and 0.8 <= rate / close <= 1.2:
+        return float(rate)
+    return close
+
+
+def _portfolio_performance_series(lots, histories):
+    """Pure close/close approximation; all lines share invested amounts/dates.
+
+    Truncated history is not an entry price. Within covered history, weekends
+    use the next session. Broker P/L is not used to force endpoint agreement.
+    """
+    from bisect import bisect_left
+    clean = {}
+    for symbol, rows in histories.items():
+        clean[symbol] = sorted({d: float(c) for d, c in (rows or [])
+                                if _num_or_none(c) is not None and float(c) > 0}.items())
+    covered, excluded = [], set()
+    total = sum(l["amount"] for l in lots)
+    for lot in lots:
+        entries = {}
+        for symbol in (lot["symbol"], "QQQ", "SPY"):
+            rows = clean.get(symbol, [])
+            if not rows or rows[0][0] > lot["opened"] or rows[-1][0] < lot["opened"]:
+                break
+            idx = bisect_left([d for d, _ in rows], lot["opened"])
+            entries[symbol] = rows[idx]
+        else:
+            covered.append((lot, entries))
+            continue
+        excluded.add(lot["symbol"] or "?")
+    symbols = {symbol for _, entries in covered for symbol in entries}
+    dates = sorted({d for symbol in symbols for d, _ in clean[symbol]})
+    lookups = {symbol: dict(clean[symbol]) for symbol in symbols}
+    current, points = {}, []
+    for d in dates:
+        for symbol in symbols:
+            if d in lookups[symbol]:
+                current[symbol] = lookups[symbol][d]
+        active = [(lot, entries) for lot, entries in covered if lot["opened"] <= d
+                  and all(entry[0] <= d for entry in entries.values())]
+        invested = sum(lot["amount"] for lot, _ in active)
+        if not invested:
+            continue
+        point = {"date": d.isoformat()}
+        for field, index in (("portfolio_pct", None), ("qqq_pct", "QQQ"), ("spy_pct", "SPY")):
+            value = sum(lot["amount"] * current[index or lot["symbol"]]
+                        / (_lot_entry_price(lot, entries) if index is None else entries[index][1])
+                        for lot, entries in active)
+            point[field] = round((value / invested - 1) * 100, 2)
+        points.append(point)
+    return {"available": bool(points), "account": "1", "points": points,
+            "coverage_pct": round(sum(l["amount"] for l, _ in covered) / total * 100, 2) if total else 0,
+            "lots": len(covered), "excluded": sorted(excluded),
+            "note": "Účet 1 · od skutočnej nákupnej ceny, bez FX a poplatkov; iba dnes otvorené loty, "
+                    "bez uzavretých obchodov (survivorship bias)."}
+
+
+@app.get("/api/portfolio/performance")
+def get_portfolio_performance():
+    lots = _portfolio_benchmark_lots()
+    key = tuple(sorted((l["symbol"] or "", l["amount"], l["pnl"], l["opened"].isoformat()) for l in lots))
+    now = _time_module.time()
+    if _performance_cache["key"] == key and now - _performance_cache["ts"] < BENCHMARK_CACHE_TTL:
+        return _performance_cache["data"]
+    histories = {}
+    for symbol in sorted({l["symbol"] for l in lots if l["symbol"]} | ({"QQQ", "SPY"} if lots else set())):
+        try:
+            frame = _scanner_download_cached(symbol, "5y", "1d")
+            histories[symbol] = [(idx.date(), value) for idx, value in frame["Close"].items()] if frame is not None and not frame.empty else []
+        except Exception as e:
+            print(f"  [performance] {symbol}: {_scrub_token(e)}")
+            histories[symbol] = []
+    result = _portfolio_performance_series(lots, histories)
+    result["generated_at"] = datetime.now(timezone.utc).isoformat()
+    _performance_cache.update(key=key, data=result, ts=now)
+    return result
+
+
+@app.get("/api/portfolio/benchmark")
+def get_portfolio_benchmark():
+    """Vážené porovnanie otvorených Stock/ETF pozícií proti QQQ a SPY za obdobia
+    od otvorenia každej pozície. Viď blok komentárov vyššie — hlavne výhradu, že
+    zatvorené obchody sa nezapočítavajú."""
+    lots = _portfolio_benchmark_lots()
 
     if not lots:
         return {"available": False, "reason": "no_positions"}

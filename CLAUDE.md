@@ -656,7 +656,32 @@ These were already in the codebase and need to stay fixed:
    skreslené v prospech portfólia (survivorship — zatvorené straty chýbajú).
    Zámerne NEROBENÉ: alfa, beta, Sortino, Ulcer, XIRR, atribúcia.
 
--2. **Redizajn Prehľadu podľa referencie — PREBIEHA, LADÍ SA.**
+-2. **Redizajn Prehľadu podľa referencie — dvojstĺpcový layout + graf hotové 2026-09-24; runtime QA obmedzené sieťou.**
+   Nový layout: vľavo KPI → „Výkonnosť portfólia vs benchmark“ → existujúce karty
+   v pôvodnom poradí; vpravo samostatný stĺpec správ. LWC v5 line series, percentá,
+   modré Portfólio / fialové QQQ / amber SPY, legenda posledných hodnôt.
+   `GET /api/portfolio/performance`: iba účet 1, spoločný `_portfolio_benchmark_lots`
+   filter s benchmarkom, processed cache bez eToro requestu; scanner `5y/1d` closes,
+   RAM cache 15 min podľa podpisu lotov. Výpočet k dátumu d:
+   invested = Σ amount otvorených lotov, value = Σ amount × close(d)/nákupná cena,
+   percent = (value/invested − 1) × 100; indexy používajú rovnaké sumy a dátumy.
+   Close sa forward-filluje, chýbajúce pokrytie vstupu vylučuje lot a znižuje coverage_pct.
+   Rozsahy 1M/3M/6M/YTD/1Y/2Y/ALL (default YTD, localStorage) iba orezávajú,
+   NIKDY nerebasujú money-weighted sériu. Chart a ResizeObserver sa čistia pri DOM obnove.
+   NIE JE eToro equity curve: daily-gain/gain mieša krypto, leverage a copy trading (viď -3).
+   **Nákupná cena = eToro `openRate`, nie close dňa nákupu** — inak sa koniec grafu rozíde
+   s kartou „Moje výbery vs index" (nákup cez deň vs close sa bežne líši o jednotky %).
+   Poistka: ak sa `openRate` líši od close dňa nákupu o viac než ±20 %, vezme sa close —
+   londýnske tituly má yfinance v pencách a eToro môže mať libry (100×), a neupravená
+   cena po splite by dala nezmysel (`_lot_entry_price`). Indexy vstupujú close prvého
+   obchodného dňa ≥ nákup. Bez FX a poplatkov, survivorship bias: iba dnes otvorené loty,
+   uzavreté obchody chýbajú; upozornenie je priamo pod grafom.
+   Konzistencia: regresia garantuje posledný bod portfólia a QQQ do 0,05 pp pri rovnakých
+   syntetických cenách a konzistentnom broker P/L. Všeobecnú zhodu nemožno garantovať:
+   nezmenený benchmark používa skutočný broker pnl a indexy z inej (2y) cache,
+   graf spoločnú pokrytú množinu lotov. Koncový bod neupravovať umelo.
+   Overené lokálne na 8 reálnych tituloch (2024-10 až 2026-05): 486 dní, pokrytie 100 %,
+   1,2 s zo scanner cache, žiadne NaN.
    Používateľ dodal mockup (2026-08-04) a chce ísť jeho smerom: tmavý terminálový
    štýl, KPI riadok hore, pod ním bloky *čo riešiť / príležitosti / kontext*,
    koláčový graf príspevku k výnosu, prehľadová tabuľka pozícií.
@@ -1259,7 +1284,7 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 
 ## Data flow worth knowing
 
-- `GET /api/home/news` reads cached processed positions from both accounts, Stock-only, deduplicated by uppercase symbol (never calls eToro). Yahoo search (`newsCount=10`) -> Finnhub company-news (last 7 days, when configured); no Alpha Vantage because its 25 requests/day cannot cover the portfolio. **Výber je zmeraný na 16 držaných tituloch (2026-09-24), neprerábať bez nového merania:** (1) články s tickerom na PRVOM mieste v `relatedTickers`, z nich sústredený (≤2 tickery), ak nie je o viac než 48 h starší než najnovší, inak najnovší; (2) ak taký nie je, článok s najviac dvoma tickermi; (3) inak NIČ — radšej žiadna správa než zoznam „3 čipové akcie". Prvá verzia radila „menej tickerov" pred aktuálnosťou (NU dostal 6 dní starý článok namiesto 7-hodinového) a prepadala na zoznamy (GFS dostal článok o Monolithic Power). Studený beh má rozpočet `PORTFOLIO_NEWS_BATCH_BUDGET_S` (25 s) a timeout 5 s na zdroj: Yahoo z Render IP nie je overený a visiaci zdroj by inak držal Prehľad 1–3 minúty; čo rozpočet nestihne, sa NEZAPÍŠE a dobehne pri ďalšom otvorení. Lokálne zmerané: 16 titulov 4,6 s naprázdno, 16 ms z cache. `portfolio_news.json` is atomically written under a module lock, fresh for 6h, failed attempts retry after 1h and retain the last good item marked stale. At most four fetch workers; items older than 7 days appear only in `without_news`. The Home card loads independently after KPI, before the unchanged benchmark card.
+- `GET /api/home/news` reads cached processed positions from both accounts, Stock-only, deduplicated by uppercase symbol (never calls eToro). Yahoo search (`newsCount=10`) -> Finnhub company-news (last 7 days, when configured); no Alpha Vantage because its 25 requests/day cannot cover the portfolio. **Výber je zmeraný na 16 držaných tituloch (2026-09-24), neprerábať bez nového merania:** (1) články s tickerom na PRVOM mieste v `relatedTickers`, z nich sústredený (≤2 tickery), ak nie je o viac než 48 h starší než najnovší, inak najnovší; (2) ak taký nie je, článok s najviac dvoma tickermi; (3) inak NIČ — radšej žiadna správa než zoznam „3 čipové akcie". Prvá verzia radila „menej tickerov" pred aktuálnosťou (NU dostal 6 dní starý článok namiesto 7-hodinového) a prepadala na zoznamy (GFS dostal článok o Monolithic Power). Studený beh má rozpočet `PORTFOLIO_NEWS_BATCH_BUDGET_S` (25 s) a timeout 5 s na zdroj: Yahoo z Render IP nie je overený a visiaci zdroj by inak držal Prehľad 1–3 minúty; čo rozpočet nestihne, sa NEZAPÍŠE a dobehne pri ďalšom otvorení. Lokálne zmerané: 16 titulov 4,6 s naprázdno, 16 ms z cache. `portfolio_news.json` is atomically written under a module lock, fresh for 6h, failed attempts retry after 1h and retain the last good item marked stale. At most four fetch workers; items older than 7 days appear only in `without_news`. The news loads independently in the right-hand Home column (320–360 px), with compact ticker/age, three-line headline and source rows; below 1200 px it stacks last. The old wide card after KPI was removed. Stĺpec je `position: sticky; top: 12px` s vlastným ohraničeným scrollom — **zmerané v prehliadači**: scrolluje `#main-home`, pri scrolle 0/400/900 px ostal stĺpec na top 108/12/12 px; bez sticky odišiel s prvou obrazovkou (−271 px). Pod 1200 px `position: static`.
 
 
 - **`_yf_download_cached` skúša Massive pred yfinance.** yfinance je na free tieri najkrehkejší zdroj (rate-limit → prázdne grafy, scanner "chyby"). `_massive_daily_bars(ticker, period, interval)` ťahá denné/týždenné bary z Massive `/v2/aggs/ticker/.../range/1/{day|week}/...` (Polygon-style), yfinance je fallback. Intraday (1h/4h) ostáva na yfinance (free Massive plán ho nemá). Po prvom `NOT_AUTHORIZED` sa Massive bary vypnú flagom `_massive_bars_disabled` (žiadny opakovaný latency hit). `get_chart` (weekly predictive) má Massive len ako fallback keď yfinance vráti prázdno. **Over cez `/api/diagnostics/massive`, či free plán per-ticker agregáty vôbec dáva** — ak nie, všetko padá späť na yfinance bez zmeny správania.

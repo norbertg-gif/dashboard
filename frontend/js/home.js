@@ -101,10 +101,11 @@ async function renderHomeView(force = false) {
   // Čerstvé dáta z poslednej návštevy — vykresli hneď, bez ďalšieho kola
   // refresh=1 fetchov na eToro proxy (Home sa má dať prepínať bez trestu).
   if (!force && _homeLastData && (Date.now() - _homeLastFetchMs) < HOME_DATA_TTL_MS) {
+    disposeHomePerformance();
     el.innerHTML = homeContentHtml(_homeLastData);
     // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
     // aby ju nedržal ten istý TTL ako portfóliový snapshot.
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); loadHomePerformance(); }, 0);
     return;
   }
 
@@ -113,10 +114,11 @@ async function renderHomeView(force = false) {
   // portfolioAccountData — staré pozície (napr. medzitým zatvorené) by sa
   // rozliezli do Portfólia a header pills; to nech naplní až živý fetch nižšie.
   const snap = homeCacheRead();
+  disposeHomePerformance();
   el.innerHTML = snap
     ? homeStaleBarHtml(snap.t) + homeContentHtml(snap.d)
     : homeSkeletonHtml();
-  if (snap) loadPortfolioNewsCard();
+  if (snap) { loadPortfolioNewsCard(); loadHomePerformance(); }
   try {
     const acct = (typeof activeAccount !== 'undefined' && activeAccount) || '1';
     const results = await Promise.allSettled([
@@ -146,16 +148,18 @@ async function renderHomeView(force = false) {
       }
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
+    disposeHomePerformance();
     el.innerHTML = homeContentHtml(_homeLastData);
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); loadHomePerformance(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
-    el.innerHTML = snap
+    disposeHomePerformance();
+  el.innerHTML = snap
       ? `<div class="home-error">Aktualizácia zlyhala: ${escHtml(e.message)} — nižšie je uložený stav.</div>` +
         homeContentHtml(snap.d)
       : `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
-    if (snap) loadPortfolioNewsCard();
+    if (snap) { loadPortfolioNewsCard(); loadHomePerformance(); }
   } finally {
     _homeLoading = false;
   }
@@ -827,9 +831,9 @@ function homeNewsHtml(data) {
       ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(item.title)}</a>`
       : escHtml(item.title);
     return `<div class="home-news-row">
-      <button type="button" class="btn mini" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}">${escHtml(row.ticker)}</button>
-      <div>${headline}<div class="home-news-meta">${escHtml(item.source || '')} · ${escHtml(homeNewsAge(row.age_hours))}
-        ${row.stale ? '<span title="Obnovenie správy zlyhalo. Zobrazuje sa posledná uložená správa.">(staršie)</span>' : ''}</div></div>
+      <div class="home-news-top"><button type="button" class="btn mini" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}">${escHtml(row.ticker)}</button><span class="home-news-meta">${escHtml(homeNewsAge(row.age_hours))}</span></div>
+      <div class="home-news-headline">${headline}</div><div class="home-news-meta">${escHtml(item.source || '')}
+        ${row.stale ? '<span title="Obnovenie správy zlyhalo. Zobrazuje sa posledná uložená správa.">(staršie)</span>' : ''}</div>
     </div>`;
   }).join('');
   return `<div class="home-news-list">${rows || '<div class="home-empty">Žiadne aktuálne správy k držaným akciám.</div>'}</div>`
@@ -853,6 +857,100 @@ async function loadPortfolioNewsCard() {
   }
 }
 
+let _homePerformanceChart = null;
+let _homePerformanceRO = null;
+let _homePerformanceData = null;
+
+function disposeHomePerformance() {
+  if (_homePerformanceRO) _homePerformanceRO.disconnect();
+  _homePerformanceRO = null;
+  if (_homePerformanceChart) _homePerformanceChart.remove();
+  _homePerformanceChart = null;
+}
+
+function homePerformanceRange() {
+  try {
+    const range = localStorage.getItem('td_home_performance_range');
+    if (['1M', '3M', '6M', 'YTD', '1Y', '2Y', 'ALL'].includes(range)) return range;
+  } catch (e) {}
+  return 'YTD';
+}
+
+function homePerformanceHtml() {
+  return `<div class="home-performance-ranges">${['1M', '3M', '6M', 'YTD', '1Y', '2Y', 'ALL'].map(r =>
+    `<button class="btn mini ${r === homePerformanceRange() ? 'active' : ''}" type="button" data-performance-range="${r}" onclick="homeSetPerformanceRange('${r}')">${r}</button>`).join('')}</div>
+    <div class="home-performance-body"><div id="home-performance-chart"><div class="home-empty">Načítavam…</div></div><div id="home-performance-legend"></div></div>
+    <div id="home-performance-note" class="signal-outcome-note">Účet 1 · od skutočnej nákupnej ceny, bez FX a poplatkov; iba dnes otvorené loty, uzavreté obchody chýbajú (survivorship bias).</div>`;
+}
+
+function homeSetPerformanceRange(range) {
+  try { localStorage.setItem('td_home_performance_range', range); } catch (e) {}
+  renderHomePerformance(_homePerformanceData, range);
+}
+
+async function loadHomePerformance() {
+  const container = document.getElementById('home-performance-chart');
+  if (!container) return;
+  try {
+    const response = await fetch(`${API}/api/portfolio/performance`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!container.isConnected) return;
+    _homePerformanceData = data;
+    renderHomePerformance(data);
+  } catch (e) {
+    if (container.isConnected) container.innerHTML = '<div class="home-empty">Výkonnosť sa teraz nepodarilo načítať.</div>';
+  }
+}
+
+function renderHomePerformance(data, range = homePerformanceRange()) {
+  disposeHomePerformance();
+  const container = document.getElementById('home-performance-chart');
+  if (!container) return;
+  container.innerHTML = '';
+  document.querySelectorAll('[data-performance-range]').forEach(b => b.classList.toggle('active', b.dataset.performanceRange === range));
+  const legend = document.getElementById('home-performance-legend');
+  legend.innerHTML = '';
+  if (!data?.available || !data.points?.length) {
+    container.innerHTML = '<div class="home-empty">Pre graf zatiaľ nie je dostupná história otvorených pozícií účtu 1.</div>';
+    return;
+  }
+  document.getElementById('home-performance-note').textContent = `${data.note} Pokrytie: ${data.coverage_pct} %${data.excluded?.length ? ' · Vynechané: ' + data.excluded.join(', ') : ''}`;
+  if (typeof LightweightCharts === 'undefined') {
+    container.innerHTML = '<div class="home-empty">Knižnica grafu sa nenačítala. Skontroluj pripojenie a obnov stránku.</div>';
+    return;
+  }
+  const theme = getChartTheme();
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: 320,
+    layout: { background: { type: 'solid', color: theme.bg }, textColor: theme.text, attributionLogo: false },
+    grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
+    rightPriceScale: { borderColor: theme.border },
+    timeScale: { borderColor: theme.border, timeVisible: false },
+    // Rovnaký formát ako legenda (desatinná čiarka); os s 2 desatinnými je šum.
+    localization: { locale: 'sk-SK', priceFormatter: p => `${p.toLocaleString('sk-SK', { maximumFractionDigits: 1 })} %` },
+  });
+  _homePerformanceChart = chart;
+  const last = data.points[data.points.length - 1];
+  // Crop only: a money-weighted P/L/invested curve must never be rebased.
+  const cutoff = new Date(`${last.date}T00:00:00Z`);
+  if (range === 'YTD') cutoff.setUTCMonth(0, 1);
+  else if (range.endsWith('M')) cutoff.setUTCMonth(cutoff.getUTCMonth() - parseInt(range));
+  else if (range.endsWith('Y')) cutoff.setUTCFullYear(cutoff.getUTCFullYear() - parseInt(range));
+  const from = cutoff.toISOString().slice(0, 10);
+  const points = data.points.filter(p => range === 'ALL' || p.date >= from);
+  for (const [field, label, color] of [['portfolio_pct', 'Portfólio', '#528bff'], ['qqq_pct', 'QQQ', '#a78bfa'], ['spy_pct', 'SPY', '#e9ae45']]) {
+    const series = chart.addSeries(LightweightCharts.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    series.setData(points.map(p => ({ time: p.date, value: p[field] })));
+    legend.innerHTML += `<div style="color:${color}"><span>${label}</span><strong>${last[field] >= 0 ? '+' : ''}${last[field].toLocaleString('sk-SK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %</strong></div>`;
+  }
+  chart.timeScale().fitContent();
+  _homePerformanceRO = new ResizeObserver(() => {
+    if (container.isConnected && container.clientWidth > 0) chart.applyOptions({ width: container.clientWidth });
+  });
+  _homePerformanceRO.observe(container);
+}
+
 function homeContentHtml(data) {
   return `
     <div class="home-wrap">
@@ -864,10 +962,9 @@ function homeContentHtml(data) {
         </div>
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
+      <div class="home-columns"><div class="home-main-column">
       ${homePortfolioKpiHtml(data.port1, data.port2)}
-      ${homeCard('Správy k portfóliu',
-        `<div id="home-news-block"><div class="home-empty">Načítavam…</div></div>`,
-        { wide: true })}
+      ${homeCard('Výkonnosť portfólia vs benchmark', homePerformanceHtml(), { className: 'home-card-performance' })}
       ${homeCard('Moje výbery vs index',
         `<div id="home-bench-block"><div class="home-empty">Načítavam…</div></div>`,
         { className: 'home-card-bench' })}
@@ -883,5 +980,8 @@ function homeContentHtml(data) {
         ${homeCard('Možný nákup', buildFirstBarrierHtml(data.plan) + homePlanRowsHtml(data.plan?.buy_candidates, 'Plán tento týždeň nenašiel kandidáta na nákup.'), { className: 'home-card-dip' })}
         ${homeCard('Možné DCA', homePlanRowsHtml(data.plan?.dca, 'Tento týždeň nie je kandidát na DCA.'), { className: 'home-card-dip' })}
       </div>
+      </div><aside class="home-news-column" aria-label="Správy k portfóliu">
+        ${homeCard('Správy k portfóliu', '<div id="home-news-block"><div class="home-empty">Načítavam…</div></div>')}
+      </aside></div>
     </div>`;
 }

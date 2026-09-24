@@ -46,3 +46,6 @@ ml_accuracy_eval.py
 API Endpoints v2.json
 marketstack API Endpoints v2.json
 Trading Dashboard.html
+
+# cache Správ k portfóliu (lokálne DATA_ROOT = repo)
+portfolio_news.json

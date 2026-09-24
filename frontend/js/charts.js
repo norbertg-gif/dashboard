@@ -259,6 +259,7 @@ function resetAllChartsToDefault() {
 }
 
 function applyThemeToAllCharts() {
+  if (typeof _homePerformanceChart !== 'undefined' && _homePerformanceChart) applyChartTheme(_homePerformanceChart);
   // Panel grafy (registry)
   for (const r of Object.values(registry)) {
     if (r.mainChart) applyChartTheme(r.mainChart);
