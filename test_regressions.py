@@ -26,6 +26,92 @@ from backend import etoro_proxy as ep
 
 
 
+class PortfolioDropsRegressionTests(unittest.TestCase):
+    def frame(self, close=None, high=None):
+        close = close or [100, 100, 110, 130, 120, 85]
+        return pd.DataFrame({"Close": close, "High": high or [100, 100, 110, 150, 125, 90]},
+                            index=pd.date_range("2026-01-02", periods=len(close), freq="W-FRI"))
+
+    def endpoint(self, frames=None, holdings=None, threshold=15):
+        frames = frames or {"FOUR": self.frame(), "QQQ": self.frame([100]*6, [100]*6)}
+        with patch.object(tb, "_portfolio_drops_cache", {}), patch.object(tb, "_get_portfolio_holdings", return_value=holdings or {"FOUR": {}}), patch.object(tb, "_scanner_download_cached", side_effect=lambda ticker, period, interval: frames[ticker]), patch.object(tb, "load_dip_scores", return_value={}), patch.object(tb, "load_scanner_cache", return_value={}), patch.object(tb, "_assistant_solvency", return_value={}), patch.object(tb, "_assistant_solvency_verdict", return_value={"status": "unknown", "flag": False}):
+            return tb.get_portfolio_drops(threshold=threshold)
+
+    def test_rally_then_collapse_drawdown_beats_change(self):
+        m = tb._portfolio_drop_metrics(self.frame())
+        self.assertAlmostEqual(m["change_4w_pct"], -15)
+        self.assertAlmostEqual(m["drawdown_4w_pct"], (85/150-1)*100)
+        self.assertLess(m["drawdown_4w_pct"], m["change_4w_pct"])
+
+    def test_window_is_current_week_plus_four_full_weeks(self):
+        # 5 sviečok: prah 15 % je nameraný na tomto okne. 900 (6. od konca) je
+        # mimo, 800 (5. od konca) v okne — pri 4-sviečkovom okne by vypadlo.
+        m = tb._portfolio_drop_metrics(self.frame(high=[900, 800, 110, 120, 125, 150]))
+        self.assertAlmostEqual(m["drawdown_4w_pct"], (85/800-1)*100)
+        self.assertEqual(m["peak_week"], "2026-01-09")
+        self.assertEqual(m["bars"], 6)
+
+    def test_insufficient_has_no_numbers_and_is_listed(self):
+        frame = self.frame().iloc[:5]
+        m = tb._portfolio_drop_metrics(frame)
+        self.assertIsNone(m["drawdown_4w_pct"])
+        self.assertIsNone(m["change_4w_pct"])
+        data = self.endpoint({"FOUR": frame, "QQQ": self.frame()})
+        self.assertEqual(data["insufficient"], ["FOUR"])
+        self.assertIsNone(data["rows"][0]["vs_qqq_pp"])
+
+    def test_vs_qqq_subtracts_change(self):
+        data = self.endpoint({"FOUR": self.frame(), "QQQ": self.frame([100,100,101,102,103,104], [100,100,101,102,103,104])})
+        self.assertEqual(data["rows"][0]["vs_qqq_pp"], -19)
+
+    def test_threshold_boundary_inclusive(self):
+        data = self.endpoint({"FOUR": self.frame([100,100,100,100,100,85], [100]*6), "QQQ": self.frame()})
+        self.assertTrue(data["rows"][0]["significant"])
+        self.assertFalse(self.endpoint({"FOUR": self.frame([100,100,100,100,100,85.01], [100]*6), "QQQ": self.frame()})["rows"][0]["significant"])
+
+    def test_sorted_deepest_first(self):
+        data = self.endpoint({"A": self.frame([100]*6,[100]*6), "B": self.frame(), "QQQ": self.frame()}, {"A": {}, "B": {}})
+        self.assertEqual([r["ticker"] for r in data["rows"]], ["B", "A"])
+
+    def test_only_held_symbols(self):
+        data = self.endpoint({"FOUR": self.frame(), "WATCH": self.frame(), "QQQ": self.frame()})
+        self.assertEqual([r["ticker"] for r in data["rows"]], ["FOUR"])
+        self.assertEqual(data["total"], 1)
+
+    def test_nan_free_output(self):
+        frame = self.frame(); frame.iloc[-2, frame.columns.get_loc("High")] = float("nan")
+        data = self.endpoint({"FOUR": frame, "QQQ": frame}, {"FOUR": {"pnl_pct": float("nan")}})
+        json.dumps(data, allow_nan=False)
+        self.assertIsNone(data["rows"][0]["drawdown_4w_pct"])
+
+    def test_settings_save_clears_drops_cache(self):
+        class FakeRequest:
+            async def json(self): return {"portfolio_drop_pct": 20}
+        with patch.object(tb, "_portfolio_drops_cache", {("date",15): (0,{})}), patch.object(tb, "_atomic_write_json"), patch.object(tb, "_investor_view_cache", {}):
+            result = asyncio.run(tb.save_dash_settings(FakeRequest()))
+            self.assertEqual(result["settings"]["portfolio_drop_pct"], 20)
+            self.assertEqual(tb._portfolio_drops_cache, {})
+
+    def test_default_setting_and_limits(self):
+        self.assertEqual(tb.DASH_SETTINGS_DEFAULTS["portfolio_drop_pct"], 15)
+        self.assertEqual(tb._DASH_SETTINGS_LIMITS["portfolio_drop_pct"], (3,60))
+
+    def test_saved_layout_without_drops_keeps_new_card(self):
+        script = r"""
+const fs = require('fs'), vm = require('vm'), assert = require('assert');
+const context = { localStorage: {getItem: () => JSON.stringify([['plan','calendar'],['inbox','radar'],['ema200']])} };
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('frontend/js/scanner.js','utf8'), context);
+vm.runInContext(`
+  if (!SCANNER_AUX_DEFAULT_LAYOUT.flat().includes('drops')) throw Error('Missing default drops card');
+  const result = getStoredScannerAuxLayout(['plan','calendar','inbox','radar','ema200','drops']);
+  if (result.flat().length !== 6 || result[2].join(',') !== 'ema200,drops') throw Error('New card lost');
+`, context);
+"""
+        result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class PortfolioNewsRegressionTests(unittest.TestCase):
     def item(self, title="Company news", published=None):
         return {"title": title, "url": "https://example.com/news", "source": "Example",
@@ -972,6 +1058,24 @@ class BuildReadinessRegressionTests(unittest.TestCase):
                 data = self.build({"A": {"position_class": "CORE", "target_weight": 50, **extra}})
                 row = next(r for r in data["positions"] if r["symbol"] == "A")
                 self.assertEqual((row["readiness"], row["readiness_reason"]), ("blocked", reason))
+
+    def test_real_chart_health_output_blocks_build(self):
+        # Porovnanie bolo == "Bad", ale chart_health() vracia status "bad"
+        # (malé písmená; "Bad" je len label). Titul s pokazeným grafom teda
+        # v produkcii NIKDY neblokoval a mohol byť PRIPRAVENÝ. Fixture "Bad"
+        # prevzatý z dokumentácie to zakryl — preto sa status berie z reálnej funkcie.
+        import numpy as np
+        idx = pd.date_range("2025-01-01", periods=260, freq="B")
+        close = np.concatenate([np.linspace(100, 150, 200), np.linspace(150, 80, 60)])
+        df = pd.DataFrame({"Open": close * 1.01, "High": close * 1.02, "Low": close * 0.97, "Close": close,
+                           "Volume": np.r_[np.full(250, 1e6), np.full(10, 4e6)]}, index=idx)
+        health = tb.chart_health(tb.add_indicators(df), "daily")
+        self.assertEqual(health["status"], "bad", "fixture už nevyrába zlý graf")
+        data = self.build(scanner=[{"ticker": "A", "chart_health": {"daily": health},
+                                    "entry_zone": {"ema20_dist_pct": 1, "atr_pct": 5}}])
+        row = next(r for r in data["positions"] if r["symbol"] == "A")
+        self.assertEqual(row["readiness"], "blocked")
+        self.assertIn("denný", row["readiness_reason"])
 
     def test_bad_chart_either_timeframe_precedes_missing_zone(self):
         for frame, label in [("daily", "denný"), ("weekly", "týždenný")]:

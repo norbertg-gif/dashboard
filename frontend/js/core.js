@@ -422,6 +422,7 @@ function renderErrorBox(el, msg, retryFn) {
 // pravdy (DCA prahy konzumuje aj Investor Inbox), toto je len štartovací stav
 // kým sa nedotiahne /api/settings.
 let dashSettings = {
+  portfolio_drop_pct: 15,
   dca_loss_pct: 15,
   dca_last_tranche_pct: 20,
   solvency_coverage_max: 3,
@@ -453,6 +454,7 @@ async function loadDashSettings() {
 
 let dashSettingsDefaults = { ...dashSettings };
 const _SETTINGS_INPUTS = [
+  ['set-portfolio-drop-pct', 'portfolio_drop_pct'],
   ['set-dca-loss', 'dca_loss_pct'],
   ['set-dca-last-tranche', 'dca_last_tranche_pct'],
   ['set-solvency-coverage-max', 'solvency_coverage_max'],
@@ -520,6 +522,7 @@ async function saveSettingsModal() {
     clearScannerClientCache('weeklyPlan');
     if (portState.main?.data) renderPortPanel('main');
     applyScannerBadges();
+    if (document.getElementById('portfolio-drops-section')) loadPortfolioDrops();
     setStatus('Nastavenia uložené', 'ok');
   } catch(e) {
     setStatus(`Nastavenia sa nepodarilo uložiť: ${e.message}`, 'err');

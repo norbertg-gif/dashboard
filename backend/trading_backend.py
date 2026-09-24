@@ -2539,6 +2539,8 @@ def get_trade_history(
 DASH_SETTINGS_FILE = DATA_ROOT / "dashboard_settings.json"
 _dash_settings_lock = threading.Lock()
 DASH_SETTINGS_DEFAULTS = {
+    # Measured sample: 15% flags 7/30 company-specific falls; 10% flags a third.
+    "portfolio_drop_pct": 15,
     "dca_loss_pct": 15.0,        # strata pozície ≥ x % → DCA úvaha
     "dca_last_tranche_pct": 20.0, # posledná tranža ≤ -x % → DCA trigger
     "solvency_coverage_max": 3.0,
@@ -2564,6 +2566,7 @@ DASH_SETTINGS_DEFAULTS = {
     "ema200_scan_threshold_pct": 5.0,  # |cena-EMA200|/EMA200 <= x % -> "nebezpečne blízko" v EMA200 scane
 }
 _DASH_SETTINGS_LIMITS = {
+    "portfolio_drop_pct": (3, 60),
     "dca_loss_pct": (1, 90),
     "dca_last_tranche_pct": (1, 90),
     "solvency_coverage_max": (0, 50),
@@ -2624,6 +2627,8 @@ async def save_dash_settings(request: Request):
     # "Nastavenia uložené" a potom ten istý výsledok počítaný so starými prahmi.
     with _investor_view_cache_lock:
         _investor_view_cache.clear()
+    with _portfolio_drops_cache_lock:
+        _portfolio_drops_cache.clear()
     return {"ok": True, "settings": current}
 
 
@@ -2939,7 +2944,7 @@ def _build_position_rows(positions: list[dict], scanner_by_symbol: dict | None =
         rs_3m = (relative_strength or {}).get("rs_3m_pp")
         health = (scanner or {}).get("chart_health") or {}
         bad_frames = [label for key, label in (("daily", "denný"), ("weekly", "týždenný"))
-                      if (health.get(key) or {}).get("status") == "Bad"]
+                      if str((health.get(key) or {}).get("status") or "").lower() == "bad"]
         distance = (zone or {}).get("ema20_dist_pct")
         atr = (zone or {}).get("atr_pct")
         gap_amount = round(gap / 100 * book_value, 2) if gap is not None and gap > 0 else None
@@ -9339,6 +9344,90 @@ def _watched_symbols_for_calendar() -> list[str]:
 
 INVESTOR_INBOX_CACHE_TTL = 86400     # seconds; Scanner is a daily snapshot, manual refresh/scan bypasses cache
 EARNINGS_CALENDAR_VIEW_TTL = 86400   # seconds; earnings dates are day-level, not live data
+
+_portfolio_drops_cache = {}
+_portfolio_drops_cache_lock = threading.Lock()
+
+
+def _portfolio_drop_metrics(frame):
+    """Okno = aktuálny (rozbehnutý) týždeň + 4 CELÉ predchádzajúce = 5 týždenných
+    sviečok. Pokles = posledný close voči najvyššiemu High v okne; zmena = voči
+    close spred 4 sviečok. Presne na tejto definícii je nameraný prah 15 %
+    (2026-09-24, 30 titulov). Pri 4 sviečkach by okno v strede týždňa pokrylo
+    len ~3,4 týždňa: FOUR by ukázal −17,5 % namiesto skutočných −24,7 % a NCLH
+    (−20,0 %) by pod prah vôbec nespadol. Prah a okno patria k sebe."""
+    result = dict(drawdown_4w_pct=None, change_4w_pct=None, peak_week=None,
+                  bars=0 if frame is None else len(frame))
+    if result["bars"] < 6:
+        return result
+    highs = pd.to_numeric(frame["High"].iloc[-5:], errors="coerce")
+    close = _num_or_none(frame["Close"].iloc[-1])
+    base = _num_or_none(frame["Close"].iloc[-5])
+    if any(_num_or_none(v) is None or v <= 0 for v in highs) or close is None or close <= 0 or base is None or base <= 0:
+        return result
+    peak = highs.max()
+    result.update(drawdown_4w_pct=_num_or_none((close / peak - 1) * 100),
+                  change_4w_pct=_num_or_none((close / base - 1) * 100),
+                  peak_week=pd.Timestamp(highs.idxmax()).date().isoformat())
+    return result
+
+
+@app.get("/api/portfolio/drops")
+def get_portfolio_drops(threshold: float | None = Query(None, ge=3, le=60)):
+    settings = _dash_settings()
+    threshold = float(settings["portfolio_drop_pct"] if threshold is None else threshold)
+    if not 3 <= threshold <= 60:
+        raise HTTPException(400, "threshold: mimo rozsahu 3–60")
+    key = (datetime.now(timezone.utc).date().isoformat(), threshold)
+    with _portfolio_drops_cache_lock:
+        hit = _portfolio_drops_cache.get(key)
+        if hit and time.time() - hit[0] < 1800:
+            return hit[1]
+
+    def metrics(symbol):
+        try:
+            return _portfolio_drop_metrics(_scanner_download_cached(symbol, "1y", "1wk"))
+        except Exception:
+            return _portfolio_drop_metrics(None)
+
+    def rounded(value):
+        value = _num_or_none(value)
+        return round(value, 2) if value is not None else None
+
+    qqq = metrics("QQQ")
+    holdings = _get_portfolio_holdings()
+    dips = load_dip_scores() or {}
+    charts = {r.get("ticker"): r.get("chart_health") or {}
+              for r in (load_scanner_cache() or {}).get("results", [])}
+    rows, insufficient = [], []
+    for symbol, position in holdings.items():
+        m = qqq if symbol == "QQQ" else metrics(symbol)
+        dd, change = m["drawdown_4w_pct"], m["change_4w_pct"]
+        if dd is None or change is None:
+            insufficient.append(symbol)
+        solvency = _assistant_solvency_verdict(symbol, _assistant_solvency(symbol), settings)
+        chart = charts.get(symbol, {})
+        dip = dips.get(symbol, {}) if not symbol.startswith("_") else {}
+        rows.append(dict(ticker=symbol, **{k: rounded(m[k]) for k in ("drawdown_4w_pct", "change_4w_pct")},
+                         vs_qqq_pp=rounded(change - qqq["change_4w_pct"]) if change is not None and qqq["change_4w_pct"] is not None else None,
+                         peak_week=m["peak_week"], bars=m["bars"],
+                         position_pnl_pct=rounded(position.get("pnl_pct")), dip_total=rounded(dip.get("total")),
+                         chart_daily=(chart.get("daily") or {}).get("status"),
+                         chart_weekly=(chart.get("weekly") or {}).get("status"),
+                         solvency_status=solvency["status"], solvency_flag=bool(solvency["flag"]),
+                         significant=dd is not None and round(dd, 10) <= -threshold))
+    rows.sort(key=lambda r: (r["drawdown_4w_pct"] is None, r["drawdown_4w_pct"] or 0, r["ticker"]))
+    payload = dict(generated_at=datetime.now(timezone.utc).isoformat(), threshold_pct=threshold,
+                   window_weeks=4, qqq={k: rounded(qqq[k]) for k in ("change_4w_pct", "drawdown_4w_pct")},
+                   rows=rows, insufficient=sorted(insufficient), total=len(holdings))
+    with _portfolio_drops_cache_lock:
+        # Bound RAM even when callers explore many custom thresholds.
+        if len(_portfolio_drops_cache) >= 64:
+            _portfolio_drops_cache.clear()
+        _portfolio_drops_cache[key] = (time.time(), payload)
+    return payload
+
+
 _investor_view_cache: dict[str, tuple[float, dict]] = {}
 _investor_view_cache_lock = threading.Lock()
 

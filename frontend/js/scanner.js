@@ -25,7 +25,7 @@ const SCANNER_RADAR_COLLAPSED_KEY = 'td_scanner_radar_collapsed';
 function isScannerRadarCollapsed() { return localStorage.getItem(SCANNER_RADAR_COLLAPSED_KEY) !== '0'; }
 
 const SCANNER_AUX_LAYOUT_KEY = 'td_scanner_aux_layout';
-const SCANNER_AUX_DEFAULT_LAYOUT = [['plan', 'calendar'], ['inbox', 'radar'], ['ema200']];
+const SCANNER_AUX_DEFAULT_LAYOUT = [['plan', 'calendar'], ['inbox', 'radar'], ['ema200', 'drops']];
 let scannerAuxDragState = null;
 
 function scannerAuxGripHtml() {
@@ -1199,6 +1199,7 @@ async function renderScannerView() {
           ${ema200CardHead()}
           <div id="ema200ScanBox" class="inbox-empty">${ema200CardBodyHtml()}</div>
         </section>
+        <section class="investor-week-card scanner-aux-card" id="portfolio-drops-section" data-aux-key="drops"></section>
         <section class="earnings-calendar-card scanner-aux-card scanner-aux-calendar" data-aux-key="calendar">
           <div class="scanner-source-head">
             ${scannerAuxGripHtml()}
@@ -1241,6 +1242,8 @@ async function renderScannerView() {
       </div>
     </div>`;
   const auxGrid = el.querySelector('.scanner-aux-grid');
+  renderPortfolioDropsCard();
+  loadPortfolioDrops();
   applyScannerAuxLayout(auxGrid);
   setupScannerAuxDragAndDrop(auxGrid);
   const dip = await loadDipStatus();
@@ -2348,4 +2351,69 @@ function loadTickerFromChecklist(ticker) {
   closeChecklist();
   switchMainTab('predictive');
   setTimeout(() => pc_selectTicker(ticker), 120);
+}
+
+
+// Interpretive portfolio attention layer; independent of scanner/DIP decisions.
+let portfolioDropsData = null;
+let portfolioDropsLoading = false;
+let portfolioDropsError = null;
+let portfolioDropsSort = { key: 'drawdown_4w_pct', dir: 1 };
+
+function togglePortfolioDropsPreference(key) {
+  localStorage.setItem(key, localStorage.getItem(key) === '1' ? '0' : '1');
+  renderPortfolioDropsCard();
+}
+
+function sortPortfolioDrops(key) {
+  portfolioDropsSort = { key, dir: portfolioDropsSort.key === key ? -portfolioDropsSort.dir : 1 };
+  renderPortfolioDropsCard();
+}
+
+async function loadPortfolioDrops() {
+  if (portfolioDropsLoading) return;
+  portfolioDropsLoading = true;
+  portfolioDropsError = null;
+  renderPortfolioDropsCard();
+  try {
+    const response = await fetch(`${API}/api/portfolio/drops`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    portfolioDropsData = await response.json();
+  } catch (error) { portfolioDropsError = error.message; }
+  finally { portfolioDropsLoading = false; renderPortfolioDropsCard(); }
+}
+
+function renderPortfolioDropsCard() {
+  const el = document.getElementById('portfolio-drops-section');
+  if (!el) return;
+  const data = portfolioDropsData;
+  const collapsed = localStorage.getItem('td_portfolio_drops_collapsed') === '1';
+  const all = localStorage.getItem('td_portfolio_drops_all') === '1';
+  const fmt = (v, unit = '%') => Number.isFinite(v) ? `${v > 0 ? '+' : ''}${v.toLocaleString('sk-SK', {maximumFractionDigits: 2})} ${unit}` : 'málo dát';
+  const significant = (data?.rows || []).filter(r => r.significant).length;
+  const summary = data ? (significant ? `${significant} titulov ≥ ${data.threshold_pct} % pod 4t maximom` : 'Žiadny významný pokles') : 'Načítavam…';
+  const head = `<div class="scanner-source-head">${scannerAuxGripHtml()}
+    <button class="btn dca-toggle" onclick="togglePortfolioDropsPreference('td_portfolio_drops_collapsed')">${collapsed ? '+' : '−'}</button>
+    <div class="scanner-aux-heading"><div><div class="scanner-section-kicker">Doplnok k DIP</div><div class="scanner-source-title">Poklesy v portfóliu (4 týždne)</div></div></div>
+    <button class="btn" onclick="togglePortfolioDropsPreference('td_portfolio_drops_all')">${all ? 'Všetky' : 'Len významné'}</button>
+    <button class="btn" onclick="loadPortfolioDrops()" ${portfolioDropsLoading ? 'disabled' : ''}>↻ Obnoviť</button></div>`;
+  const reference = data ? `<div class="muted">QQQ za 4 týždne: ${escHtml(fmt(data.qqq.change_4w_pct))}</div>` : '';
+  let body = escHtml(summary);
+  if (portfolioDropsError) body = `Chyba: ${escHtml(portfolioDropsError)}`;
+  else if (data && !collapsed) {
+    const rows = data.rows.filter(r => all || r.significant).sort((a, b) => compareSortableRows(portfolioDropsSort, a, b));
+    const th = (key, label) => `<th style="cursor:pointer" onclick="sortPortfolioDrops('${key}')">${escHtml(label)}${portfolioDropsSort.key === key ? (portfolioDropsSort.dir === 1 ? ' ▲' : ' ▼') : ''}</th>`;
+    const health = value => `<span class="chart-health-badge ${['ok', 'risk', 'bad'].includes(value) ? value : 'unknown'}">${escHtml(({ok:'OK',risk:'Risk',bad:'Bad'})[value] || '—')}</span>`;
+    body = `<div style="overflow:auto;max-height:360px"><table class="tool-table"><thead><tr>${[
+      ['ticker','Ticker'],['drawdown_4w_pct','Od 4t max'],['change_4w_pct','Zmena 4t'],['vs_qqq_pp','vs QQQ'],['position_pnl_pct','Tvoja P/L'],['dip_total','DIP'],['chart_daily','Graf D/W'],['solvency_status','Solventnosť']
+    ].map(([key,label]) => th(key,label)).join('')}</tr></thead><tbody>${rows.map(r => `<tr data-ticker="${escHtml(r.ticker)}" onclick="openScannerTicker(this.dataset.ticker)" oncontextmenu="onEma200ScanRowContextMenu(event,this.dataset.ticker)" style="cursor:pointer">
+      <td>${escHtml(r.ticker)}</td><td title="${escHtml(r.peak_week || 'málo dát')}">${escHtml(fmt(r.drawdown_4w_pct))}</td><td>${escHtml(fmt(r.change_4w_pct))}</td>
+      <td ${r.vs_qqq_pp !== null && r.vs_qqq_pp <= -10 ? 'style="color:var(--red)" title="pokles najmä samotnej firmy, nie trhu"' : ''}>${escHtml(fmt(r.vs_qqq_pp,'pp'))}</td>
+      <td>${r.position_pnl_pct === null ? '—' : escHtml(fmt(r.position_pnl_pct))}</td><td>${escHtml(r.dip_total ?? '—')}</td><td>${health(r.chart_daily)} / ${health(r.chart_weekly)}</td>
+      <td title="${escHtml(r.solvency_flag ? 'Súčasne nízke úrokové krytie, vysoký dlh a nízka bežná likvidita' : r.solvency_status)}">${r.solvency_flag ? '⚠' : r.solvency_status === 'clear' ? 'OK' : '—'}</td></tr>`).join('')}</tbody></table></div>
+      ${!rows.length ? `<div class="muted">${escHtml(summary)}</div>` : ''}
+      ${!all ? `<div class="muted">Skryté ostatné tituly: ${escHtml(data.total - significant)}.</div>` : ''}
+      ${data.insufficient.length ? `<div class="muted">Málo dát: ${escHtml(data.insufficient.join(', '))}</div>` : ''}`;
+  }
+  el.innerHTML = `${head}<div class="inbox-empty">${reference}${body}</div>`;
 }

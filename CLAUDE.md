@@ -813,6 +813,37 @@ Tier is trend-primary: `up` (EMA10 > EMA20) → **buy** (green), `down` (EMA10 <
 
 ## Scanner tab — key architecture
 
+### Scanner: Poklesy v portfóliu (4 týždne)
+
+`GET /api/portfolio/drops?threshold=` uses cached Stock/ETF holdings from both accounts,
+shared `_scanner_download_cached(symbol, "1y", "1wk")` bars and disk-only DIP,
+chart-health and solvency context. RAM TTL is 30 minutes, keyed by UTC date and
+threshold; saving settings clears it. `portfolio_drop_pct` defaults to 15 (3–60).
+Drawdown = last close / maximum High of the last **5 weekly bars — the current
+partial week plus four full weeks** — minus one. Change = last close / close four
+bars earlier minus one. At least 6 bars are required; invalid/missing inputs produce null metrics
+and an explicit “málo dát” entry, never fabricated values or NaN.
+
+Why drawdown: FOUR rallied then collapsed inside the window; the supplied initial
+measurement showed −24.7% from its high versus only −12.5% close-to-close. That
+30-title sample used exactly this 5-bar window: median −5.2%, 10/30 below −10%,
+7/30 below −15%, 3/30 below −20%. **Okno a prah patria k sebe:** prvá verzia mala
+4 sviečky, ale prah bol nameraný na 5 — v strede týždňa by okno pokrylo len ~3,4
+týždňa, FOUR by ukázal −17,5 % namiesto −24,7 % a NCLH (−20,0 %) by pod prah
+nespadol. Meniť okno = premerať prah.
+All seven at 15% were company-specific falls; 10% flagged a third of the book.
+These historical sample counts motivate the default, not a claim about current data.
+QQQ was +3.6% over four weeks and −1.0% from its high in that measurement.
+`vs_qqq_pp` subtracts QQQ's four-week change from the position's change (percentage
+points, not drawdowns); ≤ −10 pp highlights company-relative weakness, not proof
+of its cause. QQQ is computed once per uncached response.
+
+The Scanner aux card follows EMA200, auto-loads, supports refresh, persisted collapse
+and significant/all filtering, sortable context columns and the EMA200 context menu.
+Saved layouts missing `drops` retain their order and append the new card.
+This is interpretive attention only: no composite score or trading instruction;
+C1–C4, DIP, DCA, BUILD, tier, Verdict, Inbox and Weekly Plan are unchanged.
+
 **Role:** Candidate discovery — "čo si mám pozrieť?"
 
 Main source sections:
@@ -972,7 +1003,7 @@ Main source sections:
   **Spresnenie 2026-09-22:** platí to už len o DIP SKÓRE. Odkedy scanner
   univerzum pripája držané Stock/ETF tituly, európska pozícia signál aj
   `chart_health` dostane — sivá ostáva len tickerom mimo portfólia.
-- **Chart Health** — scanner rows include `chart_health.daily` and `chart_health.weekly` (`OK` / `Risk` / `Bad`) as a human visual-quality filter. It checks EMA regime, recent drawdown, simple swing structure, crash days, and red volume spikes. This is presentation/triage only: it must not change C1-C4, DIP score, scanner tier, or portfolio accounting.
+- **Chart Health** — scanner rows include `chart_health.daily` and `chart_health.weekly` (`OK` / `Risk` / `Bad`; **pole `status` je malými písmenami `ok`/`risk`/`bad`, veľké je len `label`** — BUILD readiness porovnával `== "Bad"`, takže titul s pokazeným grafom v produkcii nikdy neblokoval; testy to zakryli fixtúrou „Bad" z tejto dokumentácie. Porovnávaj vždy cez `.lower()` a testuj nad reálnym výstupom `chart_health()`) as a human visual-quality filter. It checks EMA regime, recent drawdown, simple swing structure, crash days, and red volume spikes. This is presentation/triage only: it must not change C1-C4, DIP score, scanner tier, or portfolio accounting.
 - **Workflow badges** — scanner/chart/predictive/verdict expose a unified `+ WL` action via `addCurrentToWatchlist()` / `watchlistButtonHtml()`. Scanner ticker cells also show `PORT ±%` from `/api/portfolio/holdings`. Verdikt receives the current context ticker when opened from charts, scanner, or predictive.
    Scanner cache now stores `error_counts` and `error_samples` so the UI can explain large error counts instead of showing only a number. Main table still shows only tickers with a current technical signal; high DIP rank alone is not enough to display a row.
 
