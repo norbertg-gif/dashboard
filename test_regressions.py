@@ -25,6 +25,111 @@ from backend import trading_backend as tb
 from backend import etoro_proxy as ep
 
 
+
+class PortfolioNewsRegressionTests(unittest.TestCase):
+    def item(self, title="Company news", published=None):
+        return {"title": title, "url": "https://example.com/news", "source": "Example",
+                "published": published or tb._time_module.time(), "provider": "yahoo"}
+
+    def test_selection_on_company_over_listicle(self):
+        rows = [dict(self.item("Own ON Semiconductor... Or Micron's?"), relatedTickers=["MU", "ON", "NXPI", "NVDA"]),
+                dict(self.item("Marvell and 2 More Stocks"), relatedTickers=["MRVL", "AMD", "ON"]),
+                dict(self.item("ON company news", 100), relatedTickers=["ON"])]
+        self.assertEqual(tb._select_ticker_news("ON", rows)["title"], "ON company news")
+
+    def test_selection_nu_specific_and_newest_tiebreak(self):
+        rows = [dict(self.item("Three stocks", 300), relatedTickers=["NU", "AMD", "NVDA"]),
+                dict(self.item("Prediction: Nu Holdings Will Earn More Than $5 Billion in 2027", 200), relatedTickers=["NU", "NVDA"]),
+                dict(self.item("Older prediction", 100), relatedTickers=["NU", "NVDA"])]
+        self.assertTrue(tb._select_ticker_news("NU", rows)["title"].startswith("Prediction:"))
+
+    def test_selection_prefers_fresh_company_article_over_week_old_single_ticker(self):
+        # Reálny prípad NU 2026-09-24: 6 dní starý článok len s [NU] vyhral nad
+        # 7-hodinovým [NU, NVDA], lebo "menej tickerov" malo prednosť pred vekom.
+        now = 1_800_000_000
+        rows = [dict(self.item("Some Brazilian voters are feeling burned", now - 147 * 3600), relatedTickers=["NU"]),
+                dict(self.item("Prediction: Nu Holdings Will Earn More", now - 7 * 3600), relatedTickers=["NU", "NVDA"])]
+        self.assertTrue(tb._select_ticker_news("NU", rows)["title"].startswith("Prediction:"))
+
+    def test_selection_drops_listicle_where_ticker_is_not_first(self):
+        # Reálny prípad GFS: článok o Monolithic Power s GFS v zozname nesmie
+        # byť "správa o GFS"; radšej žiadna.
+        rows = [dict(self.item("Wall Street Thinks Monolithic Power Stock Is Worth 50% More"),
+                     relatedTickers=["MPWR", "GFS", "ON", "TXN"])]
+        self.assertIsNone(tb._select_ticker_news("GFS", rows))
+
+    def test_selection_drops_unrelated(self):
+        self.assertIsNone(tb._select_ticker_news("ON", [dict(self.item(), relatedTickers=["MU"])]))
+
+    def test_yahoo_failure_finnhub_fallback(self):
+        from unittest.mock import Mock
+        response = Mock()
+        response.json.return_value = [{"headline": "Older", "url": "https://example.com", "source": "F", "datetime": 100},
+                                      {"headline": "Latest", "url": "https://example.com", "source": "F", "datetime": int(tb._time_module.time())}]
+        with patch.dict(tb.os.environ, {"FINNHUB_API_KEY": "test"}), patch.object(tb.requests, "get", side_effect=[RuntimeError("offline"), response]) as get:
+            item, error = tb._fetch_portfolio_ticker_news("NU")
+        self.assertEqual(item["title"], "Latest")
+        self.assertEqual(item["provider"], "finnhub")
+        self.assertIsNone(error)
+        self.assertIn("company-news", get.call_args.args[0])
+
+    def test_yahoo_failure_without_key(self):
+        with patch.dict(tb.os.environ, {"FINNHUB_API_KEY": ""}), patch.object(tb.requests, "get", side_effect=RuntimeError("offline")) as get:
+            item, error = tb._fetch_portfolio_ticker_news("ON")
+        self.assertIsNone(item)
+        self.assertTrue(error)
+        self.assertEqual(get.call_count, 1)
+
+    def test_failed_refresh_preserves_item_and_retries_after_hour(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "ON"}):
+            old = self.item()
+            path = Path(tmp) / "portfolio_news.json"
+            path.write_text(json.dumps({"ON": {"ts": 1, "item": old, "error": None}}))
+            with patch.object(tb, "_fetch_portfolio_ticker_news", return_value=(None, "offline")) as fetch:
+                result = tb.get_home_news()
+                tb.get_home_news()
+            self.assertEqual(fetch.call_count, 1)
+            self.assertEqual(result["items"][0]["item"], old)
+            self.assertTrue(result["items"][0]["stale"])
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(json.loads(path.read_text())["ON"]["item"], old)
+
+    def test_slow_ticker_does_not_hold_the_response_and_stays_due(self):
+        # Yahoo z Render IP nie je overený: visiaci zdroj nesmie držať Prehľad
+        # minúty ani zapísať pomalý ticker ako "bez správy".
+        import time as _t
+        def fake_fetch(sym):
+            if sym == "SLOW":
+                _t.sleep(2)
+            return ({"title": sym, "url": "https://x.test/" + sym, "source": "s",
+                     "published": _t.time() - 60, "provider": "yahoo"}, None)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)),              patch.object(tb, "_portfolio_news_holdings", return_value={"FAST": "F", "SLOW": "S"}),              patch.object(tb, "_fetch_portfolio_ticker_news", side_effect=fake_fetch),              patch.object(tb, "PORTFOLIO_NEWS_BATCH_BUDGET_S", 0.3):
+            started = _t.monotonic()
+            data = tb.get_home_news()
+            elapsed = _t.monotonic() - started
+            cache = json.loads((Path(tmp) / "portfolio_news.json").read_text(encoding="utf-8"))
+        self.assertLess(elapsed, 1.5, "odpoveď čakala na pomalý ticker")
+        self.assertEqual([row["ticker"] for row in data["items"]], ["FAST"])
+        self.assertNotIn("SLOW", cache, "pomalý ticker sa zapísal ako vybavený — nabudúce by ho nik neskúsil")
+
+    def test_stock_only_both_accounts_deduplicated(self):
+        ram = {"1": {"data": [{"symbol": "on", "type": "Stock", "name": "Onsemi"}, {"symbol": "SPY", "type": "ETF"}]}}
+        disk = {"data": [{"symbol": "ON", "type": "Stock"}, {"symbol": "NU", "type": "Stock", "name": "Nu"}]}
+        with patch.object(tb, "_positions_cache", ram), patch.object(tb, "cache_read", return_value=disk):
+            self.assertEqual(tb._portfolio_news_holdings(), {"ON": "Onsemi", "NU": "Nu"})
+
+    def test_fresh_cache_zero_http_and_old_items_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "Onsemi", "NU": "Nu", "AMD": "AMD"}):
+            now = tb._time_module.time()
+            entries = {sym: {"ts": now, "item": item, "error": None} for sym, item in
+                       [("ON", self.item(published=now-100)), ("NU", self.item(published=now-8*86400)), ("AMD", self.item(published=now-10))]}
+            (Path(tmp) / "portfolio_news.json").write_text(json.dumps(entries))
+            with patch.object(tb.requests, "get") as get:
+                result = tb.get_home_news()
+            get.assert_not_called()
+            self.assertEqual([r["ticker"] for r in result["items"]], ["AMD", "ON"])
+            self.assertEqual(result["without_news"], ["NU"])
+
 class EtoroProxySecurityRegressionTests(unittest.TestCase):
     """Exercise the local handler only; no eToro request leaves this process."""
 

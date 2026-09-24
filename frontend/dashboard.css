@@ -7062,3 +7062,10 @@ body.light-mode .port-table td.port-ticker-tag {
 .ticker-tag-row { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
 .ticker-tag-row input:not([type="color"]) { min-width:0; flex:1; background:var(--bg-input); color:var(--text); border:1px solid var(--border); padding:7px; border-radius:var(--radius-sm); }
 .ticker-tag-row input[type="color"] { width:36px; height:32px; padding:2px; flex-shrink:0; }
+
+/* Portfolio news keeps large holdings lists within the overview. */
+.home-news-list { max-height: 480px; overflow-y: auto; }
+.home-news-row { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: start; }
+.home-news-row .btn { justify-self: start; }
+.home-news-row a { color: var(--text); overflow-wrap: anywhere; }
+.home-news-meta { color: var(--muted); font-size: 12px; margin-top: 5px; }

@@ -104,7 +104,7 @@ async function renderHomeView(force = false) {
     el.innerHTML = homeContentHtml(_homeLastData);
     // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
     // aby ju nedržal ten istý TTL ako portfóliový snapshot.
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); }, 0);
     return;
   }
 
@@ -116,6 +116,7 @@ async function renderHomeView(force = false) {
   el.innerHTML = snap
     ? homeStaleBarHtml(snap.t) + homeContentHtml(snap.d)
     : homeSkeletonHtml();
+  if (snap) loadPortfolioNewsCard();
   try {
     const acct = (typeof activeAccount !== 'undefined' && activeAccount) || '1';
     const results = await Promise.allSettled([
@@ -146,7 +147,7 @@ async function renderHomeView(force = false) {
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     el.innerHTML = homeContentHtml(_homeLastData);
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
@@ -154,6 +155,7 @@ async function renderHomeView(force = false) {
       ? `<div class="home-error">Aktualizácia zlyhala: ${escHtml(e.message)} — nižšie je uložený stav.</div>` +
         homeContentHtml(snap.d)
       : `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+    if (snap) loadPortfolioNewsCard();
   } finally {
     _homeLoading = false;
   }
@@ -805,6 +807,52 @@ function homeCard(title, bodyHtml, opts = {}) {
   </div>`;
 }
 
+function homeNewsAge(hours) {
+  const h = Math.max(0, Math.floor(Number(hours) || 0));
+  if (h < 1) return 'pred chvíľou';
+  if (h < 24) return `pred ${h} h`;
+  const days = Math.floor(h / 24);
+  return days === 1 ? 'včera' : `pred ${days} dňami`;
+}
+
+function homeNewsHtml(data) {
+  const rows = (data.items || []).map(row => {
+    const item = row.item;
+    let url = '';
+    try {
+      const parsed = new URL(item.url);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') url = parsed.href;
+    } catch (e) {}
+    const headline = url
+      ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(item.title)}</a>`
+      : escHtml(item.title);
+    return `<div class="home-news-row">
+      <button type="button" class="btn mini" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}">${escHtml(row.ticker)}</button>
+      <div>${headline}<div class="home-news-meta">${escHtml(item.source || '')} · ${escHtml(homeNewsAge(row.age_hours))}
+        ${row.stale ? '<span title="Obnovenie správy zlyhalo. Zobrazuje sa posledná uložená správa.">(staršie)</span>' : ''}</div></div>
+    </div>`;
+  }).join('');
+  return `<div class="home-news-list">${rows || '<div class="home-empty">Žiadne aktuálne správy k držaným akciám.</div>'}</div>`
+    + (data.without_news?.length ? `<div class="home-news-meta">Bez správy za 7 dní: ${data.without_news.map(t => escHtml(t)).join(', ')}</div>` : '');
+}
+
+async function loadPortfolioNewsCard() {
+  const wrap = document.getElementById('home-news-block');
+  if (!wrap) return;
+  try {
+    const response = await fetch(`${API}/api/home/news`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!wrap.isConnected) return;
+    wrap.innerHTML = homeNewsHtml(data);
+    wrap.querySelectorAll('[data-news-ticker]').forEach(button => {
+      button.addEventListener('click', () => openScannerTicker(button.dataset.newsTicker));
+    });
+  } catch (e) {
+    if (wrap.isConnected) wrap.innerHTML = '<div class="home-empty">Správy sa teraz nepodarilo načítať.</div>';
+  }
+}
+
 function homeContentHtml(data) {
   return `
     <div class="home-wrap">
@@ -817,6 +865,9 @@ function homeContentHtml(data) {
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
       ${homePortfolioKpiHtml(data.port1, data.port2)}
+      ${homeCard('Správy k portfóliu',
+        `<div id="home-news-block"><div class="home-empty">Načítavam…</div></div>`,
+        { wide: true })}
       ${homeCard('Moje výbery vs index',
         `<div id="home-bench-block"><div class="home-empty">Načítavam…</div></div>`,
         { className: 'home-card-bench' })}

@@ -9893,6 +9893,172 @@ def _heatmap_change(change: tuple[float, float] | None) -> float | None:
     return round(float(change[0]), 2) if change is not None else None
 
 
+# Portfolio news is independent of the chart/Alpha Vantage news endpoints.
+_portfolio_news_lock = threading.Lock()
+# Studený beh nesmie držať Prehľad minúty. Yahoo z Render IP nie je overený —
+# ak by visel, 50 titulov × 2 zdroje × timeout / 4 vlákna by bolo 1–3 minúty
+# pri každom otvorení po vypršaní TTL. Čo nestihne rozpočet, ostane "due"
+# a dobehne pri ďalšom otvorení; už uložené správy sa ukážu hneď.
+PORTFOLIO_NEWS_HTTP_TIMEOUT = 5
+PORTFOLIO_NEWS_BATCH_BUDGET_S = 25
+
+
+def _select_ticker_news(sym, items):
+    """Vyber JEDEN článok, ktorý je naozaj o firme — čistá funkcia, bez I/O.
+
+    Pravidlo je zmerané na 16 držaných tituloch (2026-09-24): (1) článok, kde je
+    ticker PRVÝ v relatedTickers, a z nich NAJNOVŠÍ; (2) ak taký nie je, článok
+    s najviac dvoma tickermi (typicky „X vs Y"), najnovší; (3) inak nič.
+    Pôvodná verzia radila „menej tickerov" pred aktuálnosťou aj medzi článkami
+    o firme — NU dostal 6 dní starý článok, hoci existoval 7-hodinový — a pri
+    chýbajúcom primárnom článku prepadla na zoznamy typu „3 čipové akcie" (GFS
+    dostal článok o Monolithic Power). Položky bez relatedTickers (Finnhub) sú
+    už viazané na firmu zdrojom, berie sa najnovšia."""
+    sym = sym.upper()
+    primary, small, untagged = [], [], []
+    for item in items:
+        if not isinstance(item, dict) or not item.get("title"):
+            continue
+        published = item.get("published")
+        if not isinstance(published, (int, float)) or not math.isfinite(published) or published <= 0:
+            continue
+        if "relatedTickers" not in item:
+            untagged.append(item)
+            continue
+        related = item.get("relatedTickers")
+        if not isinstance(related, list):
+            continue
+        related = [str(t).upper() for t in related]
+        if sym not in related:
+            continue
+        if related[0] == sym:
+            primary.append((item, len(related)))
+        elif len(related) <= 2:
+            small.append(item)
+    # Stabilný tie-break titulkom a URL, nech výber nekolíše medzi behmi.
+    newest = lambda group: max(group, key=lambda it: (it["published"], str(it.get("title", "")), str(it.get("url", ""))))
+    if primary:
+        # Aj článok s tickerom na prvom mieste môže byť zoznam „3 akcie". Sústredený
+        # článok (≤2 tickery) vyhrá, ak nie je o viac než 48 h starší než najnovší —
+        # starší by už nebol „aktuálna správa" (NU: 147 h vs 7 h).
+        top = newest([it for it, _ in primary])
+        focused = [it for it, n in primary if n <= 2 and top["published"] - it["published"] <= 48 * 3600]
+        return newest(focused) if focused else top
+    for group in (small, untagged):
+        if group:
+            return newest(group)
+    return None
+
+
+def _fetch_portfolio_ticker_news(sym):
+    """Yahoo search first, then Finnhub; errors never include credential URLs."""
+    now = _time_module.time()
+    errors = []
+    for provider in ("yahoo", "finnhub"):
+        key = os.getenv("FINNHUB_API_KEY", "").strip()
+        if provider == "finnhub" and not key:
+            break
+        try:
+            if provider == "yahoo":
+                response = requests.get("https://query2.finance.yahoo.com/v1/finance/search",
+                    params={"q": sym, "quotesCount": 0, "newsCount": 10,
+                            "enableFuzzyQuery": "false"}, headers=YF_HEADERS, timeout=PORTFOLIO_NEWS_HTTP_TIMEOUT)
+            else:
+                today = datetime.fromtimestamp(now, timezone.utc).date()
+                response = requests.get("https://finnhub.io/api/v1/company-news",
+                    params={"symbol": sym, "from": str(today - timedelta(days=7)),
+                            "to": str(today), "token": key}, timeout=PORTFOLIO_NEWS_HTTP_TIMEOUT)
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload.get("news", []) if provider == "yahoo" else payload
+            if not isinstance(rows, list):
+                raise ValueError("Invalid news response")
+            normalized = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                item = {"title": row.get("title" if provider == "yahoo" else "headline"),
+                        "url": row.get("link" if provider == "yahoo" else "url", ""),
+                        "source": row.get("publisher" if provider == "yahoo" else "source", ""),
+                        "published": row.get("providerPublishTime" if provider == "yahoo" else "datetime"),
+                        "provider": provider}
+                if provider == "yahoo" and "relatedTickers" in row:
+                    item["relatedTickers"] = row["relatedTickers"]
+                pub = item["published"]
+                if isinstance(pub, (int, float)) and now - 7 * 86400 <= pub <= now + 300:
+                    normalized.append(item)
+            selected = _select_ticker_news(sym, normalized)
+            if selected:
+                return {k: v for k, v in selected.items() if k != "relatedTickers"}, None
+        except Exception as exc:
+            errors.append(f"{provider}: {type(exc).__name__}")
+    return None, "; ".join(errors) or None
+
+
+def _portfolio_news_holdings():
+    """Read processed snapshots only, across both accounts; exclude ETFs."""
+    holdings = {}
+    for account in ("1", "2"):
+        cached = _positions_cache.get(account) or cache_read(_portfolio_disk_path(account)) or {}
+        for pos in cached.get("data", []):
+            sym = str(pos.get("symbol") or "").strip().upper()
+            if pos.get("type") == "Stock" and sym:
+                holdings.setdefault(sym, pos.get("name") or sym)
+    return holdings
+
+
+@app.get("/api/home/news")
+def get_home_news():
+    holdings = _portfolio_news_holdings()
+    # Serialize refresh batches as well as writes: concurrent clients share one
+    # cold fetch and cannot multiply the four-worker limit or lose cache updates.
+    with _portfolio_news_lock:
+        path = DATA_ROOT / "portfolio_news.json"
+        try:
+            cache = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(cache, dict):
+                cache = {}
+        except (OSError, ValueError):
+            cache = {}
+        now = _time_module.time()
+        due = [sym for sym in holdings if sym not in cache or
+               now - cache[sym].get("ts", 0) >= (3600 if cache[sym].get("error") else 21600)]
+        if due:
+            pool = ThreadPoolExecutor(max_workers=4)
+            futures = {pool.submit(_fetch_portfolio_ticker_news, sym): sym for sym in due}
+            finished, _ = wait(futures, timeout=PORTFOLIO_NEWS_BATCH_BUDGET_S)
+            # Nečakať na bežiace ani nespustené — ich výsledok sa zahodí a
+            # ticker ostane bez nového záznamu, teda "due" aj nabudúce.
+            pool.shutdown(wait=False, cancel_futures=True)
+            for future in finished:
+                sym = futures[future]
+                try:
+                    item, error = future.result()
+                except Exception as exc:
+                    item, error = None, type(exc).__name__
+                previous = cache.get(sym, {}).get("item")
+                cache[sym] = {"ts": _time_module.time(),
+                              "item": previous if error else item, "error": error}
+            if finished:
+                _atomic_write_json(path, cache)
+        items, without_news = [], []
+        errors = 0
+        for sym, name in holdings.items():
+            entry = cache.get(sym, {})
+            item = entry.get("item")
+            stale = bool(entry.get("error"))
+            errors += int(stale)
+            age = max(0, (now - item["published"]) / 3600) if item else None
+            if item and age <= 7 * 24:
+                items.append({"ticker": sym, "name": name, "item": item,
+                              "stale": stale, "age_hours": round(age, 2)})
+            else:
+                without_news.append(sym)
+        items.sort(key=lambda row: (-row["item"]["published"], row["ticker"]))
+        return {"generated_at": now, "items": items,
+                "without_news": sorted(without_news), "errors": errors}
+
+
 @app.get("/api/home/heatmap")
 def get_home_heatmap():
     """Compose one cache-only view for deciding where to enter or add.
