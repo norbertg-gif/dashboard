@@ -1372,6 +1372,7 @@ from starlette.responses import Response as _SR
 
 class _BasicAuth(BaseHTTPMiddleware):
     COOKIE_NAME = "td_auth"
+    SESSION_MAX_AGE = 30 * 24 * 3600
 
     def __init__(self, app):
         super().__init__(app)
@@ -1389,12 +1390,31 @@ class _BasicAuth(BaseHTTPMiddleware):
     def _make_cookie_value(self):
         if not self._user or not self._pass:
             return ""
+        issued_unix = str(int(_time_module.time()))
         secret = f"{self._user}:{self._pass}".encode("utf-8")
-        return hmac.new(secret, b"trading-dashboard-basic-session", hashlib.sha256).hexdigest()
+        message = b"trading-dashboard-basic-session|" + issued_unix.encode("ascii")
+        signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
+        return f"{issued_unix}.{signature}"
 
     def _has_session_cookie(self, request):
         cookie = request.cookies.get(self.COOKIE_NAME, "")
-        return bool(self._cookie_value and hmac.compare_digest(cookie, self._cookie_value))
+        if not self._user or not self._pass:
+            return False
+        issued_unix, separator, signature = cookie.partition(".")
+        if not separator or not issued_unix.isascii() or not issued_unix.isdigit():
+            return False
+        try:
+            issued_at = int(issued_unix)
+        except ValueError:
+            return False
+        now = _time_module.time()
+        age = now - issued_at
+        if age < -300 or age > self.SESSION_MAX_AGE:
+            return False
+        secret = f"{self._user}:{self._pass}".encode("utf-8")
+        message = b"trading-dashboard-basic-session|" + issued_unix.encode("ascii")
+        expected = hmac.new(secret, message, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature, expected)
 
     async def dispatch(self, request, call_next):
         # Verejné endpointy — preskočiť Basic Auth (chránené vlastným tokenom)
@@ -1414,8 +1434,8 @@ class _BasicAuth(BaseHTTPMiddleware):
                     response = await call_next(request)
                     response.set_cookie(
                         self.COOKIE_NAME,
-                        self._cookie_value,
-                        max_age=60 * 60 * 24 * 30,
+                        self._make_cookie_value(),  # čas vydania = teraz, nie štart servera
+                        max_age=self.SESSION_MAX_AGE,
                         httponly=True,
                         samesite="lax",
                         secure=request.url.scheme == "https",

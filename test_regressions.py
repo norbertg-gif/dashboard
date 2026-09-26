@@ -3777,5 +3777,43 @@ class ReviewSeptemberRegressionTests(unittest.TestCase):
         self.assertNotIn(".then(r => r.json())", home)
 
 
+class SessionCookieExpiryRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.env = patch.dict("os.environ", {"DASH_USER": "test-user", "DASH_PASS": "test-pass"})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.auth = tb._BasicAuth(lambda scope, receive, send: None)
+
+    def _request_with_cookie(self, cookie):
+        return type("Request", (), {"cookies": {self.auth.COOKIE_NAME: cookie}})()
+
+    def test_fresh_cookie_is_accepted(self):
+        with patch.object(tb._time_module, "time", return_value=1_800_000_000):
+            cookie = self.auth._make_cookie_value()
+            self.assertTrue(self.auth._has_session_cookie(self._request_with_cookie(cookie)))
+
+    def test_cookie_older_than_30_days_is_rejected(self):
+        issued_at = 1_800_000_000
+        with patch.object(tb._time_module, "time", return_value=issued_at):
+            cookie = self.auth._make_cookie_value()
+        with patch.object(tb._time_module, "time", return_value=issued_at + self.auth.SESSION_MAX_AGE + 1):
+            self.assertFalse(self.auth._has_session_cookie(self._request_with_cookie(cookie)))
+
+    def test_tampered_signature_is_rejected(self):
+        with patch.object(tb._time_module, "time", return_value=1_800_000_000):
+            cookie = self.auth._make_cookie_value()
+            issued_at, signature = cookie.split(".", 1)
+            tampered = f"{issued_at}.{('0' if signature[0] != '0' else '1')}{signature[1:]}"
+            self.assertFalse(self.auth._has_session_cookie(self._request_with_cookie(tampered)))
+
+    def test_old_deterministic_format_cookie_is_rejected(self):
+        import hashlib
+        import hmac
+
+        secret = b"test-user:test-pass"
+        old_cookie = hmac.new(secret, b"trading-dashboard-basic-session", hashlib.sha256).hexdigest()
+        self.assertFalse(self.auth._has_session_cookie(self._request_with_cookie(old_cookie)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
