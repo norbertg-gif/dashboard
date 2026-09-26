@@ -3741,5 +3741,41 @@ class AlphaVantageQuotaRegressionTests(unittest.TestCase):
         self.assertNotIn("fmpkey12345", msg)
 
 
+class ReviewSeptemberRegressionTests(unittest.TestCase):
+    """Nálezy z externej revízie (watchlist XSS, eToro search bez tokenu)."""
+
+    def test_watchlist_rejects_symbols_that_break_inline_handlers(self):
+        items = [
+            {"symbol": "aapl", "name": "<img src=x onerror=alert(1)>"},
+            {"symbol": "x');alert(1);//"},
+            {"symbol": "<svg>"},
+            "BRK-B", "RHM.DE", "^VIX", "BTC/USD",
+        ]
+        symbols = [i["symbol"] for i in tb._normalize_watchlist_items(items)]
+        self.assertEqual(symbols, ["AAPL", "BRK-B", "RHM.DE", "^VIX", "BTC/USD"])
+
+    def test_instrument_search_goes_through_authenticated_proxy_session(self):
+        class _Resp:
+            ok = True
+            def json(self):
+                return {"items": [{"instrumentId": 1001, "internalSymbolFull": "ZZTEST"}]}
+        tb._instrument_id_cache.pop("ZZTEST", None)
+        with (
+            patch.object(tb.ETORO_PROXY_SESSION, "get", return_value=_Resp()) as session_get,
+            patch.object(tb.requests, "get", side_effect=AssertionError("unauthenticated proxy call")),
+        ):
+            iid = tb.get_instrument_id("ZZTEST")
+        tb._instrument_id_cache.pop("ZZTEST", None)
+        self.assertEqual(iid, 1001)
+        self.assertTrue(session_get.called)
+
+    def test_frontend_escapes_watchlist_names_and_checks_save_status(self):
+        wl = (Path(__file__).parent / "frontend" / "js" / "watchlist.js").read_text(encoding="utf-8")
+        self.assertNotIn(">${item.name}<", wl)
+        self.assertIn("if (!r.ok) throw new Error('HTTP ' + r.status);", wl)
+        home = (Path(__file__).parent / "frontend" / "js" / "home.js").read_text(encoding="utf-8")
+        self.assertNotIn(".then(r => r.json())", home)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

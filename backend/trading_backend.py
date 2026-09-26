@@ -1705,6 +1705,8 @@ def _cache_file_lock(path: _Path):
     digest = hashlib.blake2b(str(path).encode("utf-8"), digest_size=2).digest()
     return _CACHE_FILE_LOCKS[int.from_bytes(digest, "big") % len(_CACHE_FILE_LOCKS)]
 
+_WATCHLIST_SYMBOL_RE = re.compile(r"[A-Z0-9.^=_:/-]{1,24}")
+
 def _normalize_watchlist_items(items):
     out = []
     seen = set()
@@ -1716,7 +1718,8 @@ def _normalize_watchlist_items(items):
         if not isinstance(item, dict):
             continue
         symbol = str(item.get("symbol") or "").strip().upper()
-        if not symbol or symbol in seen:
+        # Frontend vkladá symbol do inline onclick — úvodzovky ani < > nesmú prejsť.
+        if not _WATCHLIST_SYMBOL_RE.fullmatch(symbol) or symbol in seen:
             continue
         seen.add(symbol)
         clean = {"symbol": symbol}
@@ -5162,13 +5165,13 @@ def get_instrument_id(symbol: str, account: str = "1") -> int | None:
     try:
         # Skús presný match cez internalSymbolFull parameter
         url = f"{ETORO_PROXY}/etoro/market-data/search?internalSymbolFull={sym}&fields=instrumentId,symbolName,internalSymbolFull&pageSize=20&account={account}"
-        resp = requests.get(url, timeout=6)
+        resp = ETORO_PROXY_SESSION.get(url, timeout=6)
         items = resp.json().get("items", []) if resp.ok else []
 
         # Ak nenájdeme cez internalSymbolFull, skúsime searchText
         if not items:
             url2 = f"{ETORO_PROXY}/etoro/market-data/search?searchText={sym}&fields=instrumentId,symbolName,internalSymbolFull&pageSize=20&account={account}"
-            resp2 = requests.get(url2, timeout=6)
+            resp2 = ETORO_PROXY_SESSION.get(url2, timeout=6)
             items = resp2.json().get("items", []) if resp2.ok else []
 
         if items:

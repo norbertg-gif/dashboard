@@ -96,8 +96,8 @@ function showAlertToast(sym, name, message, type, panelId) {
       <span class="alert-toast-title">🔔 PRICE ALERT</span>
     </div>
     <div class="alert-toast-body">
-      <span class="alert-toast-sym">${sym}</span>${name ? ' — ' + name : ''}<br>
-      <span class="alert-toast-price ${type}">${message}</span>
+      <span class="alert-toast-sym">${escHtml(sym)}</span>${name ? ' — ' + escHtml(name) : ''}<br>
+      <span class="alert-toast-price ${type}">${escHtml(message)}</span>
     </div>
     <div class="alert-toast-btns">
       ${panelId ? `<button class="alert-toast-btn primary" onclick="setActivePanel('${panelId}');this.closest('.alert-toast').remove()">Otvoriť graf</button>` : ''}
@@ -208,13 +208,15 @@ function saveAlertFromEditor(sym) {
 let watchlist = [];
 let watchlistServerSaveTimer = null;
 
+const WATCHLIST_SYMBOL_RE = /^[A-Z0-9.^=_:\/-]{1,24}$/;
 function normalizeWatchlistItems(items) {
   const seen = new Set();
   return (Array.isArray(items) ? items : [])
     .map(x => typeof x === 'string' ? {symbol:x} : (x || {}))
     .map(x => ({...x, symbol:String(x.symbol || '').trim().toUpperCase()}))
     .filter(x => {
-      if (!x.symbol || seen.has(x.symbol)) return false;
+      // Symbol ide do inline onclick a data-* atribútov — úvodzovky a < > nesmú prejsť.
+      if (!WATCHLIST_SYMBOL_RE.test(x.symbol) || seen.has(x.symbol)) return false;
       seen.add(x.symbol);
       return true;
     });
@@ -242,14 +244,37 @@ async function saveWatchlistToServer() {
       if (addedAt) item.addedAt = addedAt;
       return item;
     });
-    await fetch(`${API}/api/watchlist`, {
+    const r = await fetch(`${API}/api/watchlist`, {
       method: 'PUT',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({items})
     });
+    // fetch neodmieta HTTP 500 — bez kontroly by zmena ostala len v localStorage
+    // a pri ďalšej synchronizácii zo servera mohla zmiznúť.
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    document.getElementById('wl-save-failed')?.remove();
   } catch(e) {
     console.warn('Server watchlist save failed:', e);
+    showWatchlistSaveFailed(e.message || String(e));
   }
+}
+
+function showWatchlistSaveFailed(reason) {
+  const container = document.getElementById('alert-toasts');
+  if (!container) return;
+  document.getElementById('wl-save-failed')?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'wl-save-failed';
+  toast.className = 'alert-toast bear';
+  toast.innerHTML = `
+    <div class="alert-toast-hdr"><span class="alert-toast-icon">⚠️</span>
+      <span class="alert-toast-title">Watchlist neuložený</span></div>
+    <div class="alert-toast-body">Zmena je len v tomto prehliadači (${escHtml(reason)}).</div>
+    <div class="alert-toast-btns">
+      <button class="alert-toast-btn primary" onclick="saveWatchlistToServer()">Skúsiť znova</button>
+      <button class="alert-toast-btn" onclick="this.closest('.alert-toast').remove()">Zavrieť</button>
+    </div>`;
+  container.appendChild(toast);
 }
 async function syncWatchlistFromServer() {
   const localItems = normalizeWatchlistItems(watchlist);
@@ -522,7 +547,7 @@ function renderSidebar() {
     const chgCls = chg == null ? 'flat' : chg > 0.05 ? 'up' : chg < -0.05 ? 'down' : 'flat';
     const chgStr = chg == null ? '—' : (chg>=0?'▲':'▼')+Math.abs(chg).toFixed(2)+'%';
     const nameStr = item.name
-      ? `<div style="font-size:9px;color:var(--yellow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>`
+      ? `<div style="font-size:9px;color:var(--yellow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(item.name)}</div>`
       : '';
     const tag = getTag(sym);
     const tagColor = TAGS[tag].color;
@@ -588,7 +613,7 @@ function renderSidebar() {
           style="flex-shrink:0;font-size:10px;padding:0 2px;cursor:pointer;line-height:1;">✕</span>
       </div>
       ${item.name ? `<div style="padding-left:11px;font-size:9px;color:var(--muted2);
-        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>` : ''}
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(item.name)}</div>` : ''}
     </div>${editorHtml}`;
   }).join('');
 

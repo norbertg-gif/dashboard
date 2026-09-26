@@ -7086,6 +7086,7 @@ body.light-mode .port-table td.port-ticker-tag {
 .home-performance-ranges .active { color: var(--blue); border-color: var(--blue); }
 .home-performance-body { display: grid; grid-template-columns: minmax(0, 1fr) 155px; gap: 16px; align-items: center; }
 #home-performance-chart { height: 320px; min-width: 0; overflow: hidden; }
+#home-performance-chart.is-empty { height: auto; }
 #home-performance-legend > div { display: flex; flex-direction: column; gap: 5px; margin: 22px 0; font-size: 13px; }
 #home-performance-legend strong { font-size: 18px; font-variant-numeric: tabular-nums; }
 @media (max-width: 1199px) {

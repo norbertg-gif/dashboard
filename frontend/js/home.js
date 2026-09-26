@@ -86,10 +86,25 @@ function homeCacheWrite(data) {
   } catch (e) {}
 }
 
-function homeStaleBarHtml(ts) {
+const HOME_BLOCKS = [
+  ['moversUp', 'rastúce'], ['moversDown', 'klesajúce'], ['plan', 'týždenný plán'],
+  ['earnings', 'výsledky'], ['port1', 'portfólio účet 1'], ['port2', 'portfólio účet 2'],
+];
+
+// Bez kontroly r.ok by sa HTTP 503 s {"detail": ...} prijal ako dáta.
+async function homeFetchJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function homeHhmm(ts) {
   const d = new Date(ts);
-  const hhmm = String(d.getHours()).padStart(2, '0') + ':' +
-               String(d.getMinutes()).padStart(2, '0');
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function homeStaleBarHtml(ts) {
+  const hhmm = homeHhmm(ts);
   return `<div class="home-stale-bar" title="Posledný uložený prehľad — čerstvé dáta sa načítavajú">` +
          `<span class="spinner"></span>Stav z ${hhmm} · aktualizujem…</div>`;
 }
@@ -122,25 +137,38 @@ async function renderHomeView(force = false) {
   try {
     const acct = (typeof activeAccount !== 'undefined' && activeAccount) || '1';
     const results = await Promise.allSettled([
-      fetch(`${API}/api/movers?account=${acct}&n=6&direction=up`).then(r => r.json()),
-      fetch(`${API}/api/movers?account=${acct}&n=6&direction=down`).then(r => r.json()),
-      fetch(`${API}/api/investor/plan`).then(r => r.json()),
-      fetch(`${API}/api/earnings/calendar?days=14`).then(r => r.json()),
+      homeFetchJson(`${API}/api/movers?account=${acct}&n=6&direction=up`),
+      homeFetchJson(`${API}/api/movers?account=${acct}&n=6&direction=down`),
+      homeFetchJson(`${API}/api/investor/plan`),
+      homeFetchJson(`${API}/api/earnings/calendar?days=14`),
       // Home je jednorazový snapshot pri otvorení tabu (nie priebežne live ako
       // Portfólio, ktoré cache dorovnáva WebSocket tickami) — refresh=1 obchádza
       // 24h POSITIONS_CACHE_TTL, aby KPI karty neukazovali starý stav.
-      fetch(`${API}/api/etoro/portfolio?account=1&refresh=1`).then(r => r.json()),
-      fetch(`${API}/api/etoro/portfolio?account=2&refresh=1`).then(r => r.json()),
+      homeFetchJson(`${API}/api/etoro/portfolio?account=1&refresh=1`),
+      homeFetchJson(`${API}/api/etoro/portfolio?account=2&refresh=1`),
     ]);
-    const [moversUp, moversDown, plan, earnings, port1, port2] =
-      results.map(r => (r.status === 'fulfilled' ? r.value : null));
-    _homeLastData = { moversUp, moversDown, plan, earnings, port1, port2 };
+    // Blok, ktorý zlyhal, si ponechá poslednú platnú hodnotu — chybová
+    // odpoveď ({"detail": ...}) nesmie prepísať dobrý snapshot ani cache.
+    const prev = _homeLastData || snap?.d || {};
+    const merged = {};
+    const failed = [];
+    HOME_BLOCKS.forEach(([key], i) => {
+      if (results[i].status === 'fulfilled') merged[key] = results[i].value;
+      else { merged[key] = prev[key] ?? null; failed.push(i); }
+    });
+    if (failed.length === HOME_BLOCKS.length) throw results[0].reason || new Error('všetky zdroje zlyhali');
+    const { port1, port2 } = merged;
+    const fresh = key => results[HOME_BLOCKS.findIndex(([k]) => k === key)].status === 'fulfilled';
+    _homeLastData = merged;
     _homeLastFetchMs = Date.now();
-    homeCacheWrite(_homeLastData);
+    // Čiastočný výpadok sa neukladá ako čerstvý stav: pri ďalšom otvorení sa
+    // skúsi znova namiesto TTL a localStorage si ponechá posledný úplný stav.
+    if (failed.length) _homeLastFetchMs = 0;
+    else homeCacheWrite(_homeLastData);  // uložený snapshot musí mať pravdivý čas
     // Nasej čerstvý snapshot do zdieľaného portfolioAccountData — live.js ho
     // priebežne dorovnáva WS tickami (recalcPortfolioLiveSummary), takže KPI
     // karty aj header equity pill z toho ďalej žijú live, nie zo starej cache.
-    for (const [id, port] of [['1', port1], ['2', port2]]) {
+    for (const [id, port] of [['1', fresh('port1') ? port1 : null], ['2', fresh('port2') ? port2 : null]]) {
       if (port?.positions && port?.summary && typeof preparePortfolioSnapshot === 'function') {
         preparePortfolioSnapshot(port);
         portfolioAccountData[id] = port;
@@ -149,7 +177,10 @@ async function renderHomeView(force = false) {
     }
     if (typeof updateHeaderEquities === 'function') updateHeaderEquities();
     disposeHomePerformance();
-    el.innerHTML = homeContentHtml(_homeLastData);
+    const failNote = failed.length
+      ? `<div class="home-error">Neaktualizované: ${escHtml(failed.map(i => HOME_BLOCKS[i][1]).join(', '))}${snap ? ` — zobrazený stav z ${homeHhmm(snap.t)}` : ''}.</div>`
+      : '';
+    el.innerHTML = failNote + homeContentHtml(_homeLastData);
     setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); loadHomePerformance(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
@@ -888,6 +919,14 @@ function homeSetPerformanceRange(range) {
   renderHomePerformance(_homePerformanceData, range);
 }
 
+function homeRetryPerformance() {
+  const container = document.getElementById('home-performance-chart');
+  if (!container) return;
+  container.classList.remove('is-empty');
+  container.innerHTML = '<div class="home-empty">Načítavam…</div>';
+  loadHomePerformance();
+}
+
 async function loadHomePerformance() {
   const container = document.getElementById('home-performance-chart');
   if (!container) return;
@@ -899,7 +938,11 @@ async function loadHomePerformance() {
     _homePerformanceData = data;
     renderHomePerformance(data);
   } catch (e) {
-    if (container.isConnected) container.innerHTML = '<div class="home-empty">Výkonnosť sa teraz nepodarilo načítať.</div>';
+    if (!container.isConnected) return;
+    // Kompaktný chybový stav — plná výška grafu patrí len načítavaniu a grafu.
+    container.classList.add('is-empty');
+    container.innerHTML = `<div class="home-empty">Výkonnosť sa teraz nepodarilo načítať (${escHtml(e.message || String(e))}).
+      <button class="btn mini" type="button" onclick="homeRetryPerformance()">Skúsiť znova</button></div>`;
   }
 }
 
@@ -908,10 +951,12 @@ function renderHomePerformance(data, range = homePerformanceRange()) {
   const container = document.getElementById('home-performance-chart');
   if (!container) return;
   container.innerHTML = '';
+  container.classList.remove('is-empty');
   document.querySelectorAll('[data-performance-range]').forEach(b => b.classList.toggle('active', b.dataset.performanceRange === range));
   const legend = document.getElementById('home-performance-legend');
   legend.innerHTML = '';
   if (!data?.available || !data.points?.length) {
+    container.classList.add('is-empty');
     container.innerHTML = '<div class="home-empty">Pre graf zatiaľ nie je dostupná história otvorených pozícií účtu 1.</div>';
     return;
   }
@@ -964,7 +1009,7 @@ function homeContentHtml(data) {
       </div>
       <div class="home-columns"><div class="home-main-column">
       ${homePortfolioKpiHtml(data.port1, data.port2)}
-      ${homeCard('Výkonnosť portfólia vs benchmark', homePerformanceHtml(), { className: 'home-card-performance' })}
+      ${homeCard('Výkonnosť portfólia · účet 1 vs benchmark', homePerformanceHtml(), { className: 'home-card-performance' })}
       ${homeCard('Moje výbery vs index',
         `<div id="home-bench-block"><div class="home-empty">Načítavam…</div></div>`,
         { className: 'home-card-bench' })}
