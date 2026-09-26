@@ -3694,5 +3694,52 @@ class Ema200ScopeRegressionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
 
 
+class AlphaVantageQuotaRegressionTests(unittest.TestCase):
+    """AV free tier = 25 req/den. Automaticky nacitane insights ho nesmu minat."""
+
+    class _Resp:
+        def __init__(self, status, payload=None, text=""):
+            self.status_code = status
+            self._payload = payload
+            self.text = text
+
+        def json(self):
+            return self._payload
+
+    def test_insights_never_fetches_alpha_vantage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(tb, "YAHOO_INSIGHTS_DIR", Path(tmp) / "ins"),
+                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp) / "av"),
+                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
+                patch.object(tb, "_av_limit_active", return_value=False),
+                patch.object(tb, "_insights_fetch_finnhub", side_effect=RuntimeError("down")),
+                patch.object(tb, "_yahoo_quote_summary", return_value=None),
+                patch.object(tb, "_fmp_price_target", return_value=None),
+                patch.object(tb, "_fmp_earnings_surprises", return_value=([], False, "HTTP 402")),
+                patch.object(tb, "_yahoo_earnings_chart", return_value=([], False, "down")),
+                patch.object(tb.requests, "get") as get,
+            ):
+                tb.get_ticker_insights("AAPL", refresh=1)
+        av_calls = [c for c in get.call_args_list if "alphavantage" in str(c)]
+        self.assertEqual(av_calls, [])
+
+    def test_fmp_error_reports_stable_reason_not_only_legacy_403(self):
+        responses = [
+            self._Resp(402, text='{"Error Message": "Premium Query Parameter: symbol"}'),
+            self._Resp(403, text="Legacy Endpoint"),
+        ]
+        with (
+            patch.dict("os.environ", {"FMP_API_KEY": "fmpkey12345"}),
+            patch.object(tb.requests, "get", side_effect=responses),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                tb._fmp_fund_get("income-statement", "AAPL")
+        msg = str(ctx.exception)
+        self.assertIn("stable HTTP 402", msg)
+        self.assertIn("Premium", msg)
+        self.assertNotIn("fmpkey12345", msg)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

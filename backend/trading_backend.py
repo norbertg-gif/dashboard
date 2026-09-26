@@ -3563,30 +3563,34 @@ def _fmp_fund_get(path: str, sym: str, extra: dict | None = None):
     api_key = os.getenv("FMP_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("FMP_API_KEY nie je nastavený")
-    last_err = None
+    errors = []
     # stable API: /stable/{path}?symbol=SYM ; v3 API: /api/v3/{path}/SYM
+    # v3 je od 2025 "Legacy Endpoint" (HTTP 403) — ak by sa hlásila len
+    # posledná chyba, 403 z v3 zakryje skutočný dôvod zo stable (napr. plán).
     attempts = (
-        (f"https://financialmodelingprep.com/stable/{path}", {"symbol": sym}),
-        (f"https://financialmodelingprep.com/api/v3/{path}/{urllib.parse.quote(sym)}", {}),
+        ("stable", f"https://financialmodelingprep.com/stable/{path}", {"symbol": sym}),
+        ("v3", f"https://financialmodelingprep.com/api/v3/{path}/{urllib.parse.quote(sym)}", {}),
     )
-    for url, sym_params in attempts:
+    for label, url, sym_params in attempts:
         params = {**sym_params, "apikey": api_key, **(extra or {})}
         try:
             r = requests.get(url, params=params, timeout=12)
             if r.status_code != 200:
-                last_err = f"HTTP {r.status_code}"
+                snippet = " ".join((r.text or "").split())[:140]
+                errors.append(f"{label} HTTP {r.status_code}" + (f" ({_scrub_token(snippet)})" if snippet else ""))
                 continue
             data = r.json()
             if isinstance(data, dict) and (data.get("Error Message") or data.get("error") or data.get("message")):
-                last_err = "error payload"
+                msg = str(data.get("Error Message") or data.get("error") or data.get("message"))[:140]
+                errors.append(f"{label} error ({_scrub_token(msg)})")
                 continue
             if not data:
-                last_err = "empty"
+                errors.append(f"{label} empty")
                 continue
             return data
         except Exception as e:
-            last_err = type(e).__name__
-    raise RuntimeError(f"FMP {path}: {last_err}")
+            errors.append(f"{label} {type(e).__name__}")
+    raise RuntimeError(f"FMP {path}: " + "; ".join(errors))
 
 def _fmp_row_to_av(row: dict, mapping: dict) -> dict:
     out = {}
@@ -12008,8 +12012,13 @@ def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
     return (history[-8:], True, None)
 
 
-def _av_earnings_history(sym: str) -> tuple[list[dict], bool, str | None]:
-    """Map cached Alpha Vantage EARNINGS rows to (eps_history, succeeded, error)."""
+def _av_earnings_history(sym: str, allow_fetch: bool = True) -> tuple[list[dict], bool, str | None]:
+    """Map cached Alpha Vantage EARNINGS rows to (eps_history, succeeded, error).
+
+    allow_fetch=False = iba disk cache. Insights sa načítavajú automaticky
+    (Analytika, stĺpec Cieľ v Portfóliu, Verdikt) a pri 1 h TTL neúspešných
+    zdrojov by každý titul bez EPS z Finnhubu/FMP minul jeden z 25 denných
+    AV requestov — kvóta bola preč skôr, než používateľ klikol na fundamenty."""
     sym = _validate_ticker_symbol(sym)
     path = AV_EARNINGS_CACHE_DIR / f"{sym}.json"
 
@@ -12056,6 +12065,8 @@ def _av_earnings_history(sym: str) -> tuple[list[dict], bool, str | None]:
         if cached_history is not None:
             return (cached_history, True, None)
 
+        if not allow_fetch:
+            return ([], False, "Alpha Vantage: cache only (quota reserved for explicit requests)")
         api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
         if not api_key:
             return ([], False, "ALPHA_VANTAGE_API_KEY is not configured")
@@ -13342,7 +13353,7 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
     av_succeeded = False
     av_error = None
     if core is None or not core.get("eps_history"):
-        av_eps, av_succeeded, av_error = _av_earnings_history(sym)
+        av_eps, av_succeeded, av_error = _av_earnings_history(sym, allow_fetch=False)
         if av_eps:
             if core is None:
                 core = {"eps_history": av_eps, "source": "av"}
