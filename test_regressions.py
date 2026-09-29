@@ -189,109 +189,170 @@ vm.runInContext(`
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-class PortfolioNewsRegressionTests(unittest.TestCase):
-    def item(self, title="Company news", published=None):
-        return {"title": title, "url": "https://example.com/news", "source": "Example",
-                "published": published or tb._time_module.time(), "provider": "yahoo"}
+class NewsTabRegressionTests(unittest.TestCase):
+    def item(self, title="Company news", published=None, source="Reuters", related=None, kind=None):
+        row = {"title": title, "url": "https://example.com/news", "source": source,
+               "published": published or tb._time_module.time(), "provider": "finnhub"}
+        if related is not None:
+            row["relatedTickers"] = related
+        row["kind"] = kind or tb._news_kind(source, title)
+        return row
 
-    def test_selection_on_company_over_listicle(self):
-        rows = [dict(self.item("Own ON Semiconductor... Or Micron's?"), relatedTickers=["MU", "ON", "NXPI", "NVDA"]),
-                dict(self.item("Marvell and 2 More Stocks"), relatedTickers=["MRVL", "AMD", "ON"]),
-                dict(self.item("ON company news", 100), relatedTickers=["ON"])]
-        self.assertEqual(tb._select_ticker_news("ON", rows)["title"], "ON company news")
+    def test_news_kind_source_and_title_classification(self):
+        for source in ("Zacks", "Simply Wall St."):
+            self.assertEqual(tb._news_kind(source, "Company update"), "commentary")
+        for source in ("Reuters", "MT Newswires", "PR Newswire"):
+            self.assertEqual(tb._news_kind(source, "Company update"), "wire")
+        self.assertEqual(tb._news_kind("Unknown Source", "Should You Buy X Stock Now"), "commentary")
 
-    def test_selection_nu_specific_and_newest_tiebreak(self):
-        rows = [dict(self.item("Three stocks", 300), relatedTickers=["NU", "AMD", "NVDA"]),
-                dict(self.item("Prediction: Nu Holdings Will Earn More Than $5 Billion in 2027", 200), relatedTickers=["NU", "NVDA"]),
-                dict(self.item("Older prediction", 100), relatedTickers=["NU", "NVDA"])]
-        self.assertTrue(tb._select_ticker_news("NU", rows)["title"].startswith("Prediction:"))
-
-    def test_selection_prefers_fresh_company_article_over_week_old_single_ticker(self):
-        # Reálny prípad NU 2026-09-24: 6 dní starý článok len s [NU] vyhral nad
-        # 7-hodinovým [NU, NVDA], lebo "menej tickerov" malo prednosť pred vekom.
+    def test_selection_caps_three_orders_wire_then_newest_and_drops_old(self):
         now = 1_800_000_000
-        rows = [dict(self.item("Some Brazilian voters are feeling burned", now - 147 * 3600), relatedTickers=["NU"]),
-                dict(self.item("Prediction: Nu Holdings Will Earn More", now - 7 * 3600), relatedTickers=["NU", "NVDA"])]
-        self.assertTrue(tb._select_ticker_news("NU", rows)["title"].startswith("Prediction:"))
+        rows = [self.item("old", now - 8*86400),
+                self.item("commentary recent", now - 60, source="Example", kind="commentary"),
+                self.item("wire older", now - 3600, kind="wire"),
+                self.item("wire newest", now - 120, kind="wire")]
+        selected = tb._select_ticker_news("ON", rows, now)
+        self.assertEqual([row["title"] for row in selected], ["wire newest", "wire older", "commentary recent"])
+        self.assertLessEqual(len(selected), 3)
+        self.assertTrue(all(now-row["published"] <= 7*86400 for row in selected))
 
-    def test_selection_drops_listicle_where_ticker_is_not_first(self):
-        # Reálny prípad GFS: článok o Monolithic Power s GFS v zozname nesmie
-        # byť "správa o GFS"; radšej žiadna.
-        rows = [dict(self.item("Wall Street Thinks Monolithic Power Stock Is Worth 50% More"),
-                     relatedTickers=["MPWR", "GFS", "ON", "TXN"])]
-        self.assertIsNone(tb._select_ticker_news("GFS", rows))
+    def test_selection_prefers_focused_article_over_list_article(self):
+        now = 1_800_000_000
+        rows = [self.item("ON and more", now-30, related=["ON", "AMD", "NVDA"]),
+                self.item("Focused ON", now-3600, related=["ON"]),
+                self.item("Ticker second", now-10, related=["AMD", "ON"])]
+        self.assertEqual([row["title"] for row in tb._select_ticker_news("ON", rows, now)], ["Focused ON"])
 
-    def test_selection_drops_unrelated(self):
-        self.assertIsNone(tb._select_ticker_news("ON", [dict(self.item(), relatedTickers=["MU"])]))
+    def test_symbol_normalization_is_lookup_only(self):
+        self.assertEqual(tb._normalize_news_symbol("ADI.US"), "ADI")
+        self.assertEqual(tb._normalize_news_symbol("BRK.B"), "BRK-B")
+        self.assertEqual(tb._normalize_news_symbol("RHM.DE"), "RHM.DE")
 
-    def test_yahoo_failure_finnhub_fallback(self):
+    def test_fetch_uses_normalized_symbol_and_returns_normalized_list(self):
         from unittest.mock import Mock
         response = Mock()
-        response.json.return_value = [{"headline": "Older", "url": "https://example.com", "source": "F", "datetime": 100},
-                                      {"headline": "Latest", "url": "https://example.com", "source": "F", "datetime": int(tb._time_module.time())}]
-        with patch.dict(tb.os.environ, {"FINNHUB_API_KEY": "test"}), patch.object(tb.requests, "get", side_effect=[RuntimeError("offline"), response]) as get:
-            item, error = tb._fetch_portfolio_ticker_news("NU")
-        self.assertEqual(item["title"], "Latest")
-        self.assertEqual(item["provider"], "finnhub")
+        response.json.return_value = {"news": [{"title": "ADI results", "link": "https://x.test", "publisher": "Reuters", "providerPublishTime": int(tb._time_module.time()), "relatedTickers": ["ADI"]}]}
+        with patch.dict(tb.os.environ, {"FINNHUB_API_KEY": ""}), patch.object(tb.requests, "get", return_value=response) as get:
+            items, error = tb._fetch_portfolio_ticker_news("ADI.US")
         self.assertIsNone(error)
-        self.assertIn("company-news", get.call_args.args[0])
+        self.assertEqual(items[0]["title"], "ADI results")
+        self.assertEqual(get.call_args.kwargs["params"]["q"], "ADI")
 
-    def test_yahoo_failure_without_key(self):
-        with patch.dict(tb.os.environ, {"FINNHUB_API_KEY": ""}), patch.object(tb.requests, "get", side_effect=RuntimeError("offline")) as get:
-            item, error = tb._fetch_portfolio_ticker_news("ON")
-        self.assertIsNone(item)
-        self.assertTrue(error)
+    def test_real_yahoo_shape_survives_cache_round_trip(self):
+        """Cold fetch -> cache -> warm read must both return the article.
+        (Cached items have relatedTickers stripped; re-selecting them dropped every Yahoo item.)"""
+        now = tb._time_module.time()
+
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"news": [{"title": "AMD to acquire lab for $8bn", "link": "https://example.com/a",
+                                  "publisher": "Reuters", "providerPublishTime": int(now - 3600),
+                                  "relatedTickers": ["AMD"]}]}
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)),              patch.object(tb, "_portfolio_news_holdings", return_value={"AMD": "AMD Inc"}),              patch.object(tb, "_get_portfolio_holdings", return_value={}),              patch.object(tb.requests, "get", return_value=_Resp()) as get:
+            cold = tb.get_portfolio_news()
+            warm = tb.get_portfolio_news()
         self.assertEqual(get.call_count, 1)
+        for data in (cold, warm):
+            self.assertEqual([r["ticker"] for r in data["tickers"]], ["AMD"])
+            self.assertEqual(data["tickers"][0]["items"][0]["kind"], "wire")
+            self.assertEqual(data["wire_count"], 1)
 
-    def test_failed_refresh_preserves_item_and_retries_after_hour(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "ON"}):
-            old = self.item()
-            path = Path(tmp) / "portfolio_news.json"
-            path.write_text(json.dumps({"ON": {"ts": 1, "item": old, "error": None}}))
-            with patch.object(tb, "_fetch_portfolio_ticker_news", return_value=(None, "offline")) as fetch:
-                result = tb.get_home_news()
-                tb.get_home_news()
-            self.assertEqual(fetch.call_count, 1)
-            self.assertEqual(result["items"][0]["item"], old)
-            self.assertTrue(result["items"][0]["stale"])
-            self.assertEqual(result["errors"], 1)
-            self.assertEqual(json.loads(path.read_text())["ON"]["item"], old)
-
-    def test_slow_ticker_does_not_hold_the_response_and_stays_due(self):
-        # Yahoo z Render IP nie je overený: visiaci zdroj nesmie držať Prehľad
-        # minúty ani zapísať pomalý ticker ako "bez správy".
+    def test_batch_budget_leaves_slow_ticker_due(self):
         import time as _t
-        def fake_fetch(sym):
-            if sym == "SLOW":
-                _t.sleep(2)
-            return ({"title": sym, "url": "https://x.test/" + sym, "source": "s",
-                     "published": _t.time() - 60, "provider": "yahoo"}, None)
-        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)),              patch.object(tb, "_portfolio_news_holdings", return_value={"FAST": "F", "SLOW": "S"}),              patch.object(tb, "_fetch_portfolio_ticker_news", side_effect=fake_fetch),              patch.object(tb, "PORTFOLIO_NEWS_BATCH_BUDGET_S", 0.3):
+        def fetch(sym):
+            if sym == "SLOW": _t.sleep(1)
+            return ([self.item(sym, _t.time()-60)], None)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value={"FAST": "F", "SLOW": "S"}), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb, "_fetch_portfolio_ticker_news", side_effect=fetch), \
+             patch.object(tb, "PORTFOLIO_NEWS_BATCH_BUDGET_S", 0.2):
             started = _t.monotonic()
-            data = tb.get_home_news()
-            elapsed = _t.monotonic() - started
-            cache = json.loads((Path(tmp) / "portfolio_news.json").read_text(encoding="utf-8"))
-        self.assertLess(elapsed, 1.5, "odpoveď čakala na pomalý ticker")
-        self.assertEqual([row["ticker"] for row in data["items"]], ["FAST"])
-        self.assertNotIn("SLOW", cache, "pomalý ticker sa zapísal ako vybavený — nabudúce by ho nik neskúsil")
+            data = tb.get_portfolio_news()
+            elapsed = _t.monotonic()-started
+            cache = json.loads((Path(tmp)/"portfolio_news_v2.json").read_text(encoding="utf-8"))
+        self.assertLess(elapsed, 1)
+        self.assertIn("FAST", [row["ticker"] for row in data["tickers"]])
+        self.assertNotIn("SLOW", cache)
 
-    def test_stock_only_both_accounts_deduplicated(self):
-        ram = {"1": {"data": [{"symbol": "on", "type": "Stock", "name": "Onsemi"}, {"symbol": "SPY", "type": "ETF"}]}}
-        disk = {"data": [{"symbol": "ON", "type": "Stock"}, {"symbol": "NU", "type": "Stock", "name": "Nu"}]}
+    def test_cache_atomic_and_seven_day_cutoff(self):
+        now = tb._time_module.time()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value={"OLD": "Old", "NEW": "New"}), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={}):
+            entries = {"OLD": {"ts": now, "items": [self.item("expired", now-8*86400)], "error": None},
+                       "NEW": {"ts": now, "items": [self.item("fresh", now-60)], "error": None}}
+            (Path(tmp)/"portfolio_news_v2.json").write_text(json.dumps(entries), encoding="utf-8")
+            with patch.object(tb.requests, "get") as get:
+                data = tb.get_portfolio_news()
+            get.assert_not_called()
+            self.assertEqual([row["ticker"] for row in data["tickers"]], ["NEW"])
+            self.assertEqual(data["without_news"], ["OLD"])
+            self.assertFalse(list(Path(tmp).glob("*.tmp")))
+
+    def test_order_has_wire_then_amount_then_name(self):
+        now = tb._time_module.time()
+        holdings = {"ALOW": "Zulu", "B": "Beta", "C": "Alpha"}
+        cache = {sym: {"ts": now, "items": [self.item(sym, now-100, kind=kind)], "error": None}
+                 for sym, kind in (("ALOW", "wire"), ("B", "commentary"), ("C", "wire"))}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value=holdings), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={"ALOW": {"amount": 500}, "B": {"amount": 900}, "C": {"amount": 500}}):
+            (Path(tmp)/"portfolio_news_v2.json").write_text(json.dumps(cache), encoding="utf-8")
+            result = tb.get_portfolio_news()
+        self.assertEqual([row["ticker"] for row in result["tickers"]], ["C", "ALOW", "B"])
+        self.assertEqual(result["wire_count"], 2)
+
+    def test_holdings_are_processed_stock_only_both_accounts_deduplicated(self):
+        ram = {"1": {"data": [{"symbol": "on", "type": "Stock", "name": "Onsemi"},
+                              {"symbol": "SPY", "type": "ETF"}]}}
+        disk = {"data": [{"symbol": "ON", "type": "Stock"},
+                 {"symbol": "NU", "type": "Stock", "name": "Nu"}]}
         with patch.object(tb, "_positions_cache", ram), patch.object(tb, "cache_read", return_value=disk):
             self.assertEqual(tb._portfolio_news_holdings(), {"ON": "Onsemi", "NU": "Nu"})
 
-    def test_fresh_cache_zero_http_and_old_items_excluded(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "Onsemi", "NU": "Nu", "AMD": "AMD"}):
-            now = tb._time_module.time()
-            entries = {sym: {"ts": now, "item": item, "error": None} for sym, item in
-                       [("ON", self.item(published=now-100)), ("NU", self.item(published=now-8*86400)), ("AMD", self.item(published=now-10))]}
-            (Path(tmp) / "portfolio_news.json").write_text(json.dumps(entries))
-            with patch.object(tb.requests, "get") as get:
-                result = tb.get_home_news()
-            get.assert_not_called()
-            self.assertEqual([r["ticker"] for r in result["items"]], ["AMD", "ON"])
-            self.assertEqual(result["without_news"], ["NU"])
+    def test_failed_refresh_retains_last_good_items_and_uses_error_retry_window(self):
+        now = tb._time_module.time()
+        old = self.item("Still useful", now-300)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "Onsemi"}), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb, "_fetch_portfolio_ticker_news", return_value=([], "offline")) as fetch:
+            path = Path(tmp)/"portfolio_news_v2.json"
+            path.write_text(json.dumps({"ON": {"ts": 1, "items": [old], "error": None}}), encoding="utf-8")
+            result = tb.get_portfolio_news()
+            tb.get_portfolio_news()
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(result["tickers"][0]["items"][0]["title"], "Still useful")
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(saved["ON"]["items"][0]["title"], "Still useful")
+
+    def test_cache_refresh_uses_atomic_writer(self):
+        now = tb._time_module.time()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "Onsemi"}), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb, "_fetch_portfolio_ticker_news", return_value=([self.item("fresh", now-10)], None)), \
+             patch.object(tb, "_atomic_write_json", wraps=tb._atomic_write_json) as atomic_write:
+            (Path(tmp)/"portfolio_news_v2.json").write_text(json.dumps({"ON": {"ts": 1, "items": [], "error": None}}), encoding="utf-8")
+            tb.get_portfolio_news()
+            atomic_write.assert_called_once()
+            self.assertTrue((Path(tmp)/"portfolio_news_v2.json").exists())
+            self.assertFalse(list(Path(tmp).glob("*.tmp")))
+
+    def test_endpoint_does_not_call_etoro_proxy(self):
+        now = tb._time_module.time()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)), \
+             patch.object(tb, "_portfolio_news_holdings", return_value={"ON": "Onsemi"}), \
+             patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb.ETORO_PROXY_SESSION, "get", side_effect=AssertionError("endpoint must not use eToro")) as proxy_get:
+            (Path(tmp)/"portfolio_news_v2.json").write_text(json.dumps({"ON": {"ts": now, "items": [self.item("Fresh", now-1)], "error": None}}), encoding="utf-8")
+            result = tb.get_portfolio_news()
+        proxy_get.assert_not_called()
+        self.assertEqual(result["tickers"][0]["ticker"], "ON")
 
 class EtoroProxySecurityRegressionTests(unittest.TestCase):
     """Exercise the local handler only; no eToro request leaves this process."""

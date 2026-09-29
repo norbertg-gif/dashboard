@@ -65,7 +65,7 @@ document.addEventListener('keydown', e => {
     switchMainTab('portfolio');
   } else if (requestedTab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
     switchMainTab('portfolio');
-  } else if (['home','charts','portfolio','history','predictive','scanner','verdict'].includes(requestedTab)) {
+  } else if (['home','charts','portfolio','history','predictive','scanner','verdict','news'].includes(requestedTab)) {
     switchMainTab(requestedTab);
   } else {
     // Bez ?tab= parametra je Home defaultný pristávací tab — treba ho reálne

@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20260929-153108">
+<link rel="stylesheet" href="/dashboard.css?v=20260929-164100">
 </head>
 <body data-main-tab="home">
 
@@ -23,6 +23,7 @@
   <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()" title="Skryť ľavý panel">☰</button>
   <div id="main-tabs">
     <div class="main-tab active" id="tab-home" onclick="switchMainTab('home')">Prehľad <button class="tab-popout" onclick="openMainTabWindow(event,'home')" title="Otvoriť v novej karte">↗</button></div>
+    <div class="main-tab" id="tab-news" onclick="switchMainTab('news')">Správy <button class="tab-popout" onclick="openMainTabWindow(event,'news')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-charts" onclick="switchMainTab('charts')">Grafy <button class="tab-popout" onclick="openMainTabWindow(event,'charts')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab" id="tab-portfolio" onclick="switchMainTab('portfolio')">Portfólio <button class="tab-popout" onclick="openMainTabWindow(event,'portfolio')" title="Otvoriť v novej karte">↗</button></div>
     <div class="main-tab advanced-only" id="tab-history" onclick="switchMainTab('history')">História <button class="tab-popout" onclick="openMainTabWindow(event,'history')" title="Otvoriť v novej karte">↗</button></div>
@@ -147,6 +148,7 @@
   <div id="main-portfolio" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;">
     <div id="portfolio-view" style="flex:1;display:flex;flex-direction:column;overflow:hidden;"></div>
   </div>
+  <div id="main-news" class="tool-view" style="display:none;"><div id="news-view"></div></div>
   <div id="main-history" class="tool-view" style="display:none;"></div>
   <div id="main-scanner" class="tool-view" style="display:none;"></div>
   <div id="main-verdict" class="tool-view verdict-view" style="display:none;">
@@ -530,16 +532,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20260929-153108"></script>
-  <script src="/js/live.js?v=20260929-153108"></script>
-  <script src="/js/portfolio.js?v=20260929-153108"></script>
-  <script src="/js/watchlist.js?v=20260929-153108"></script>
-  <script src="/js/scanner-table-sort.js?v=20260929-153108"></script>
-  <script src="/js/scanner.js?v=20260929-153108"></script>
-  <script src="/js/predictive.js?v=20260929-153108"></script>
-  <script src="/js/verdict.js?v=20260929-153108"></script>
-  <script src="/js/home.js?v=20260929-153108"></script>
-  <script src="/js/charts.js?v=20260929-153108"></script>
-  <script src="/js/main.js?v=20260929-153108"></script>
+  <script src="/js/core.js?v=20260929-164100"></script>
+  <script src="/js/live.js?v=20260929-164100"></script>
+  <script src="/js/portfolio.js?v=20260929-164100"></script>
+  <script src="/js/watchlist.js?v=20260929-164100"></script>
+  <script src="/js/scanner-table-sort.js?v=20260929-164100"></script>
+  <script src="/js/scanner.js?v=20260929-164100"></script>
+  <script src="/js/predictive.js?v=20260929-164100"></script>
+  <script src="/js/verdict.js?v=20260929-164100"></script>
+  <script src="/js/home.js?v=20260929-164100"></script>
+  <script src="/js/newsfeed.js?v=20260929-164100"></script>
+  <script src="/js/charts.js?v=20260929-164100"></script>
+  <script src="/js/main.js?v=20260929-164100"></script>
 </body>
 </html>

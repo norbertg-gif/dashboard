@@ -10090,57 +10090,112 @@ PORTFOLIO_NEWS_HTTP_TIMEOUT = 5
 PORTFOLIO_NEWS_BATCH_BUDGET_S = 25
 
 
-def _select_ticker_news(sym, items):
-    """Vyber JEDEN článok, ktorý je naozaj o firme — čistá funkcia, bez I/O.
+NEWS_COMMENTARY_SOURCES = frozenset({
+    "zacks", "simply wall st.", "insider monkey", "motley fool", "trefis",
+    "stockstory", "24/7 wall st.", "gurufocus.com", "tikr", "moneywise",
+    "stocktwits", "seekingalpha",
+})
+NEWS_COMMENTARY_TITLE_PATTERNS = (
+    r"\bshould you\b", r"\bstock now or\b", r"\bcould be\b",
+    r"\bundervalued\b", r"\bovervalued\b", r"\bworth buying\b",
+    r"\bbuy the dip\b", r"\bis it a buy\b", r"\btop \d+ stocks\b",
+    r"\b\d+ (?:value|growth|profitable) stocks\b", r"\bhere.s why\b",
+    r"\bwhat investors need to know\b",
+)
+PORTFOLIO_NEWS_MAX_AGE_S = 7 * 86400
 
-    Pravidlo je zmerané na 16 držaných tituloch (2026-09-24): (1) článok, kde je
-    ticker PRVÝ v relatedTickers, a z nich NAJNOVŠÍ; (2) ak taký nie je, článok
-    s najviac dvoma tickermi (typicky „X vs Y"), najnovší; (3) inak nič.
-    Pôvodná verzia radila „menej tickerov" pred aktuálnosťou aj medzi článkami
-    o firme — NU dostal 6 dní starý článok, hoci existoval 7-hodinový — a pri
-    chýbajúcom primárnom článku prepadla na zoznamy typu „3 čipové akcie" (GFS
-    dostal článok o Monolithic Power). Položky bez relatedTickers (Finnhub) sú
-    už viazané na firmu zdrojom, berie sa najnovšia."""
-    sym = sym.upper()
-    primary, small, untagged = [], [], []
-    for item in items:
-        if not isinstance(item, dict) or not item.get("title"):
+
+def _news_kind(source, title):
+    """Pure display classification; tune source and title lists above."""
+    normalized_source = re.sub(r"\s+", " ", str(source or "").strip().lower())
+    if normalized_source in NEWS_COMMENTARY_SOURCES:
+        return "commentary"
+    normalized_title = str(title or "").lower()
+    return "commentary" if any(re.search(pattern, normalized_title, re.I)
+                               for pattern in NEWS_COMMENTARY_TITLE_PATTERNS) else "wire"
+
+
+def _normalize_news_symbol(sym):
+    """Yahoo/Finnhub lookup symbol only; portfolio identity remains untouched."""
+    symbol = str(sym or "").strip().upper()
+    if symbol.endswith(".US"):
+        symbol = symbol[:-3]
+    if re.fullmatch(r"[A-Z0-9]+\.[A-Z]", symbol):
+        symbol = symbol.replace(".", "-")
+    return symbol
+
+
+def _select_ticker_news(sym, items, now=None):
+    """Return up to three relevant, recent normalized articles in display order."""
+    now = _time_module.time() if now is None else now
+    sym = _normalize_news_symbol(sym)
+    valid, primary = [], []
+    for original in items:
+        if not isinstance(original, dict) or not original.get("title"):
             continue
-        published = item.get("published")
-        if not isinstance(published, (int, float)) or not math.isfinite(published) or published <= 0:
+        published = original.get("published")
+        if (not isinstance(published, (int, float)) or not math.isfinite(published)
+                or published <= 0 or published < now - PORTFOLIO_NEWS_MAX_AGE_S or published > now + 300):
             continue
-        if "relatedTickers" not in item:
-            untagged.append(item)
-            continue
+        item = dict(original)
         related = item.get("relatedTickers")
-        if not isinstance(related, list):
+        if isinstance(related, list):
+            related = [_normalize_news_symbol(t) for t in related]
+            if not related or related[0] != sym:
+                continue
+            primary.append(item)
+        elif "relatedTickers" in item or item.get("provider") != "finnhub":
             continue
-        related = [str(t).upper() for t in related]
-        if sym not in related:
+        valid.append(item)
+    # If a focused primary item exists, broad ticker-first list articles add noise.
+    focused = [item for item in primary if len(item.get("relatedTickers", [])) <= 2]
+    eligible = focused if focused else primary
+    eligible.extend(item for item in valid if "relatedTickers" not in item)
+    eligible.sort(key=lambda item: (
+        0 if item.get("relatedTickers", [sym])[0] == sym else 1,
+        0 if item.get("kind") == "wire" else 1,
+        -item["published"], str(item.get("title", "")), str(item.get("url", ""))))
+    result = []
+    seen = set()
+    for item in eligible:
+        key = (item.get("url"), item.get("title"), item.get("published"))
+        if key in seen:
             continue
-        if related[0] == sym:
-            primary.append((item, len(related)))
-        elif len(related) <= 2:
-            small.append(item)
-    # Stabilný tie-break titulkom a URL, nech výber nekolíše medzi behmi.
-    newest = lambda group: max(group, key=lambda it: (it["published"], str(it.get("title", "")), str(it.get("url", ""))))
-    if primary:
-        # Aj článok s tickerom na prvom mieste môže byť zoznam „3 akcie". Sústredený
-        # článok (≤2 tickery) vyhrá, ak nie je o viac než 48 h starší než najnovší —
-        # starší by už nebol „aktuálna správa" (NU: 147 h vs 7 h).
-        top = newest([it for it, _ in primary])
-        focused = [it for it, n in primary if n <= 2 and top["published"] - it["published"] <= 48 * 3600]
-        return newest(focused) if focused else top
-    for group in (small, untagged):
-        if group:
-            return newest(group)
-    return None
+        seen.add(key)
+        clean = {k: v for k, v in item.items() if k != "relatedTickers"}
+        clean["kind"] = clean.get("kind") or _news_kind(clean.get("source"), clean.get("title"))
+        clean["age_hours"] = round(max(0, (now - clean["published"]) / 3600), 2)
+        result.append(clean)
+        if len(result) == 3:
+            break
+    return result
+
+
+def _recent_cached_news(items, now):
+    """Read-time filter for entries that were ALREADY selected before caching.
+
+    Cached items have relatedTickers stripped, so they must NOT go through
+    _select_ticker_news again (it would drop every Yahoo item as "untagged").
+    Only the 7-day cutoff and the age are recomputed."""
+    result = []
+    for item in items if isinstance(items, list) else []:
+        published = item.get("published") if isinstance(item, dict) else None
+        if (not isinstance(published, (int, float)) or not math.isfinite(published)
+                or published < now - PORTFOLIO_NEWS_MAX_AGE_S or published > now + 300):
+            continue
+        clean = dict(item)
+        clean["age_hours"] = round(max(0, (now - published) / 3600), 2)
+        result.append(clean)
+    result.sort(key=lambda it: (0 if it.get("kind") == "wire" else 1, -it["published"]))
+    return result[:3]
 
 
 def _fetch_portfolio_ticker_news(sym):
-    """Yahoo search first, then Finnhub; errors never include credential URLs."""
+    """Yahoo search then Finnhub, returning normalized items and safe errors."""
     now = _time_module.time()
+    lookup_sym = _normalize_news_symbol(sym)
     errors = []
+    normalized = []
     for provider in ("yahoo", "finnhub"):
         key = os.getenv("FINNHUB_API_KEY", "").strip()
         if provider == "finnhub" and not key:
@@ -10148,19 +10203,18 @@ def _fetch_portfolio_ticker_news(sym):
         try:
             if provider == "yahoo":
                 response = requests.get("https://query2.finance.yahoo.com/v1/finance/search",
-                    params={"q": sym, "quotesCount": 0, "newsCount": 10,
+                    params={"q": lookup_sym, "quotesCount": 0, "newsCount": 10,
                             "enableFuzzyQuery": "false"}, headers=YF_HEADERS, timeout=PORTFOLIO_NEWS_HTTP_TIMEOUT)
             else:
                 today = datetime.fromtimestamp(now, timezone.utc).date()
                 response = requests.get("https://finnhub.io/api/v1/company-news",
-                    params={"symbol": sym, "from": str(today - timedelta(days=7)),
+                    params={"symbol": lookup_sym, "from": str(today - timedelta(days=7)),
                             "to": str(today), "token": key}, timeout=PORTFOLIO_NEWS_HTTP_TIMEOUT)
             response.raise_for_status()
             payload = response.json()
             rows = payload.get("news", []) if provider == "yahoo" else payload
             if not isinstance(rows, list):
                 raise ValueError("Invalid news response")
-            normalized = []
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -10172,14 +10226,12 @@ def _fetch_portfolio_ticker_news(sym):
                 if provider == "yahoo" and "relatedTickers" in row:
                     item["relatedTickers"] = row["relatedTickers"]
                 pub = item["published"]
-                if isinstance(pub, (int, float)) and now - 7 * 86400 <= pub <= now + 300:
+                if isinstance(pub, (int, float)) and now - PORTFOLIO_NEWS_MAX_AGE_S <= pub <= now + 300:
+                    item["kind"] = _news_kind(item["source"], item["title"])
                     normalized.append(item)
-            selected = _select_ticker_news(sym, normalized)
-            if selected:
-                return {k: v for k, v in selected.items() if k != "relatedTickers"}, None
         except Exception as exc:
             errors.append(f"{provider}: {type(exc).__name__}")
-    return None, "; ".join(errors) or None
+    return _select_ticker_news(sym, normalized, now), "; ".join(errors) or None
 
 
 def _portfolio_news_holdings():
@@ -10194,13 +10246,12 @@ def _portfolio_news_holdings():
     return holdings
 
 
-@app.get("/api/home/news")
-def get_home_news():
+@app.get("/api/news/portfolio")
+def get_portfolio_news():
     holdings = _portfolio_news_holdings()
-    # Serialize refresh batches as well as writes: concurrent clients share one
-    # cold fetch and cannot multiply the four-worker limit or lose cache updates.
+    positions = _get_portfolio_holdings()
     with _portfolio_news_lock:
-        path = DATA_ROOT / "portfolio_news.json"
+        path = DATA_ROOT / "portfolio_news_v2.json"
         try:
             cache = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(cache, dict):
@@ -10210,40 +10261,40 @@ def get_home_news():
         now = _time_module.time()
         due = [sym for sym in holdings if sym not in cache or
                now - cache[sym].get("ts", 0) >= (3600 if cache[sym].get("error") else 21600)]
+        finished = set()
         if due:
             pool = ThreadPoolExecutor(max_workers=4)
-            futures = {pool.submit(_fetch_portfolio_ticker_news, sym): sym for sym in due}
-            finished, _ = wait(futures, timeout=PORTFOLIO_NEWS_BATCH_BUDGET_S)
-            # Nečakať na bežiace ani nespustené — ich výsledok sa zahodí a
-            # ticker ostane bez nového záznamu, teda "due" aj nabudúce.
+            futures = {pool.submit(_fetch_portfolio_ticker_news, _normalize_news_symbol(sym)): sym for sym in due}
+            done, _ = wait(futures, timeout=PORTFOLIO_NEWS_BATCH_BUDGET_S)
             pool.shutdown(wait=False, cancel_futures=True)
-            for future in finished:
+            for future in done:
                 sym = futures[future]
+                finished.add(sym)
                 try:
-                    item, error = future.result()
+                    items, error = future.result()
                 except Exception as exc:
-                    item, error = None, type(exc).__name__
-                previous = cache.get(sym, {}).get("item")
-                cache[sym] = {"ts": _time_module.time(),
-                              "item": previous if error else item, "error": error}
+                    items, error = [], type(exc).__name__
+                previous = cache.get(sym, {}).get("items", [])
+                cache[sym] = {"ts": _time_module.time(), "items": previous if error else items, "error": error}
             if finished:
                 _atomic_write_json(path, cache)
-        items, without_news = [], []
-        errors = 0
+        rows, without_news, errors = [], [], 0
         for sym, name in holdings.items():
             entry = cache.get(sym, {})
-            item = entry.get("item")
-            stale = bool(entry.get("error"))
-            errors += int(stale)
-            age = max(0, (now - item["published"]) / 3600) if item else None
-            if item and age <= 7 * 24:
-                items.append({"ticker": sym, "name": name, "item": item,
-                              "stale": stale, "age_hours": round(age, 2)})
+            errors += int(bool(entry.get("error")))
+            items = _recent_cached_news(entry.get("items", []), now)
+            if items:
+                rows.append({"ticker": sym, "name": name, "has_wire": any(i["kind"] == "wire" for i in items), "items": items})
             else:
                 without_news.append(sym)
-        items.sort(key=lambda row: (-row["item"]["published"], row["ticker"]))
-        return {"generated_at": now, "items": items,
-                "without_news": sorted(without_news), "errors": errors}
+        amounts = {}
+        for symbol, holding in positions.items():
+            normalized = _normalize_news_symbol(symbol)
+            amounts[normalized] = amounts.get(normalized, 0.0) + float((holding or {}).get("amount", 0) or 0)
+        rows.sort(key=lambda row: (not row["has_wire"], -amounts.get(_normalize_news_symbol(row["ticker"]), 0.0), row["name"].casefold()))
+        wire_count = sum(bool(row["has_wire"]) for row in rows)
+        return {"generated_at": now, "tickers": rows, "without_news": sorted(without_news),
+                "errors": errors, "wire_count": wire_count}
 
 
 @app.get("/api/home/heatmap")
@@ -15536,7 +15587,7 @@ def help_screenshot(fname: str):
 # validácie, nech sa nedá vyžiadať nič mimo frontend/js/.
 _JS_MODULES = {
     "core.js", "live.js", "watchlist.js", "portfolio.js", "scanner.js",
-    "predictive.js", "verdict.js", "home.js", "charts.js", "main.js",
+    "predictive.js", "verdict.js", "home.js", "newsfeed.js", "charts.js", "main.js",
     # Nový modul MUSÍ pribudnúť aj sem — inak endpoint vráti 404 a v produkcii
     # padne všetko, čo ten súbor potrebuje (lokálne to nevidno, ak sa testuje
     # bez tohto endpointu).

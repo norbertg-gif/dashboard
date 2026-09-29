@@ -1,0 +1,105 @@
+let _newsTabLastGood = null;
+let _newsTabRequest = null;
+let _homeNewsSummaryRequest = null;
+
+function newsfeedAge(hours) {
+  const value = Math.max(0, Number(hours) || 0);
+  if (value < 1) return `${Math.max(1, Math.round(value * 60))} min`;
+  if (value < 24) return `${Math.floor(value)} h`;
+  return `${Math.floor(value / 24)} d`;
+}
+
+async function fetchPortfolioNews(force = false) {
+  if (!force && _newsTabRequest) return _newsTabRequest;
+  _newsTabRequest = (async () => {
+    const response = await fetch(`${API}/api/news/portfolio`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    _newsTabLastGood = data;
+    return data;
+  })();
+  try { return await _newsTabRequest; }
+  finally { _newsTabRequest = null; }
+}
+
+function newsfeedSafeUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+    return '';
+  } catch (e) { return ''; }
+}
+
+function newsfeedItemHtml(item) {
+  const title = escHtml(item.title || '');
+  const url = newsfeedSafeUrl(item.url);
+  let headline = title;
+  if (url) headline = `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>`;
+  return `<div class="newsfeed-item">${headline}<span class="newsfeed-meta">${escHtml(item.source || '')} \u00b7 ${escHtml(newsfeedAge(item.age_hours))}</span></div>`;
+}
+
+function newsfeedRender(data, stale = false) {
+  const tickers = data.tickers || [];
+  const rows = tickers.map(row => {
+    const wire = (row.items || []).filter(item => item.kind === 'wire');
+    const commentary = (row.items || []).filter(item => item.kind === 'commentary');
+    let extra = '';
+    if (commentary.length) extra = `<details class="newsfeed-commentary"><summary>\u010fal\u0161ie (${commentary.length})</summary>${commentary.map(newsfeedItemHtml).join('')}</details>`;
+    return `<section class="newsfeed-row">
+      <button type="button" class="btn mini newsfeed-ticker" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span></button>
+      <div>${wire.map(newsfeedItemHtml).join('')}${extra}</div>
+    </section>`;
+  }).join('');
+  let without = '';
+  if (data.without_news && data.without_news.length) without = `<div class="newsfeed-without">Bez spr\u00e1vy: ${data.without_news.map(ticker => escHtml(ticker)).join(', ')}</div>`;
+  let retry = '';
+  if (stale) retry = '<button type="button" class="btn mini" onclick="loadNewsTab(true)">Sk\u00fasi\u0165 znova</button>';
+  let staleNote = '';
+  if (stale) staleNote = '<span>neaktualizovan\u00e9</span>';
+  const count = Number(data.wire_count) || 0;
+  const intro = `${count} titulov s v\u00fdznamnou spr\u00e1vou \u00b7 len posledn\u00fdch 7 dn\u00ed \u00b7 zdroje: Yahoo/Finnhub`;
+  let content = rows;
+  if (!content) content = '<div class="home-empty">Za posledn\u00fdch 7 dn\u00ed sa nena\u0161la spr\u00e1va k dr\u017ean\u00fdm titulom.</div>';
+  return `<div class="newsfeed-wrap"><div class="newsfeed-head"><span>${intro}</span><span>${staleNote} ${retry}</span></div>${content}${without}</div>`;
+}
+
+function newsfeedBindTickers(root) {
+  root.querySelectorAll('[data-news-ticker]').forEach(button => {
+    button.addEventListener('click', () => openScannerTicker(button.dataset.newsTicker));
+  });
+}
+
+async function loadNewsTab(retry = false) {
+  const root = document.getElementById('news-view');
+  if (!root) return;
+  if (_newsTabLastGood) root.innerHTML = newsfeedRender(_newsTabLastGood, Number(_newsTabLastGood.errors) > 0);
+  else root.innerHTML = '<div class="newsfeed-wrap"><div class="home-empty">Na\u010d\u00edtavam spr\u00e1vy...</div></div>';
+  newsfeedBindTickers(root);
+  try {
+    const data = await fetchPortfolioNews(retry);
+    if (!root.isConnected) return;
+    root.innerHTML = newsfeedRender(data, Number(data.errors) > 0);
+    newsfeedBindTickers(root);
+  } catch (error) {
+    if (!root.isConnected) return;
+    if (_newsTabLastGood) root.innerHTML = newsfeedRender(_newsTabLastGood, true);
+    else root.innerHTML = `<div class="newsfeed-wrap"><div class="home-empty">Spr\u00e1vy sa nepodarilo na\u010d\u00edta\u0165. <button type="button" class="btn mini" onclick="loadNewsTab(true)">Sk\u00fasi\u0165 znova</button></div></div>`;
+  }
+}
+
+async function loadHomeNewsSummary() {
+  const button = document.getElementById('news-summary-link');
+  if (!button) return;
+  try {
+    if (!_homeNewsSummaryRequest) _homeNewsSummaryRequest = fetchPortfolioNews();
+    const data = await _homeNewsSummaryRequest;
+    _homeNewsSummaryRequest = null;
+    if (!button.isConnected) return;
+    const count = Number(data.wire_count) || 0;
+    button.textContent = `Spr\u00e1vy: ${count} titulov s v\u00fdznamnou spr\u00e1vou \u2192 otvori\u0165`;
+    button.hidden = count === 0;
+  } catch (error) {
+    _homeNewsSummaryRequest = null;
+    if (button.isConnected) button.hidden = true;
+  }
+}

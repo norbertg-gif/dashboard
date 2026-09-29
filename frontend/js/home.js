@@ -120,7 +120,7 @@ async function renderHomeView(force = false) {
     el.innerHTML = homeContentHtml(_homeLastData);
     // Heatmapa má vlastnú cache aj vlastný endpoint — dopĺňa sa po vykreslení,
     // aby ju nedržal ten istý TTL ako portfóliový snapshot.
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); loadHomePerformance(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadHomeNewsSummary(); loadHomePerformance(); }, 0);
     return;
   }
 
@@ -133,7 +133,7 @@ async function renderHomeView(force = false) {
   el.innerHTML = snap
     ? homeStaleBarHtml(snap.t) + homeContentHtml(snap.d)
     : homeSkeletonHtml();
-  if (snap) { loadPortfolioNewsCard(); loadHomePerformance(); }
+  if (snap) { loadHomeNewsSummary(); loadHomePerformance(); }
   try {
     const acct = (typeof activeAccount !== 'undefined' && activeAccount) || '1';
     const results = await Promise.allSettled([
@@ -181,7 +181,7 @@ async function renderHomeView(force = false) {
       ? `<div class="home-error">Neaktualizované: ${escHtml(failed.map(i => HOME_BLOCKS[i][1]).join(', '))}${snap ? ` — zobrazený stav z ${homeHhmm(snap.t)}` : ''}.</div>`
       : '';
     el.innerHTML = failNote + homeContentHtml(_homeLastData);
-    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadPortfolioNewsCard(); loadHomePerformance(); }, 0);
+    setTimeout(() => { loadHeatmapCard(); loadBenchmarkCard(); loadHomeNewsSummary(); loadHomePerformance(); }, 0);
   } catch (e) {
     // Uložený prehľad je aj tak lepší než prázdna chyba — nechaj ho a chybu
     // pripíš nad neho, nech je jasné, že sa nepodarilo aktualizovať.
@@ -190,7 +190,7 @@ async function renderHomeView(force = false) {
       ? `<div class="home-error">Aktualizácia zlyhala: ${escHtml(e.message)} — nižšie je uložený stav.</div>` +
         homeContentHtml(snap.d)
       : `<div class="home-error">Home sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
-    if (snap) { loadPortfolioNewsCard(); loadHomePerformance(); }
+    if (snap) { loadHomeNewsSummary(); loadHomePerformance(); }
   } finally {
     _homeLoading = false;
   }
@@ -259,6 +259,7 @@ function homePortfolioKpiHtml(port1, port2) {
         <div class="home-kpi-label">${label}</div>
         <div class="home-kpi-val" data-home-kpi="${key}">${val}</div>
       </div>`).join('')}</div>
+    <button type="button" class="news-summary-link" id="news-summary-link" hidden onclick="switchMainTab('news')"></button>
   </div>`;
 }
 
@@ -842,52 +843,6 @@ function homeCard(title, bodyHtml, opts = {}) {
   </div>`;
 }
 
-function homeNewsAge(hours) {
-  const h = Math.max(0, Math.floor(Number(hours) || 0));
-  if (h < 1) return 'pred chvíľou';
-  if (h < 24) return `pred ${h} h`;
-  const days = Math.floor(h / 24);
-  return days === 1 ? 'včera' : `pred ${days} dňami`;
-}
-
-function homeNewsHtml(data) {
-  const rows = (data.items || []).map(row => {
-    const item = row.item;
-    let url = '';
-    try {
-      const parsed = new URL(item.url);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') url = parsed.href;
-    } catch (e) {}
-    const headline = url
-      ? `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${escHtml(item.title)}</a>`
-      : escHtml(item.title);
-    return `<div class="home-news-row">
-      <div class="home-news-top"><button type="button" class="btn mini" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}">${escHtml(row.ticker)}</button><span class="home-news-meta">${escHtml(homeNewsAge(row.age_hours))}</span></div>
-      <div class="home-news-headline">${headline}</div><div class="home-news-meta">${escHtml(item.source || '')}
-        ${row.stale ? '<span title="Obnovenie správy zlyhalo. Zobrazuje sa posledná uložená správa.">(staršie)</span>' : ''}</div>
-    </div>`;
-  }).join('');
-  return `<div class="home-news-list">${rows || '<div class="home-empty">Žiadne aktuálne správy k držaným akciám.</div>'}</div>`
-    + (data.without_news?.length ? `<div class="home-news-meta">Bez správy za 7 dní: ${data.without_news.map(t => escHtml(t)).join(', ')}</div>` : '');
-}
-
-async function loadPortfolioNewsCard() {
-  const wrap = document.getElementById('home-news-block');
-  if (!wrap) return;
-  try {
-    const response = await fetch(`${API}/api/home/news`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    if (!wrap.isConnected) return;
-    wrap.innerHTML = homeNewsHtml(data);
-    wrap.querySelectorAll('[data-news-ticker]').forEach(button => {
-      button.addEventListener('click', () => openScannerTicker(button.dataset.newsTicker));
-    });
-  } catch (e) {
-    if (wrap.isConnected) wrap.innerHTML = '<div class="home-empty">Správy sa teraz nepodarilo načítať.</div>';
-  }
-}
-
 let _homePerformanceChart = null;
 let _homePerformanceRO = null;
 let _homePerformanceData = null;
@@ -1007,7 +962,7 @@ function homeContentHtml(data) {
         </div>
         <div class="home-horizon-chip">12+ mesiacov</div>
       </div>
-      <div class="home-columns"><div class="home-main-column">
+      <div class="home-main-column">
       ${homePortfolioKpiHtml(data.port1, data.port2)}
       ${homeCard('Výkonnosť portfólia · účet 1 vs benchmark', homePerformanceHtml(), { className: 'home-card-performance' })}
       ${homeCard('Moje výbery vs index',
@@ -1025,8 +980,6 @@ function homeContentHtml(data) {
         ${homeCard('Možný nákup', buildFirstBarrierHtml(data.plan) + homePlanRowsHtml(data.plan?.buy_candidates, 'Plán tento týždeň nenašiel kandidáta na nákup.'), { className: 'home-card-dip' })}
         ${homeCard('Možné DCA', homePlanRowsHtml(data.plan?.dca, 'Tento týždeň nie je kandidát na DCA.'), { className: 'home-card-dip' })}
       </div>
-      </div><aside class="home-news-column" aria-label="Správy k portfóliu">
-        ${homeCard('Správy k portfóliu', '<div id="home-news-block"><div class="home-empty">Načítavam…</div></div>')}
-      </aside></div>
+      </div>
     </div>`;
 }

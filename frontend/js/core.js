@@ -328,7 +328,7 @@ function switchMainTab(tab) {
       }, 100);
     }
   }
-  ['home','charts','portfolio','history','predictive','scanner','verdict'].forEach(name => {
+  ['home','charts','portfolio','history','predictive','scanner','verdict','news'].forEach(name => {
     const el = document.getElementById('main-' + name);
     if (!el) return;
     if (name === tab) {
@@ -351,13 +351,15 @@ function switchMainTab(tab) {
     renderHistoryView();
   } else if (tab === 'scanner') {
     renderScannerView();
+  } else if (tab === 'news') {
+    loadNewsTab();
   } else if (tab === 'verdict') {
     initVerdictView(previousContextTicker);
   }
   if (typeof syncChartDockVisibilityForTab === 'function') syncChartDockVisibilityForTab();
   // Názov browser tabu podľa otvorenej záložky — pri viacerých oknách
   // dashboardu je hneď vidno, kde čo je
-  const TAB_TITLES = { home: 'Home', charts: 'Grafy', portfolio: 'Portfólio', history: 'História',
+  const TAB_TITLES = { home: 'Home', news: 'Správy', charts: 'Grafy', portfolio: 'Portfólio', history: 'História',
                        predictive: 'Analytika', scanner: 'Scanner', verdict: 'Verdikt' };
   document.title = `TD · ${TAB_TITLES[tab] || 'Dashboard'}`;
   const url = new URL(window.location.href);
