@@ -238,6 +238,17 @@ class NewsTabRegressionTests(unittest.TestCase):
         self.assertEqual(items[0]["title"], "ADI results")
         self.assertEqual(get.call_args.kwargs["params"]["q"], "ADI")
 
+    def test_sentiment_is_only_fetched_on_click(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "newsfeed.js").read_text(encoding="utf-8")
+        # exactly one place may call the per-ticker (Alpha Vantage) endpoint, and it must be the click handler
+        self.assertEqual(src.count("/api/news/${"), 1)
+        body = src.split("async function newsfeedLoadSentiment(", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("/api/news/${", body)
+        loader = src.split("async function loadNewsTab(", 1)[1].split("\nasync function loadHomeNewsSummary", 1)[0]
+        self.assertNotIn("newsfeedLoadSentiment(", loader)
+        # definition + the click listener are the ONLY references
+        self.assertEqual(src.count("newsfeedLoadSentiment("), 2)
+
     def test_real_yahoo_shape_survives_cache_round_trip(self):
         """Cold fetch -> cache -> warm read must both return the article.
         (Cached items have relatedTickers stripped; re-selecting them dropped every Yahoo item.)"""

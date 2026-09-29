@@ -48,6 +48,7 @@ function newsfeedRender(data, stale = false) {
     return `<section class="newsfeed-row">
       <button type="button" class="btn mini newsfeed-ticker" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span></button>
       <div>${wire.map(newsfeedItemHtml).join('')}${extra}</div>
+      <div class="newsfeed-sent" data-sent-ticker="${escHtml(row.ticker)}">${newsfeedSentimentCellHtml(row.ticker)}</div>
     </section>`;
   }).join('');
   let without = '';
@@ -63,7 +64,67 @@ function newsfeedRender(data, stale = false) {
   return `<div class="newsfeed-wrap"><div class="newsfeed-head"><span>${intro}</span><span>${staleNote} ${retry}</span></div>${content}${without}</div>`;
 }
 
+// ── Alpha Vantage sentiment — VÝHRADNE na klik (25 req/deň, 1 request na titul).
+// Nikdy sa nevolá hromadne ani automaticky pri otvorení záložky.
+const _newsSentimentCache = {};   // { TICKER: {data} | {error} | {loading:true} }
+
+function newsfeedSentimentLabel(avg) {
+  if (avg <= -0.35) return 'Bearish';
+  if (avg <= -0.15) return 'Somewhat-Bearish';
+  if (avg < 0.15) return 'Neutral';
+  if (avg < 0.35) return 'Somewhat-Bullish';
+  return 'Bullish';
+}
+
+function newsfeedSentimentCellHtml(ticker) {
+  const state = _newsSentimentCache[ticker];
+  const btn = (text) => `<button type="button" class="btn mini" data-sent-load="${escHtml(ticker)}" title="Alpha Vantage NEWS_SENTIMENT — 1 z 25 denných dotazov">${text}</button>`;
+  if (!state) return btn('Sentiment');
+  if (state.loading) return '<span class="newsfeed-meta"><span class="cl-spinner"></span> načítavam…</span>';
+  if (state.error) return `<span class="newsfeed-meta" title="${escHtml(state.error)}">${escHtml(state.error)}</span> ${btn('Skúsiť znova')}`;
+  const summary = newsSummaryFromItems(state.items || []);
+  if (!summary) return `<span class="newsfeed-meta">bez hodnotenia (${(state.items || []).length} článkov)</span>`;
+  const label = newsfeedSentimentLabel(summary.avg);
+  const stale = state.stale ? ' · staré dáta' : '';
+  return `${newsSentimentBadge(label, summary.avg)}<span class="newsfeed-meta">${summary.n} udalostí${stale}</span>`;
+}
+
+async function newsfeedLoadSentiment(ticker) {
+  if ((_newsSentimentCache[ticker] || {}).loading) return;
+  _newsSentimentCache[ticker] = { loading: true };
+  newsfeedPatchSentiment(ticker);
+  try {
+    const r = await fetch(`${API}/api/news/${encodeURIComponent(ticker)}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let data = await r.json();
+    if (data.error && !(data.items || []).length && typeof fetchTickerNewsDirect === 'function') {
+      const direct = await fetchTickerNewsDirect(ticker);   // per-IP limit na Renderi → z prehliadača
+      if (direct) data = direct;
+    }
+    _newsSentimentCache[ticker] = data.error && !(data.items || []).length
+      ? { error: String(data.error).slice(0, 120) } : data;
+  } catch (e) {
+    _newsSentimentCache[ticker] = { error: String(e.message || e).slice(0, 120) };
+  }
+  newsfeedPatchSentiment(ticker);
+}
+
+function newsfeedPatchSentiment(ticker) {
+  document.querySelectorAll('[data-sent-ticker]').forEach(cell => {
+    if (cell.dataset.sentTicker !== ticker) return;
+    cell.innerHTML = newsfeedSentimentCellHtml(ticker);
+    newsfeedBindSentiment(cell);
+  });
+}
+
+function newsfeedBindSentiment(root) {
+  root.querySelectorAll('[data-sent-load]').forEach(button => {
+    button.addEventListener('click', () => newsfeedLoadSentiment(button.dataset.sentLoad));
+  });
+}
+
 function newsfeedBindTickers(root) {
+  newsfeedBindSentiment(root);
   root.querySelectorAll('[data-news-ticker]').forEach(button => {
     button.addEventListener('click', () => openScannerTicker(button.dataset.newsTicker));
   });
