@@ -2339,101 +2339,6 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
             "beat": True,
         }])
 
-    def test_av_earnings_history_maps_string_fields_and_report_date(self):
-        response = self._Response(200, {
-            "symbol": "AAPL",
-            "quarterlyEarnings": [
-                {
-                    "fiscalDateEnding": "2026-06-30",
-                    "reportedDate": "2026-07-24",
-                    "reportedEPS": "1.65",
-                    "estimatedEPS": "1.50",
-                    "surprisePercentage": "10.0",
-                },
-                {
-                    "fiscalDateEnding": "2026-03-31",
-                    "reportedDate": "2026-04-25",
-                    "reportedEPS": "1.20",
-                    "estimatedEPS": "None",
-                    "surprisePercentage": "None",
-                },
-                {
-                    "fiscalDateEnding": "2025-12-31",
-                    "reportedDate": "2026-01-30",
-                    "reportedEPS": "None",
-                    "estimatedEPS": "1.10",
-                    "surprisePercentage": "None",
-                },
-            ],
-        })
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
-                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
-                patch.object(tb, "_av_limit_active", return_value=False),
-                patch.object(tb.requests, "get", return_value=response),
-            ):
-                history, succeeded, error = tb._av_earnings_history("aapl")
-        self.assertTrue(succeeded)
-        self.assertIsNone(error)
-        self.assertEqual(history, [
-            {
-                "date": "2026-04-25",
-                "quarter": "Q1 2026",
-                "actual": 1.2,
-                "estimate": None,
-                "surprise_pct": None,
-                "beat": False,
-            },
-            {
-                "date": "2026-07-24",
-                "quarter": "Q2 2026",
-                "actual": 1.65,
-                "estimate": 1.5,
-                "surprise_pct": 10.0,
-                "beat": True,
-            },
-        ])
-
-    def test_av_earnings_history_30_day_cache_prevents_second_request(self):
-        response = self._Response(200, {
-            "symbol": "AAPL",
-            "quarterlyEarnings": [],
-        })
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
-                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
-                patch.object(tb, "_av_limit_active", return_value=False),
-                patch.object(tb.requests, "get", return_value=response) as get,
-            ):
-                first = tb._av_earnings_history("AAPL")
-                second = tb._av_earnings_history("AAPL")
-        self.assertEqual(first, ([], True, None))
-        self.assertEqual(second, first)
-        self.assertEqual(get.call_count, 1)
-
-    def test_av_earnings_history_limit_short_circuits_without_request(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)),
-                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
-                patch.object(tb, "_av_limit_active", return_value=True),
-                patch.object(tb.requests, "get") as get,
-            ):
-                history, succeeded, error = tb._av_earnings_history("AAPL")
-        self.assertEqual(history, [])
-        self.assertFalse(succeeded)
-        self.assertIn("limit exhausted", error)
-        get.assert_not_called()
-
-    def test_av_earnings_history_rejects_path_traversal_symbol(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp)):
-                with self.assertRaises(HTTPException) as caught:
-                    tb._av_earnings_history("../../etc/passwd")
-        self.assertEqual(caught.exception.status_code, 400)
-
     def test_finnhub_calendar_retries_once_on_429(self):
         responses = [
             self._Response(429, {}),
@@ -2467,16 +2372,9 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                     tb, "_fmp_earnings_surprises",
                     return_value=([], False, "HTTP 429"),
                 ),
-                patch.object(
-                    tb, "_av_earnings_history",
-                    return_value=([], False, "daily limit exhausted"),
-                ),
             ):
                 first = tb.get_ticker_insights("AAPL", refresh=0)
                 self.assertIn("eps_history_error", first)
-                self.assertEqual(
-                    first["av_earnings_error"], "daily limit exhausted"
-                )
                 path = cache_dir / "AAPL.json"
                 cached = json.loads(path.read_text(encoding="utf-8"))
                 cached["fetched_at"] = (
@@ -2507,10 +2405,6 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
                 patch.object(tb, "_fmp_price_target", return_value=None),
                 patch.object(
                     tb, "_fmp_earnings_surprises",
-                    return_value=([], True, None),
-                ),
-                patch.object(
-                    tb, "_av_earnings_history",
                     return_value=([], True, None),
                 ),
             ):
@@ -2724,22 +2618,18 @@ class FundAnalysisFmpRegressionTests(unittest.TestCase):
                 payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
         self.assertEqual(payload["source"], "FinancialData.net")
 
-    def test_endpoint_falls_back_to_alpha_vantage(self):
-        av_payloads = {
-            "OVERVIEW": {"Name": "AV Corp", "PERatio": "20"},
-            "INCOME_STATEMENT": {"annualReports": [{"totalRevenue": "1000", "netIncome": "100"}]},
-            "BALANCE_SHEET": {"annualReports": [{"totalShareholderEquity": "500"}]},
-            "CASH_FLOW": {"annualReports": [{"operatingCashflow": "200", "capitalExpenditures": "50"}]},
-        }
+    def test_endpoint_never_calls_alpha_vantage_when_other_sources_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.object(tb, "FUND_ANALYSIS_DIR", Path(tmp)),
                 patch.object(tb, "_fmp_fund_raw", side_effect=RuntimeError("FMP down")),
-                patch.object(tb, "_alpha_vantage", side_effect=lambda fn, sym: av_payloads[fn]),
+                patch.object(tb, "_fdn_fund_raw", side_effect=RuntimeError("FDN down")),
+                patch.object(tb.requests, "get", side_effect=AssertionError("network call")),
             ):
-                payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
-        self.assertEqual(payload["source"], "Alpha Vantage")
-        self.assertEqual(payload["company"], "AV Corp")
+                with self.assertRaises(tb.HTTPException) as ctx:
+                    tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertIn("FMP down", ctx.exception.detail)
+        self.assertNotIn("Alpha Vantage", ctx.exception.detail)
 
 
 class MassiveSplitAdjustmentRegressionTests(unittest.TestCase):
@@ -3706,11 +3596,10 @@ class AlphaVantageQuotaRegressionTests(unittest.TestCase):
         def json(self):
             return self._payload
 
-    def test_insights_never_fetches_alpha_vantage(self):
+    def test_insights_do_not_fetch_alpha_vantage(self):
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.object(tb, "YAHOO_INSIGHTS_DIR", Path(tmp) / "ins"),
-                patch.object(tb, "AV_EARNINGS_CACHE_DIR", Path(tmp) / "av"),
                 patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
                 patch.object(tb, "_av_limit_active", return_value=False),
                 patch.object(tb, "_insights_fetch_finnhub", side_effect=RuntimeError("down")),

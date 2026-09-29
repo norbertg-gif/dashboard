@@ -1707,33 +1707,9 @@ async function loadEarningsCalendar() {
   try {
     const r = await fetch('/api/earnings');
     if (!r.ok) { _earningsDates = {}; return; }
-    let data = await r.json();
-    // rate-limit na Render IP → stiahni CSV priamo z prehliadača (per-IP limit)
-    if (data.error && !Object.keys(data.dates || {}).length) {
-      const direct = await fetchEarningsDirect();
-      if (direct) data = direct;
-    }
+    const data = await r.json();
     _earningsDates = data.dates || {};
   } catch (e) { _earningsDates = {}; }
-}
-
-async function fetchEarningsDirect() {
-  try {
-    const kr = await fetch('/api/news/clientkey');
-    if (!kr.ok) return null;
-    const { key } = await kr.json();
-    if (!key) return null;
-    const av = await fetch(`https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=3month&apikey=${encodeURIComponent(key)}`);
-    if (!av.ok) return null;
-    const csv = await av.text();
-    const ir = await fetch('/api/earnings/ingest', { method: 'POST', body: csv });
-    if (!ir.ok) return null;
-    const data = await ir.json();
-    if (data.error && !Object.keys(data.dates || {}).length) return null;
-    return data;
-  } catch (e) {
-    return null;
-  }
 }
 
 function newsSummaryFromItems(items) {

@@ -3557,28 +3557,6 @@ def _av_mark_limit_exhausted():
 def _av_limit_active() -> bool:
     return time.time() < _av_limit_exhausted_until
 
-def _alpha_vantage(function: str, symbol: str) -> dict:
-    key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
-    if not key:
-        raise HTTPException(status_code=503, detail="ALPHA_VANTAGE_API_KEY nie je nastaveny")
-    if _av_limit_active():
-        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný — resetuje sa o polnoci UTC.")
-    resp = requests.get(
-        "https://www.alphavantage.co/query",
-        params={"function": function, "symbol": symbol, "apikey": key},
-        timeout=14,
-    )
-    resp.raise_for_status()
-    data = resp.json() or {}
-    # Upstream text NIKDY neposielať do UI — Alpha Vantage vkladá do Note/
-    # Information plný API kľúč ("We have detected your API key as ...").
-    if data.get("Note") or data.get("Information"):
-        _av_mark_limit_exhausted()
-        raise HTTPException(status_code=429, detail="Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň) — resetuje sa o polnoci UTC.")
-    if data.get("Error Message"):
-        raise HTTPException(status_code=404, detail=f"Alpha Vantage nepozná symbol {symbol}.")
-    return data
-
 # ── FMP ako primárny zdroj fundamentov (free 250 req/deň vs AV 25/deň) ───────
 # Adaptér mapuje FMP odpovede na Alpha Vantage tvar, ktorý _build_fund_analysis
 # už pozná — builder/skóring sa nemení, mení sa len zdroj dát.
@@ -4052,8 +4030,8 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
     # Primárne FMP (free 250 req/deň, ~5 volaní/ticker), fallback Alpha Vantage
     # (25 req/deň, 4 volania/ticker). Cache/UX filozofia sa nemení — stále len
     # explicitný klik, 7-dňová disk cache, refresh=1 obíde cache.
-    # Reťaz zdrojov: FMP (250/deň) → FinancialData.net (300/deň) → Alpha Vantage
-    # (25/deň). Chybová hláška vždy nesie dôvody všetkých zlyhaných zdrojov.
+    # Reťaz zdrojov: FMP (250/deň) → FinancialData.net (300/deň). Chybová
+    # hláška vždy nesie dôvody všetkých zlyhaných zdrojov.
     reasons = []
     payload = None
     for source, fetcher in (("FMP", _fmp_fund_raw), ("FinancialData.net", _fdn_fund_raw)):
@@ -4065,17 +4043,9 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
             reasons.append(f"{source}: {_scrub_token(str(e))}")
             print(f"[fund-analysis] {source} failed for {sym}: {_scrub_token(str(e))}")
     if payload is None:
-        try:
-            raw = {
-                "overview": _alpha_vantage("OVERVIEW", sym),
-                "income": _alpha_vantage("INCOME_STATEMENT", sym),
-                "balance": _alpha_vantage("BALANCE_SHEET", sym),
-                "cashflow": _alpha_vantage("CASH_FLOW", sym),
-            }
-            payload = _build_fund_analysis(sym, raw, source="Alpha Vantage")
-        except HTTPException as av_exc:
-            reasons.append(f"Alpha Vantage: {av_exc.detail}")
-            raise HTTPException(status_code=av_exc.status_code, detail=" · ".join(reasons))
+        # Alpha Vantage z fundamentov odstránený (25 req/deň = ~6 titulov) —
+        # AV ostáva len na News sentiment.
+        raise HTTPException(status_code=502, detail=" · ".join(reasons))
     payload["cached"] = False
     try:
         _write_ticker_json_cache(path, payload)
@@ -11630,10 +11600,6 @@ def _yraw(v):
 YAHOO_INSIGHTS_DIR = DATA_ROOT / "yahoo_insights"
 INSIGHTS_TTL_H = 12
 INSIGHTS_SCHEMA_VERSION = 17   # 17: FMP ako tretí zdroj price_target (invaliduje cache bez cieľa)
-AV_EARNINGS_CACHE_DIR = DATA_ROOT / "av_earnings"
-AV_EARNINGS_CACHE_TTL_H = 24 * 30
-AV_EARNINGS_CACHE_SCHEMA_VERSION = 1
-_AV_EARNINGS_FETCH_LOCKS = tuple(threading.Lock() for _ in range(32))
 
 
 def _insider_transaction_price(transaction_text: str) -> float | None:
@@ -12033,139 +11999,6 @@ def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
         })
     history.sort(key=lambda item: item["date"])
     return (history[-8:], True, None)
-
-
-def _av_earnings_history(sym: str, allow_fetch: bool = True) -> tuple[list[dict], bool, str | None]:
-    """Map cached Alpha Vantage EARNINGS rows to (eps_history, succeeded, error).
-
-    allow_fetch=False = iba disk cache. Insights sa načítavajú automaticky
-    (Analytika, stĺpec Cieľ v Portfóliu, Verdikt) a pri 1 h TTL neúspešných
-    zdrojov by každý titul bez EPS z Finnhubu/FMP minul jeden z 25 denných
-    AV requestov — kvóta bola preč skôr, než používateľ klikol na fundamenty."""
-    sym = _validate_ticker_symbol(sym)
-    path = AV_EARNINGS_CACHE_DIR / f"{sym}.json"
-
-    def _cached_history(payload: dict) -> list[dict] | None:
-        history = payload.get("history")
-        if not isinstance(history, list):
-            return None
-        try:
-            for row in history:
-                if (
-                    not isinstance(row, dict)
-                    or not isinstance(row.get("date"), str)
-                    or not isinstance(row.get("quarter"), str)
-                    or not isinstance(row.get("beat"), bool)
-                    or isinstance(row.get("actual"), bool)
-                    or not isinstance(row.get("actual"), (int, float))
-                    or not math.isfinite(row["actual"])
-                ):
-                    return None
-                date.fromisoformat(row["date"])
-                for key in ("estimate", "surprise_pct"):
-                    value = row.get(key)
-                    if value is not None and (
-                        isinstance(value, bool)
-                        or not isinstance(value, (int, float))
-                        or not math.isfinite(value)
-                    ):
-                        return None
-        except (KeyError, TypeError, ValueError):
-            return None
-        return history
-
-    lock_digest = hashlib.blake2b(sym.encode("utf-8"), digest_size=2).digest()
-    fetch_lock = _AV_EARNINGS_FETCH_LOCKS[
-        int.from_bytes(lock_digest, "big") % len(_AV_EARNINGS_FETCH_LOCKS)
-    ]
-    # Keep the lock across a cache miss and fetch so concurrent insights panels
-    # for the same symbol cannot spend multiple scarce AV requests.
-    with fetch_lock:
-        cached = _read_ticker_json_cache(
-            path, AV_EARNINGS_CACHE_SCHEMA_VERSION, AV_EARNINGS_CACHE_TTL_H
-        )
-        cached_history = _cached_history(cached) if cached is not None else None
-        if cached_history is not None:
-            return (cached_history, True, None)
-
-        if not allow_fetch:
-            return ([], False, "Alpha Vantage: cache only (quota reserved for explicit requests)")
-        api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
-        if not api_key:
-            return ([], False, "ALPHA_VANTAGE_API_KEY is not configured")
-        if _av_limit_active():
-            return (
-                [],
-                False,
-                "Alpha Vantage daily limit exhausted; resets at midnight UTC",
-            )
-        try:
-            response = requests.get(
-                "https://www.alphavantage.co/query",
-                params={"function": "EARNINGS", "symbol": sym, "apikey": api_key},
-                timeout=20,
-            )
-            response.raise_for_status()
-            data = response.json() or {}
-            if data.get("Note") or data.get("Information"):
-                _av_mark_limit_exhausted()
-                raise RuntimeError(
-                    "Alpha Vantage daily limit exhausted (free tier 25 requests/day)"
-                )
-            if data.get("Error Message"):
-                return ([], False, f"Alpha Vantage does not recognize symbol {sym}")
-        except Exception as e:
-            return ([], False, _scrub_token(e))
-
-        def _number(value):
-            try:
-                number = float(value)
-                return number if math.isfinite(number) else None
-            except (TypeError, ValueError):
-                return None
-
-        history = []
-        rows = data.get("quarterlyEarnings") or []
-        if not isinstance(rows, list):
-            rows = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            reported_date = str(row.get("reportedDate") or "").strip()[:10]
-            fiscal_date = str(row.get("fiscalDateEnding") or "").strip()[:10]
-            try:
-                date.fromisoformat(reported_date)
-                fiscal = date.fromisoformat(fiscal_date)
-            except ValueError:
-                continue
-            actual = _number(row.get("reportedEPS"))
-            if actual is None:
-                continue
-            estimate = _number(row.get("estimatedEPS"))
-            surprise_pct = _number(row.get("surprisePercentage"))
-            if surprise_pct is None and estimate is not None and estimate != 0:
-                surprise_pct = (actual - estimate) / abs(estimate) * 100
-            history.append({
-                "date": reported_date,
-                "quarter": f"Q{(fiscal.month - 1) // 3 + 1} {fiscal.year}",
-                "actual": actual,
-                "estimate": estimate,
-                "surprise_pct": (
-                    round(surprise_pct, 1) if surprise_pct is not None else None
-                ),
-                "beat": estimate is not None and actual >= estimate,
-            })
-        history.sort(key=lambda item: item["date"])
-        history = history[-8:]
-        try:
-            _write_ticker_json_cache(path, {
-                "schema_version": AV_EARNINGS_CACHE_SCHEMA_VERSION,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "history": history,
-            })
-        except Exception:
-            pass
-        return (history, True, None)
 
 
 def _finnhub_earnings_calendar_get(sym: str, api_key: str, today: date):
@@ -13373,18 +13206,6 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
                 sources = core.get("source", "").split("+")
                 if "fmp" not in sources:
                     core["source"] = core.get("source", "finnhub") + "+fmp"
-    av_succeeded = False
-    av_error = None
-    if core is None or not core.get("eps_history"):
-        av_eps, av_succeeded, av_error = _av_earnings_history(sym, allow_fetch=False)
-        if av_eps:
-            if core is None:
-                core = {"eps_history": av_eps, "source": "av"}
-            else:
-                core["eps_history"] = av_eps
-                sources = core.get("source", "").split("+")
-                if "av" not in sources:
-                    core["source"] = core.get("source", "finnhub") + "+av"
     # Yahoo earningsChart je posledná vrstva zámerne: je zadarmo a bez kvóty,
     # ale hodnoty sú na časti titulov nepoužiteľné (viď _yahoo_earnings_chart).
     # Preto sa použije až keď platené/spoľahlivejšie zdroje nič nedali.
@@ -13403,17 +13224,15 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         # This diagnostic also selects the existing one-hour cache TTL.
         if core is None:
             empty_source = (
-                "av" if av_succeeded else ("fmp" if fmp_succeeded else "none")
+                "fmp" if fmp_succeeded else "none"
             )
             core = {"eps_history": [], "source": empty_source}
         core["eps_history_error"] = (
-            "Finnhub earnings unavailable; FMP, Alpha Vantage and Yahoo "
+            "Finnhub earnings unavailable; FMP and Yahoo "
             "fallbacks returned no usable data"
         )
         if fmp_error:
             core["fmp_earnings_error"] = fmp_error
-        if av_error:
-            core["av_earnings_error"] = av_error
         if yahoo_eps_error:
             core["yahoo_earnings_error"] = yahoo_eps_error
     if core is None:
@@ -15552,9 +15371,6 @@ def earnings_source_diagnostics(symbol: str):
     stratia. Tento endpoint preto skúša každý zdroj zvlášť a vypíše výsledok
     aj vtedy, keď iný zdroj medzitým uspel.
 
-    Alpha Vantage sa testuje ŽIVÝM volaním, teda zámerne obchádza 30-dňovú
-    cache — inak by potvrdilo len to, že cache existuje, nie že kľúč funguje.
-    Stojí to 1 z 25 denných AV requestov, preto to nevolaj v slučke.
     Kľúče sa nikdy nevypisujú, len či sú nastavené.
     """
     sym = _validate_ticker_symbol(symbol)
@@ -15562,46 +15378,10 @@ def earnings_source_diagnostics(symbol: str):
         "symbol": sym,
         "keys_configured": {
             name: bool(os.getenv(name, "").strip())
-            for name in ("FINNHUB_API_KEY", "FMP_API_KEY", "ALPHA_VANTAGE_API_KEY")
+            for name in ("FINNHUB_API_KEY", "FMP_API_KEY")
         },
         "sources": {},
     }
-
-    # ── Alpha Vantage: živý probe mimo cache ──
-    av: dict = {"key_configured": out["keys_configured"]["ALPHA_VANTAGE_API_KEY"],
-                "daily_limit_backoff_active": _av_limit_active()}
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "").strip()
-    if not api_key:
-        av["ok"] = False
-        av["error"] = "ALPHA_VANTAGE_API_KEY nie je nastavený"
-    elif _av_limit_active():
-        av["ok"] = False
-        av["error"] = "AV denný limit vyčerpaný — resetuje sa o polnoci UTC"
-    else:
-        try:
-            resp = requests.get(
-                "https://www.alphavantage.co/query",
-                params={"function": "EARNINGS", "symbol": sym, "apikey": api_key},
-                timeout=20,
-            )
-            av["http_status"] = resp.status_code
-            data = resp.json() if resp.status_code == 200 else {}
-            # AV vracia HTTP 200 aj pri chybe — skutočný dôvod je v tele.
-            # Tieto hlášky vie AV vrátiť aj s echom kľúča, preto _scrub_token.
-            for field in ("Note", "Information", "Error Message"):
-                if data.get(field):
-                    av["av_message"] = _scrub_token(str(data[field]))[:300]
-            quarterly = data.get("quarterlyEarnings") or []
-            av["quarterly_count"] = len(quarterly)
-            av["ok"] = bool(quarterly)
-            if quarterly:
-                av["newest"] = quarterly[0]
-            elif "av_message" not in av:
-                av["error"] = "AV nevrátila quarterlyEarnings (neznámy symbol?)"
-        except Exception as e:
-            av["ok"] = False
-            av["error"] = f"{type(e).__name__}: {_scrub_token(e)}"
-    out["sources"]["alpha_vantage"] = av
 
     # ── Ostatné vrstvy: použi rovnaké funkcie ako produkčná cesta ──
     for name, fn in (("finnhub", _insights_fetch_finnhub),

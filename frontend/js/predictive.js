@@ -2848,7 +2848,7 @@ async function pc_loadFairValue(refresh = false) {
   }
 }
 
-// ── Fundamentálna kvalita z Alpha Vantage ─────────────────────────────────────
+// ── Fundamentálna kvalita (FMP) ─────────────────────────────────────
 const pc_fundAnalysisCache = new Map();
 let pc_fundAnalysisTicker = null;
 const pc_corpActionsCache = new Map();
@@ -2880,8 +2880,8 @@ function pc_prepareFundAnalysisCard(ticker) {
   }
   // Žiadny auto-load — Alpha Vantage (4 req/ticker, free limit 25/deň) sa volá
   // výhradne na explicitný klik používateľa.
-  card.innerHTML = `<div class="card-title" title="Free fundamenty (FMP, fallback Alpha Vantage). Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span>
-      <button type="button" class="fund-av-btn" onclick="pc_loadFundAnalysis()" title="Načítaj fundamenty (FMP, fallback Alpha Vantage; cache 7 dní)">⬇</button></div>
+  card.innerHTML = `<div class="card-title" title="Free fundamenty (FMP, FinancialData.net). Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">FMP</span>
+      <button type="button" class="fund-av-btn" onclick="pc_loadFundAnalysis()" title="Načítaj fundamenty (FMP, FinancialData.net; cache 7 dní)">⬇</button></div>
     <div class="earnings-unavailable-note">Načíta sa až na vyžiadanie — klikni na ⬇.</div>`;
   card.style.display = '';
 }
@@ -2891,7 +2891,7 @@ function pc_renderFundAnalysisCard(data) {
   if (!card || !data || (data.symbol || data.ticker) !== pc_fundAnalysisTicker) return;
   if (data.error) {
     const detail = data.detail || data.error || 'Fundamentálna analýza je dočasne nedostupná.';
-    card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+    card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">FMP</span></div>
       <div class="earnings-unavailable-note">${escHtml(detail)}</div>
       <button type="button" class="btn fair-value-load" onclick="pc_loadFundAnalysis(true)">Skúsiť znova</button>`;
     card.style.display = '';
@@ -2913,7 +2913,7 @@ function pc_renderFundAnalysisCard(data) {
     return `<div class="fund-analysis-metric ${cls}"><span>${escHtml(label)}</span><strong>${value}</strong><small>${escHtml(text || '')}</small></div>`;
   }).join('');
   const flags = (data.flags || []).map(f => `<span>${escHtml(f)}</span>`).join('');
-  card.innerHTML = `<div class="card-title" title="Free fundamenty (FMP, fallback Alpha Vantage). Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span>
+  card.innerHTML = `<div class="card-title" title="Free fundamenty (FMP, FinancialData.net). Kontext kvality firmy; nemení technické C1-C4 signály.">Fundamentálna kvalita <span class="fair-value-beta">FMP</span>
       <button type="button" class="fund-av-btn" onclick="pc_loadFundAnalysis(true)" title="Obnov fundamenty (obíde 7-dňovú cache)">⟳</button></div>
     <div class="fund-analysis-head">
       <div>
@@ -2924,7 +2924,7 @@ function pc_renderFundAnalysisCard(data) {
     </div>
     <div class="fund-analysis-grid">${scoreRows}</div>
     ${flags ? `<div class="fund-analysis-flags">${flags}</div>` : ''}
-    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'Alpha Vantage')} · cache 7 dní</div>`;
+    <div class="fair-value-foot">Zdroj: ${escHtml(data.source || 'FMP')} · cache 7 dní</div>`;
   card.style.display = '';
 }
 
@@ -2937,7 +2937,7 @@ async function pc_loadFundAnalysis(refresh = false) {
     pc_renderFundAnalysisCard(pc_fundAnalysisCache.get(sym));
     return;
   }
-  card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">Alpha</span></div>
+  card.innerHTML = `<div class="card-title">Fundamentálna kvalita <span class="fair-value-beta">FMP</span></div>
     <div class="earnings-unavailable-note"><span class="cl-spinner"></span> Načítavam fundamenty...</div>`;
   card.style.display = '';
   try {
