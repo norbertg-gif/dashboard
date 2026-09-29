@@ -325,6 +325,23 @@ class NewsTabRegressionTests(unittest.TestCase):
         self.assertEqual([row["ticker"] for row in result["tickers"]], ["C", "ALOW", "B"])
         self.assertEqual(result["wire_count"], 2)
 
+    def test_titles_in_loss_come_first_biggest_usd_loss_on_top(self):
+        now = tb._time_module.time()
+        holdings = {sym: sym for sym in ("WIN", "SMALL", "BIG", "BRK.B")}
+        cache = {sym: {"ts": now, "items": [self.item(sym, now-100, kind="wire")], "error": None}
+                 for sym in holdings}
+        positions = {"WIN": {"amount": 9000, "pnl": 800},
+                     "SMALL": {"amount": 60000, "pnl": -30},   # huge position, tiny loss: must NOT beat BIG
+                     "BIG": {"amount": 5000, "pnl": -400},     # -8 %, biggest $ loss
+                     "BRK-B": {"amount": 1000, "pnl": -100}}   # symbol normalisation must still match
+        with tempfile.TemporaryDirectory() as tmp, patch.object(tb, "DATA_ROOT", Path(tmp)),              patch.object(tb, "_portfolio_news_holdings", return_value=holdings),              patch.object(tb, "_get_portfolio_holdings", return_value=positions):
+            (Path(tmp)/"portfolio_news_v2.json").write_text(json.dumps(cache), encoding="utf-8")
+            result = tb.get_portfolio_news()
+        self.assertEqual([r["ticker"] for r in result["tickers"]], ["BIG", "BRK.B", "SMALL", "WIN"])
+        by = {r["ticker"]: r for r in result["tickers"]}
+        self.assertEqual(by["BIG"]["pnl"], -400.0)
+        self.assertEqual(by["BIG"]["pnl_pct"], -8.0)
+
     def test_holdings_are_processed_stock_only_both_accounts_deduplicated(self):
         ram = {"1": {"data": [{"symbol": "on", "type": "Stock", "name": "Onsemi"},
                               {"symbol": "SPY", "type": "ETF"}]}}

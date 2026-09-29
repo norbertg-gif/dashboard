@@ -38,6 +38,14 @@ function newsfeedItemHtml(item) {
   return `<div class="newsfeed-item">${headline}<span class="newsfeed-meta">${escHtml(item.source || '')} \u00b7 ${escHtml(newsfeedAge(item.age_hours))}</span></div>`;
 }
 
+function newsfeedPnlHtml(row) {
+  const pnl = Number(row.pnl);
+  if (!Number.isFinite(pnl) || pnl === 0) return '';
+  const pct = Number.isFinite(Number(row.pnl_pct)) ? ` (${pnl >= 0 ? '+' : ''}${Number(row.pnl_pct).toFixed(1)} %)` : '';
+  const usd = `${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toLocaleString('sk-SK', { maximumFractionDigits: 0 })}`;
+  return `<em class="newsfeed-pnl ${pnl < 0 ? 'loss' : 'profit'}" title="P/L pozície, oba účty spolu">${usd}${pct}</em>`;
+}
+
 function newsfeedRender(data, stale = false) {
   const tickers = data.tickers || [];
   const rows = tickers.map(row => {
@@ -46,7 +54,7 @@ function newsfeedRender(data, stale = false) {
     let extra = '';
     if (commentary.length) extra = `<details class="newsfeed-commentary"><summary>\u010fal\u0161ie (${commentary.length})</summary>${commentary.map(newsfeedItemHtml).join('')}</details>`;
     return `<section class="newsfeed-row">
-      <button type="button" class="btn mini newsfeed-ticker" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span></button>
+      <button type="button" class="btn mini newsfeed-ticker" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span>${newsfeedPnlHtml(row)}</button>
       <div>${wire.map(newsfeedItemHtml).join('')}${extra}</div>
       <div class="newsfeed-sent" data-sent-ticker="${escHtml(row.ticker)}">${newsfeedSentimentCellHtml(row.ticker)}</div>
       <div class="newsfeed-av" data-av-ticker="${escHtml(row.ticker)}">${newsfeedAvPanelHtml(row.ticker)}</div>
@@ -59,7 +67,7 @@ function newsfeedRender(data, stale = false) {
   let staleNote = '';
   if (stale) staleNote = '<span>neaktualizovan\u00e9</span>';
   const count = Number(data.wire_count) || 0;
-  const intro = `${count} titulov s v\u00fdznamnou spr\u00e1vou \u00b7 len posledn\u00fdch 7 dn\u00ed \u00b7 zdroje: Yahoo/Finnhub`;
+  const intro = `${count} titulov s v\u00fdznamnou spr\u00e1vou \u00b7 len posledn\u00fdch 7 dn\u00ed \u00b7 zdroje: Yahoo/Finnhub · najprv tituly v strate`;
   let content = rows;
   if (!content) content = '<div class="home-empty">Za posledn\u00fdch 7 dn\u00ed sa nena\u0161la spr\u00e1va k dr\u017ean\u00fdm titulom.</div>';
   return `<div class="newsfeed-wrap"><div class="newsfeed-head"><span>${intro}</span><span>${staleNote} ${retry}</span></div>${content}${without}</div>`;

@@ -10287,11 +10287,25 @@ def get_portfolio_news():
                 rows.append({"ticker": sym, "name": name, "has_wire": any(i["kind"] == "wire" for i in items), "items": items})
             else:
                 without_news.append(sym)
-        amounts = {}
+        amounts, pnls = {}, {}
         for symbol, holding in positions.items():
             normalized = _normalize_news_symbol(symbol)
-            amounts[normalized] = amounts.get(normalized, 0.0) + float((holding or {}).get("amount", 0) or 0)
-        rows.sort(key=lambda row: (not row["has_wire"], -amounts.get(_normalize_news_symbol(row["ticker"]), 0.0), row["name"].casefold()))
+            holding = holding or {}
+            amounts[normalized] = amounts.get(normalized, 0.0) + float(holding.get("amount", 0) or 0)
+            pnls[normalized] = pnls.get(normalized, 0.0) + float(holding.get("pnl", 0) or 0)
+        for row in rows:
+            key = _normalize_news_symbol(row["ticker"])
+            amount, pnl = amounts.get(key, 0.0), pnls.get(key, 0.0)
+            row["pnl"] = round(pnl, 2)
+            row["pnl_pct"] = round(pnl / amount * 100, 2) if amount else None
+        # Najprv tituly v strate — najväčšia strata v USD hore (pnl je súčet oboch
+        # účtov, rovnako ako Scanner PORT badge). Zvyšok: agentúrna správa, veľkosť pozície.
+        rows.sort(key=lambda row: (
+            0 if row["pnl"] < 0 else 1,
+            row["pnl"] if row["pnl"] < 0 else 0.0,
+            not row["has_wire"],
+            -amounts.get(_normalize_news_symbol(row["ticker"]), 0.0),
+            row["name"].casefold()))
         wire_count = sum(bool(row["has_wire"]) for row in rows)
         return {"generated_at": now, "tickers": rows, "without_news": sorted(without_news),
                 "errors": errors, "wire_count": wire_count}

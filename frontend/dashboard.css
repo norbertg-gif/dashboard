@@ -7085,6 +7085,9 @@ body.light-mode .port-table td.port-ticker-tag {
 .newsfeed-row { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) minmax(120px, 170px); gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--border); }
 .newsfeed-ticker { align-self: start; cursor: pointer; text-align: left; }
 .newsfeed-ticker strong { display: block; color: var(--text); font-size: 14px; }
+.newsfeed-pnl { display: block; font-style: normal; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.newsfeed-pnl.loss { color: var(--down); }
+.newsfeed-pnl.profit { color: var(--up); }
 .newsfeed-ticker span { color: var(--muted); font-size: 12px; }
 .newsfeed-item { margin: 0 0 10px; line-height: 1.45; }
 .newsfeed-item a { color: var(--text); }
