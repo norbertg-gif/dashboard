@@ -249,6 +249,15 @@ class NewsTabRegressionTests(unittest.TestCase):
         # definition + the click listener are the ONLY references
         self.assertEqual(src.count("newsfeedLoadSentiment("), 2)
 
+    def test_alpha_vantage_articles_panel_escapes_and_reuses_loaded_data(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "newsfeed.js").read_text(encoding="utf-8")
+        panel = src.split("function newsfeedAvPanelHtml(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("newsfeedSafeUrl(item.url)", panel)
+        self.assertIn("escHtml(item.title", panel)
+        self.assertNotIn("fetch(", panel)   # opening the list must not cost another AV request
+        toggle = src.split("function newsfeedToggleAv(", 1)[1].split("\n}\n", 1)[0]
+        self.assertNotIn("fetch(", toggle)
+
     def test_real_yahoo_shape_survives_cache_round_trip(self):
         """Cold fetch -> cache -> warm read must both return the article.
         (Cached items have relatedTickers stripped; re-selecting them dropped every Yahoo item.)"""

@@ -7092,5 +7092,8 @@ body.light-mode .port-table td.port-ticker-tag {
 .newsfeed-commentary { margin-top: 8px; color: var(--muted); }
 .newsfeed-without { margin-top: 22px; color: var(--muted); font-size: 12px; }
 .news-summary-link { margin-top: 9px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text); cursor: pointer; font: inherit; text-align: left; }
+.newsfeed-av { grid-column: 1 / -1; }
+.newsfeed-av:empty { display: none; }
+.newsfeed-av-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 6px; }
 .newsfeed-sent { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12px; }
 @media (max-width: 650px) { .newsfeed-wrap { padding: 16px; } .newsfeed-row { grid-template-columns: 1fr; gap: 9px; } }
