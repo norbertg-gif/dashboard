@@ -4003,6 +4003,45 @@ def get_ticker_corporate_actions(symbol: str, refresh: int = Query(0)):
         pass
     return payload
 
+@app.get("/api/diagnostics/finnhub-metric/{symbol}")
+def diag_finnhub_metric(symbol: str):
+    """Debug: ktoré polia Finnhub free tier pre titul naozaj vracia (`metric=all`).
+    Slúži na rozhodnutie, či sa fundamenty dajú postaviť len z Finnhubu. Bez kľúča v odpovedi."""
+    sym = _validate_ticker_symbol(symbol)
+    key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return {"symbol": sym, "ok": False, "error": "FINNHUB_API_KEY nie je nastavený"}
+    out: dict = {"symbol": sym, "endpoints": {}}
+    for name, path, params in (
+        ("metric", "/stock/metric", {"symbol": sym, "metric": "all"}),
+        ("profile2", "/stock/profile2", {"symbol": sym}),
+        ("financials_std", "/stock/financials", {"symbol": sym, "statement": "ic", "freq": "annual"}),
+        ("financials_reported", "/stock/financials-reported", {"symbol": sym, "freq": "annual"}),
+    ):
+        try:
+            r = requests.get(f"https://finnhub.io/api/v1{path}", params={**params, "token": key}, timeout=15)
+            entry: dict = {"http": r.status_code}
+            if r.status_code == 200:
+                data = r.json() or {}
+                if name == "metric":
+                    metric = data.get("metric") or {}
+                    entry["metric_keys"] = len(metric)
+                    entry["metric"] = {k: v for k, v in metric.items() if isinstance(v, (int, float))
+                                       and any(t in k.lower() for t in (
+                                           "pe", "ps", "ev", "margin", "growth", "debt", "cash", "fcf", "free",
+                                           "current", "roe", "roa", "revenue", "eps", "ebitda", "interest"))}
+                    entry["series_annual_keys"] = sorted(((data.get("series") or {}).get("annual") or {}).keys())[:40]
+                elif name == "profile2":
+                    entry["fields"] = sorted(data.keys()) if isinstance(data, dict) else None
+                else:
+                    entry["empty"] = not data or not (data.get("data") if isinstance(data, dict) else data)
+            else:
+                entry["body"] = _scrub_token(" ".join((r.text or "").split())[:160])
+            out["endpoints"][name] = entry
+        except Exception as e:
+            out["endpoints"][name] = {"error": _scrub_token(f"{type(e).__name__}: {e}")}
+    return out
+
 @app.get("/api/diagnostics/fund-fmp/{symbol}")
 def diag_fund_fmp(symbol: str, source: str = Query("fmp")):
     """Debug: vráti FMP/FDN→AV mapovaný raw tvar pre overenie field mappingu.
