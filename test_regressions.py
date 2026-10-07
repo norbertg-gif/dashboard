@@ -3802,5 +3802,103 @@ class SessionCookieExpiryRegressionTests(unittest.TestCase):
         self.assertFalse(self.auth._has_session_cookie(self._request_with_cookie(old_cookie)))
 
 
+class EtoroOfficialCloseRegressionTests(unittest.TestCase):
+    """Denné P/L a Top pohyby počítajú voči eToro OFICIÁLNEJ zatváracej cene.
+
+    Kedysi voči burzovému close z Massive/yfinance, takže sa denné percento
+    rozchádzalo s eToro, ktoré ráta voči vlastnému oficiálnemu close.
+    """
+
+    # Tvar odpovede presne podľa živej route (overené 2026-10-07): bez filtra,
+    # chýbajúca hodnota = -1 a dátum 0001-01-01, nie null.
+    PAYLOAD = [
+        {"instrumentId": 1127, "officialClosingPrice": 69.0, "isMarketOpen": False,
+         "closingPrices": {"daily": {"price": 68.69, "date": "2026-10-06 00:00:00Z"},
+                           "weekly": {"price": 67.0, "date": "2026-10-02 00:00:00Z"},
+                           "monthly": {"price": -1, "date": "0001-01-01 00:00:00Z"}}},
+        {"instrumentId": 999, "officialClosingPrice": -1, "isMarketOpen": False,
+         "closingPrices": {"daily": {"price": -1, "date": "0001-01-01 00:00:00Z"}}},
+        {"instrumentId": "bad", "closingPrices": {"daily": {"price": 5.0, "date": "2026-10-06"}}},
+    ]
+
+    def setUp(self):
+        self._saved = dict(tb._etoro_official_closes)
+        tb._etoro_official_closes.update(data=None, fetched_at=0.0, failed_at=0.0)
+
+    def tearDown(self):
+        tb._etoro_official_closes.clear()
+        tb._etoro_official_closes.update(self._saved)
+
+    def test_parser_reads_daily_and_drops_sentinels(self):
+        parsed = tb._parse_etoro_official_closes(self.PAYLOAD)
+        self.assertEqual(parsed, {1127: (68.69, "2026-10-06")})
+
+    def test_official_close_wins_over_exchange_close(self):
+        tb._etoro_official_closes.update(data={1127: (68.69, "2026-10-06")},
+                                         fetched_at=tb.time.time())
+        with patch.object(tb, "_yf_download_cached") as exchange:
+            close = tb._get_market_prev_close("NFLX", "Stock", instrument_id=1127)
+        self.assertEqual(close, 68.69)
+        exchange.assert_not_called()
+
+    def test_missing_official_falls_back_to_exchange(self):
+        tb._etoro_official_closes.update(data={1127: (68.69, "2026-10-06")},
+                                         fetched_at=tb.time.time())
+        with (
+            patch.object(tb, "cache_read", return_value=None),
+            patch.object(tb, "_yf_download_cached", return_value="raw"),
+            patch.object(tb, "_select_market_prev_close", return_value=(70.5, "2026-10-06")),
+            patch.object(tb, "cache_write"),
+        ):
+            close = tb._get_market_prev_close("ABC", "Stock", instrument_id=555)
+        self.assertEqual(close, 70.5)
+
+    def test_without_instrument_id_no_lookup_is_attempted(self):
+        """Nedohľadáva sa cez get_instrument_id — ten pri nejasnej zhode vezme prvý titul."""
+        with (
+            patch.object(tb, "_get_etoro_official_closes") as official,
+            patch.object(tb, "get_instrument_id") as lookup,
+            patch.object(tb, "cache_read", return_value={"close": 10.0}),
+            patch.object(tb, "cache_age_seconds", return_value=1),
+        ):
+            close = tb._get_market_prev_close("ABC", "Stock")
+        self.assertEqual(close, 10.0)
+        official.assert_not_called()
+        lookup.assert_not_called()
+
+    def test_non_stock_types_are_unchanged(self):
+        with (
+            patch.object(tb, "_get_etoro_official_closes") as official,
+            patch.object(tb, "_get_prev_close", return_value=1.23),
+        ):
+            close = tb._get_market_prev_close("BTC", "Crypto", instrument_id=100000)
+        self.assertEqual(close, 1.23)
+        official.assert_not_called()
+
+    def test_single_bulk_fetch_then_cached(self):
+        class Resp:
+            ok = True
+            status_code = 200
+            def json(self_inner):
+                return EtoroOfficialCloseRegressionTests.PAYLOAD
+        with (
+            patch.object(tb, "cache_read", return_value=None),
+            patch.object(tb, "cache_write"),
+            patch.object(tb.ETORO_PROXY_SESSION, "get", return_value=Resp()) as get,
+        ):
+            for _ in range(5):
+                self.assertEqual(tb._etoro_official_prev_close(1127), 68.69)
+        self.assertEqual(get.call_count, 1, "650 KB sa nesmie sťahovať pri každej pozícii")
+
+    def test_outage_is_fail_soft_and_not_retried_per_position(self):
+        with (
+            patch.object(tb, "cache_read", return_value=None),
+            patch.object(tb.ETORO_PROXY_SESSION, "get", side_effect=OSError("proxy down")) as get,
+        ):
+            for _ in range(5):
+                self.assertIsNone(tb._etoro_official_prev_close(1127))
+        self.assertEqual(get.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

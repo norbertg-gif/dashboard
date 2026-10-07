@@ -2261,7 +2261,8 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
                         current_rate = None
             except Exception:
                 current_rate = None
-        prev_close = _get_market_prev_close(sym, asset_type) if sym and not sym.isdigit() else None
+        prev_close = (_get_market_prev_close(sym, asset_type, instrument_id=iid)
+                      if sym and not sym.isdigit() else None)
         if prev_close and current_rate and units_val:
             daily_pnl = round((current_rate - prev_close) * float(units_val) * (1 if is_buy else -1), 2)
         else:
@@ -3205,6 +3206,7 @@ def get_movers(
     # Watchlist beriem celý (sú to akcie); portfólio filtrujem na stock/ETF cez type
     universe: dict[str, str] = {}   # symbol -> source
     live_rates: dict[str, float] = {}
+    instrument_ids: dict[str, int] = {}
     for item in _read_watchlist_file():
         sym = str(item.get("symbol") or "").upper()
         if sym:
@@ -3225,6 +3227,8 @@ def get_movers(
             current_rate = pos.get("currentRate")
             if isinstance(current_rate, (int, float)) and current_rate > 0:
                 live_rates[sym] = float(current_rate)
+            if pos.get("instrumentId") is not None:
+                instrument_ids[sym] = pos.get("instrumentId")
     except Exception as e:
         print(f"[movers] portfolio error: {_scrub_token(e)}")
 
@@ -3236,7 +3240,8 @@ def get_movers(
         dc = None
         price_source = "ohlcv_cache"
         live_rate = live_rates.get(sym)
-        prev_close = _get_market_prev_close(sym, "Stock") if live_rate else None
+        prev_close = (_get_market_prev_close(sym, "Stock", instrument_id=instrument_ids.get(sym))
+                      if live_rate else None)
         if live_rate and prev_close:
             dc = ((live_rate - prev_close) / prev_close * 100, live_rate)
             price_source = "etoro_live"
@@ -4218,6 +4223,48 @@ def diagnostics_ema200(symbol: str):
                               if abs(out["matched_window"]["diff_pct"]) > 0.5
                               else "rozdiel robí DĹŽKA histórie")
     return out
+
+
+@app.get("/api/diagnostics/prev-close")
+def diagnostics_prev_close(account: str = Query("1")):
+    """Pre každú držanú Stock/ETF pozíciu: eToro oficiálny close vs burzový close.
+
+    Denné P/L teraz počíta voči oficiálnemu (ten istý, voči ktorému ráta eToro).
+    Toto ukáže, o koľko sa od burzového líšil a pri ktorých tituloch oficiálny
+    chýba (tie padajú späť na burzu). Read-only: žiadny zápis do cache okrem
+    bežného hromadného stiahnutia oficiálnych cien.
+    """
+    if account not in ("1", "2"):
+        raise HTTPException(400, "account musí byť 1 alebo 2")
+    official = _get_etoro_official_closes()
+    portfolio = get_portfolio(account=account, refresh=0)
+    rows = []
+    for pos in portfolio.get("positions", []):
+        if str(pos.get("type") or "").lower() not in ("stock", "etf"):
+            continue
+        sym = str(pos.get("symbol") or "").upper()
+        iid = pos.get("instrumentId")
+        hit = official.get(iid) if isinstance(iid, int) else None
+        exchange = None
+        try:
+            exchange, _date = _select_market_prev_close(
+                _yf_download_cached(sym, "1mo", "1d", prefer_massive=True))
+        except Exception:
+            pass
+        diff = (round((hit[0] - exchange) / exchange * 100, 3)
+                if hit and exchange else None)
+        rows.append({"symbol": sym, "instrumentId": iid,
+                     "official_close": hit[0] if hit else None,
+                     "official_date": hit[1] if hit else None,
+                     "exchange_close": round(exchange, 4) if exchange else None,
+                     "diff_pct": diff,
+                     "used": "official" if hit else "exchange_fallback"})
+    rows.sort(key=lambda r: -abs(r["diff_pct"] or 0))
+    return _json_safe({"account": account,
+                       "official_instruments": len(official),
+                       "positions": len(rows),
+                       "missing_official": [r["symbol"] for r in rows if not r["official_close"]],
+                       "rows": rows})
 
 
 @app.get("/api/diagnostics/summary")
@@ -5380,11 +5427,119 @@ def _select_market_prev_close(df: pd.DataFrame) -> tuple[float | None, str | Non
     return float(close), day.isoformat()
 
 
-def _get_market_prev_close(sym: str, asset_type: str | None = None) -> float | None:
-    """Market previous close pre portfolio daily P/L.
+# ── eToro OFFICIAL CLOSING PRICES ─────────────────────────────────────────────
+# Denné P/L a Top pohyby sa kedysi počítali voči predchádzajúcemu close
+# z Massive/yfinance, teda z BURZY. eToro však denné percento ráta voči vlastnej
+# oficiálnej zatváracej cene a vlastnej hranici dňa, takže sa dashboard s eToro
+# rozchádzal — a to je presne to, čo používateľ nechce (rovnaké čísla na eToro
+# aj v dashboarde). `GET /market-data/instruments/history/closing-price` vracia
+# `closingPrices.daily` = "official closing price from the previous trading day"
+# (podľa špecifikácie) pre VŠETKY inštrumenty naraz.
+#
+# Route NEMÁ filter — vždy vráti všetko (~650 KB, overené 2026-10-07), preto
+# jedno hromadné volanie do cache, nikdy nie po tickeroch. Kvóta je 120/60 s
+# zdieľaná s ostatnými market-data route (vrátane OHLCV histórie), takže TTL
+# drží počet volaní zanedbateľný. Chýbajúcu hodnotu eToro značí `-1` a dátumom
+# `0001-01-01`, nie null — taká hodnota sa preskočí, inak by vzniklo nezmyselné
+# percento. `isMarketOpen` je v špecifikácii označené ako zastarané, nečíta sa.
+ETORO_OFFICIAL_CLOSE_TTL = 30 * 60        # zachytí rollover dňa do pol hodiny
+ETORO_OFFICIAL_CLOSE_FAIL_TTL = 10 * 60   # výpadok neopakovať pri každej pozícii
+_etoro_official_closes: dict = {"data": None, "fetched_at": 0.0, "failed_at": 0.0}
+_etoro_official_closes_lock = threading.Lock()
 
-    Stock/ETF pouziva daily data z Massive/yfinance. Ostatne typy ostavaju na
-    povodnom eToro OHLCV cache fallbacku.
+
+def _etoro_official_close_cache_path() -> _Path:
+    return CACHE_DIR / "market_close" / "_etoro_official_daily"
+
+
+def _parse_etoro_official_closes(payload) -> dict:
+    """[{instrumentId, closingPrices:{daily:{price,date}}}] → {iid: (price, date)}."""
+    out = {}
+    if not isinstance(payload, list):
+        return out
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        iid = row.get("instrumentId")
+        daily = (row.get("closingPrices") or {}).get("daily") or {}
+        price = _num_or_none(daily.get("price"))
+        date = str(daily.get("date") or "")
+        if not isinstance(iid, int) or price is None or price <= 0 or date.startswith("0001"):
+            continue
+        out[iid] = (float(price), date[:10])
+    return out
+
+
+def _get_etoro_official_closes() -> dict:
+    """{instrumentId: (prev_close, date)} — RAM → disk → jedno hromadné volanie.
+
+    Fail-soft: pri výpadku vráti posledné známe dáta (aj staršie než TTL), inak
+    prázdny dict a volajúci padne späť na burzový close. "Teraz sa nepodarilo"
+    nesmie zhodiť denné P/L.
+    """
+    now = time.time()
+    state = _etoro_official_closes
+    if state["data"] is not None and now - state["fetched_at"] < ETORO_OFFICIAL_CLOSE_TTL:
+        return state["data"]
+    with _etoro_official_closes_lock:
+        # Iný thread to medzitým mohol stiahnuť — 650 KB nesťahovať dvakrát.
+        if state["data"] is not None and now - state["fetched_at"] < ETORO_OFFICIAL_CLOSE_TTL:
+            return state["data"]
+        path = _etoro_official_close_cache_path()
+        if state["data"] is None:
+            try:
+                cached = cache_read(path)
+                if cached and isinstance(cached.get("closes"), dict):
+                    state["data"] = {int(k): (float(v[0]), str(v[1]))
+                                     for k, v in cached["closes"].items()}
+                    state["fetched_at"] = now - cache_age_seconds(path)
+                    if now - state["fetched_at"] < ETORO_OFFICIAL_CLOSE_TTL:
+                        return state["data"]
+            except Exception:
+                pass
+        if now - state["failed_at"] < ETORO_OFFICIAL_CLOSE_FAIL_TTL:
+            return state["data"] or {}
+        try:
+            resp = ETORO_PROXY_SESSION.get(
+                f"{ETORO_PROXY}/etoro/market-data/instruments/history/closing-price",
+                timeout=20)
+            parsed = _parse_etoro_official_closes(resp.json() if resp.ok else None)
+            if not parsed:
+                raise RuntimeError(f"HTTP {resp.status_code}, 0 použiteľných záznamov")
+            state.update(data=parsed, fetched_at=now, failed_at=0.0)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                cache_write(path, {"closes": {str(k): list(v) for k, v in parsed.items()},
+                                   "updated_at": datetime.now(timezone.utc).isoformat()})
+            except Exception:
+                pass
+            print(f"[official_close] {len(parsed)} inštrumentov", flush=True)
+        except Exception as exc:
+            state["failed_at"] = now
+            print(f"[official_close] zlyhalo: {_scrub_token(exc)}", flush=True)
+        return state["data"] or {}
+
+
+def _etoro_official_prev_close(instrument_id) -> float | None:
+    try:
+        iid = int(instrument_id)
+    except (TypeError, ValueError):
+        return None
+    hit = _get_etoro_official_closes().get(iid)
+    return hit[0] if hit else None
+
+
+def _get_market_prev_close(sym: str, asset_type: str | None = None,
+                           instrument_id=None) -> float | None:
+    """Predchádzajúci close pre denné P/L a Top pohyby.
+
+    Stock/ETF: najprv eToro OFICIÁLNA zatváracia cena (rovnaká, voči ktorej
+    ráta denné percento eToro), až potom burzový close z Massive/yfinance.
+    Poradie je dôležité — oficiálny close sa musí skúsiť PRED 6h disk cache
+    burzového close, inak by stará burzová hodnota vyhrala. `instrument_id`
+    posiela volajúci z pozície; zámerne sa nedohľadáva cez `get_instrument_id`,
+    ktorý pri nejednoznačnom vyhľadaní vezme prvý nájdený titul.
+    Ostatné typy ostávajú na pôvodnom eToro OHLCV cache fallbacku.
     """
     sym = str(sym or "").upper().strip()
     if not sym:
@@ -5392,6 +5547,11 @@ def _get_market_prev_close(sym: str, asset_type: str | None = None) -> float | N
     typ = str(asset_type or "").lower()
     if typ not in ("stock", "etf"):
         return _get_prev_close(sym)
+
+    if instrument_id is not None:
+        official = _etoro_official_prev_close(instrument_id)
+        if official:
+            return official
 
     cache_path = _market_prev_close_cache_key(sym)
     try:
