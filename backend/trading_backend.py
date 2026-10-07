@@ -4239,11 +4239,16 @@ def diagnostics_prev_close(account: str = Query("1")):
     official = _get_etoro_official_closes()
     portfolio = get_portfolio(account=account, refresh=0)
     rows = []
+    seen = set()
     for pos in portfolio.get("positions", []):
         if str(pos.get("type") or "").lower() not in ("stock", "etf"):
             continue
         sym = str(pos.get("symbol") or "").upper()
         iid = pos.get("instrumentId")
+        # Pozície sú po tranžiach (NET ich má desať) — close je per titul.
+        if sym in seen:
+            continue
+        seen.add(sym)
         hit = official.get(iid) if isinstance(iid, int) else None
         exchange = None
         try:
@@ -4260,10 +4265,26 @@ def diagnostics_prev_close(account: str = Query("1")):
                      "diff_pct": diff,
                      "used": "official" if hit else "exchange_fallback"})
     rows.sort(key=lambda r: -abs(r["diff_pct"] or 0))
+    diffs = sorted(abs(r["diff_pct"]) for r in rows if r["diff_pct"] is not None)
+    summary = None
+    if diffs:
+        summary = {
+            "compared": len(diffs),
+            "median_abs_diff_pct": round(diffs[len(diffs) // 2], 3),
+            "max_abs_diff_pct": round(diffs[-1], 3),
+            "over_0_5_pct": sum(1 for d in diffs if d > 0.5),
+            "over_2_pct": sum(1 for d in diffs if d > 2),
+            # Rozdiel nad ~2 % už nie je iná hranica dňa, ale iná cena — typicky
+            # rozdielny dátum posledného close (sviatok, iná burza) alebo split.
+            "largest": [f'{r["symbol"]} {r["diff_pct"]:+.2f}% '
+                        f'(eToro {r["official_date"]} / burza)'
+                        for r in rows[:5] if r["diff_pct"] is not None],
+        }
     return _json_safe({"account": account,
                        "official_instruments": len(official),
-                       "positions": len(rows),
+                       "tickers": len(rows),
                        "missing_official": [r["symbol"] for r in rows if not r["official_close"]],
+                       "summary": summary,
                        "rows": rows})
 
 
