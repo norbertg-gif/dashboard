@@ -4250,9 +4250,9 @@ def diagnostics_prev_close(account: str = Query("1")):
             continue
         seen.add(sym)
         hit = official.get(iid) if isinstance(iid, int) else None
-        exchange = None
+        exchange = exchange_date = None
         try:
-            exchange, _date = _select_market_prev_close(
+            exchange, exchange_date = _select_market_prev_close(
                 _yf_download_cached(sym, "1mo", "1d", prefer_massive=True))
         except Exception:
             pass
@@ -4262,6 +4262,7 @@ def diagnostics_prev_close(account: str = Query("1")):
                      "official_close": hit[0] if hit else None,
                      "official_date": hit[1] if hit else None,
                      "exchange_close": round(exchange, 4) if exchange else None,
+                     "exchange_date": str(exchange_date)[:10] if exchange_date else None,
                      "diff_pct": diff,
                      "used": "official" if hit else "exchange_fallback"})
     rows.sort(key=lambda r: -abs(r["diff_pct"] or 0))
@@ -4277,8 +4278,12 @@ def diagnostics_prev_close(account: str = Query("1")):
             # Rozdiel nad ~2 % už nie je iná hranica dňa, ale iná cena — typicky
             # rozdielny dátum posledného close (sviatok, iná burza) alebo split.
             "largest": [f'{r["symbol"]} {r["diff_pct"]:+.2f}% '
-                        f'(eToro {r["official_date"]} / burza)'
+                        f'(eToro {r["official_date"]} / burza {r["exchange_date"]})'
                         for r in rows[:5] if r["diff_pct"] is not None],
+            # Rozdiel s ROVNAKÝM dátumom je skutočne iná cena; s rôznym dátumom
+            # len porovnanie dvoch rôznych dní (eToro ešte neposunulo close).
+            "date_mismatch": sum(1 for r in rows if r["diff_pct"] is not None
+                                 and r["official_date"] != r["exchange_date"]),
         }
     return _json_safe({"account": account,
                        "official_instruments": len(official),
