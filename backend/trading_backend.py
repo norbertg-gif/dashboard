@@ -3346,7 +3346,7 @@ def get_summary(symbol: str = Query(...)):
 
 
 FUND_ANALYSIS_DIR = DATA_ROOT / "fund_analysis"
-FUND_ANALYSIS_TTL_H = 168  # 7 dní — AV sa volá len na explicitný klik, refresh=1 obíde cache
+FUND_ANALYSIS_TTL_H = 168  # 7 dní — Finnhub sa volá len na explicitný klik, refresh=1 obíde cache
 FUND_ANALYSIS_SCHEMA_VERSION = 1
 CORP_ACTIONS_DIR = DATA_ROOT / "corp_actions"
 CORP_ACTIONS_TTL_H = 168  # 7 dní — Massive sa volá len na explicitný klik
@@ -3365,13 +3365,8 @@ def _fund_num(value, default=None):
     except Exception:
         return default
 
-def _fund_ratio(num, den):
-    if num is None or den in (None, 0):
-        return None
-    return num / den
-
 def _fund_clamp(value):
-    return max(0, min(100, int(round(value))))
+    return round(max(0, min(100, value)))
 
 def _fund_score_growth(pct, good=0.10, bad=-0.05):
     if pct is None:
@@ -3397,17 +3392,6 @@ def _fund_label(score, good="Strong", mid="Mixed", bad="Weak"):
     if score <= 40:
         return bad
     return mid
-
-def _fund_latest(raw, key):
-    rows = raw.get(key) or []
-    return rows[:4] if isinstance(rows, list) else []
-
-def _fund_get(row, *keys):
-    for key in keys:
-        value = _fund_num((row or {}).get(key))
-        if value is not None:
-            return value
-    return None
 
 # ── Logovanie externých API volaní ────────────────────────────────────────────
 # Účel: po čase štatisticky vedieť, koľko volaní na ktorého providera reálne
@@ -3466,7 +3450,6 @@ _orig_requests_get = requests.get
 _API_HOST_PROVIDERS = (
     ("alphavantage.co", "alpha_vantage"),
     ("financialmodelingprep.com", "fmp"),
-    ("financialdata.net", "financialdata"),
     ("finnhub.io", "finnhub"),
     ("api.massive.com", "massive"),
     ("finance.yahoo.com", "yahoo"),
@@ -3562,235 +3545,25 @@ def _av_mark_limit_exhausted():
 def _av_limit_active() -> bool:
     return time.time() < _av_limit_exhausted_until
 
-# ── FMP ako primárny zdroj fundamentov (free 250 req/deň vs AV 25/deň) ───────
-# Adaptér mapuje FMP odpovede na Alpha Vantage tvar, ktorý _build_fund_analysis
-# už pozná — builder/skóring sa nemení, mení sa len zdroj dát.
-def _fmp_fund_get(path: str, sym: str, extra: dict | None = None):
-    api_key = os.getenv("FMP_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("FMP_API_KEY nie je nastavený")
-    errors = []
-    # stable API: /stable/{path}?symbol=SYM ; v3 API: /api/v3/{path}/SYM
-    # v3 je od 2025 "Legacy Endpoint" (HTTP 403) — ak by sa hlásila len
-    # posledná chyba, 403 z v3 zakryje skutočný dôvod zo stable (napr. plán).
-    attempts = (
-        ("stable", f"https://financialmodelingprep.com/stable/{path}", {"symbol": sym}),
-        ("v3", f"https://financialmodelingprep.com/api/v3/{path}/{urllib.parse.quote(sym)}", {}),
+def _build_fund_analysis_from_metrics(sym: str, metric: dict, company: str | None) -> dict:
+    metric = metric if isinstance(metric, dict) else {}
+    pe = _first_number(metric, "peTTM", "peBasicExclExtraTTM", "peAnnual")
+    fpe = _first_number(metric, "forwardPE")
+    ps = _first_number(metric, "psTTM", "psAnnual")
+    ev_ebitda = _first_number(metric, "evEbitdaTTM")
+
+    revenue_growth_raw = _first_number(metric, "revenueGrowthTTMYoy", "revenueGrowth3Y")
+    revenue_growth = None if revenue_growth_raw is None else revenue_growth_raw / 100
+    eps_growth_raw = _first_number(metric, "epsGrowthTTMYoy")
+    eps_growth = None if eps_growth_raw is None else eps_growth_raw / 100
+    fcf_positive = _first_number(metric, "pfcfShareTTM", "cashFlowPerShareTTM")
+    margin_raw = _first_number(metric, "netProfitMarginTTM")
+    profit_margin = None if margin_raw is None else margin_raw / 100
+    debt_to_equity = _first_number(
+        metric, "totalDebtToEquityAnnual", "totalDebt/totalEquityAnnual",
+        "totalDebtToEquityQuarterly",
     )
-    for label, url, sym_params in attempts:
-        params = {**sym_params, "apikey": api_key, **(extra or {})}
-        try:
-            r = requests.get(url, params=params, timeout=12)
-            if r.status_code != 200:
-                snippet = " ".join((r.text or "").split())[:140]
-                errors.append(f"{label} HTTP {r.status_code}" + (f" ({_scrub_token(snippet)})" if snippet else ""))
-                continue
-            data = r.json()
-            if isinstance(data, dict) and (data.get("Error Message") or data.get("error") or data.get("message")):
-                msg = str(data.get("Error Message") or data.get("error") or data.get("message"))[:140]
-                errors.append(f"{label} error ({_scrub_token(msg)})")
-                continue
-            if not data:
-                errors.append(f"{label} empty")
-                continue
-            return data
-        except Exception as e:
-            errors.append(f"{label} {type(e).__name__}")
-    raise RuntimeError(f"FMP {path}: " + "; ".join(errors))
-
-def _fmp_row_to_av(row: dict, mapping: dict) -> dict:
-    out = {}
-    for av_key, fmp_keys in mapping.items():
-        for fk in fmp_keys:
-            if row.get(fk) is not None:
-                out[av_key] = row[fk]
-                break
-    return out
-
-_FMP_INCOME_MAP = {
-    "totalRevenue": ("revenue",),
-    "netIncome": ("netIncome",),
-    "operatingIncome": ("operatingIncome",),
-}
-_FMP_BALANCE_MAP = {
-    "cashAndCashEquivalentsAtCarryingValue": ("cashAndCashEquivalents",),
-    "cashAndShortTermInvestments": ("cashAndShortTermInvestments",),
-    "shortLongTermDebtTotal": ("totalDebt",),
-    "longTermDebt": ("longTermDebt",),
-    "shortTermDebt": ("shortTermDebt",),
-    "totalShareholderEquity": ("totalStockholdersEquity", "totalEquity"),
-}
-_FMP_CASHFLOW_MAP = {
-    "operatingCashflow": ("operatingCashFlow", "netCashProvidedByOperatingActivities"),
-    "capitalExpenditures": ("capitalExpenditure",),
-}
-
-def _fmp_fund_raw(sym: str) -> dict:
-    """4 FMP volania → raw dict v AV tvare pre _build_fund_analysis."""
-    profile = _fmp_fund_get("profile", sym)
-    income = _fmp_fund_get("income-statement", sym, {"limit": 2, "period": "annual"})
-    balance = _fmp_fund_get("balance-sheet-statement", sym, {"limit": 1, "period": "annual"})
-    cashflow = _fmp_fund_get("cash-flow-statement", sym, {"limit": 2, "period": "annual"})
-    try:
-        ratios = _fmp_fund_get("ratios-ttm", sym)
-    except Exception:
-        ratios = []  # valuácia bez ratios degraduje fail-soft (skóre z neutral)
-    prof = profile[0] if isinstance(profile, list) and profile else (profile if isinstance(profile, dict) else {})
-    rat = ratios[0] if isinstance(ratios, list) and ratios else (ratios if isinstance(ratios, dict) else {})
-    overview = {
-        "Name": prof.get("companyName") or prof.get("name"),
-        "PERatio": rat.get("peRatioTTM") or rat.get("priceToEarningsRatioTTM") or rat.get("priceEarningsRatioTTM"),
-        "ForwardPE": None,  # FMP free TTM ratios forward P/E nemajú
-        "PriceToSalesRatioTTM": rat.get("priceToSalesRatioTTM") or rat.get("priceSalesRatioTTM"),
-        "EVToEBITDA": rat.get("enterpriseValueMultipleTTM") or rat.get("evToEBITDATTM"),
-        "ProfitMargin": rat.get("netProfitMarginTTM"),
-        "AnalystTargetPrice": None,  # analyst target ide z Finnhubu inde, nemiešať
-    }
-    def _rows(data, mapping):
-        rows = data if isinstance(data, list) else []
-        mapped = [_fmp_row_to_av(r, mapping) for r in rows if isinstance(r, dict)]
-        return [m for m in mapped if m]  # riadok bez jediného známeho fieldu = nepoužiteľný
-    income_rows = _rows(income, _FMP_INCOME_MAP)
-    balance_rows = _rows(balance, _FMP_BALANCE_MAP)
-    cashflow_rows = _rows(cashflow, _FMP_CASHFLOW_MAP)
-    # HTTP 200 s nekompatibilným tvarom nesmie prejsť ako "FMP dáta" — inak by
-    # sa 7 dní cachovalo neutrálne skóre z prázdnych výkazov namiesto AV fallbacku.
-    if not income_rows or income_rows[0].get("totalRevenue") is None:
-        raise RuntimeError("FMP income-statement: unusable rows")
-    if not balance_rows or not cashflow_rows:
-        raise RuntimeError("FMP balance/cash-flow: unusable rows")
-    return {
-        "overview": overview,
-        "income": {"annualReports": income_rows},
-        "balance": {"annualReports": balance_rows},
-        "cashflow": {"annualReports": cashflow_rows},
-    }
-
-# ── FinancialData.net ako druhý fallback ─────────────────────────────────────
-# POZOR (overené 2026-07-16): free plán výkazové endpointy NEMÁ — vracia 401 aj
-# s platným kľúčom (company-information/income-statements sú "Standard" tier).
-# Reťaz ho drží pre prípad upgradu plánu; po prvom 401 sa do reštartu preskakuje.
-_fdn_unauthorized = False
-
-def _fdn_get(path: str, sym: str, extra: dict | None = None):
-    global _fdn_unauthorized
-    api_key = os.getenv("FINANCIALDATA_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("FINANCIALDATA_API_KEY nie je nastavený")
-    if _fdn_unauthorized:
-        raise RuntimeError("FDN: free plán nemá výkazové endpointy (401) — preskakujem")
-    r = requests.get(
-        f"https://financialdata.net/api/v1/{path}",
-        params={"identifier": sym, "key": api_key, **(extra or {})},
-        timeout=12,
-    )
-    if r.status_code == 401:
-        _fdn_unauthorized = True
-        raise RuntimeError(f"FDN {path}: HTTP 401 (plán nemá tento endpoint)")
-    if r.status_code != 200:
-        raise RuntimeError(f"FDN {path}: HTTP {r.status_code}")
-    data = r.json()
-    if not data:
-        raise RuntimeError(f"FDN {path}: empty")
-    if isinstance(data, dict) and (data.get("error") or data.get("message")):
-        raise RuntimeError(f"FDN {path}: error payload")
-    return data
-
-def _fdn_fund_raw(sym: str) -> dict:
-    """5 FDN volaní → raw dict v AV tvare pre _build_fund_analysis."""
-    profile = _fdn_get("company-information", sym)
-    income = _fdn_get("income-statements", sym, {"period": "year"})
-    balance = _fdn_get("balance-sheet-statements", sym, {"period": "year"})
-    cashflow = _fdn_get("cash-flow-statements", sym, {"period": "year"})
-    try:
-        metrics = _fdn_get("key-metrics", sym)
-    except Exception:
-        metrics = []
-    prof = profile[0] if isinstance(profile, list) and profile else (profile if isinstance(profile, dict) else {})
-    met = metrics[0] if isinstance(metrics, list) and metrics else (metrics if isinstance(metrics, dict) else {})
-
-    def _first_rows(data, n=2):
-        rows = data if isinstance(data, list) else []
-        return [r for r in rows if isinstance(r, dict)][:n]
-
-    income_rows = []
-    for r in _first_rows(income):
-        income_rows.append({
-            "totalRevenue": r.get("revenue"),
-            "netIncome": r.get("net_income"),
-            "operatingIncome": r.get("operating_income"),
-        })
-    balance_rows = []
-    for r in _first_rows(balance, 1):
-        st_debt = _fund_num(r.get("short_term_debt"))
-        lt_debt = _fund_num(r.get("long_term_debt"))
-        total_debt = None if st_debt is None and lt_debt is None else (st_debt or 0) + (lt_debt or 0)
-        balance_rows.append({
-            "cashAndCashEquivalentsAtCarryingValue": r.get("cash_and_cash_equivalents"),
-            "shortLongTermDebtTotal": total_debt,
-            "longTermDebt": r.get("long_term_debt"),
-            "shortTermDebt": r.get("short_term_debt"),
-            "totalShareholderEquity": r.get("total_shareholders_equity"),
-        })
-    cashflow_rows = []
-    for r in _first_rows(cashflow):
-        cashflow_rows.append({
-            "operatingCashflow": r.get("cash_from_operating_activities"),
-            "capitalExpenditures": r.get("acquisition_of_property_plant_and_equipment"),
-        })
-    if not income_rows or _fund_num(income_rows[0].get("totalRevenue")) is None:
-        raise RuntimeError("FDN income-statements: unusable rows")
-    if not balance_rows or not cashflow_rows:
-        raise RuntimeError("FDN balance/cash-flow: unusable rows")
-    overview = {
-        "Name": prof.get("registrant_name") or prof.get("trading_symbol"),
-        "PERatio": _fund_num(met.get("price_to_earnings_ratio")),
-        "ForwardPE": None,
-        "PriceToSalesRatioTTM": None,  # FDN key-metrics P/S nemá — skóre degraduje na neutrál
-        "EVToEBITDA": None,
-        "ProfitMargin": None,  # builder si net margin dopočíta z net_income/revenue
-        "AnalystTargetPrice": None,
-    }
-    return {
-        "overview": overview,
-        "income": {"annualReports": income_rows},
-        "balance": {"annualReports": balance_rows},
-        "cashflow": {"annualReports": cashflow_rows},
-    }
-
-def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> dict:
-    overview = raw.get("overview") or {}
-    income = _fund_latest(raw.get("income") or {}, "annualReports")
-    balance = _fund_latest(raw.get("balance") or {}, "annualReports")
-    cashflow = _fund_latest(raw.get("cashflow") or {}, "annualReports")
-    li, pi = (income[0] if income else {}), (income[1] if len(income) > 1 else {})
-    lb = balance[0] if balance else {}
-    lc, pc = (cashflow[0] if cashflow else {}), (cashflow[1] if len(cashflow) > 1 else {})
-
-    revenue = _fund_get(li, "totalRevenue")
-    prev_revenue = _fund_get(pi, "totalRevenue")
-    net_income = _fund_get(li, "netIncome")
-    op_income = _fund_get(li, "operatingIncome")
-    cash = _fund_get(lb, "cashAndCashEquivalentsAtCarryingValue", "cashAndShortTermInvestments")
-    debt = _fund_get(lb, "shortLongTermDebtTotal", "longTermDebt", "shortTermDebt")
-    equity = _fund_get(lb, "totalShareholderEquity")
-    ocf = _fund_get(lc, "operatingCashflow")
-    capex = _fund_get(lc, "capitalExpenditures")
-    prev_ocf = _fund_get(pc, "operatingCashflow")
-    prev_capex = _fund_get(pc, "capitalExpenditures")
-
-    fcf = None if ocf is None or capex is None else ocf - abs(capex)
-    prev_fcf = None if prev_ocf is None or prev_capex is None else prev_ocf - abs(prev_capex)
-    revenue_growth = _fund_ratio(revenue - prev_revenue, abs(prev_revenue)) if revenue is not None and prev_revenue else None
-    fcf_growth = _fund_ratio(fcf - prev_fcf, abs(prev_fcf)) if fcf is not None and prev_fcf else None
-    profit_margin = _fund_num(overview.get("ProfitMargin"))
-    net_margin = _fund_ratio(net_income, revenue)
-    debt_to_equity = _fund_ratio(debt, equity)
-    net_debt = None if debt is None else debt - (cash or 0)
-    pe = _fund_num(overview.get("PERatio"))
-    fpe = _fund_num(overview.get("ForwardPE"))
-    ps = _fund_num(overview.get("PriceToSalesRatioTTM"))
-    ev_ebitda = _fund_num(overview.get("EVToEBITDA"))
+    net_debt_to_ebitda = _first_number(metric, "netDebtToEBITDAAnnual")
 
     valuation = _fund_clamp(
         _fund_score_low(pe, 18, 45) * 0.35 +
@@ -3798,25 +3571,30 @@ def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> 
         _fund_score_low(ps, 2.5, 9) * 0.20 +
         _fund_score_low(ev_ebitda, 10, 25) * 0.20
     )
+    margin_score = 50 if profit_margin is None else (85 if profit_margin > 0.12 else 60 if profit_margin > 0.04 else 30)
+    fcf_score = 50 if fcf_positive is None else (85 if fcf_positive > 0 else 35)
     fundamentals = _fund_clamp(
         _fund_score_growth(revenue_growth, 0.08, -0.03) * 0.30 +
-        _fund_score_growth(fcf_growth, 0.10, -0.10) * 0.25 +
-        (85 if fcf and fcf > 0 else 35) * 0.20 +
-        (85 if (profit_margin or net_margin or 0) > 0.12 else 60 if (profit_margin or net_margin or 0) > 0.04 else 30) * 0.25
+        _fund_score_growth(eps_growth, 0.10, -0.10) * 0.25 +
+        fcf_score * 0.20 + margin_score * 0.25
     )
+    if net_debt_to_ebitda is None:
+        net_debt_score = 50
+    else:
+        net_debt_score = 85 if net_debt_to_ebitda <= 0 else 55 if debt_to_equity is None or debt_to_equity < 1.5 else 30
+    fcf_risk_score = 50 if fcf_positive is None else (80 if fcf_positive > 0 else 35)
     risk = _fund_clamp(
         _fund_score_low(debt_to_equity, 0.8, 2.5) * 0.55 +
-        (85 if net_debt is not None and net_debt <= 0 else 55 if debt_to_equity is None or debt_to_equity < 1.5 else 30) * 0.25 +
-        (80 if fcf and fcf > 0 else 35) * 0.20
+        net_debt_score * 0.25 + fcf_risk_score * 0.20
     )
-    analyst = 55 + (5 if _fund_num(overview.get("AnalystTargetPrice")) else 0)
+    analyst = 55
     overall = _fund_clamp(fundamentals * 0.38 + valuation * 0.27 + risk * 0.25 + analyst * 0.10)
     flags = []
     if valuation < 42:
         flags.append("valuation demanding")
     if risk < 45:
         flags.append("balance-sheet / FCF risk")
-    if fcf is not None and fcf < 0:
+    if fcf_positive is not None and fcf_positive <= 0:
         flags.append("negative recent FCF")
     if revenue_growth is not None and revenue_growth < -0.03:
         flags.append("revenue deterioration")
@@ -3830,8 +3608,8 @@ def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> 
     return {
         "schema_version": FUND_ANALYSIS_SCHEMA_VERSION,
         "symbol": sym,
-        "company": overview.get("Name") or sym,
-        "source": source,
+        "company": company or sym,
+        "source": "Finnhub",
         "scores": {"overall": overall, "fundamentals": fundamentals, "valuation": valuation, "risk": risk, "analyst": analyst},
         "labels": {
             "overall": _fund_label(overall, "Good", "Mixed", "Weak"),
@@ -3843,6 +3621,37 @@ def _build_fund_analysis(sym: str, raw: dict, source: str = "Alpha Vantage") -> 
         "memo": memo,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _finnhub_fund_metrics(sym: str) -> tuple[dict, str | None]:
+    api_key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("FINNHUB_API_KEY is not configured")
+    response = requests.get(
+        "https://finnhub.io/api/v1/stock/metric",
+        params={"symbol": sym, "metric": "all", "token": api_key},
+        timeout=15,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Finnhub metric: HTTP {response.status_code}")
+    payload = response.json()
+    metric = payload.get("metric") if isinstance(payload, dict) else None
+    metric = metric if isinstance(metric, dict) else {}
+    if not metric:
+        return {}, None
+    company = None
+    try:
+        profile_response = requests.get(
+            "https://finnhub.io/api/v1/stock/profile2",
+            params={"symbol": sym, "token": api_key}, timeout=15,
+        )
+        if profile_response.status_code == 200:
+            profile = profile_response.json()
+            if isinstance(profile, dict):
+                company = profile.get("name")
+    except Exception:
+        pass
+    return metric, company
 
 
 def _massive_corp_actions_raw(ticker: str, action: str) -> dict:
@@ -4047,21 +3856,6 @@ def diag_finnhub_metric(symbol: str):
             out["endpoints"][name] = {"error": _scrub_token(f"{type(e).__name__}: {e}")}
     return out
 
-@app.get("/api/diagnostics/fund-fmp/{symbol}")
-def diag_fund_fmp(symbol: str, source: str = Query("fmp")):
-    """Debug: vráti FMP/FDN→AV mapovaný raw tvar pre overenie field mappingu.
-    ?source=fdn otestuje FinancialData.net. Bez kľúča v odpovedi."""
-    sym = _validate_ticker_symbol(symbol)
-    fetcher = _fdn_fund_raw if source.lower() == "fdn" else _fmp_fund_raw
-    if source.lower() == "fdn":
-        global _fdn_unauthorized
-        _fdn_unauthorized = False  # diag = explicitný re-test, napr. po upgrade plánu
-    try:
-        raw = fetcher(sym)
-        return {"ticker": sym, "source": source.lower(), "ok": True, "raw": raw}
-    except Exception as e:
-        return {"ticker": sym, "source": source.lower(), "ok": False, "error": _scrub_token(str(e))}
-
 @app.get("/api/ticker/fund-analysis/{symbol}")
 def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
     sym = _validate_ticker_symbol(symbol)
@@ -4071,25 +3865,16 @@ def get_ticker_fund_analysis(symbol: str, refresh: int = Query(0)):
         if cached is not None:
             cached["cached"] = True
             return cached
-    # Primárne FMP (free 250 req/deň, ~5 volaní/ticker), fallback Alpha Vantage
-    # (25 req/deň, 4 volania/ticker). Cache/UX filozofia sa nemení — stále len
-    # explicitný klik, 7-dňová disk cache, refresh=1 obíde cache.
-    # Reťaz zdrojov: FMP (250/deň) → FinancialData.net (300/deň). Chybová
-    # hláška vždy nesie dôvody všetkých zlyhaných zdrojov.
-    reasons = []
-    payload = None
-    for source, fetcher in (("FMP", _fmp_fund_raw), ("FinancialData.net", _fdn_fund_raw)):
-        try:
-            raw = fetcher(sym)
-            payload = _build_fund_analysis(sym, raw, source=source)
-            break
-        except Exception as e:
-            reasons.append(f"{source}: {_scrub_token(str(e))}")
-            print(f"[fund-analysis] {source} failed for {sym}: {_scrub_token(str(e))}")
-    if payload is None:
-        # Alpha Vantage z fundamentov odstránený (25 req/deň = ~6 titulov) —
-        # AV ostáva len na News sentiment.
-        raise HTTPException(status_code=502, detail=" · ".join(reasons))
+    if not os.getenv("FINNHUB_API_KEY", "").strip():
+        raise HTTPException(status_code=503, detail="FINNHUB_API_KEY is not configured")
+    try:
+        metric, company = _finnhub_fund_metrics(sym)
+    except Exception as exc:
+        reason = _scrub_token(str(exc))
+        raise HTTPException(status_code=502, detail=reason) from exc
+    if not metric:
+        raise HTTPException(status_code=404, detail="Finnhub: no data for symbol")
+    payload = _build_fund_analysis_from_metrics(sym, metric, company)
     payload["cached"] = False
     try:
         _write_ticker_json_cache(path, payload)
@@ -12126,7 +11911,7 @@ def _scrub_token(msg: str) -> str:
     2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
     Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
     msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "FINANCIALDATA_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
+    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
         secret = os.getenv(env_name, "").strip()
         if secret and (env_name == "FINVIZ_COOKIE" or len(secret) >= 8):
             msg = msg.replace(secret, "***")

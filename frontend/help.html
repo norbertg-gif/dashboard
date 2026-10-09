@@ -465,6 +465,9 @@
   <p>Massive údaje sú interpretačné a zatiaľ nemenia C1–C4, DIP skóre, ML ani Buy/Watch/Counter.</p>
   <p>Pri tickeroch sa zobrazujú aj workflow značky: <strong>PORT ±%</strong> znamená, že titul už je v niektorom eToro portfóliu; <strong>+ WL</strong> pridá ticker do serverového watchlistu. Verdikt si pri otvorení z Grafov, Scannera alebo Analytiky preberá aktuálny ticker.</p>
 
+  <h3>Fundamentálna kvalita</h3>
+  <p>Karta používa výhradne Finnhub <code>/stock/metric</code> (free tier; na AAPL/NU/ON bolo nameraných 120–133 polí). Štandardizované výkazy sú platené (HTTP 403), preto ich karta nepoužíva. Percentuálne metriky sa pred skórovaním delia 100; D/E bánk nie je zmysluplné. FMP zostáva pre cieľovú cenu a earnings surprises.</p>
+
   <h3>Správy a sentiment (📰 v Analytike)</h3>
   <p>Správy sa neťahajú priamo v Scanneri, aby sa šetril limit free API. V záložke <strong>Analytika</strong> je tlačidlo <strong>📰 Správy</strong> pri horných ovládačoch. Po kliknutí sa pre aktuálny ticker otvorí zavriteľné popup okno so zoznamom článkov a sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
   <ul>
@@ -659,7 +662,7 @@
   <h3>Dátové zdroje sú krehké</h3>
   <p class="warn">Celý nástroj stojí na bezplatných tieroch, ktoré sa menia bez ohlásenia. <strong>25. 7. 2026</strong> prestal Finnhub vracať insider aj earnings dáta (HTTP 200 s prázdnymi poľami) a FMP začal na <code>earnings-surprises</code> odpovedať 403. Earnings preto majú reťaz štyroch zdrojov: Finnhub → FMP → Alpha Vantage → Yahoo.</p>
   <ul>
-    <li><strong>Alpha Vantage</strong> má 25 volaní denne. Earnings majú preto vlastnú 30-dňovú cache — bez nej by limit vyčerpali a zablokovali aj fundamenty.</li>
+    <li><strong>Alpha Vantage</strong> má 25 volaní denne. Alpha Vantage slúži iba na news sentiment; fundamentálna kvalita používa Finnhub.</li>
     <li><strong>Yahoo quoteSummary</strong> je neoficiálny endpoint bez SLA. Môže kedykoľvek zmeniť tvar alebo prestať odpovedať.</li>
     <li><strong>eToro</strong> sa volá cez lokálny proxy na neverejné API. Nie je to podporovaná integrácia.</li>
     <li>Podmienky väčšiny zdrojov <strong>zakazujú ďalšie šírenie dát</strong>. Pre osobné použitie to je iná situácia než pre čokoľvek zdieľané.</li>
@@ -740,7 +743,8 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>; bezpečne sa posiela v hlavičke <code>Authorization: Bearer</code> alebo <code>X-API-Token</code>.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
     <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie).</td></tr>
-    <tr><td><code>FINNHUB_API_KEY</code></td><td>Earnings, insider, EPS, analytický konsenzus a mapa ticker→sektor (profile2) pre sektorovú relatívnu silu.</td></tr>
+    <tr><td><code>FMP_API_KEY</code></td><td>Cieľová cena a earnings surprises.</td></tr>
+    <tr><td><code>FINNHUB_API_KEY</code></td><td>Earnings, insider, EPS, analytický konsenzus, sektorová relatívna sila a fundamentálna kvalita (/stock/metric).</td></tr>
     <tr><td><code>MASSIVE_API_KEY</code></td><td>End-of-day trhový kontext Nasdaq-100 a S&amp;P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako primárny zdroj denných/týždenných OHLCV (yfinance fallback).</td></tr>
     <tr><td><code>FRED_API_KEY</code></td><td>Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva vynechá.</td></tr>
     <tr><td><code>SCANNER_MAX_WORKERS</code></td><td>Paralelizmus skenera (v low-memory profile default 2, inak 3 — kompromis medzi rýchlosťou a RAM).</td></tr>

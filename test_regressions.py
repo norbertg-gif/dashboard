@@ -2612,122 +2612,105 @@ class TickerInsightsEarningsRegressionTests(unittest.TestCase):
         self.assertIsNotNone(err)
 
 
-class FundAnalysisFmpRegressionTests(unittest.TestCase):
-    _FMP_PROFILE = [{"companyName": "Test Corp"}]
-    _FMP_INCOME = [
-        {"revenue": 1000, "netIncome": 150, "operatingIncome": 200},
-        {"revenue": 900, "netIncome": 120, "operatingIncome": 170},
-    ]
-    _FMP_BALANCE = [{
-        "cashAndCashEquivalents": 300, "totalDebt": 200,
-        "longTermDebt": 150, "totalStockholdersEquity": 800,
-    }]
-    _FMP_CASHFLOW = [
-        {"operatingCashFlow": 250, "capitalExpenditure": -50},
-        {"operatingCashFlow": 200, "capitalExpenditure": -40},
-    ]
-    _FMP_RATIOS = [{"peRatioTTM": 20.0, "priceToSalesRatioTTM": 3.0,
-                    "enterpriseValueMultipleTTM": 12.0, "netProfitMarginTTM": 0.15}]
-
-    def _fake_fmp_get(self, path, sym, extra=None):
-        return {
-            "profile": self._FMP_PROFILE, "income-statement": self._FMP_INCOME,
-            "balance-sheet-statement": self._FMP_BALANCE,
-            "cash-flow-statement": self._FMP_CASHFLOW, "ratios-ttm": self._FMP_RATIOS,
-        }[path]
-
-    def test_fmp_raw_feeds_existing_builder(self):
-        with patch.object(tb, "_fmp_fund_get", self._fake_fmp_get):
-            raw = tb._fmp_fund_raw("TEST")
-        payload = tb._build_fund_analysis("TEST", raw, source="FMP")
-        self.assertEqual(payload["source"], "FMP")
-        self.assertEqual(payload["company"], "Test Corp")
-        # revenue growth (1000 vs 900) a kladné FCF musia dať zmysluplné skóre
-        for key in ("overall", "fundamentals", "valuation", "risk"):
-            self.assertTrue(0 <= payload["scores"][key] <= 100)
-
-    def test_unusable_fmp_rows_raise_for_av_fallback(self):
-        # HTTP 200 s nekompatibilnými fieldmi nesmie prejsť ako FMP dáta —
-        # pre každý z troch výkazov zvlášť
-        for bad_path in ("income-statement", "balance-sheet-statement", "cash-flow-statement"):
-            def bad_fmp_get(path, sym, extra=None, _bad=bad_path):
-                if path == _bad:
-                    return [{"unexpectedField": 1}]
-                return self._fake_fmp_get(path, sym, extra)
-            with patch.object(tb, "_fmp_fund_get", bad_fmp_get):
-                with self.assertRaises(RuntimeError, msg=f"bad {bad_path} must raise"):
-                    tb._fmp_fund_raw("TEST")
-
-    def test_fmp_get_builds_v3_url_with_symbol_in_path(self):
-        urls = []
-        def fake_get(url, params=None, timeout=None):
-            urls.append(url)
-            class R:
-                status_code = 404
-                def json(self): return {}
-            return R()
-        with (
-            patch.dict("os.environ", {"FMP_API_KEY": "testkey123"}),
-            patch.object(tb, "requests") as mock_requests,
-        ):
-            mock_requests.get = fake_get
-            with self.assertRaises(RuntimeError):
-                tb._fmp_fund_get("income-statement", "AAPL")
-        self.assertEqual(urls, [
-            "https://financialmodelingprep.com/stable/income-statement",
-            "https://financialmodelingprep.com/api/v3/income-statement/AAPL",
-        ])
-
-    _FDN_PAYLOADS = {
-        "company-information": [{"registrant_name": "FDN Corp", "trading_symbol": "TEST"}],
-        "income-statements": [
-            {"revenue": 1000, "net_income": 150, "operating_income": 200},
-            {"revenue": 900, "net_income": 120, "operating_income": 170},
-        ],
-        "balance-sheet-statements": [{
-            "cash_and_cash_equivalents": 300, "short_term_debt": 50,
-            "long_term_debt": 150, "total_shareholders_equity": 800,
-        }],
-        "cash-flow-statements": [
-            {"cash_from_operating_activities": 250, "acquisition_of_property_plant_and_equipment": -50},
-            {"cash_from_operating_activities": 200, "acquisition_of_property_plant_and_equipment": -40},
-        ],
-        "key-metrics": [{"price_to_earnings_ratio": 20.0}],
+class FundAnalysisFinnhubRegressionTests(unittest.TestCase):
+    GOOD_METRIC = {
+        "peTTM": 20, "forwardPE": 18, "psTTM": 3, "evEbitdaTTM": 12,
+        "revenueGrowthTTMYoy": 12, "epsGrowthTTMYoy": 15, "pfcfShareTTM": 20,
+        "netProfitMarginTTM": 24.3, "totalDebtToEquityAnnual": 0.3,
+        "netDebtToEBITDAAnnual": -0.2,
     }
 
-    def test_fdn_raw_feeds_existing_builder(self):
-        with patch.object(tb, "_fdn_get", lambda path, sym, extra=None: self._FDN_PAYLOADS[path]):
-            raw = tb._fdn_fund_raw("TEST")
-        payload = tb._build_fund_analysis("TEST", raw, source="FinancialData.net")
-        self.assertEqual(payload["source"], "FinancialData.net")
-        self.assertEqual(payload["company"], "FDN Corp")
-        # total debt = short + long
-        self.assertEqual(raw["balance"]["annualReports"][0]["shortLongTermDebtTotal"], 200)
-        for key in ("overall", "fundamentals", "valuation", "risk"):
-            self.assertTrue(0 <= payload["scores"][key] <= 100)
+    class _Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+        def json(self):
+            return self._payload
 
-    def test_endpoint_prefers_fdn_when_fmp_fails(self):
+    def test_realistic_metrics_score_good_low_risk_and_stretched_valuation(self):
+        good = tb._build_fund_analysis_from_metrics("TEST", self.GOOD_METRIC, "Test Corp")
+        self.assertEqual(good["company"], "Test Corp")
+        self.assertEqual(good["source"], "Finnhub")
+        self.assertEqual(good["labels"]["overall"], "Good")
+        self.assertEqual(good["labels"]["risk"], "Low")
+        expensive = tb._build_fund_analysis_from_metrics("EXP", {
+            **self.GOOD_METRIC, "peTTM": 60, "forwardPE": 60, "psTTM": 15,
+            "evEbitdaTTM": 30,
+        }, None)
+        self.assertEqual(expensive["labels"]["valuation"], "Stretched")
+
+    def test_percent_growth_is_converted_before_scoring(self):
+        metric = {"revenueGrowthTTMYoy": 5, "pfcfShareTTM": 1, "netProfitMarginTTM": 24.3}
+        result = tb._build_fund_analysis_from_metrics("TEST", metric, None)
+        self.assertEqual(result["scores"]["fundamentals"], 71)
+
+    def test_missing_inputs_are_neutral_and_do_not_crash(self):
+        result = tb._build_fund_analysis_from_metrics("NU", {}, None)
+        self.assertEqual(result["scores"], {
+            "overall": 50, "fundamentals": 50, "valuation": 50,
+            "risk": 50, "analyst": 55,
+        })
+
+    def test_endpoint_finnhub_payload_and_disk_cache(self):
+        metric_response = self._Response(200, {"metric": self.GOOD_METRIC})
+        profile_response = self._Response(200, {"name": "Test Corp"})
         with tempfile.TemporaryDirectory() as tmp:
             with (
                 patch.object(tb, "FUND_ANALYSIS_DIR", Path(tmp)),
-                patch.object(tb, "_fmp_fund_raw", side_effect=RuntimeError("FMP down")),
-                patch.object(tb, "_fdn_get", lambda path, sym, extra=None: self._FDN_PAYLOADS[path]),
+                patch.dict("os.environ", {"FINNHUB_API_KEY": "test-secret-123"}),
+                patch.object(tb.requests, "get", side_effect=[metric_response, profile_response]) as get,
             ):
                 payload = tb.get_ticker_fund_analysis("AAPL", refresh=1)
-        self.assertEqual(payload["source"], "FinancialData.net")
+                cached = tb.get_ticker_fund_analysis("AAPL", refresh=0)
+        self.assertEqual(payload["source"], "Finnhub")
+        self.assertFalse(payload["cached"])
+        self.assertTrue(cached["cached"])
+        self.assertEqual(get.call_count, 2)
 
-    def test_endpoint_never_calls_alpha_vantage_when_other_sources_fail(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.object(tb, "FUND_ANALYSIS_DIR", Path(tmp)),
-                patch.object(tb, "_fmp_fund_raw", side_effect=RuntimeError("FMP down")),
-                patch.object(tb, "_fdn_fund_raw", side_effect=RuntimeError("FDN down")),
-                patch.object(tb.requests, "get", side_effect=AssertionError("network call")),
-            ):
-                with self.assertRaises(tb.HTTPException) as ctx:
-                    tb.get_ticker_fund_analysis("AAPL", refresh=1)
-        self.assertIn("FMP down", ctx.exception.detail)
-        self.assertNotIn("Alpha Vantage", ctx.exception.detail)
+    def test_endpoint_empty_metric_returns_404(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            tb, "FUND_ANALYSIS_DIR", Path(tmp)
+        ), patch.dict("os.environ", {"FINNHUB_API_KEY": "test-secret-123"}), patch.object(
+            tb.requests, "get", return_value=self._Response(200, {"metric": {}})
+        ):
+            with self.assertRaises(tb.HTTPException) as ctx:
+                tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_endpoint_upstream_failure_is_502_and_scrubs_key(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            tb, "FUND_ANALYSIS_DIR", Path(tmp)
+        ), patch.dict("os.environ", {"FINNHUB_API_KEY": "test-secret-123"}), patch.object(
+            tb.requests, "get", side_effect=RuntimeError("token=test-secret-123 connection failed")
+        ):
+            with self.assertRaises(tb.HTTPException) as ctx:
+                tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertNotIn("test-secret-123", ctx.exception.detail)
+
+    def test_endpoint_missing_key_returns_503(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            tb, "FUND_ANALYSIS_DIR", Path(tmp)
+        ), patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(tb.HTTPException) as ctx:
+                tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_endpoint_network_calls_are_finnhub_only(self):
+        calls = []
+        def fake_get(url, params=None, timeout=None):
+            calls.append(url)
+            if url.endswith("/stock/metric"):
+                return self._Response(200, {"metric": self.GOOD_METRIC})
+            return self._Response(200, {"name": "Test"})
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            tb, "FUND_ANALYSIS_DIR", Path(tmp)
+        ), patch.dict("os.environ", {"FINNHUB_API_KEY": "test-secret-123"}), patch.object(
+            tb.requests, "get", side_effect=fake_get
+        ):
+            tb.get_ticker_fund_analysis("AAPL", refresh=1)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all("finnhub.io" in url for url in calls))
 
 
 class MassiveSplitAdjustmentRegressionTests(unittest.TestCase):
@@ -3711,21 +3694,6 @@ class AlphaVantageQuotaRegressionTests(unittest.TestCase):
         av_calls = [c for c in get.call_args_list if "alphavantage" in str(c)]
         self.assertEqual(av_calls, [])
 
-    def test_fmp_error_reports_stable_reason_not_only_legacy_403(self):
-        responses = [
-            self._Resp(402, text='{"Error Message": "Premium Query Parameter: symbol"}'),
-            self._Resp(403, text="Legacy Endpoint"),
-        ]
-        with (
-            patch.dict("os.environ", {"FMP_API_KEY": "fmpkey12345"}),
-            patch.object(tb.requests, "get", side_effect=responses),
-        ):
-            with self.assertRaises(RuntimeError) as ctx:
-                tb._fmp_fund_get("income-statement", "AAPL")
-        msg = str(ctx.exception)
-        self.assertIn("stable HTTP 402", msg)
-        self.assertIn("Premium", msg)
-        self.assertNotIn("fmpkey12345", msg)
 
 
 class ReviewSeptemberRegressionTests(unittest.TestCase):
