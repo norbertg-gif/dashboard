@@ -172,6 +172,7 @@ function onChartPanelContextMenu(event, id) {
     { label: 'RSI', checked: !!inds.rsi, action: () => toggleIndicator(id, 'rsi') },
     { label: 'ADX', checked: !!inds.adx, action: () => toggleIndicator(id, 'adx') },
     { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
+    { label: 'IPP · prijatie pohybu', checked: !!inds.ipp, action: () => toggleIndicator(id, 'ipp') },
     { sep: true },
     { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
     { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
@@ -205,7 +206,7 @@ function onChartPanelContextMenu(event, id) {
 // Vantage — kvótu 25 req/deň míňajú len Správy v Analytike, takže kopírovanie
 // na všetky grafy nič nestojí. Zoom sa nekopíruje: pri inom intervale ho
 // loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
-const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd'];
+const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp'];
 const PANEL_DEFAULT_INTERVAL = '1d';
 
 function gridChartPanelIds() {
@@ -266,6 +267,7 @@ function applyThemeToAllCharts() {
     if (r.rsiChart)  applyChartTheme(r.rsiChart);
     if (r.adxChart)  applyChartTheme(r.adxChart);
     if (r.macdChart) applyChartTheme(r.macdChart);
+    if (r.ippChart) applyChartTheme(r.ippChart);
   }
   // Predictive tab grafy. Pozn.: classic-script top-level `let` nevytvára
   // window.* vlastnosť (main.js to rieši len pre pc_realChartInst/
@@ -447,7 +449,7 @@ function resizeChartPanelNow(id) {
   } else if (w > 0) {
     try { r.mainChart?.applyOptions({ width: w }); } catch(e) {}
   }
-  for (const chart of [r.rsiChart, r.adxChart, r.macdChart]) {
+  for (const chart of [r.rsiChart, r.adxChart, r.macdChart, r.ippChart]) {
     try { chart?.applyOptions({ width: w, height: 80 }); } catch(e) {}
   }
 }
@@ -731,11 +733,12 @@ function toggleIndicator(pid, ind) {
 function updateSubVisibility(pid) {
   const r = registry[pid]; if (!r) return;
   const showRsi = r.indicators.rsi, showAdx = r.indicators.adx;
-  const showMacd = r.indicators.macd;
+  const showMacd = r.indicators.macd, showIpp = r.indicators.ipp;
   document.getElementById(`sub-rsi-${pid}`)?.classList.toggle('hidden', !showRsi);
   document.getElementById(`sub-adx-${pid}`)?.classList.toggle('hidden', !showAdx);
   document.getElementById(`sub-macd-${pid}`)?.classList.toggle('hidden', !showMacd);
-  document.getElementById(`chart-${pid}`)?.classList.toggle('with-sub', showRsi || showAdx || showMacd);
+  document.getElementById(`sub-ipp-${pid}`)?.classList.toggle('hidden', !showIpp);
+  document.getElementById(`chart-${pid}`)?.classList.toggle('with-sub', showRsi || showAdx || showMacd || showIpp);
   requestAnimationFrame(() => {
     resizeChartPanelNow(pid);
     requestAnimationFrame(() => resizeChartPanelNow(pid));
@@ -747,6 +750,7 @@ function updateSubVisibility(pid) {
       if (showRsi  && r.rsiChart)  r.rsiChart.resize(w, 80);
       if (showAdx  && r.adxChart)  r.adxChart.resize(w, 80);
       if (showMacd && r.macdChart) r.macdChart.resize(w, 80);
+      if (showIpp && r.ippChart) r.ippChart.resize(w, 80);
     }
   }, 30);
   // MACD resize po odkrytí
@@ -879,6 +883,7 @@ function ensureRsiChart(id, r) {
   r.syncFrom(r.mainChart, [r.rsiChart]);
   r.syncFrom(r.rsiChart,  [r.mainChart]);
   if (r.adxChart) { r.syncFrom(r.rsiChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.rsiChart]); }
+  if (r.ippChart) { r.syncFrom(r.rsiChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.rsiChart]); }
 }
 function ensureAdxChart(id, r) {
   if (r.adxChart) return;
@@ -892,6 +897,7 @@ function ensureAdxChart(id, r) {
   r.syncFrom(r.mainChart, [r.adxChart]);
   r.syncFrom(r.adxChart,  [r.mainChart]);
   if (r.rsiChart) { r.syncFrom(r.rsiChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.rsiChart]); }
+  if (r.ippChart) { r.syncFrom(r.adxChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.adxChart]); }
 }
 
 function ensureMacdChart(id, r) {
@@ -906,6 +912,50 @@ function ensureMacdChart(id, r) {
   r.syncFrom(r.macdChart,  [r.mainChart]);
   if (r.rsiChart) { r.syncFrom(r.macdChart,[r.rsiChart]); r.syncFrom(r.rsiChart,[r.macdChart]); }
   if (r.adxChart) { r.syncFrom(r.macdChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.macdChart]); }
+  if (r.ippChart) { r.syncFrom(r.macdChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.macdChart]); }
+}
+
+function ensureIppChart(id, r) {
+  if (r.ippChart) return;
+  r.ippChart = makeChart(document.getElementById('sub-ipp-' + id), 80, { timeVisible:false });
+  r.ippLine = r.ippChart.addSeries(LightweightCharts.LineSeries, {
+    color:'#a070ff', lineWidth:2, priceLineVisible:false,
+    autoscaleInfoProvider: () => ({ priceRange:{ minValue:-100, maxValue:100 } }),
+  });
+  r.ippLine.createPriceLine({ price:0, color:'#88888888', lineWidth:1,
+    lineStyle:2, axisLabelVisible:false, title:'' });
+  r.ippChart.priceScale('right').applyOptions({ scaleMargins:{top:0.1,bottom:0.1} });
+  for (const chart of [r.mainChart, r.rsiChart, r.adxChart, r.macdChart]) {
+    if (chart) { r.syncFrom(chart, [r.ippChart]); r.syncFrom(r.ippChart, [chart]); }
+  }
+}
+
+function renderIpp(id, data, r) {
+  ensureIppChart(id, r);
+  ensureSubChartTimeAnchor(r, r.ippChart, 'ippAnchor', data);
+  // Whitespace breaks the line during missing-data periods instead of bridging them.
+  r.ippLine.setData(data.map(d => d.ipp == null ? {time:d.time} : {time:d.time, value:d.ipp}));
+  const latest = data[data.length - 1];
+  const confirmed = latest?.ipp_status === 'unconfirmed_bar'
+    ? [...data].reverse().find(d => d.ipp_status && d.ipp_status !== 'unconfirmed_bar') : latest;
+  const label = document.getElementById('ipp-label-' + id);
+  const messages = {
+    daily_only:'Len denný interval 1d', warming_up:'Nedostatok histórie (min. 43 seáns)',
+    volume_missing:'Chýba platný objem', insufficient_events:'Nedostatok udalostí (min. 5)',
+    unconfirmed_bar:'Čaká na uzavreté denné dáta',
+  };
+  if (label) {
+    const value = confirmed?.ipp;
+    const status = confirmed?.ipp_status;
+    const retention = confirmed?.ipp_retention;
+    label.textContent = `IPP ${value == null ? '—' : value.toFixed(1)} · ${confirmed?.ipp_events ?? 0} udalostí`
+      + (retention == null ? '' : ` · zachovanie ${(retention * 100).toFixed(0)} %`)
+      + ` · čaká ${confirmed?.ipp_pending ?? 0}`
+      + (messages[status] ? ` · ${messages[status]}` : '')
+      + (confirmed?.time ? ` · k ${confirmed.time}` : '');
+    label.title = label.textContent + '. Index prijatia pohybu: −100 až +100. ATR 20, okno 20 dokončených udalostných seáns, vyhodnotenie po 3 seansách, pohyb ≥ 0,7 ATR. Bežné ceny aj pri HA; dnešná UTC sviečka sa nezapočítava. Experimentálny indikátor.';
+  }
+  alignSubChartToMain(r, r.ippChart);
 }
 
 // ── CREATE PANEL ──────────────────────────────────────────────────────────────
@@ -961,12 +1011,13 @@ function createPanel(cfg) {
       <button id="ind-${id}-rsi"      class="ind-btn${inds.rsi      ?' active-rsi':''}"      onclick="toggleIndicator('${id}','rsi')">RSI</button>
       <button id="ind-${id}-adx"      class="ind-btn${inds.adx      ?' active-adx':''}"      onclick="toggleIndicator('${id}','adx')">ADX</button>
       <button id="ind-${id}-macd"     class="ind-btn${inds.macd     ?' active-macd':''}"     onclick="toggleIndicator('${id}','macd')">MACD</button>
+      <button id="ind-${id}-ipp" class="ind-btn${inds.ipp ?' active-ipp':''}" onclick="toggleIndicator('${id}','ipp')" title="Index prijatia pohybu · denný interval · experimentálny">IPP</button>
       <div style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></div>
       <button id="wiz-btn-${id}" class="ind-btn${inds.wizard?' active-adx':''}" style="${inds.wizard?'border-color:var(--blue);color:var(--blue);background:var(--blue-dim);':''}" onclick="toggleWizard('${id}')">⚡ WIZARD</button>
       <button id="news-btn-${id}" class="ind-btn" style="${inds.news?'border-color:var(--muted2);color:var(--text);background:var(--bg2);':''}" onclick="toggleNews('${id}')">📰 NEWS</button>
     </div>
     <div class="p-info" id="info-${id}" onclick="setActivePanel('${id}')"><span class="p-name">—</span></div>
-    <div class="p-chart${inds.rsi||inds.adx?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
+    <div class="p-chart${inds.rsi||inds.adx||inds.macd||inds.ipp?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
       <div class="p-ov" id="ov-${id}">Načítava sa…</div>
     </div>
     <div class="p-sub${inds.rsi?'':' hidden'}" id="sub-rsi-${id}" style="height:80px;" onclick="setActivePanel('${id}')">
@@ -977,6 +1028,9 @@ function createPanel(cfg) {
     </div>
     <div class="p-sub${inds.macd?'':' hidden'}" id="sub-macd-${id}" style="height:80px;" onclick="setActivePanel('${id}')">
       <div class="p-sub-label" style="color:#00d4d4">MACD 12/26/9</div>
+    </div>
+    <div class="p-sub${inds.ipp?'':' hidden'}" id="sub-ipp-${id}" style="height:80px;flex-shrink:0;" onclick="setActivePanel('${id}')">
+      <div class="p-sub-label" id="ipp-label-${id}" style="color:#a070ff">IPP · Načítava sa…</div>
     </div>
     <div class="p-news${inds.news?'':' hidden'}" id="news-${id}">
       <div class="news-loading">Načítava správy…</div>
@@ -1043,7 +1097,7 @@ function createPanel(cfg) {
       const w = mainCont.clientWidth, h = mainCont.clientHeight;
       if (!(w > 0 && h > 0)) return;
       try { reg.mainChart.applyOptions({ width: w, height: h }); } catch (e) {}
-      [reg.rsiChart, reg.adxChart, reg.macdChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
+      [reg.rsiChart, reg.adxChart, reg.macdChart, reg.ippChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
       // LWC dokončí interný layout až po aktuálnom frame. Kumo preto kreslíme
       // v nasledujúcom frame, keď už majú time/price súradnice finálne rozmery.
       requestAnimationFrame(() => {
@@ -1059,7 +1113,8 @@ function createPanel(cfg) {
     rsiChart:null, rsiLine:null, rsiOB:null, rsiOS:null,
     adxChart:null, adxLine:null, diPLine:null, diMLine:null, adxThr:null,
     macdChart:null, macdLine:null, macdSignal:null, macdHist:null,
-    syncFrom, overlaySeries:{}, indicators:{...inds}, ro,
+    ippChart:null, ippLine:null, ippAnchor:null,
+    syncFrom, overlaySeries:{}, indicators:{...inds, ipp:!!inds.ipp}, ro,
     viewRange: initialViewRange,
     suppressViewSave: false,
     // Prepne sa až na skutočný vstup používateľa (koliesko/ťah v grafe) —
@@ -1376,6 +1431,8 @@ function applyOverlays(id, data, r) {
     if (adxData.length) r.adxThr.setData(adxData.map(d=>({time:d.time,value:25})));
     alignSubChartToMain(r, r.adxChart);
   }
+
+  if (r.indicators.ipp) renderIpp(id, data, r);
 
   // MACD
   if (r.indicators.macd) {
@@ -2493,6 +2550,7 @@ function removePanel(id) {
     if (r.rsiChart)  r.rsiChart.remove();
     if (r.adxChart)  r.adxChart.remove();
     if (r.macdChart) r.macdChart.remove();
+    if (r.ippChart) r.ippChart.remove();
     delete registry[id];
   }
   document.getElementById(id)?.remove();

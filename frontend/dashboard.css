@@ -7100,3 +7100,8 @@ body.light-mode .port-table td.port-ticker-tag {
 .newsfeed-av-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 6px; }
 .newsfeed-sent { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12px; }
 @media (max-width: 650px) { .newsfeed-wrap { padding: 16px; } .newsfeed-row { grid-template-columns: 1fr; gap: 9px; } }
+
+/* IPP event-retention oscillator */
+.ind-btn.active-ipp { border-color:var(--ind-ema); color:var(--ind-ema); background:var(--ind-ema-soft); }
+
+[id^="ipp-label-"] { max-width:calc(100% - 80px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:auto; }

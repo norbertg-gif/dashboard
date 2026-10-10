@@ -128,6 +128,20 @@ SLEDOVANIE · BACKTEST · EXPORT).
   mimo viditeľnej oblasti; badge cenu ukáže vždy, bez ohľadu na zoom.
 - **EMA** ukazuje krátkodobý/strednodobý trend, **Ichimoku** trend a zóny,
   **RSI** prekúpenosť/prepredanosť, **ADX** silu trendu a **MACD** momentum.
+- **IPP (Index prijatia pohybu)** otvorí vlastný panel na denných grafoch (`1d`).
+  Rozsah −100 až +100 vyjadruje, či si trh viac zachováva rastové alebo poklesové
+  pohyby. Udalosť musí dosiahnuť 0,7 predchádzajúceho ATR 20 a vyhodnotí sa až
+  po troch ďalších uzavretých seansách. IPP berie posledných 20 seáns pôvodu
+  dokončených udalostí; váha je min(|pohyb/ATR|, 3) × √min(relatívny objem, 4).
+  Relatívny objem používa medián predchádzajúcich 20 objemov. Zachovanie je
+  priemer zachovanej časti pohybu za tri seansy, každá obmedzená na 0 až 100 %.
+  Hlavička ukazuje počet udalostí, ich priemerné zachovanie a počet čakajúcich
+  udalostí. Potrebných je aspoň 43 seáns a päť dokončených udalostí; pri
+  chýbajúcom alebo nulovom objeme nie je možné indikátor spoľahlivo vypočítať.
+  IPP používa bežné ceny aj pri Heikin Ashi. Dnešná UTC sviečka sa konzervatívne
+  vynecháva až do ďalšieho UTC dňa; dátum v hlavičke označuje posledné hodnotenie.
+  Nula môže znamenať vyrovnané smery aj vymazávanie pohybov. Ide o experimentálny
+  indikátor bez overenej výnosnosti, nie samostatný pokyn na nákup alebo predaj.
 - **Volume Profile** ukazuje objem podľa ceny za práve viditeľný úsek:
   POC je najobchodovanejšia cena, HVN sú husté zóny a LVN riedke zóny.
   Z denných OHLCV dát nemožno spoľahlivo rozdeliť profil na Buy/Sell volume;

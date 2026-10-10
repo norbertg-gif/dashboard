@@ -3233,6 +3233,88 @@ class ChartPayloadJsonRegressionTests(unittest.TestCase):
         json.dumps(cleaned, allow_nan=False)
 
 
+class IppRegressionTests(unittest.TestCase):
+    @staticmethod
+    def frame(close=None, n=90):
+        import numpy as np
+        close = np.asarray(close if close is not None else np.arange(n) + 100, dtype=float)
+        return pd.DataFrame({"Open": close, "High": close + 0.1,
+                             "Low": close - 0.1, "Close": close,
+                             "Volume": np.full(len(close), 1000.0)},
+                            index=pd.bdate_range("2024-01-01", periods=len(close)))
+
+    def test_persistent_moves_are_symmetric_and_bounded(self):
+        for direction in (1, -1):
+            frame = self.frame()
+            if direction < 0:
+                frame = self.frame(300 - frame.Close.to_numpy())
+            result = tb.calc_ipp(frame)
+            self.assertAlmostEqual(result.ipp.iloc[-1], direction * 100)
+            self.assertEqual(result.ipp_events.iloc[-1], 20)
+            self.assertEqual(result.ipp_pending.iloc[-1], 3)
+            self.assertEqual(result.ipp_retention.iloc[-1], 1)
+            self.assertTrue(result.ipp.dropna().between(-100, 100).all())
+
+    def test_hand_calculated_retention_and_three_bar_maturity(self):
+        frame = self.frame([100, 100, 100, 100, 102, 101, 102, 100])
+        result = tb.calc_ipp(frame, atr_period=2, lookback=1, min_events=1)
+        self.assertTrue(pd.isna(result.ipp.iloc[6]))
+        self.assertAlmostEqual(result.ipp.iloc[7], 50)
+        self.assertAlmostEqual(result.ipp_retention.iloc[7], 0.5)
+
+    def test_all_prefixes_match_full_history_without_future_leakage(self):
+        import numpy as np
+        rng = np.random.default_rng(42)
+        frame = self.frame(100 + np.cumsum(rng.normal(0, 2, 90)))
+        full = tb.calc_ipp(frame)
+        for n in range(24, 90):
+            short = tb.calc_ipp(frame.iloc[:n])
+            pd.testing.assert_frame_equal(short, full.iloc[:n])
+
+    def test_zero_missing_and_infinite_volume_do_not_produce_scores(self):
+        for volume in (0, float("nan"), float("inf")):
+            frame = self.frame()
+            frame["Volume"] = volume
+            result = tb.calc_ipp(frame)
+            self.assertTrue(result.ipp.isna().all())
+            self.assertEqual(result.ipp_status.iloc[-1], "volume_missing")
+
+    def test_flat_and_short_history_are_explicit(self):
+        flat = tb.calc_ipp(self.frame([100] * 90))
+        self.assertEqual(flat.ipp_status.iloc[-1], "insufficient_events")
+        self.assertTrue(flat.ipp.isna().all())
+        self.assertTrue((tb.calc_ipp(self.frame(n=42)).ipp_status == "warming_up").all())
+
+    def response(self, frame, ha=0, interval="1d", limit=0):
+        raw = {"candles": [{"candles": [dict(fromDate=str(ts), open=row.Open,
+               high=row.High, low=row.Low, close=row.Close, volume=row.Volume)
+               for ts, row in frame.iterrows()]}]}
+        with patch.object(tb, "cache_read", return_value=raw), \
+             patch.object(tb, "detect_patterns", return_value=[]):
+            return tb.get_ohlcv(symbol="IPPTEST", period="auto", interval=interval,
+                               indicators="ipp", ha=ha, account="1", refresh=0,
+                               limit=limit, before="")
+
+    def test_endpoint_uses_real_prices_for_ha_and_full_history_before_trim(self):
+        frame = self.frame()
+        normal = self.response(frame)["data"]
+        ha = self.response(frame, ha=1)["data"]
+        self.assertEqual([r["ipp"] for r in normal], [r["ipp"] for r in ha])
+        trimmed = self.response(frame, limit=10)["data"]
+        self.assertEqual(trimmed, normal[-10:])
+
+    def test_today_bar_cannot_mature_events_and_other_intervals_are_explicit(self):
+        frame = self.frame()
+        frame.index = pd.bdate_range(end=pd.Timestamp.now(tz="UTC").normalize().tz_localize(None), periods=90)
+        # Include today even on a weekend, without modifying historical bars.
+        frame.index = list(frame.index[:-1]) + [pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)]
+        result = self.response(frame)["data"]
+        self.assertIsNone(result[-1]["ipp"])
+        self.assertEqual(result[-1]["ipp_status"], "unconfirmed_bar")
+        self.assertEqual(result[-2]["ipp"], 100)
+        self.assertTrue(all(r["ipp_status"] == "daily_only" for r in self.response(frame, interval="1wk")["data"]))
+
+
 class IndicatorWarmupRegressionTests(unittest.TestCase):
     """Žiadny indikátor nesmie vrátiť číslo skôr, než má dosť sviečok.
 

@@ -184,6 +184,58 @@ def calc_atr(df, period=14):
     # podľa nezmyslu. Scoring má na chýbajúce ATR fallback, na nesprávne nie.
     return tr.ewm(com=period - 1, adjust=False, min_periods=period).mean()
 
+def calc_ipp(df, atr_period=20, lookback=20, horizon=3,
+             threshold=0.7, min_events=5):
+    """Causal event-retention oscillator on completed, ordinary OHLCV bars.
+
+    At t, score events originating in [t-horizon-lookback+1, t-horizon].
+    Each event enters only at i+horizon; historical output never uses future
+    bars. The volume baseline uses the preceding atr_period bars, not i.
+    """
+    if (min(atr_period, lookback, horizon, min_events) < 1
+            or not np.isfinite(threshold) or threshold <= 0):
+        raise ValueError("IPP periods and threshold must be positive")
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    volume = pd.to_numeric(df["Volume"], errors="coerce")
+    volume = volume.where(np.isfinite(volume) & (volume > 0))
+    baseline = volume.shift(1).rolling(atr_period, min_periods=atr_period).median()
+    atr = calc_atr(df, atr_period).shift(1)
+    delta = close.diff()
+    impact = delta / atr.where(np.isfinite(atr) & (atr > 0))
+    relative_volume = volume / baseline
+    events = (impact.abs() >= threshold) & relative_volume.notna()
+    weight = impact.abs().clip(upper=3) * np.sqrt(relative_volume.clip(upper=4))
+    direction = np.sign(delta)
+    # Intermediate arrays describe the event at its origin. Shift the whole
+    # contribution by horizon BEFORE any rolling aggregation.
+    retention = pd.concat([
+        (direction * (close.shift(-k) - close.shift(1)) / delta.abs())
+        .clip(lower=0, upper=1) for k in range(1, horizon + 1)
+    ], axis=1).mean(axis=1, skipna=False)
+    valid = events & retention.notna() & np.isfinite(weight)
+    matured_weight = weight.where(valid, 0).shift(horizon, fill_value=0)
+    total_weight = matured_weight.rolling(lookback, min_periods=1).sum()
+    count = valid.astype(int).shift(horizon, fill_value=0).rolling(lookback, min_periods=1).sum()
+    numerator = (weight * direction * retention).where(valid, 0).shift(horizon, fill_value=0)
+    numerator = numerator.rolling(lookback, min_periods=1).sum()
+    avg_retention = retention.where(valid, 0).shift(horizon, fill_value=0)
+    avg_retention = avg_retention.rolling(lookback, min_periods=1).sum() / count.replace(0, np.nan)
+    score = (100 * numerator / total_weight.replace(0, np.nan)).clip(-100, 100)
+    warm = pd.Series(np.arange(len(df)) >= atr_period + horizon + lookback - 1, index=df.index)
+    # Require volume coverage over the complete event window and its baseline.
+    volume_ok = volume.notna().rolling(atr_period + horizon + lookback,
+                                      min_periods=1).min().astype(bool)
+    ready = warm & volume_ok & (count >= min_events)
+    status = np.where(~warm, "warming_up", np.where(~volume_ok, "volume_missing",
+                      np.where(count < min_events, "insufficient_events", "ready")))
+    return pd.DataFrame({
+        "ipp": score.where(ready), "ipp_events": count.astype(int),
+        "ipp_retention": avg_retention.where(warm & volume_ok),
+        "ipp_pending": events.astype(int).rolling(horizon, min_periods=1).sum().astype(int),
+        "ipp_status": status,
+    }, index=df.index)
+
+
 def add_indicators(df):
     df = df.copy()
     df["ema10"]      = calc_ema(df["Close"], 10)
@@ -5808,6 +5860,13 @@ def get_ohlcv(
         if df.empty:
             raise HTTPException(404, "Resample vrátil prázdny DataFrame")
 
+    ipp_frame = None
+    if "ipp" in {i.strip() for i in indicators.split(",")} and interval == "1d":
+        # Conservative daily finality: bars dated today UTC remain unconfirmed
+        # until the next UTC day. Never use a live/HA candle to mature an event.
+        completed = df.loc[df.index.normalize() < pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()]
+        ipp_frame = calc_ipp(completed)
+
     # Heikin Ashi
     if ha:
         df = heikin_ashi(df)
@@ -5894,6 +5953,20 @@ def get_ohlcv(
             "close":  safe(row.get("Close")),
             "volume": safe(row.get("Volume")),
         }
+        if "ipp" in ind_set:
+            if interval != "1d":
+                point["ipp"] = None
+                point["ipp_status"] = "daily_only"
+            elif ipp_frame is not None and df.index[i] in ipp_frame.index:
+                ipp_row = ipp_frame.loc[df.index[i]]
+                for key in ("ipp", "ipp_retention"):
+                    point[key] = safe(ipp_row[key])
+                for key in ("ipp_events", "ipp_pending"):
+                    point[key] = int(ipp_row[key])
+                point["ipp_status"] = str(ipp_row["ipp_status"])
+            else:
+                point["ipp"] = None
+                point["ipp_status"] = "unconfirmed_bar"
         if ema20  is not None: point["ema20"]  = safe(ema20.iloc[i])
         if ema50  is not None: point["ema50"]  = safe(ema50.iloc[i])
         if ema200 is not None: point["ema200"] = safe(ema200.iloc[i])

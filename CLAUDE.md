@@ -1331,6 +1331,23 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
   **Pasca objavená naživo (nie čítaním kódu):** `#grid` má CSS `flex:1`, ale jeho skutočný rodič `#main-charts` je `display:block` (samotné `flex:1` na `#main-charts` funguje, lebo flex-item sizing sa riadi rodičom `#main`, nie vlastným `display` elementu) — takže `#grid` NIKDY nebolo skutočným flex-itemom svojho priameho rodiča a jeho výška bežne pochádza výhradne z obsahu (CSS grid auto-sizing cez viditeľné panely). Keď maximalizácia skryje všetky ostatné panely a ten maximalizovaný vytiahne z normal flow (`position:absolute`), `#grid` stratí VŠETOK in-flow obsah a skolabuje na holý padding (24px, overené priamo v prehliadači) — `inset:0` na maximalizovanom paneli tak nemá čo vyplniť. Fix: `#grid.has-maximized{height:100%}` (spoľahlivé, lebo `#main-charts` má definitívnu výšku cez vlastný flex:1 od `#main`).
 - **Chart dock (bočný graf z Portfólia).** `#chart-dock` je tretí flex stĺpec v `#body` (sourozenec `#sidebar`/`#main`, mimo tab-switchovaného obsahu), zatvorený pri načítaní stránky (žiadna perzistencia otvoreného stavu, len šírky cez `td_dock_width`). Viditeľný je iba pri aktívnom tabe Portfólio: `syncChartDockVisibilityForTab()` mimo Portfólia pridá `.tab-hidden` a ponechá panel/dáta v pamäti, pri návrate do Portfólia ho znovu ukáže. Klik na `.port-sym-cell` v Portfóliu volá `openChartDock(sym)` (`charts.js`), ktorý recykluje jeden `createPanel({..., container:'dock-grid'})` panel — identický so štandardným Grafy panelom (rovnaký `createPanel()` factory, teda aj indikátory/wizard/news/WL tlačidlo fungujú). Vnútorné `.p-btn-rm` je v `#dock-grid` skryté, zatvára sa len hlavičkovým `.dock-close`. `dockPanelId` global sleduje tento jediný panel a je explicitne vylúčený zo VŠETKÝCH bulk operácií Grafy tabu, ktoré robia `document.querySelectorAll('.panel')` sweep: `getCurrentConfig()`/`saveLayout()` (dock sa nikdy neukladá do layoutu/presetu), `clearAllPanels()`, `clearChartPanelsForImport()`, `loadMovers()`, `loadPreset()`, `onSbTickerClick()`, `portRowClick()` (posledné dve by inak mohli uniesť dock panel keď je `#grid` prázdny). Zámerne NEVYLÚČENÝ z `loadAll()` (dock sa obnovuje spolu s ostatnými grafmi) a z `applyAllChartPortfolioFlags()`/tag update (dock dostáva rovnaké portfolio-held orámovanie). Zatváracie ✕ volá `closeChartDock()` → `removePanel()` + reset `dockPanelId = null`. Resize cez `#dock-resizer` mirroruje `#sb-resizer` vzor (`main.js`), šírka v CSS custom property `--dock-width`.
 
+## IPP custom indicator (2026-10-10)
+
+- Graph panels expose `ipp` via button/context menu/persisted panel views. Daily
+  only; unsupported intervals show an explicit label. IPP does not enter Wizard,
+  predictive scores, scanner strategies or trade decisions.
+- `calc_ipp`: ATR/previous volume median 20, event threshold 0.7 ATR, horizon 3,
+  rolling 20 matured origin sessions, minimum 5 events, minimum 43 completed bars.
+  Weight = min(abs(impact),3) * sqrt(min(relative_volume,4)); survival is the mean
+  clipped retained displacement over the next three closes. Shift contributions
+  by horizon BEFORE aggregation; prefix invariance is covered by regression tests.
+- `/api/ohlcv?indicators=ipp`: calculated on full ordinary daily history before
+  HA/display trimming. Exclude today UTC conservatively; current rows have null
+  IPP and `unconfirmed_bar`, UI labels the last confirmed date. Missing positive
+  finite volume over the complete input window yields `volume_missing`.
+- IPP lazy chart participates in scale synchronization, themes, resizing, disposal
+  and layout/bulk-view persistence. Browser caches use shared `20261010-ipp` token.
+
 ## File touch policy
 
 - **`presets.json`, `scanner_notes.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them. (Pôvodný `trade_journal.json` z Trade Journal funkcie už appka nepoužíva — feature bola odstránená; existujúci súbor na disku ostáva, no žiadny kód ho už nečíta ani neprepisuje.)
