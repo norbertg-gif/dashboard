@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261010-123644">
+<link rel="stylesheet" href="/dashboard.css?v=20261010-125128">
 </head>
 <body data-main-tab="home">
 
@@ -79,6 +79,7 @@
         <input type="checkbox" id="movers-portfolio-only" style="cursor:pointer;">Len z portfólia
       </label>
       <button class="btn" id="clipboard-charts-btn" onclick="importChartsFromClipboard()" title="Vloží tickery zo schránky (každý na samostatnom riadku), zruší aktuálne grafy a otvorí ich ako 1d grafy. Limit 20.">📋 Tickery</button>
+      <button class="btn" id="chart-defaults-btn" onclick="openChartDefaultsModal()" title="Ako sa má otvoriť každý nový graf v záložke Grafy: časový rámec a indikátory">⚙ Predvolené</button>
       <button class="btn" id="basket-open-btn" onclick="openChartBasket()" title="Otvorí tickery vyklikané cez ⊕ naprieč dashboardom" style="display:none;">🧺 Košík</button>
     </div>
   </div>
@@ -423,6 +424,22 @@
     </div>
   </div>
 </div>
+<div id="chart-defaults-modal-bg" onclick="if(event.target===this)closeChartDefaultsModal()" onkeydown="if(event.key==='Escape')closeChartDefaultsModal()">
+  <div id="chart-defaults-modal" role="dialog" aria-modal="true" aria-labelledby="chart-defaults-title">
+    <h2 id="chart-defaults-title">Grafy · predvolené zobrazenie</h2>
+    <div class="settings-note">Použije sa pri každom novom grafe v záložke Grafy (Nový graf, Tickery, Top pohyby). Už otvorené grafy a uložené presety sa nemenia. Top pohyby ostávajú na 1d, lebo percento pohybu je denné.</div>
+    <label class="chart-defaults-row">Časový rámec
+      <select id="chart-defaults-interval" class="p-sel"></select></label>
+    <div class="chart-defaults-row">Zapnuté pri otvorení</div>
+    <div id="chart-defaults-indicators"></div>
+    <div id="chart-defaults-status" class="settings-note"></div>
+    <div class="modal-btns">
+      <button class="btn" onclick="resetChartDefaultsModal()">1D bez indikátorov</button>
+      <button class="btn" onclick="closeChartDefaultsModal()">Zruš</button>
+      <button class="btn primary" onclick="saveChartDefaultsModal()">Ulož</button>
+    </div>
+  </div>
+</div>
 <div id="ticker-tags-modal-bg" onclick="if(event.target===this)closePortfolioTagsModal()" onkeydown="if(event.key==='Escape')closePortfolioTagsModal()">
   <div id="ticker-tags-modal" role="dialog" aria-modal="true" aria-labelledby="ticker-tags-title">
     <h2 id="ticker-tags-title">Štítky tickerov</h2>
@@ -536,17 +553,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20261010-123644"></script>
-  <script src="/js/live.js?v=20261010-123644"></script>
-  <script src="/js/portfolio.js?v=20261010-123644"></script>
-  <script src="/js/watchlist.js?v=20261010-123644"></script>
-  <script src="/js/scanner-table-sort.js?v=20261010-123644"></script>
-  <script src="/js/scanner.js?v=20261010-123644"></script>
-  <script src="/js/predictive.js?v=20261010-123644"></script>
-  <script src="/js/verdict.js?v=20261010-123644"></script>
-  <script src="/js/home.js?v=20261010-123644"></script>
-  <script src="/js/newsfeed.js?v=20261010-123644"></script>
-  <script src="/js/charts.js?v=20261010-123644"></script>
-  <script src="/js/main.js?v=20261010-123644"></script>
+  <script src="/js/core.js?v=20261010-125128"></script>
+  <script src="/js/live.js?v=20261010-125128"></script>
+  <script src="/js/portfolio.js?v=20261010-125128"></script>
+  <script src="/js/watchlist.js?v=20261010-125128"></script>
+  <script src="/js/scanner-table-sort.js?v=20261010-125128"></script>
+  <script src="/js/scanner.js?v=20261010-125128"></script>
+  <script src="/js/predictive.js?v=20261010-125128"></script>
+  <script src="/js/verdict.js?v=20261010-125128"></script>
+  <script src="/js/home.js?v=20261010-125128"></script>
+  <script src="/js/newsfeed.js?v=20261010-125128"></script>
+  <script src="/js/charts.js?v=20261010-125128"></script>
+  <script src="/js/main.js?v=20261010-125128"></script>
 </body>
 </html>

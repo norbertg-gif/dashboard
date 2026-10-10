@@ -1348,6 +1348,12 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - IPP lazy chart participates in scale synchronization, themes, resizing, disposal
   and layout/bulk-view persistence. Browser caches use shared `20261010-ipp` token.
 
+## Grafy: predvolené zobrazenie nového panela (2026-10-10)
+
+- `GET/POST /api/charts/defaults` → `DATA_ROOT/chart_defaults.json` (gitignored, atomický zápis): `{interval, indicators:{ha,ema,ichimoku,rsi,adx,macd,ipp,consensus}}`. Na serveri, aby platilo doma aj v práci; `td_chart_defaults` v localStorage je len synchrónne zrkadlo do dokončenia fetchu. POST odmietne neznámy interval, neznámy indikátor aj ne-boolean hodnotu (400, nič nezapíše); poškodený súbor padá na 1d bez indikátorov.
+- **Platí VÝHRADNE pre panely v mriežke Grafov** (rozhodnutie používateľa): `openNewChartPanel`, vloženie zoznamu „Tickery“ a „Top pohyby“ idú cez `chartDefaultPanelCfg()`. Top pohyby si nechávajú `1d` (percento pohybu je denné), berú len indikátory. Bočný graf v Portfóliu (`dock-grid`), panel vo Verdikte (`verdict-grid`) a Analytika default NEPOUŽÍVAJÚ — test to stráži. Už otvorené panely, uložené rozloženia a presety sa nemenia.
+- UI: tlačidlo `⚙ Predvolené` v skupine Zobrazenie lišty Grafov (vlastné okno, nie spoločné ⚙ s prahmi) a položka pravého tlačidla „Nastaviť toto zobrazenie ako predvolené“. „Všetky grafy na predvolené zobrazenie“ teraz aplikuje tieto hodnoty namiesto natvrdo 1D bez indikátorov. Zoznam kľúčov v JS (`PANEL_VIEW_KEYS`, `ALL_INTERVALS`) musí sedieť so serverom — nový indikátor v paneli = doplniť aj `CHART_DEFAULT_INDICATORS`, inak test spadne.
+
 ## Consensus strip (Zhoda), 2026-10-10
 
 - **Tri pasce nájdené až v prehliadači (2026-10-10), testy ich nevideli:** (1) `priceScale(id).applyOptions()` pred `addSeries` sa stratí — overlay stupnica vznikne až so sériou, takže štyri riadky splývali do jedného bloku; (2) pás musí mať sériu s HODNOTOU na každej sviečke (`consensusDomain`), inak začne pri prvom nahriatom stave a je posunutý doľava (pitfall -4), a pravá cenová stupnica musí ostať viditeľná, lebo jej pevná šírka zarovnáva políčka so sviečkami; (3) CSS `order` na deťoch `.panel` presunul `.p-resize-handle` medzi graf a pás a `min-height` prebil `.p-sub.hidden` — veľkosť sa preto viaže na `:not(.hidden)` a úchyt má `order:4`.

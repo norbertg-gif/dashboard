@@ -1903,7 +1903,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
 }
 
 /* ── MODAL ── */
-#modal-bg, #settings-modal-bg, #ticker-tags-modal-bg {
+#modal-bg, #settings-modal-bg, #ticker-tags-modal-bg, #chart-defaults-modal-bg {
   display: none;
   position: fixed;
   inset: 0;
@@ -1914,10 +1914,10 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   justify-content: center;
   transition: var(--transition);
 }
-#modal-bg.open, #settings-modal-bg.open, #ticker-tags-modal-bg.open {
+#modal-bg.open, #settings-modal-bg.open, #ticker-tags-modal-bg.open, #chart-defaults-modal-bg.open {
   display: flex;
 }
-#modal, #settings-modal, #ticker-tags-modal {
+#modal, #settings-modal, #ticker-tags-modal, #chart-defaults-modal {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1933,7 +1933,7 @@ body.dock-open #main-portfolio .port-main-table-wrap {
   from { transform: scale(0.95); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
-#modal h2, #settings-modal h2 {
+#modal h2, #settings-modal h2, #chart-defaults-modal h2 {
   font-size: 16px;
   font-weight: 750;
   color: var(--text);
@@ -7081,6 +7081,12 @@ body.light-mode .port-table td.port-ticker-tag {
   background: color-mix(in srgb, var(--ticker-tag-color) 10%, transparent);
 }
 #ticker-tags-modal { width: min(560px, 95vw); min-width: 0; max-height: 90vh; overflow-y: auto; }
+#chart-defaults-modal { width: min(460px, 95vw); min-width: 0; }
+.chart-defaults-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:12px 0 8px; font-size:12px; color:var(--muted2); }
+#chart-defaults-indicators { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px 16px; margin-bottom:12px; }
+.chart-defaults-check { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); cursor:pointer; }
+#chart-defaults-status:empty { display:none; }
+#chart-defaults-status { color:var(--down); }
 .ticker-tag-row { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
 .ticker-tag-row input:not([type="color"]) { min-width:0; flex:1; background:var(--bg-input); color:var(--text); border:1px solid var(--border); padding:7px; border-radius:var(--radius-sm); }
 .ticker-tag-row input[type="color"] { width:36px; height:32px; padding:2px; flex-shrink:0; }

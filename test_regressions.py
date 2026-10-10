@@ -4060,5 +4060,78 @@ class EtoroOfficialCloseRegressionTests(unittest.TestCase):
         self.assertEqual(get.call_count, 1)
 
 
+class ChartDefaultsRegressionTests(unittest.TestCase):
+    """Default view of a NEW panel in the Grafy tab (interval + indicators)."""
+
+    class _Request:
+        def __init__(self, body):
+            self._body = body
+
+        async def json(self):
+            return self._body
+
+    def _post(self, body):
+        import asyncio
+        return asyncio.run(tb.save_chart_defaults(self._Request(body)))
+
+    def test_missing_or_corrupt_file_falls_back_to_daily_without_indicators(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chart_defaults.json"
+            with patch.object(tb, "CHART_DEFAULTS_FILE", path):
+                self.assertEqual(tb.get_chart_defaults()["interval"], "1d")
+                path.write_text("{not json", encoding="utf-8")
+                data = tb.get_chart_defaults()
+        self.assertEqual(data["interval"], "1d")
+        self.assertEqual(set(data["indicators"]), set(tb.CHART_DEFAULT_INDICATORS))
+        self.assertFalse(any(data["indicators"].values()))
+
+    def test_save_round_trip_and_unlisted_indicators_default_to_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chart_defaults.json"
+            with patch.object(tb, "CHART_DEFAULTS_FILE", path):
+                saved = self._post({"interval": "1wk", "indicators": {"ema": True, "consensus": True}})
+                loaded = tb.get_chart_defaults()
+        self.assertEqual(saved, loaded)
+        self.assertEqual(loaded["interval"], "1wk")
+        self.assertTrue(loaded["indicators"]["ema"] and loaded["indicators"]["consensus"])
+        self.assertFalse(loaded["indicators"]["rsi"])
+
+    def test_invalid_payloads_are_rejected_and_nothing_is_written(self):
+        bad = [
+            {"interval": "2d", "indicators": {}},
+            {"interval": "1d", "indicators": {"ema": "yes"}},
+            {"interval": "1d", "indicators": {"wizard": True}},
+            {"interval": "1d"},
+            ["1d"],
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "chart_defaults.json"
+            with patch.object(tb, "CHART_DEFAULTS_FILE", path):
+                for body in bad:
+                    with self.assertRaises(tb.HTTPException) as ctx:
+                        self._post(body)
+                    self.assertEqual(ctx.exception.status_code, 400)
+                self.assertFalse(path.exists())
+
+    def test_frontend_uses_defaults_only_for_grid_panels(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
+        self.assertIn("const cfg = chartDefaultPanelCfg(symbol);", src)
+        self.assertIn("createPanel(chartDefaultPanelCfg(symbol))", src)
+        # Top pohyby keep the daily interval (the mover percentage is daily)
+        movers = src.split("movers.forEach(m => createPanel({", 1)[1].split("}));", 1)[0]
+        self.assertIn("...chartDefaultPanelCfg(m.symbol)", movers)
+        self.assertLess(movers.index("...chartDefaultPanelCfg"), movers.index("interval: '1d'"))
+        # dock (Portfolio) and the Verdikt panel are deliberately NOT driven by the defaults
+        for marker in ("container: 'dock-grid'", "container: 'verdict-grid'"):
+            block = src.split(marker, 1)[0][-260:]
+            self.assertNotIn("chartDefaultPanelCfg", block)
+            self.assertIn("interval: '1d'", block)
+        # the JS key list must match what the server accepts
+        keys = src.split("const PANEL_VIEW_KEYS = [", 1)[1].split("]", 1)[0].replace("'", "").replace(" ", "").split(",")
+        self.assertEqual(sorted(keys), sorted(tb.CHART_DEFAULT_INDICATORS))
+        intervals = src.split("const ALL_INTERVALS = [", 1)[1].split("]", 1)[0].replace("'", "").replace(" ", "").split(",")
+        self.assertEqual(intervals, list(tb.CHART_DEFAULT_INTERVALS))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

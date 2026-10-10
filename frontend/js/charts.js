@@ -128,8 +128,115 @@ function onSbTickerClick(symbol) {
 // Vždy vytvorí nový panel, nikdy neprepíše existujúci — na rozdiel od
 // onSbTickerClick, ktorý pri aktívnom paneli prepisuje jeho ticker. Right-click
 // akcia "Nový graf" túto reuse-logiku zámerne obchádza.
+// ── Predvolené zobrazenie nového panela v Grafoch ────────────────────────────
+// Platí LEN pre panely v mriežke Grafov (Nový graf, Tickery, Top pohyby).
+// Bočný graf v Portfóliu, panel vo Verdikte a Analytika ho zámerne nepoužívajú.
+// Zdroj pravdy je server (/api/charts/defaults); localStorage je len zrkadlo,
+// aby bol default k dispozícii synchrónne ešte pred dokončením fetchu.
+const CHART_DEFAULTS_KEY = 'td_chart_defaults';
+const CHART_DEFAULT_LABELS = [
+  ['ha', 'Heikin Ashi'], ['ema', 'EMA'], ['ichimoku', 'Ichimoku'], ['rsi', 'RSI'],
+  ['adx', 'ADX'], ['macd', 'MACD'], ['ipp', 'IPP'], ['consensus', 'Zhoda'],
+];
+let chartDefaults = null;
+
+function cleanChartDefaults(raw) {
+  const indicators = {};
+  for (const key of PANEL_VIEW_KEYS) indicators[key] = raw?.indicators?.[key] === true;
+  return { interval: ALL_INTERVALS.includes(raw?.interval) ? raw.interval : '1d', indicators };
+}
+
+function getChartDefaults() {
+  if (!chartDefaults) {
+    let stored = null;
+    try { stored = JSON.parse(localStorage.getItem(CHART_DEFAULTS_KEY) || 'null'); } catch (e) {}
+    chartDefaults = cleanChartDefaults(stored);
+  }
+  return chartDefaults;
+}
+
+function rememberChartDefaults(raw) {
+  chartDefaults = cleanChartDefaults(raw);
+  try { localStorage.setItem(CHART_DEFAULTS_KEY, JSON.stringify(chartDefaults)); } catch (e) {}
+  return chartDefaults;
+}
+
+async function loadChartDefaults() {
+  try {
+    const r = await fetch(`${API}/api/charts/defaults`);
+    if (r.ok) rememberChartDefaults(await r.json());
+  } catch (e) {}
+}
+
+async function saveChartDefaults(raw) {
+  const body = cleanChartDefaults(raw);
+  const r = await fetch(`${API}/api/charts/defaults`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return rememberChartDefaults(await r.json());
+}
+
+// Config for a NEW grid panel. `interval` can be forced (Top pohyby stay 1d,
+// because the mover percentage is a daily figure).
+function chartDefaultPanelCfg(symbol, extra = {}) {
+  const d = getChartDefaults();
+  return {
+    symbol, period: 'auto', interval: d.interval,
+    indicators: { ...d.indicators, wizard: false, news: false },
+    ...extra,
+  };
+}
+
+function openChartDefaultsModal() {
+  const d = getChartDefaults();
+  const sel = document.getElementById('chart-defaults-interval');
+  if (sel) sel.innerHTML = intervalOpts(d.interval);
+  const box = document.getElementById('chart-defaults-indicators');
+  if (box) box.innerHTML = CHART_DEFAULT_LABELS.map(([key, label]) =>
+    `<label class="chart-defaults-check"><input type="checkbox" data-chart-default="${key}"${d.indicators[key] ? ' checked' : ''}>${escHtml(label)}</label>`).join('');
+  const note = document.getElementById('chart-defaults-status');
+  if (note) note.textContent = '';
+  document.getElementById('chart-defaults-modal-bg')?.classList.add('open');
+}
+
+function closeChartDefaultsModal() {
+  document.getElementById('chart-defaults-modal-bg')?.classList.remove('open');
+}
+
+function resetChartDefaultsModal() {
+  const sel = document.getElementById('chart-defaults-interval');
+  if (sel) sel.value = '1d';
+  document.querySelectorAll('[data-chart-default]').forEach(el => { el.checked = false; });
+}
+
+async function saveChartDefaultsModal() {
+  const indicators = {};
+  document.querySelectorAll('[data-chart-default]').forEach(el => { indicators[el.dataset.chartDefault] = el.checked; });
+  const note = document.getElementById('chart-defaults-status');
+  try {
+    await saveChartDefaults({ interval: document.getElementById('chart-defaults-interval')?.value, indicators });
+    closeChartDefaultsModal();
+    setStatus('Predvolené zobrazenie grafov uložené', 'ok');
+  } catch (e) {
+    // Never pretend it was saved: the modal stays open with the reason.
+    if (note) note.textContent = `Neuložené (${e.message}). Skús znova.`;
+  }
+}
+
+async function setPanelViewAsChartDefault(id) {
+  const r = registry[id], panel = document.getElementById(id);
+  if (!r || !panel) return;
+  try {
+    await saveChartDefaults({ interval: panel.querySelector('.interval-sel')?.value, indicators: r.indicators });
+    setStatus('Toto zobrazenie je odteraz predvolené pre nové grafy', 'ok');
+  } catch (e) {
+    setStatus(`Predvolené zobrazenie sa neuložilo: ${e.message}`, 'err');
+  }
+}
+
 function openNewChartPanel(symbol) {
-  const cfg = {symbol, period:'auto', interval:'1d', indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}};
+  const cfg = chartDefaultPanelCfg(symbol);
   const newId = createPanel(cfg);
   setActivePanel(newId);
   loadChart(newId);
@@ -187,7 +294,8 @@ function onChartPanelContextMenu(event, id) {
       others > 0
         ? { label: `Použiť toto zobrazenie na všetky grafy (${others})`, action: () => applyViewToAllCharts(id) }
         : { label: 'Použiť toto zobrazenie na všetky grafy (žiadne ďalšie)', disabled: true },
-      { label: 'Všetky grafy na predvolené (1D, bez indikátorov)', action: () => resetAllChartsToDefault() },
+      { label: 'Všetky grafy na predvolené zobrazenie', action: () => resetAllChartsToDefault() },
+      { label: 'Nastaviť toto zobrazenie ako predvolené', action: () => setPanelViewAsChartDefault(id) },
     );
   }
   // Dock a Verdikt panel majú vlastný uzatvárací tok (closeChartDock,
@@ -251,7 +359,7 @@ function applyViewToAllCharts(sourceId) {
 function resetAllChartsToDefault() {
   const ids = gridChartPanelIds();
   ids.forEach(pid => {
-    setPanelView(pid, PANEL_DEFAULT_INTERVAL, {});
+    setPanelView(pid, getChartDefaults().interval, getChartDefaults().indicators);
     setPanelWizard(pid, false);
     setPanelNews(pid, false);
   });
@@ -2677,12 +2785,7 @@ function openChartsForSymbols(symbols) {
   switchMainTab('charts');
   clearChartPanelsForImport();
   setActivePanel(null);
-  const ids = tickers.map(symbol => createPanel({
-    symbol,
-    period: 'auto',
-    interval: '1d',
-    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
-  }));
+  const ids = tickers.map(symbol => createPanel(chartDefaultPanelCfg(symbol)));
   saveLayout();
   applyAllChartPortfolioFlags();
   ids.forEach(id => loadChart(id));
@@ -2724,8 +2827,8 @@ async function loadMovers() {
     [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
     setActivePanel(null);
     movers.forEach(m => createPanel({
-      symbol: m.symbol,
-      interval: '1d',
+      ...chartDefaultPanelCfg(m.symbol),
+      interval: '1d',   // the mover percentage is a daily figure
       moverChangePct: Number(m.change_pct),
       moverLastPrice: Number(m.last_close),
       moverPriceSource: m.price_source || null

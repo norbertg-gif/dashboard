@@ -2833,6 +2833,60 @@ def _load_ticker_tags() -> dict:
         return _read_ticker_tags()
 
 
+# ── Grafy: predvolené zobrazenie nového panela ────────────────────────────────
+# Čisto prezentačné nastavenie záložky Grafy (časový rámec + zapnuté indikátory).
+# Na serveri preto, aby platilo doma aj v práci; netýka sa bočného grafu
+# v Portfóliu, Verdiktu ani Analytiky.
+CHART_DEFAULTS_FILE = DATA_ROOT / "chart_defaults.json"
+CHART_DEFAULT_INTERVALS = ("1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1wk", "1mo")
+CHART_DEFAULT_INDICATORS = ("ha", "ema", "ichimoku", "rsi", "adx", "macd", "ipp", "consensus")
+_chart_defaults_lock = threading.Lock()
+
+
+def _clean_chart_defaults(raw) -> dict:
+    """Unknown keys are dropped and anything malformed falls back to 1d / off."""
+    raw = raw if isinstance(raw, dict) else {}
+    interval = raw.get("interval")
+    indicators = raw.get("indicators") if isinstance(raw.get("indicators"), dict) else {}
+    return {
+        "interval": interval if interval in CHART_DEFAULT_INTERVALS else "1d",
+        "indicators": {key: indicators.get(key) is True for key in CHART_DEFAULT_INDICATORS},
+    }
+
+
+def _read_chart_defaults() -> dict:
+    try:
+        return _clean_chart_defaults(json.loads(CHART_DEFAULTS_FILE.read_text(encoding="utf-8")))
+    except Exception:
+        return _clean_chart_defaults(None)
+
+
+@app.get("/api/charts/defaults")
+def get_chart_defaults():
+    with _chart_defaults_lock:
+        return _read_chart_defaults()
+
+
+@app.post("/api/charts/defaults")
+async def save_chart_defaults(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid chart defaults payload")
+    interval = body.get("interval")
+    indicators = body.get("indicators")
+    if interval not in CHART_DEFAULT_INTERVALS:
+        raise HTTPException(400, f"Invalid interval: {interval!r}")
+    if not isinstance(indicators, dict) or any(not isinstance(v, bool) for v in indicators.values()):
+        raise HTTPException(400, "indicators must be an object of booleans")
+    unknown = sorted(set(indicators) - set(CHART_DEFAULT_INDICATORS))
+    if unknown:
+        raise HTTPException(400, f"Unknown indicators: {unknown!r}")
+    clean = _clean_chart_defaults(body)
+    with _chart_defaults_lock:
+        _atomic_write_json(CHART_DEFAULTS_FILE, clean)
+    return clean
+
+
 @app.get("/api/portfolio/tags")
 def get_ticker_tags():
     """Presentation only; deliberately absent from strategy/accounting exports."""
