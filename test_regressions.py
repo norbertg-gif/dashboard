@@ -2038,6 +2038,22 @@ class ScannerVisibilityRegressionTests(unittest.TestCase):
             {"ticker": "SIG", "recent_signal": {"score": 2}}, {"SIG": {"total": 10}}
         ))
 
+    def test_held_position_is_kept_without_signal_or_dip(self):
+        row = {"ticker": "LMT", "recent_signal": None}
+        self.assertFalse(tb._include_scanner_result(row, {}))
+        self.assertTrue(tb._include_scanner_result(row, {}, frozenset({"LMT"})))
+        self.assertFalse(tb._include_scanner_result(
+            {"ticker": "LOW", "recent_signal": None}, {"LOW": {"total": 84}}, frozenset({"LMT"})
+        ))
+
+    def test_scanner_passes_held_symbols_to_the_result_filter(self):
+        src = (Path(__file__).parent / "backend" / "trading_backend.py").read_text(encoding="utf-8")
+        self.assertIn("_include_scanner_result(row, dip_scores, held_symbols)", src)
+        with patch.object(tb, "_get_portfolio_holdings", return_value={"lmt": {}, "NU": {}}):
+            self.assertEqual(tb._scanner_held_symbols(), frozenset({"LMT", "NU"}))
+        with patch.object(tb, "_get_portfolio_holdings", side_effect=RuntimeError("cache down")):
+            self.assertEqual(tb._scanner_held_symbols(), frozenset())
+
     def test_high_dip_row_without_signal_sorts_safely(self):
         rows = [
             {"ticker": "WATCH", "dip_total": 80, "setup_score": 2, "recent_signal": None},

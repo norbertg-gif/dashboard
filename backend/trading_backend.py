@@ -8047,11 +8047,28 @@ def enrich_scanner_payload(payload: dict) -> dict:
     return out
 
 
-def _include_scanner_result(row: dict, dip_scores: dict) -> bool:
-    """Keep live signals plus imported DIP titles worth manual chart review."""
+def _scanner_held_symbols() -> frozenset:
+    """Held Stock/ETF symbols from the portfolio cache only; empty on failure."""
+    try:
+        return frozenset(str(sym or "").strip().upper() for sym in _get_portfolio_holdings())
+    except Exception:
+        return frozenset()
+
+
+def _include_scanner_result(row: dict, dip_scores: dict, held: frozenset = frozenset()) -> bool:
+    """Keep live signals, imported DIP titles worth manual chart review, and
+    every held position.
+
+    Held tickers are added to the scan universe so the AI export and BUILD get
+    chart health / entry zone / relative strength for them. Dropping the row
+    here (no fresh signal, no DIP >= 85) threw that work away: on 2026-10-10
+    34 of 61 held titles had no chart state, including four BUILD candidates
+    that could not be evaluated."""
     if row.get("recent_signal"):
         return True
     ticker = str(row.get("ticker") or "").upper()
+    if ticker in held:
+        return True
     dip_total = _num_or_none((dip_scores.get(ticker) or {}).get("total"))
     return dip_total is not None and dip_total >= DIP_SCANNER_VISIBILITY_THRESHOLD
 
@@ -9198,6 +9215,7 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
     slog_changed: dict = {}
     tickers, universe_label, universe_key = scanner_universe_from_dip()
     dip_scores = {k: v for k, v in load_dip_scores().items() if not k.startswith("_")}
+    held_symbols = _scanner_held_symbols()
     scanner_memory_start = _process_memory_mb().get("rss_mb")
     _scanner_job = mem_watch.track_job("scanner")
     _scanner_job.__enter__()
@@ -9252,7 +9270,7 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
                             slog_changed[ticker] = slog_update
                         if row.get("error"):
                             errors.append(row)
-                        elif _include_scanner_result(row, dip_scores):
+                        elif _include_scanner_result(row, dip_scores, held_symbols):
                             results.append(row)
                     except Exception as e:
                         errors.append({"ticker": ticker, "error": str(e)[:80]})
