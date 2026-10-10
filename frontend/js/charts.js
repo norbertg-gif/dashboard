@@ -991,6 +991,7 @@ function ensureConsensusChart(id, r) {
   // series for the bar-index domain, see CLAUDE.md pitfall -4); otherwise the
   // strip would start at the first warmed-up state and sit shifted to the left.
   r.consensusDomain = r.consensusChart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:'cs_domain',priceLineVisible:false,lastValueVisible:false,color:'rgba(0,0,0,0)'});
+  attachConsensusTooltip(r.consensusChart, document.getElementById(`sub-consensus-${id}`), time => r.consensusByTime?.get(time));
   for (const chart of [r.mainChart,r.rsiChart,r.adxChart,r.macdChart,r.ippChart]) if(chart){r.syncFrom(chart,[r.consensusChart]);r.syncFrom(r.consensusChart,[chart]);}
 }
 
@@ -1003,6 +1004,7 @@ function renderConsensus(id, data, r) {
   const colors={1:up,'-1':down,0:'rgba(128,128,128,0.55)'};
   ['rsi','stoch','macd','ichi'].forEach((key,i)=>r.consensusBars[i].setData(data.filter(d=>d[`cs_${key}`]===-1||d[`cs_${key}`]===0||d[`cs_${key}`]===1).map(d=>({time:d.time,value:1,color:colors[d[`cs_${key}`]]}))));
   r.consensusDomain?.setData(data.map(d=>({time:d.time,value:0})));
+  r.consensusByTime = new Map(data.map(d=>[d.time,d]));
   const latest=data[data.length-1]||{};
   const summary=consensusSummary(latest);
   const label=document.getElementById(`consensus-label-${id}`);

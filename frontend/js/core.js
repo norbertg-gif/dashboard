@@ -960,6 +960,48 @@ async function loadMemProfileChip() {
     chip.style.display = 'inline-block';
   } catch(e) {}
 }
+// Hover popup for the consensus strip: names every row and its state on the
+// candle under the cursor. One shared element on <body> — the strip itself is
+// 68 px high with overflow hidden, so a tooltip inside it would be clipped.
+const CONSENSUS_ROWS = [['cs_rsi', 'RSI (14)'], ['cs_stoch', 'Stochastic (14, 3)'], ['cs_macd', 'MACD histogram'], ['cs_ichi', 'Ichimoku · oblak']];
+
+function consensusTooltipHtml(time, states) {
+  const stateText = { '1': ['býčie', 'up'], '-1': ['medvedie', 'down'], '0': ['neutrálne', 'flat'] };
+  const date = Number.isFinite(Number(time)) ? new Date(Number(time) * 1000).toLocaleDateString('sk-SK') : '';
+  const rows = CONSENSUS_ROWS.map(([key, name]) => {
+    const [text, cls] = stateText[String(states?.[key])] || ['bez dát', 'none'];
+    return `<div class="consensus-tip-row"><span class="consensus-tip-dot ${cls}"></span><span>${escHtml(name)}</span><b class="${cls}">${text}</b></div>`;
+  }).join('');
+  return `<div class="consensus-tip-date">${escHtml(date)}</div>${rows}`;
+}
+
+function attachConsensusTooltip(chart, container, lookup) {
+  if (!chart || !container) return;
+  let tip = document.getElementById('consensus-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'consensus-tip';
+    tip.className = 'consensus-tip';
+    document.body.appendChild(tip);
+  }
+  const hide = () => { tip.style.display = 'none'; };
+  chart.subscribeCrosshairMove(param => {
+    const states = param?.time != null && param.point ? lookup(param.time) : null;
+    if (!states) { hide(); return; }
+    tip.innerHTML = consensusTooltipHtml(param.time, states);
+    tip.style.display = 'block';
+    const box = container.getBoundingClientRect();
+    const left = Math.min(box.left + param.point.x + 14, window.innerWidth - tip.offsetWidth - 8);
+    const above = box.top - tip.offsetHeight - 6;
+    tip.style.left = `${Math.max(8, left)}px`;
+    tip.style.top = `${above >= 8 ? above : box.bottom + 6}px`;
+  });
+  if (!container.dataset.consensusTipBound) {
+    container.dataset.consensusTipBound = '1';
+    container.addEventListener('mouseleave', hide);
+  }
+}
+
 function consensusSummary(states) {
   const labels = [['RSI', states?.cs_rsi], ['Stoch', states?.cs_stoch], ['MACD', states?.cs_macd], ['Ichimoku', states?.cs_ichi]];
   const available = labels.filter(([, value]) => value === -1 || value === 0 || value === 1);

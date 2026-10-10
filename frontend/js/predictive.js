@@ -2232,6 +2232,12 @@ function pc_buildSubpanel(view, type, ind, candles, mainChart) {
     });
     const label=block.querySelector('.consensus-summary'), summary=consensusSummary(states);
     if(label){label.textContent=summary.text;label.title=summary.title;}
+    const byTime=new Map();
+    names.forEach((name,index)=>entry.consensusPoints[index].forEach(p=>{
+      if(!byTime.has(p.time))byTime.set(p.time,{});
+      byTime.get(p.time)[`cs_${name}`]=p.value;
+    }));
+    attachConsensusTooltip(chart,block,time=>byTime.get(time)||(candles.some(c=>c.time===time)?{}:null));
   }
 
   entry.mainRangeHandler=range=>{

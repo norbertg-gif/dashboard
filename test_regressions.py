@@ -3234,6 +3234,16 @@ class ChartPayloadJsonRegressionTests(unittest.TestCase):
 
 
 class ConsensusStripRegressionTests(unittest.TestCase):
+    def test_hover_popup_names_every_row_and_is_wired_in_both_tabs(self):
+        root = Path(__file__).parent / "frontend" / "js"
+        core = (root / "core.js").read_text(encoding="utf-8")
+        for name in ("RSI (14)", "Stochastic (14, 3)", "MACD histogram", "Ichimoku"):
+            self.assertIn(name, core)
+        self.assertIn("function attachConsensusTooltip(", core)
+        self.assertIn("escHtml(name)", core)
+        self.assertIn("attachConsensusTooltip(", (root / "charts.js").read_text(encoding="utf-8"))
+        self.assertIn("attachConsensusTooltip(", (root / "predictive.js").read_text(encoding="utf-8"))
+
     @staticmethod
     def frame(close):
         import numpy as np
