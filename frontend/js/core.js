@@ -963,19 +963,29 @@ async function loadMemProfileChip() {
 // Hover popup for the consensus strip: names every row and its state on the
 // candle under the cursor. One shared element on <body> — the strip itself is
 // 68 px high with overflow hidden, so a tooltip inside it would be clipped.
-const CONSENSUS_ROWS = [['cs_rsi', 'RSI (14)'], ['cs_stoch', 'Stochastic (14, 3)'], ['cs_macd', 'MACD histogram'], ['cs_ichi', 'Ichimoku · oblak']];
+const CONSENSUS_DEFAULT_PARAMS = Object.freeze({rsi_period:14,rsi_bull:50,rsi_bear:50,stoch_period:14,stoch_smooth:3,stoch_bull:50,stoch_bear:50,macd_fast:12,macd_slow:26,macd_signal:9,ichi_tenkan:9,ichi_kijun:26,ichi_senkou:52});
 
-function consensusTooltipHtml(time, states) {
+function consensusRows(params = CONSENSUS_DEFAULT_PARAMS) {
+  const p = {...CONSENSUS_DEFAULT_PARAMS, ...(params || {})};
+  return [
+    ['cs_rsi', `RSI (${p.rsi_period}) · býčie ≥ ${p.rsi_bull}, medvedie < ${p.rsi_bear}`],
+    ['cs_stoch', `Stochastic (${p.stoch_period}, ${p.stoch_smooth}) · býčie ≥ ${p.stoch_bull}, medvedie < ${p.stoch_bear}`],
+    ['cs_macd', `MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal})`],
+    ['cs_ichi', `Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}) · oblak`],
+  ];
+}
+
+function consensusTooltipHtml(time, states, params = CONSENSUS_DEFAULT_PARAMS) {
   const stateText = { '1': ['býčie', 'up'], '-1': ['medvedie', 'down'], '0': ['neutrálne', 'flat'] };
   const date = Number.isFinite(Number(time)) ? new Date(Number(time) * 1000).toLocaleDateString('sk-SK') : '';
-  const rows = CONSENSUS_ROWS.map(([key, name]) => {
+  const rows = consensusRows(params).map(([key, name]) => {
     const [text, cls] = stateText[String(states?.[key])] || ['bez dát', 'none'];
     return `<div class="consensus-tip-row"><span class="consensus-tip-dot ${cls}"></span><span>${escHtml(name)}</span><b class="${cls}">${text}</b></div>`;
   }).join('');
   return `<div class="consensus-tip-date">${escHtml(date)}</div>${rows}`;
 }
 
-function attachConsensusTooltip(chart, container, lookup) {
+function attachConsensusTooltip(chart, container, lookup, params = CONSENSUS_DEFAULT_PARAMS) {
   if (!chart || !container) return;
   let tip = document.getElementById('consensus-tip');
   if (!tip) {
@@ -988,7 +998,8 @@ function attachConsensusTooltip(chart, container, lookup) {
   chart.subscribeCrosshairMove(param => {
     const states = param?.time != null && param.point ? lookup(param.time) : null;
     if (!states) { hide(); return; }
-    tip.innerHTML = consensusTooltipHtml(param.time, states);
+    const currentParams = typeof params === 'function' ? params() : params;
+    tip.innerHTML = consensusTooltipHtml(param.time, states, currentParams);
     tip.style.display = 'block';
     const box = container.getBoundingClientRect();
     const left = Math.min(box.left + param.point.x + 14, window.innerWidth - tip.offsetWidth - 8);
@@ -1002,7 +1013,7 @@ function attachConsensusTooltip(chart, container, lookup) {
   }
 }
 
-function consensusSummary(states) {
+function consensusSummary(states, params = CONSENSUS_DEFAULT_PARAMS) {
   const labels = [['RSI', states?.cs_rsi], ['Stoch', states?.cs_stoch], ['MACD', states?.cs_macd], ['Ichimoku', states?.cs_ichi]];
   const available = labels.filter(([, value]) => value === -1 || value === 0 || value === 1);
   const missing = labels.filter(([, value]) => value !== -1 && value !== 0 && value !== 1).map(([name]) => name);
@@ -1024,6 +1035,7 @@ function consensusSummary(states) {
     text = parts.join(' · ');
   }
   if (missing.length) text += `${text ? ' · ' : ''}bez dát: ${missing.join(', ')}`;
-  const title = 'RSI(14): ≥ 50 býčie, < 50 medvedie. Stochastic %K(14) so smoothingom 3: ≥ 50 býčie, < 50 medvedie. MACD(12,26,9) histogram: > 0 býčie, < 0 medvedie, = 0 neutrálne. Ichimoku: close nad cloudom býčie, pod cloudom medvedie, vnútri neutrálne. Čítacia pomôcka, nie signál.';
+  const p = {...CONSENSUS_DEFAULT_PARAMS, ...(params || {})};
+  const title = `${consensusRows(p)[0][1]}. Stochastic %K (${p.stoch_period}) so smoothingom ${p.stoch_smooth}: býčie ≥ ${p.stoch_bull}, medvedie < ${p.stoch_bear}. MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal}) histogram: > 0 býčie, < 0 medvedie, = 0 neutrálne. Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}): close nad oblakom býčie, pod oblakom medvedie, vnútri neutrálne. Čítacia pomôcka, nie signál.`;
   return { text, title };
 }

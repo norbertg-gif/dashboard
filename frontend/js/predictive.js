@@ -404,12 +404,22 @@ const PC_LAST_TICKER_KEY = 'td_predictive_ticker';
 // Data-only prefetch (bez initCharts()/renderCharts() — chart séria neexistuje,
 // kým sa Analytika prvýkrát neotvorí). loadData() cache skontroluje sama.
 const pc_chartDataCache = new Map();
+let pc_chartDataCacheEpoch = 0;
+
+function pc_reloadConsensusSettings() {
+  pc_chartDataCache.clear();
+  pc_chartDataCacheEpoch++;
+  const ticker=document.getElementById('tickerInput')?.value?.trim();
+  if (!window._predChartInitialized || !ticker || !(pc_weeklyIndicators.consensus || pc_dailyIndicators.consensus)) return;
+  loadData(false, true);
+}
 
 async function pc_prefetchChartData() {
   try {
+    const cacheEpoch=pc_chartDataCacheEpoch;
     // Ak už bol tab reálne otvorený (napr. priamy ?tab=predictive), loadData()
     // už prebehla naostro — neprepisuj čerstvé dáta/rozrobený ticker starším fetchom.
-    if (window._predChartInitialized) return;
+    if (window._predChartInitialized || cacheEpoch!==pc_chartDataCacheEpoch) return;
     // restorePredictiveTicker() sa už zavolala skoro pri štarte (main.js) — tu ju
     // NEVOLAŤ znova, aby sme o pár sekúnd neprepísali ticker, ktorý si užívateľ
     // medzičasom rozpísal do poľa.
@@ -2134,6 +2144,14 @@ function pc_toggleIndicator(view, key) {
     if (view === 'weekly' && key === 'vp') pc_applyVolumeProfile();
     return;
   }
+  if (key === 'consensus' && state.consensus && typeof consensusSettings !== 'undefined'
+      && JSON.stringify(pc_lastData.indicators?.consensus?.params || CONSENSUS_DEFAULT_PARAMS)
+        !== JSON.stringify(consensusSettings)) {
+    pc_chartDataCache.clear();
+    pc_chartDataCacheEpoch++;
+    loadData(false, true);
+    return;
+  }
   if (view === 'weekly') pc_applyOverlays();
   else if (pc_currentView === 'daily') renderDailyMain(pc_lastData);
 }
@@ -2230,14 +2248,15 @@ function pc_buildSubpanel(view, type, ind, candles, mainChart) {
       bars.setData(points.map(p=>({time:p.time,value:1,color:p.value===1?up:p.value===-1?down:'rgba(128,128,128,0.55)'})));
       states[`cs_${name}`]=points.find(p=>p.time===lastTime)?.value;
     });
-    const label=block.querySelector('.consensus-summary'), summary=consensusSummary(states);
+    const params=ind.consensus?.params || CONSENSUS_DEFAULT_PARAMS;
+    const label=block.querySelector('.consensus-summary'), summary=consensusSummary(states,params);
     if(label){label.textContent=summary.text;label.title=summary.title;}
     const byTime=new Map();
     names.forEach((name,index)=>entry.consensusPoints[index].forEach(p=>{
       if(!byTime.has(p.time))byTime.set(p.time,{});
       byTime.get(p.time)[`cs_${name}`]=p.value;
     }));
-    attachConsensusTooltip(chart,block,time=>byTime.get(time)||(candles.some(c=>c.time===time)?{}:null));
+    attachConsensusTooltip(chart,block,time=>byTime.get(time)||(candles.some(c=>c.time===time)?{}:null),params);
   }
 
   entry.mainRangeHandler=range=>{
@@ -3279,7 +3298,7 @@ async function pc_ensureEarningsDate(ticker, refresh = false) {
   `;
 }
 
-async function loadData(reoptimize = false) {
+async function loadData(reoptimize = false, forceRefresh = false) {
   const ticker = document.getElementById('tickerInput').value.trim().toUpperCase();
   const period = document.getElementById('periodSel').value;
   if (!ticker) return;
@@ -3309,12 +3328,13 @@ async function loadData(reoptimize = false) {
     const detail = isAdvancedUiMode() ? 'advanced' : 'basic';
     const cacheKey = `${ticker}:${period}:${detail}`;
     let data;
-    if (!reoptimize && pc_chartDataCache.has(cacheKey)) {
+    if (!reoptimize && !forceRefresh && pc_chartDataCache.has(cacheKey)) {
       // Predhriate na pozadí pri štarte (pc_prefetchChartData) — obíď fetch.
       data = pc_chartDataCache.get(cacheKey);
       pc_chartDataCache.delete(cacheKey);
     } else {
-      const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}`);
+      const cacheBust=forceRefresh?`&_=${Date.now()}`:'';
+      const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}${cacheBust}`,{cache:forceRefresh?'no-store':'default'});
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || res.statusText);

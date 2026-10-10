@@ -3237,7 +3237,7 @@ class ConsensusStripRegressionTests(unittest.TestCase):
     def test_hover_popup_names_every_row_and_is_wired_in_both_tabs(self):
         root = Path(__file__).parent / "frontend" / "js"
         core = (root / "core.js").read_text(encoding="utf-8")
-        for name in ("RSI (14)", "Stochastic (14, 3)", "MACD histogram", "Ichimoku"):
+        for name in ("RSI (${p.rsi_period})", "Stochastic (${p.stoch_period}, ${p.stoch_smooth})", "MACD (${p.macd_fast}", "Ichimoku (${p.ichi_tenkan}"):
             self.assertIn(name, core)
         self.assertIn("function attachConsensusTooltip(", core)
         self.assertIn("escHtml(name)", core)
@@ -3315,6 +3315,7 @@ class ConsensusStripRegressionTests(unittest.TestCase):
         for point in normal["data"]:
             self.assertEqual(set(k for k in point if k.startswith("cs_")),{"cs_rsi","cs_stoch","cs_macd","cs_ichi"})
             self.assertTrue(all(value is None or value in (-1,0,1) for key,value in point.items() if key.startswith("cs_")))
+        self.assertEqual(normal["consensus_params"],tb.CONSENSUS_SETTINGS_DEFAULTS)
         self.assertEqual({k:normal["data"][-1][k] for k in normal["data"][-1] if k.startswith("cs_")},
                          {k:ha["data"][-1][k] for k in ha["data"][-1] if k.startswith("cs_")})
         json.dumps(normal,allow_nan=False)
@@ -4058,6 +4059,117 @@ class EtoroOfficialCloseRegressionTests(unittest.TestCase):
             for _ in range(5):
                 self.assertIsNone(tb._etoro_official_prev_close(1127))
         self.assertEqual(get.call_count, 1)
+
+
+class ConsensusSettingsRegressionTests(unittest.TestCase):
+    class _Request:
+        def __init__(self, body): self.body = body
+        async def json(self): return self.body
+
+    def _post(self, body):
+        import asyncio
+        return asyncio.run(tb.save_consensus_settings(self._Request(body)))
+
+    @staticmethod
+    def frame(n=400):
+        import numpy as np
+        rng=np.random.default_rng(1301)
+        close=100+np.cumsum(rng.normal(0,1.4,n))
+        return pd.DataFrame({"Open":close,"High":close+np.abs(rng.normal(0.5,.2,n)),
+            "Low":close-np.abs(rng.normal(.5,.2,n)),"Close":close,"Volume":1000.0},
+            index=pd.bdate_range("2024-01-01",periods=n))
+
+    def test_default_parameters_are_identical(self):
+        frame=self.frame()
+        pd.testing.assert_frame_equal(tb.calc_consensus_states(frame),
+                                      tb.calc_consensus_states(frame,tb.CONSENSUS_SETTINGS_DEFAULTS))
+
+    def test_threshold_neutral_band_matches_rsi(self):
+        frame=self.frame()
+        params={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_bull":60,"rsi_bear":40}
+        states=tb.calc_consensus_states(frame,params).cs_rsi
+        rsi=tb.calc_rsi(frame.Close,params["rsi_period"])
+        valid=rsi.notna()
+        expected=pd.Series(float("nan"),index=frame.index)
+        expected.loc[valid & (rsi>=60)]=1
+        expected.loc[valid & (rsi<40)]=-1
+        expected.loc[valid & rsi.between(40,60,inclusive="left")]=0
+        pd.testing.assert_series_equal(states,expected,check_names=False)
+
+    def test_custom_periods_match_independent_indicator_computation(self):
+        import numpy as np
+        frame=self.frame()
+        p={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_period":21,"stoch_period":18,"stoch_smooth":4,
+           "macd_fast":8,"macd_slow":23,"macd_signal":5,"ichi_tenkan":7,"ichi_kijun":22,"ichi_senkou":48}
+        actual=tb.calc_consensus_states(frame,p)
+        close=frame.Close
+        rsi=tb.calc_rsi(close,21)
+        _m,_s,hist=tb.calc_macd(close,8,23,5)
+        _t,_k,a,b,_c=tb.calc_ichimoku(frame,7,22,48)
+        cloud_hi=pd.concat([a,b],axis=1).max(axis=1,skipna=False)
+        cloud_lo=pd.concat([a,b],axis=1).min(axis=1,skipna=False)
+        stoch=tb.calc_stoch(frame,18,4)
+        expected_rsi=pd.Series(np.where(rsi.notna(),np.where(rsi>=50,1,-1),np.nan),index=frame.index)
+        expected_stoch=pd.Series(np.where(stoch.notna(),np.where(stoch>=50,1,-1),np.nan),index=frame.index)
+        expected_macd=pd.Series(np.where(hist.notna(),np.sign(hist),np.nan),index=frame.index)
+        expected_ichi=pd.Series(np.where(close.notna()&cloud_hi.notna()&cloud_lo.notna(),
+            np.where(close>cloud_hi,1,np.where(close<cloud_lo,-1,0)),np.nan),index=frame.index)
+        for key,expected in (("cs_rsi",expected_rsi),("cs_stoch",expected_stoch),("cs_macd",expected_macd),("cs_ichi",expected_ichi)):
+            pd.testing.assert_series_equal(actual[key],expected,check_names=False)
+        self.assertFalse(actual.equals(tb.calc_consensus_states(frame)))
+
+    def test_custom_parameters_are_prefix_invariant(self):
+        frame=self.frame()
+        p={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_period":19,"stoch_period":17,"stoch_smooth":4,
+           "macd_fast":7,"macd_slow":30,"macd_signal":6,"ichi_tenkan":8,"ichi_kijun":24,"ichi_senkou":50}
+        full=tb.calc_consensus_states(frame,p)
+        for t in (79,161,279,399):
+            pd.testing.assert_series_equal(tb.calc_consensus_states(frame.iloc[:t+1],p).iloc[-1],full.iloc[t],check_names=False)
+
+    def test_get_fallback_partial_post_and_invalid_payloads(self):
+        bad=[[],{"unknown":1},{"rsi_period":True},{"rsi_bull":"55"},{"rsi_period":2.5},{"rsi_period":201},
+             {"stoch_smooth":21},{"macd_signal":1},{"ichi_senkou":301},{"rsi_bull":101},
+             {"rsi_bear":51,"rsi_bull":50},{"stoch_bear":51,"stoch_bull":50},
+             {"macd_fast":26},{"ichi_tenkan":26},{"ichi_kijun":52}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"consensus_settings.json"
+            with patch.object(tb,"CONSENSUS_SETTINGS_FILE",path):
+                tb._consensus_settings_cache_key=None
+                self.assertEqual(tb.read_consensus_settings(),tb.CONSENSUS_SETTINGS_DEFAULTS)
+                path.write_text("{bad",encoding="utf-8")
+                self.assertEqual(tb.read_consensus_settings(),tb.CONSENSUS_SETTINGS_DEFAULTS)
+                path.unlink()
+                saved=self._post({"rsi_period":21,"rsi_bull":55,"rsi_bear":45})
+                self.assertEqual(tb.get_consensus_settings(),saved)
+                self.assertEqual(saved["macd_fast"],12)
+                before=path.read_bytes()
+                for payload in ([1],*bad[1:]):
+                    with self.assertRaises(tb.HTTPException) as ctx:self._post(payload)
+                    self.assertEqual(ctx.exception.status_code,400)
+                    self.assertEqual(path.read_bytes(),before)
+
+    def test_state_payload_with_custom_parameters_is_strict_json(self):
+        states=tb.calc_consensus_states(self.frame(),{**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_period":21})
+        json.dumps(tb._consensus_state_payload(states),allow_nan=False)
+
+    def test_chart_indicator_groups_include_used_parameters(self):
+        source=self.frame(100)
+        candles=[{"time":int(pd.Timestamp(ts).timestamp()),"open":r.Open,"high":r.High,"low":r.Low,"close":r.Close,"volume":r.Volume} for ts,r in source.iterrows()]
+        params={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_period":21}
+        result=tb._indicators_from_display_candles(candles,consensus_params=params)
+        self.assertEqual(result["consensus"]["params"],params)
+
+    def test_frontend_parameterized_rows_and_calls(self):
+        root=Path(__file__).parent/"frontend/js"
+        core=(root/"core.js").read_text(encoding="utf-8")
+        charts=(root/"charts.js").read_text(encoding="utf-8")
+        predictive=(root/"predictive.js").read_text(encoding="utf-8")
+        self.assertNotIn("const CONSENSUS_ROWS = [['cs_rsi', 'RSI (14)'",core)
+        self.assertIn("function consensusRows(params",core)
+        self.assertIn("consensusSummary(latest,r.consensusParams)",charts)
+        self.assertIn("consensusSummary(states,params)",predictive)
+        self.assertRegex(charts,r"attachConsensusTooltip\(r\.consensusChart,[\s\S]*?\(\) => r\.consensusParams \|\| consensusSettings\)")
+        self.assertRegex(predictive,r"attachConsensusTooltip\(chart,block,[\s\S]*?,params\)")
 
 
 class ChartDefaultsRegressionTests(unittest.TestCase):

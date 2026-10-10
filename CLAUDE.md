@@ -1368,6 +1368,13 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - It is a strip rather than a composite line because the measured average
   correlates 0.92 with RSI and hides disagreement; all four agree on only 47%
   of days.
+- Global settings live in gitignored `DATA_ROOT/consensus_settings.json` via
+  `GET/POST /api/charts/consensus-settings`; Grafy and Analytika use the same
+  settings. RSI and Stochastic have separate bull/bear thresholds, with values
+  between them neutral. Actual parameters travel with both chart payloads so
+  popup rows and summaries never hard-code periods. The server caches raw OHLCV
+  bars, not consensus states; the browser had Grafy OHLCV/batch and Analytika
+  `/api/chart` caches, so successful saves bypass/clear those before reload.
 
 ## File touch policy
 

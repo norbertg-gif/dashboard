@@ -139,6 +139,42 @@ const CHART_DEFAULT_LABELS = [
   ['adx', 'ADX'], ['macd', 'MACD'], ['ipp', 'IPP'], ['consensus', 'Zhoda'],
 ];
 let chartDefaults = null;
+let consensusSettings = {...CONSENSUS_DEFAULT_PARAMS};
+const CONSENSUS_SETTING_FIELDS = [
+  ['RSI','rsi_period','RSI obdobie',2,200,1],['RSI','rsi_bull','Býčie od',0,100,0.1],['RSI','rsi_bear','Medvedie pod',0,100,0.1],
+  ['Stochastic','stoch_period','Obdobie',2,200,1],['Stochastic','stoch_smooth','Vyhladenie',1,20,1],['Stochastic','stoch_bull','Býčie od',0,100,0.1],['Stochastic','stoch_bear','Medvedie pod',0,100,0.1],
+  ['MACD','macd_fast','Rýchla',2,200,1],['MACD','macd_slow','Pomalá',2,200,1],['MACD','macd_signal','Signál',2,50,1],
+  ['Ichimoku','ichi_tenkan','Tenkan',2,200,1],['Ichimoku','ichi_kijun','Kijun',2,200,1],['Ichimoku','ichi_senkou','Senkou',2,300,1],
+];
+
+async function loadConsensusSettings() {
+  try { const r=await fetch(`${API}/api/charts/consensus-settings`); if(r.ok) consensusSettings={...CONSENSUS_DEFAULT_PARAMS,...await r.json()}; } catch(e) {}
+}
+function openConsensusSettingsModal() {
+  const root=document.getElementById('consensus-settings-sections');
+  if(root) root.innerHTML=['RSI','Stochastic','MACD','Ichimoku'].map(section=>{
+    const fields=CONSENSUS_SETTING_FIELDS.filter(x=>x[0]===section);
+    const hint=(section==='RSI'||section==='Stochastic')?'Prahy býčie a medvedie; medzi prahmi = neutrálne.':section==='MACD'?'Histogram nad nulou býčí, pod nulou medvedí.':'Close voči oblaku Senkou, posunutému o Kijun.';
+    return `<section class="consensus-settings-section"><h3>${section}</h3><div class="consensus-settings-grid">${fields.map(([,key,label,min,max,step])=>`<label>${label}<input type="number" data-consensus-setting="${key}" min="${min}" max="${max}" step="${step}" value="${consensusSettings[key]}"></label>`).join('')}</div><small>${hint}</small></section>`;
+  }).join('');
+  const note=document.getElementById('consensus-settings-status'); if(note)note.textContent='';
+  document.getElementById('consensus-settings-modal-bg')?.classList.add('open');
+}
+function closeConsensusSettingsModal(){document.getElementById('consensus-settings-modal-bg')?.classList.remove('open');}
+function resetConsensusSettingsModal(){document.querySelectorAll('[data-consensus-setting]').forEach(el=>{el.value=CONSENSUS_DEFAULT_PARAMS[el.dataset.consensusSetting];});}
+async function saveConsensusSettingsModal(){
+  const body={}; document.querySelectorAll('[data-consensus-setting]').forEach(el=>{body[el.dataset.consensusSetting]=Number(el.value);});
+  const note=document.getElementById('consensus-settings-status');
+  try {
+    const response=await fetch(`${API}/api/charts/consensus-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const result=await response.json().catch(()=>({detail:response.statusText}));
+    if(!response.ok)throw new Error(result.detail||`HTTP ${response.status}`);
+    consensusSettings={...CONSENSUS_DEFAULT_PARAMS,...result}; closeConsensusSettingsModal();
+    _ohlcvBatchCache.clear();
+    Object.entries(registry).forEach(([id,r])=>{if(r.indicators?.consensus)loadChart(id,{bypassDataCache:true});});
+    if(typeof pc_reloadConsensusSettings==='function')pc_reloadConsensusSettings();
+  } catch(e){if(note)note.textContent=e.message;}
+}
 
 function cleanChartDefaults(raw) {
   const indicators = {};
@@ -281,6 +317,7 @@ function onChartPanelContextMenu(event, id) {
     { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
     { label: 'IPP · prijatie pohybu', checked: !!inds.ipp, action: () => toggleIndicator(id, 'ipp') },
     { label: 'Zhoda indikátorov', checked: !!inds.consensus, action: () => toggleIndicator(id, 'consensus') },
+    { label: 'Nastaviť semafor…', action: () => openConsensusSettingsModal() },
     { sep: true },
     { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
     { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
@@ -1099,11 +1136,12 @@ function ensureConsensusChart(id, r) {
   // series for the bar-index domain, see CLAUDE.md pitfall -4); otherwise the
   // strip would start at the first warmed-up state and sit shifted to the left.
   r.consensusDomain = r.consensusChart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:'cs_domain',priceLineVisible:false,lastValueVisible:false,color:'rgba(0,0,0,0)'});
-  attachConsensusTooltip(r.consensusChart, document.getElementById(`sub-consensus-${id}`), time => r.consensusByTime?.get(time));
+  attachConsensusTooltip(r.consensusChart, document.getElementById(`sub-consensus-${id}`), time => r.consensusByTime?.get(time), () => r.consensusParams || consensusSettings);
   for (const chart of [r.mainChart,r.rsiChart,r.adxChart,r.macdChart,r.ippChart]) if(chart){r.syncFrom(chart,[r.consensusChart]);r.syncFrom(r.consensusChart,[chart]);}
 }
 
 function renderConsensus(id, data, r) {
+  r.consensusParams = r.consensusParams || consensusSettings;
   ensureConsensusChart(id,r);
   ensureSubChartTimeAnchor(r,r.consensusChart,'consensusAnchor',data);
   const style=getComputedStyle(document.documentElement);
@@ -1114,7 +1152,7 @@ function renderConsensus(id, data, r) {
   r.consensusDomain?.setData(data.map(d=>({time:d.time,value:0})));
   r.consensusByTime = new Map(data.map(d=>[d.time,d]));
   const latest=data[data.length-1]||{};
-  const summary=consensusSummary(latest);
+  const summary=consensusSummary(latest,r.consensusParams);
   const label=document.getElementById(`consensus-label-${id}`);
   if(label){label.textContent=summary.text;label.title=summary.title;}
   alignSubChartToMain(r,r.consensusChart);
@@ -1183,6 +1221,7 @@ function createPanel(cfg) {
     <div class="p-chart${inds.rsi||inds.adx||inds.macd||inds.ipp||inds.consensus?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
       <div class="p-ov" id="ov-${id}">Načítava sa…</div>
     </div>
+    <div class="p-sub consensus-strip${inds.consensus?'':' hidden'}" id="sub-consensus-${id}" style="height:68px;flex-shrink:0;" onclick="setActivePanel('${id}')"><div class="consensus-summary" id="consensus-label-${id}"></div><div class="consensus-captions"><span>RSI</span><span>Stoch</span><span>MACD</span><span>Ichi</span></div></div>
     <div class="p-sub${inds.rsi?'':' hidden'}" id="sub-rsi-${id}" style="height:80px;" onclick="setActivePanel('${id}')">
       <div class="p-sub-label" style="color:var(--yellow)">RSI 14</div>
     </div>
@@ -1195,7 +1234,6 @@ function createPanel(cfg) {
     <div class="p-sub${inds.ipp?'':' hidden'}" id="sub-ipp-${id}" style="height:80px;flex-shrink:0;" onclick="setActivePanel('${id}')">
       <div class="p-sub-label" id="ipp-label-${id}" style="color:#a070ff">IPP · Načítava sa…</div>
     </div>
-    <div class="p-sub consensus-strip${inds.consensus?'':' hidden'}" id="sub-consensus-${id}" style="height:68px;flex-shrink:0;" onclick="setActivePanel('${id}')"><div class="consensus-summary" id="consensus-label-${id}"></div><div class="consensus-captions"><span>RSI</span><span>Stoch</span><span>MACD</span><span>Ichi</span></div></div>
     <div class="p-news${inds.news?'':' hidden'}" id="news-${id}">
       <div class="news-loading">Načítava správy…</div>
     </div>
@@ -2333,7 +2371,7 @@ function paintPanelSnapshot(id) {
   const sym = panel.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
   const interval = panel.querySelector('.interval-sel')?.value;
   if (!sym || !interval) return false;
-  const snap = ohlcvCacheRead(sym, interval, r.indicators?.ha);
+  const snap = r._bypassSnapshot ? null : ohlcvCacheRead(sym, interval, r.indicators?.ha);
   if (!snap) return false;
   try {
     applyPanelSeriesData(r, snap.d);
@@ -2437,6 +2475,7 @@ async function loadChart(id, opts = {}) {
 
   const r = registry[id];
   if (!r) return;
+  r._bypassSnapshot = !!opts.bypassDataCache;
   const chartKey = `${sym}|${period}|${interval}`;
   if (r.loadedChartKey && r.loadedChartKey !== chartKey) {
     r.viewRange = null;
@@ -2489,22 +2528,25 @@ async function loadChart(id, opts = {}) {
       symbol: sym, period, interval, ha: haParam, indicators: allInds,
       account: acct, limit: CHART_INITIAL_BARS, before: '',
     });
-    let name, data, instrumentId, ichimokuFuture;
-    const cached = opts.refresh !== 1 ? ohlcvBatchTake(batchKey) : null;
+    let name, data, instrumentId, ichimokuFuture, responseConsensusParams;
+    const cached = opts.refresh !== 1 && !opts.bypassDataCache ? ohlcvBatchTake(batchKey) : null;
     if (cached) {
       name = cached.name || sym;
       data = cached.data;
       instrumentId = cached.instrumentId;
       ichimokuFuture = cached.ichimoku_future;
+      responseConsensusParams = cached.consensus_params;
       r.hasMoreHistory = !!cached.hasMore;
     } else {
       const refreshParam = opts.refresh === 1 ? 1 : 0;
-      const url = `${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=${period}&interval=${interval}&indicators=${allInds}&ha=${haParam}&account=${acct}&refresh=${refreshParam}&limit=${CHART_INITIAL_BARS}`;
-      const resp = await fetch(url, { signal: r.abortController.signal });
+      const cacheBust = opts.bypassDataCache ? `&_=${Date.now()}` : '';
+      const url = `${API}/api/ohlcv?symbol=${encodeURIComponent(sym)}&period=${period}&interval=${interval}&indicators=${allInds}&ha=${haParam}&account=${acct}&refresh=${refreshParam}&limit=${CHART_INITIAL_BARS}${cacheBust}`;
+      const resp = await fetch(url, { signal: r.abortController.signal, cache: opts.bypassDataCache ? 'no-store' : 'default' });
       if (!resp.ok) { const e = await resp.json().catch(()=>({detail:resp.statusText})); throw new Error(e.detail); }
       const payload = await resp.json();
       ({ name, data, instrumentId } = payload);
       ichimokuFuture = payload.ichimoku_future;
+      responseConsensusParams = payload.consensus_params;
       r.hasMoreHistory = !!payload.hasMore;
     }
     if (instrumentId) {
@@ -2516,6 +2558,7 @@ async function loadChart(id, opts = {}) {
     if (loadSeq !== r.loadSeq) return;
     if (!data?.length) throw new Error('Žiadne dáta');
     r.ichimokuFuture = Array.isArray(ichimokuFuture) ? ichimokuFuture : [];
+    if (responseConsensusParams) r.consensusParams = responseConsensusParams;
 
     // Tichý tail refresh nesmie znovu posielať celú sériu do chart enginu.
     // Aktualizuj iba poslednú sviečku; plný setData patrí prvému loadu,
@@ -2552,6 +2595,7 @@ async function loadChart(id, opts = {}) {
 
     // Ulož ešte pred mover live-patchom, nech je v cache čistý trhový stav.
     ohlcvCacheWrite(sym, interval, haParam, name, data);
+    r._bypassSnapshot = false;
     data = applyMoverLiveClose(r, data, interval);
     r._rawChartData = data;
     panel.classList.remove('panel-stale');

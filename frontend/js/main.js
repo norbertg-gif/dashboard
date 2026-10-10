@@ -41,7 +41,7 @@ document.addEventListener('keydown', e => {
   watchlist = loadWatchlist();
   renderSidebar();
   // Preset dropdown, watchlist sync a nastavenia prahov sú nezávislé — paralelne
-  await Promise.all([refreshPresetDropdown(''), syncWatchlistFromServer(), loadDashSettings(), loadPortfolioTickerTags(), loadChartDefaults()]);
+  await Promise.all([refreshPresetDropdown(''), syncWatchlistFromServer(), loadDashSettings(), loadPortfolioTickerTags(), loadChartDefaults(), loadConsensusSettings()]);
 
   // Načítaj layout — spracuj grafy aj portfolio panely
   for (const cfg of loadLayout()) {

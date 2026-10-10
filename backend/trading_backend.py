@@ -245,18 +245,21 @@ def calc_stoch(df: pd.DataFrame, period: int = 14, smooth: int = 3) -> pd.Series
     return raw.rolling(smooth, min_periods=smooth).mean()
 
 
-def calc_consensus_states(df: pd.DataFrame) -> pd.DataFrame:
+def calc_consensus_states(df: pd.DataFrame, params: dict | None = None) -> pd.DataFrame:
     """Return causal indicator states for the chart reading-aid strip only."""
+    settings = {**CONSENSUS_SETTINGS_DEFAULTS, **(params or {})}
     close = pd.to_numeric(df["Close"], errors="coerce")
-    rsi = calc_rsi(close, 14)
+    rsi_period = settings["rsi_period"]
+    rsi = calc_rsi(close, rsi_period)
     delta = close.diff()
-    avg_gain = delta.clip(lower=0).ewm(com=13, min_periods=14).mean()
-    avg_loss = (-delta.clip(upper=0)).ewm(com=13, min_periods=14).mean()
+    avg_gain = delta.clip(lower=0).ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
+    avg_loss = (-delta.clip(upper=0)).ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
     rsi = rsi.mask(rsi.isna() & avg_gain.notna() & avg_gain.gt(0) & avg_loss.eq(0), 100)
     rsi = rsi.mask(rsi.isna() & avg_gain.eq(0) & avg_loss.gt(0), 0)
-    stoch = calc_stoch(df, 14, 3)
-    _macd, _signal, hist = calc_macd(df["Close"], 12, 26, 9)
-    _tenkan, _kijun, span_a, span_b, _chikou = calc_ichimoku(df)
+    stoch = calc_stoch(df, settings["stoch_period"], settings["stoch_smooth"])
+    _macd, _signal, hist = calc_macd(df["Close"], settings["macd_fast"], settings["macd_slow"], settings["macd_signal"])
+    _tenkan, _kijun, span_a, span_b, _chikou = calc_ichimoku(
+        df, settings["ichi_tenkan"], settings["ichi_kijun"], settings["ichi_senkou"])
     upper = pd.concat([span_a, span_b], axis=1).max(axis=1, skipna=False)
     lower = pd.concat([span_a, span_b], axis=1).min(axis=1, skipna=False)
     ichi = pd.Series(np.nan, index=df.index, dtype=float)
@@ -265,8 +268,10 @@ def calc_consensus_states(df: pd.DataFrame) -> pd.DataFrame:
     ichi.loc[valid & (close < lower)] = -1
     ichi.loc[valid & (close >= lower) & (close <= upper)] = 0
     states = pd.DataFrame(index=df.index)
-    states["cs_rsi"] = np.where(rsi.notna(), np.where(rsi >= 50, 1, -1), np.nan)
-    states["cs_stoch"] = np.where(stoch.notna(), np.where(stoch >= 50, 1, -1), np.nan)
+    states["cs_rsi"] = np.where(rsi.notna(), np.where(rsi >= settings["rsi_bull"], 1,
+        np.where(rsi < settings["rsi_bear"], -1, 0)), np.nan)
+    states["cs_stoch"] = np.where(stoch.notna(), np.where(stoch >= settings["stoch_bull"], 1,
+        np.where(stoch < settings["stoch_bear"], -1, 0)), np.nan)
     states["cs_macd"] = np.where(hist.notna(), np.sign(hist), np.nan)
     states["cs_ichi"] = ichi
     return states.astype(float)
@@ -2841,6 +2846,100 @@ CHART_DEFAULTS_FILE = DATA_ROOT / "chart_defaults.json"
 CHART_DEFAULT_INTERVALS = ("1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1wk", "1mo")
 CHART_DEFAULT_INDICATORS = ("ha", "ema", "ichimoku", "rsi", "adx", "macd", "ipp", "consensus")
 _chart_defaults_lock = threading.Lock()
+
+CONSENSUS_SETTINGS_FILE = DATA_ROOT / "consensus_settings.json"
+CONSENSUS_SETTINGS_DEFAULTS = {
+    "rsi_period": 14, "rsi_bull": 50, "rsi_bear": 50,
+    "stoch_period": 14, "stoch_smooth": 3, "stoch_bull": 50, "stoch_bear": 50,
+    "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
+    "ichi_tenkan": 9, "ichi_kijun": 26, "ichi_senkou": 52,
+}
+_CONSENSUS_PERIOD_RANGES = {
+    "rsi_period": (2, 200), "stoch_period": (2, 200), "stoch_smooth": (1, 20),
+    "macd_fast": (2, 200), "macd_slow": (2, 200), "macd_signal": (2, 50),
+    "ichi_tenkan": (2, 200), "ichi_kijun": (2, 200), "ichi_senkou": (2, 300),
+}
+_CONSENSUS_THRESHOLD_KEYS = ("rsi_bull", "rsi_bear", "stoch_bull", "stoch_bear")
+_consensus_settings_lock = threading.Lock()
+_consensus_settings_cache = None
+_consensus_settings_cache_key = None
+
+
+def _validate_consensus_settings(settings: dict) -> dict:
+    unknown = sorted(set(settings) - set(CONSENSUS_SETTINGS_DEFAULTS))
+    if unknown:
+        raise HTTPException(400, f"Unknown consensus settings: {unknown!r}")
+    clean = dict(settings)
+    for key, (minimum, maximum) in _CONSENSUS_PERIOD_RANGES.items():
+        value = clean.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise HTTPException(400, f"{key} must be numeric")
+        if not float(value).is_integer() or not minimum <= value <= maximum:
+            raise HTTPException(400, f"{key} must be an integer from {minimum} to {maximum}")
+        clean[key] = int(value)
+    for key in _CONSENSUS_THRESHOLD_KEYS:
+        value = clean.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise HTTPException(400, f"{key} must be numeric")
+        if not 0 <= value <= 100:
+            raise HTTPException(400, f"{key} must be from 0 to 100")
+    if clean["rsi_bear"] > clean["rsi_bull"]:
+        raise HTTPException(400, "rsi_bear must be less than or equal to rsi_bull")
+    if clean["stoch_bear"] > clean["stoch_bull"]:
+        raise HTTPException(400, "stoch_bear must be less than or equal to stoch_bull")
+    if clean["macd_fast"] >= clean["macd_slow"]:
+        raise HTTPException(400, "macd_fast must be less than macd_slow")
+    if clean["ichi_tenkan"] >= clean["ichi_kijun"]:
+        raise HTTPException(400, "ichi_tenkan must be less than ichi_kijun")
+    if clean["ichi_kijun"] >= clean["ichi_senkou"]:
+        raise HTTPException(400, "ichi_kijun must be less than ichi_senkou")
+    return clean
+
+
+def _read_consensus_settings() -> dict:
+    global _consensus_settings_cache, _consensus_settings_cache_key
+    try:
+        stat = CONSENSUS_SETTINGS_FILE.stat()
+        cache_key = (str(CONSENSUS_SETTINGS_FILE), stat.st_mtime_ns, stat.st_size)
+        if _consensus_settings_cache_key == cache_key and _consensus_settings_cache is not None:
+            return dict(_consensus_settings_cache)
+        raw = json.loads(CONSENSUS_SETTINGS_FILE.read_text(encoding="utf-8"))
+        candidate = {**CONSENSUS_SETTINGS_DEFAULTS, **raw} if isinstance(raw, dict) else dict(CONSENSUS_SETTINGS_DEFAULTS)
+        clean = _validate_consensus_settings(candidate)
+    except Exception:
+        cache_key = (str(CONSENSUS_SETTINGS_FILE), None, None)
+        clean = dict(CONSENSUS_SETTINGS_DEFAULTS)
+    _consensus_settings_cache_key = cache_key
+    _consensus_settings_cache = dict(clean)
+    return clean
+
+
+def get_consensus_settings() -> dict:
+    with _consensus_settings_lock:
+        return _read_consensus_settings()
+
+
+@app.get("/api/charts/consensus-settings")
+def read_consensus_settings():
+    return get_consensus_settings()
+
+
+@app.post("/api/charts/consensus-settings")
+async def save_consensus_settings(request: Request):
+    global _consensus_settings_cache, _consensus_settings_cache_key
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Consensus settings must be an object")
+    with _consensus_settings_lock:
+        current = _read_consensus_settings()
+        unknown = sorted(set(body) - set(CONSENSUS_SETTINGS_DEFAULTS))
+        if unknown:
+            raise HTTPException(400, f"Unknown consensus settings: {unknown!r}")
+        candidate = _validate_consensus_settings({**current, **body})
+        _atomic_write_json(CONSENSUS_SETTINGS_FILE, candidate)
+        _consensus_settings_cache = dict(candidate)
+        _consensus_settings_cache_key = None
+    return candidate
 
 
 def _clean_chart_defaults(raw) -> dict:
@@ -5958,7 +6057,9 @@ def get_ohlcv(
             raise HTTPException(404, "Resample vrátil prázdny DataFrame")
 
     ipp_frame = None
-    consensus_frame = calc_consensus_states(df) if "consensus" in {i.strip() for i in indicators.split(",")} else None
+    ind_requested = {i.strip() for i in indicators.split(",")}
+    consensus_params = get_consensus_settings() if "consensus" in ind_requested else None
+    consensus_frame = calc_consensus_states(df, consensus_params) if consensus_params is not None else None
     consensus_payload = _consensus_state_payload(consensus_frame) if consensus_frame is not None else None
     if "ipp" in {i.strip() for i in indicators.split(",")} and interval == "1d":
         # Conservative daily finality: bars dated today UTC remain unconfirmed
@@ -6112,11 +6213,12 @@ def get_ohlcv(
         result = result[-limit:]
     has_more = available_count > len(result)
 
-    return {"symbol": sym, "name": sym, "interval": interval,
-            "count": len(result), "data": result, "instrumentId": iid,
-            "hasMore": has_more,
-            "ichimoku_future": ichimoku_future,
-            "patterns": patterns}
+    response = {"symbol": sym, "name": sym, "interval": interval,
+                "count": len(result), "data": result, "instrumentId": iid,
+                "hasMore": has_more, "ichimoku_future": ichimoku_future, "patterns": patterns}
+    if consensus_params is not None:
+        response["consensus_params"] = consensus_params
+    return response
 
 
 def ohlcv_batch_key(sym, period, interval, ha, indicators, account, limit, before) -> str:
@@ -6288,21 +6390,21 @@ def calc_bollinger(series: pd.Series, period: int = 20, std: float = 2.0):
     lower = sma - std * sigma
     return upper, sma, lower
 
-def _ichimoku_raw_spans(df: pd.DataFrame):
+def _ichimoku_raw_spans(df: pd.DataFrame, tenkan_period: int = 9, kijun_period: int = 26, senkou_period: int = 52):
     high, low = df["High"], df["Low"]
 
-    tenkan  = (high.rolling(9).max()  + low.rolling(9).min())  / 2
-    kijun   = (high.rolling(26).max() + low.rolling(26).min()) / 2
+    tenkan  = (high.rolling(tenkan_period, min_periods=tenkan_period).max()  + low.rolling(tenkan_period, min_periods=tenkan_period).min())  / 2
+    kijun   = (high.rolling(kijun_period, min_periods=kijun_period).max() + low.rolling(kijun_period, min_periods=kijun_period).min()) / 2
     span_a  = (tenkan + kijun) / 2
-    span_b  = (high.rolling(52).max() + low.rolling(52).min()) / 2
+    span_b  = (high.rolling(senkou_period, min_periods=senkou_period).max() + low.rolling(senkou_period, min_periods=senkou_period).min()) / 2
     return tenkan, kijun, span_a, span_b
 
 
-def calc_ichimoku(df: pd.DataFrame):
-    tenkan, kijun, raw_span_a, raw_span_b = _ichimoku_raw_spans(df)
-    span_a  = raw_span_a.shift(26)
-    span_b  = raw_span_b.shift(26)
-    chikou  = df["Close"].shift(-26)
+def calc_ichimoku(df: pd.DataFrame, tenkan_period: int = 9, kijun_period: int = 26, senkou_period: int = 52):
+    tenkan, kijun, raw_span_a, raw_span_b = _ichimoku_raw_spans(df, tenkan_period, kijun_period, senkou_period)
+    span_a  = raw_span_a.shift(kijun_period)
+    span_b  = raw_span_b.shift(kijun_period)
+    chikou  = df["Close"].shift(-kijun_period)
 
     return tenkan, kijun, span_a, span_b, chikou
 
@@ -6516,7 +6618,7 @@ def _trim_indicators_to_candles(indicators: dict, candles: list) -> dict:
     return trimmed
 
 
-def _indicators_from_display_candles(candles: list, include_stoch: bool = True) -> dict:
+def _indicators_from_display_candles(candles: list, include_stoch: bool = True, consensus_params: dict | None = None) -> dict:
     """Compute chart indicators from the exact candles returned to the client.
 
     The predictive endpoint deliberately keeps its scoring/backtest data on the
@@ -6548,7 +6650,8 @@ def _indicators_from_display_candles(candles: list, include_stoch: bool = True) 
     if len(frame) < 2:
         return {}
     enriched = add_indicators(frame)
-    consensus = calc_consensus_states(frame)
+    consensus_params = dict(consensus_params or CONSENSUS_SETTINGS_DEFAULTS)
+    consensus = calc_consensus_states(frame, consensus_params)
 
     def series(column: str) -> list:
         out = []
@@ -6584,11 +6687,11 @@ def _indicators_from_display_candles(candles: list, include_stoch: bool = True) 
         "di_plus": series("di_plus"),
         "di_minus": series("di_minus"),
         "consensus": {
-            key.removeprefix("cs_"): [
+            "params": consensus_params,
+            **{key.removeprefix("cs_"): [
                 {"time": int(pd.Timestamp(ts).timestamp()), "value": int(value)}
                 for ts, value in consensus[key].items() if pd.notna(value) and np.isfinite(value)
-            ]
-            for key in ("cs_rsi", "cs_stoch", "cs_macd", "cs_ichi")
+            ] for key in ("cs_rsi", "cs_stoch", "cs_macd", "cs_ichi")}
         },
     }
     if include_stoch:
@@ -7136,10 +7239,11 @@ def get_chart(
         # Verdict on the same broker candle source as the rendered charts.
         # Scoring/backtesting above intentionally remains on the longer
         # yfinance/Massive history.
+        consensus_params = get_consensus_settings()
         display_indicators = _trim_indicators_to_candles(
-            _indicators_from_display_candles(display_weekly_source), display_candles)
+            _indicators_from_display_candles(display_weekly_source, consensus_params=consensus_params), display_candles)
         display_daily_indicators = _trim_indicators_to_candles(
-            _indicators_from_display_candles(display_daily_source, include_stoch=False),
+            _indicators_from_display_candles(display_daily_source, include_stoch=False, consensus_params=consensus_params),
             display_daily_candles)
         if display_indicators:
             indicators = display_indicators
