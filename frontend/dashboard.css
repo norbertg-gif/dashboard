@@ -1408,6 +1408,18 @@ body.sidebar-collapsed #sb-resizer {
   opacity: 0.8;
   pointer-events: none;
 }
+.panel > .p-chart { order:0; }
+.panel > .consensus-strip { order:1; overflow:hidden; }
+.panel > .consensus-strip:not(.hidden) { height:68px; min-height:68px; }
+.panel > .p-sub:not(.consensus-strip) { order:2; }
+#predictiveTab .pc-indicator-subpanel.consensus-strip { height:68px; flex:0 0 68px; }
+.panel > .p-news, .panel > .p-wizard { order:3; }
+/* order above re-sorts flex children; keep the resize handle last as in the DOM */
+.panel > .p-resize-handle { order:4; }
+.consensus-strip .consensus-summary { position:absolute; z-index:6; top:2px; left:8px; right:8px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font:10px var(--font-mono); color:var(--muted2); pointer-events:auto; }
+.consensus-strip .consensus-captions { position:absolute; z-index:5; inset:27% auto 2% 0; width:70px; display:grid; grid-template-rows:repeat(4,1fr); align-items:center; padding:0 8px; box-sizing:border-box; font:9px var(--font-mono); color:var(--muted2); pointer-events:none; }
+.consensus-strip .consensus-captions span { line-height:1; }
+.ind-btn.active-consensus { border-color:var(--up); color:var(--up); background:color-mix(in srgb,var(--up) 14%,transparent); }
 .p-ov {
   position: absolute;
   inset: 0;

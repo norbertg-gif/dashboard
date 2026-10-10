@@ -3233,6 +3233,90 @@ class ChartPayloadJsonRegressionTests(unittest.TestCase):
         json.dumps(cleaned, allow_nan=False)
 
 
+class ConsensusStripRegressionTests(unittest.TestCase):
+    @staticmethod
+    def frame(close):
+        import numpy as np
+        close = np.asarray(close, dtype=float)
+        return pd.DataFrame({"Open": close, "High": close + 1,
+                             "Low": close - 1, "Close": close,
+                             "Volume": np.full(len(close), 1000.0)},
+                            index=pd.bdate_range("2023-01-02", periods=len(close)))
+
+    def test_stochastic_warmup_and_flat_range(self):
+        import numpy as np
+        frame = self.frame(np.arange(30) + 100)
+        stoch = tb.calc_stoch(frame)
+        self.assertTrue(stoch.iloc[:15].isna().all())
+        self.assertTrue(stoch.iloc[15:].between(0, 100).all())
+        flat = self.frame(np.full(40, 100.0))
+        flat["High"] = flat["Low"] = flat["Close"]
+        self.assertTrue(tb.calc_stoch(flat).isna().all())
+        self.assertTrue(pd.isna(tb.calc_consensus_states(flat).cs_stoch.iloc[-1]))
+        self.assertTrue(pd.isna(tb.calc_consensus_states(flat).cs_rsi.iloc[-1]))
+
+    def test_strong_trends_drive_all_states(self):
+        import numpy as np
+        up = tb.calc_consensus_states(self.frame(np.arange(180) + 100)).iloc[-1]
+        down = tb.calc_consensus_states(self.frame(300 - np.arange(180))).iloc[-1]
+        self.assertEqual(up.tolist(), [1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(down.tolist(), [-1.0, -1.0, -1.0, -1.0])
+
+    def test_inside_cloud_and_zero_macd_are_neutral(self):
+        import numpy as np
+        frame = self.frame(np.full(100, 100.0))
+        state = tb.calc_consensus_states(frame).iloc[-1]
+        self.assertEqual(state.cs_ichi, 0)
+        self.assertEqual(state.cs_macd, 0)
+
+    def test_prefix_invariance_for_each_state(self):
+        import numpy as np
+        rng = np.random.default_rng(20261010)
+        frame = self.frame(100 + np.cumsum(rng.normal(0, 1.5, 260)))
+        full = tb.calc_consensus_states(frame)
+        for t in (80, 129, 199, 259):
+            prefix = tb.calc_consensus_states(frame.iloc[:t + 1]).iloc[-1]
+            for key in full.columns:
+                a, b = prefix[key], full.iloc[t][key]
+                self.assertTrue((pd.isna(a) and pd.isna(b)) or a == b, f"{key} at {t}")
+
+    def test_serialization_emits_null_not_nan(self):
+        import numpy as np
+        states = tb.calc_consensus_states(self.frame(np.arange(60) + 100))
+        payload = tb._consensus_state_payload(states)
+        json.dumps(payload, allow_nan=False)
+        self.assertTrue(all(payload[0][key] is None for key in states.columns))
+
+    def test_nested_chart_consensus_series_are_trimmed(self):
+        indicators={"consensus": {"rsi":[{"time":1,"value":1},{"time":2,"value":-1}], "ichi":[{"time":1,"value":0}]}}
+        trimmed=tb._trim_indicators_to_candles(indicators,[{"time":2}])
+        self.assertEqual(trimmed["consensus"]["rsi"],[{"time":2,"value":-1}])
+        self.assertEqual(trimmed["consensus"]["ichi"],[])
+
+    def test_ohlcv_attaches_ordinary_candle_states_and_trims_after_warmup(self):
+        import numpy as np
+        frame=self.frame(100 + np.cumsum(np.random.default_rng(19).normal(0,1,90)))
+        raw={"candles":[{"candles":[{"fromDate":str(ts),"open":row.Open,"high":row.High,
+              "low":row.Low,"close":row.Close,"volume":row.Volume} for ts,row in frame.iterrows()]}]}
+        with patch.object(tb,"cache_read",return_value=raw), patch.object(tb,"detect_patterns",return_value=[]):
+            normal=tb.get_ohlcv(symbol="CSTEST",period="auto",interval="1d",indicators="consensus",ha=0,account="1",refresh=0,limit=10,before="")
+            ha=tb.get_ohlcv(symbol="CSTEST",period="auto",interval="1d",indicators="consensus",ha=1,account="1",refresh=0,limit=10,before="")
+        self.assertEqual(len(normal["data"]),10)
+        for point in normal["data"]:
+            self.assertEqual(set(k for k in point if k.startswith("cs_")),{"cs_rsi","cs_stoch","cs_macd","cs_ichi"})
+            self.assertTrue(all(value is None or value in (-1,0,1) for key,value in point.items() if key.startswith("cs_")))
+        self.assertEqual({k:normal["data"][-1][k] for k in normal["data"][-1] if k.startswith("cs_")},
+                         {k:ha["data"][-1][k] for k in ha["data"][-1] if k.startswith("cs_")})
+        json.dumps(normal,allow_nan=False)
+
+    def test_frontend_wires_consensus_summary_and_panel_key(self):
+        root = Path(__file__).parent
+        charts = (root / "frontend/js/charts.js").read_text(encoding="utf-8")
+        core = (root / "frontend/js/core.js").read_text(encoding="utf-8")
+        self.assertRegex(charts, r"PANEL_VIEW_KEYS\s*=\s*\[[^]]*['\"]consensus['\"]")
+        self.assertRegex(core, r"function\s+consensusSummary\s*\(")
+
+
 class IppRegressionTests(unittest.TestCase):
     @staticmethod
     def frame(close=None, n=90):

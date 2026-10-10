@@ -1348,6 +1348,21 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - IPP lazy chart participates in scale synchronization, themes, resizing, disposal
   and layout/bulk-view persistence. Browser caches use shared `20261010-ipp` token.
 
+## Consensus strip (Zhoda), 2026-10-10
+
+- **Tri pasce nájdené až v prehliadači (2026-10-10), testy ich nevideli:** (1) `priceScale(id).applyOptions()` pred `addSeries` sa stratí — overlay stupnica vznikne až so sériou, takže štyri riadky splývali do jedného bloku; (2) pás musí mať sériu s HODNOTOU na každej sviečke (`consensusDomain`), inak začne pri prvom nahriatom stave a je posunutý doľava (pitfall -4), a pravá cenová stupnica musí ostať viditeľná, lebo jej pevná šírka zarovnáva políčka so sviečkami; (3) CSS `order` na deťoch `.panel` presunul `.p-resize-handle` medzi graf a pás a `min-height` prebil `.p-sub.hidden` — veľkosť sa preto viaže na `:not(.hidden)` a úchyt má `order:4`.
+
+- Four states per candle: RSI(14) and classic stochastic %K(14), smoothed 3,
+  are bullish at >= 50 and bearish below 50; MACD(12,26,9) histogram is
+  bullish above zero, bearish below, neutral at zero; Ichimoku is bullish
+  above the cloud, bearish below it, neutral inside. Unwarmed inputs stay empty.
+- Render the reading aid as four LWC HistogramSeries on separate overlay price
+  scales, one row each. It is a reading aid only and never enters scores,
+  Verdict, scanner, DCA, BUILD, ML or AI export.
+- It is a strip rather than a composite line because the measured average
+  correlates 0.92 with RSI and hides disagreement; all four agree on only 47%
+  of days.
+
 ## File touch policy
 
 - **`presets.json`, `scanner_notes.json`, log files** — never commit, live on `/data` disk only. `.renderignore` excludes them. (Pôvodný `trade_journal.json` z Trade Journal funkcie už appka nepoužíva — feature bola odstránená; existujúci súbor na disku ostáva, no žiadny kód ho už nečíta ani neprepisuje.)

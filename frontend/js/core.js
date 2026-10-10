@@ -960,3 +960,28 @@ async function loadMemProfileChip() {
     chip.style.display = 'inline-block';
   } catch(e) {}
 }
+function consensusSummary(states) {
+  const labels = [['RSI', states?.cs_rsi], ['Stoch', states?.cs_stoch], ['MACD', states?.cs_macd], ['Ichimoku', states?.cs_ichi]];
+  const available = labels.filter(([, value]) => value === -1 || value === 0 || value === 1);
+  const missing = labels.filter(([, value]) => value !== -1 && value !== 0 && value !== 1).map(([name]) => name);
+  const bullish = available.filter(([, value]) => value === 1).map(([name]) => name);
+  const bearish = available.filter(([, value]) => value === -1).map(([name]) => name);
+  const neutral = available.filter(([, value]) => value === 0).map(([name]) => name);
+  let text;
+  if (available.length === 4 && (bullish.length === 4 || bearish.length === 4)) {
+    text = `Zhoda 4/4 ${bullish.length ? 'býčie' : 'medvedie'}`;
+  } else if (available.length === 4 && bullish.length === 3) {
+    text = `Zhoda 3/4 býčie · inak: ${bearish[0] || neutral[0]}`;
+  } else if (available.length === 4 && bearish.length === 3) {
+    text = `Zhoda 3/4 medvedie · inak: ${bullish[0] || neutral[0]}`;
+  } else {
+    const parts = [`Zhoda ${bullish.length}/${available.length}${available.length ? '' : ''}`];
+    if (bullish.length) parts.push(`býčie: ${bullish.join(', ')}`);
+    if (bearish.length) parts.push(`medvedie: ${bearish.join(', ')}`);
+    if (neutral.length) parts.push(`neutrálne: ${neutral.join(', ')}`);
+    text = parts.join(' · ');
+  }
+  if (missing.length) text += `${text ? ' · ' : ''}bez dát: ${missing.join(', ')}`;
+  const title = 'RSI(14): ≥ 50 býčie, < 50 medvedie. Stochastic %K(14) so smoothingom 3: ≥ 50 býčie, < 50 medvedie. MACD(12,26,9) histogram: > 0 býčie, < 0 medvedie, = 0 neutrálne. Ichimoku: close nad cloudom býčie, pod cloudom medvedie, vnútri neutrálne. Čítacia pomôcka, nie signál.';
+  return { text, title };
+}

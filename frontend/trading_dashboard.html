@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261010-ipp">
+<link rel="stylesheet" href="/dashboard.css?v=20261010-122048">
 </head>
 <body data-main-tab="home">
 
@@ -303,6 +303,7 @@
         <button id="pc-weekly-rsi" class="ind-btn" onclick="pc_toggleIndicator('weekly','rsi')">RSI</button>
         <button id="pc-weekly-adx" class="ind-btn" onclick="pc_toggleIndicator('weekly','adx')">ADX</button>
         <button id="pc-weekly-macd" class="ind-btn" onclick="pc_toggleIndicator('weekly','macd')">MACD</button>
+        <button id="pc-weekly-consensus" class="ind-btn" onclick="pc_toggleIndicator('weekly','consensus')">ZHODA</button>
         <button id="pc-weekly-vp" class="ind-btn advanced-only" onclick="pc_toggleIndicator('weekly','vp')">VOL PROFILE</button>
       </div>
       <div class="p-inds pc-indicator-row" id="pcDailyIndicatorRow" style="display:none;">
@@ -314,6 +315,7 @@
         <button id="pc-daily-rsi" class="ind-btn" onclick="pc_toggleIndicator('daily','rsi')">RSI</button>
         <button id="pc-daily-adx" class="ind-btn" onclick="pc_toggleIndicator('daily','adx')">ADX</button>
         <button id="pc-daily-macd" class="ind-btn" onclick="pc_toggleIndicator('daily','macd')">MACD</button>
+        <button id="pc-daily-consensus" class="ind-btn" onclick="pc_toggleIndicator('daily','consensus')">ZHODA</button>
       </div>
       <div class="chart-body" style="position:relative;">
         <div id="realChart" style="position:absolute;inset:0;"></div>
@@ -322,11 +324,13 @@
     </div>
 
     <div class="pc-chart-subpanels" id="pcWeeklySubpanels">
+      <div class="p-sub pc-indicator-subpanel consensus-strip" id="pc-weekly-consensus-sub"><div class="consensus-summary"></div><div class="consensus-captions"><span>RSI</span><span>Stoch</span><span>MACD</span><span>Ichi</span></div><div class="pc-subchart-canvas" id="pc-weekly-consensus-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-weekly-rsi-sub"><div class="p-sub-label" style="color:var(--ind-rsi)">RSI 14</div><div class="pc-subchart-canvas" id="pc-weekly-rsi-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-weekly-adx-sub"><div class="p-sub-label" style="color:var(--ind-adx)">ADX 14 + DI</div><div class="pc-subchart-canvas" id="pc-weekly-adx-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-weekly-macd-sub"><div class="p-sub-label" style="color:var(--ind-macd)">MACD</div><div class="pc-subchart-canvas" id="pc-weekly-macd-chart"></div></div>
     </div>
     <div class="pc-chart-subpanels" id="pcDailySubpanels" style="display:none;">
+      <div class="p-sub pc-indicator-subpanel consensus-strip" id="pc-daily-consensus-sub"><div class="consensus-summary"></div><div class="consensus-captions"><span>RSI</span><span>Stoch</span><span>MACD</span><span>Ichi</span></div><div class="pc-subchart-canvas" id="pc-daily-consensus-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-daily-rsi-sub"><div class="p-sub-label" style="color:var(--ind-rsi)">RSI 14</div><div class="pc-subchart-canvas" id="pc-daily-rsi-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-daily-adx-sub"><div class="p-sub-label" style="color:var(--ind-adx)">ADX 14 + DI</div><div class="pc-subchart-canvas" id="pc-daily-adx-chart"></div></div>
       <div class="p-sub pc-indicator-subpanel" id="pc-daily-macd-sub"><div class="p-sub-label" style="color:var(--ind-macd)">MACD</div><div class="pc-subchart-canvas" id="pc-daily-macd-chart"></div></div>
@@ -532,17 +536,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20261010-ipp"></script>
-  <script src="/js/live.js?v=20261010-ipp"></script>
-  <script src="/js/portfolio.js?v=20261010-ipp"></script>
-  <script src="/js/watchlist.js?v=20261010-ipp"></script>
-  <script src="/js/scanner-table-sort.js?v=20261010-ipp"></script>
-  <script src="/js/scanner.js?v=20261010-ipp"></script>
-  <script src="/js/predictive.js?v=20261010-ipp"></script>
-  <script src="/js/verdict.js?v=20261010-ipp"></script>
-  <script src="/js/home.js?v=20261010-ipp"></script>
-  <script src="/js/newsfeed.js?v=20261010-ipp"></script>
-  <script src="/js/charts.js?v=20261010-ipp"></script>
-  <script src="/js/main.js?v=20261010-ipp"></script>
+  <script src="/js/core.js?v=20261010-122048"></script>
+  <script src="/js/live.js?v=20261010-122048"></script>
+  <script src="/js/portfolio.js?v=20261010-122048"></script>
+  <script src="/js/watchlist.js?v=20261010-122048"></script>
+  <script src="/js/scanner-table-sort.js?v=20261010-122048"></script>
+  <script src="/js/scanner.js?v=20261010-122048"></script>
+  <script src="/js/predictive.js?v=20261010-122048"></script>
+  <script src="/js/verdict.js?v=20261010-122048"></script>
+  <script src="/js/home.js?v=20261010-122048"></script>
+  <script src="/js/newsfeed.js?v=20261010-122048"></script>
+  <script src="/js/charts.js?v=20261010-122048"></script>
+  <script src="/js/main.js?v=20261010-122048"></script>
 </body>
 </html>

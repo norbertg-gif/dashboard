@@ -173,6 +173,7 @@ function onChartPanelContextMenu(event, id) {
     { label: 'ADX', checked: !!inds.adx, action: () => toggleIndicator(id, 'adx') },
     { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
     { label: 'IPP · prijatie pohybu', checked: !!inds.ipp, action: () => toggleIndicator(id, 'ipp') },
+    { label: 'Zhoda indikátorov', checked: !!inds.consensus, action: () => toggleIndicator(id, 'consensus') },
     { sep: true },
     { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
     { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
@@ -206,7 +207,7 @@ function onChartPanelContextMenu(event, id) {
 // Vantage — kvótu 25 req/deň míňajú len Správy v Analytike, takže kopírovanie
 // na všetky grafy nič nestojí. Zoom sa nekopíruje: pri inom intervale ho
 // loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
-const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp'];
+const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp', 'consensus'];
 const PANEL_DEFAULT_INTERVAL = '1d';
 
 function gridChartPanelIds() {
@@ -262,12 +263,14 @@ function resetAllChartsToDefault() {
 function applyThemeToAllCharts() {
   if (typeof _homePerformanceChart !== 'undefined' && _homePerformanceChart) applyChartTheme(_homePerformanceChart);
   // Panel grafy (registry)
-  for (const r of Object.values(registry)) {
+  for (const [id, r] of Object.entries(registry)) {
     if (r.mainChart) applyChartTheme(r.mainChart);
     if (r.rsiChart)  applyChartTheme(r.rsiChart);
     if (r.adxChart)  applyChartTheme(r.adxChart);
     if (r.macdChart) applyChartTheme(r.macdChart);
     if (r.ippChart) applyChartTheme(r.ippChart);
+    if (r.consensusChart) applyChartTheme(r.consensusChart);
+    if (r.consensusChart && r._rawChartData?.length) renderConsensus(id, r._rawChartData, r);
   }
   // Predictive tab grafy. Pozn.: classic-script top-level `let` nevytvára
   // window.* vlastnosť (main.js to rieši len pre pc_realChartInst/
@@ -280,8 +283,15 @@ function applyThemeToAllCharts() {
   if (typeof pc_dailyMainInst !== 'undefined' && pc_dailyMainInst) applyChartTheme(pc_dailyMainInst);
   if (typeof pc_subpanels !== 'undefined') {
     for (const manager of Object.values(pc_subpanels)) {
-      for (const type of ['rsi', 'adx', 'macd']) {
+      for (const type of ['rsi', 'adx', 'macd', 'consensus']) {
         if (manager[type]?.chart) applyChartTheme(manager[type].chart);
+        if (type === 'consensus' && manager[type]?.consensusBars) {
+          const css = getComputedStyle(document.documentElement);
+          const up = css.getPropertyValue('--up').trim() || CHART_COLORS.up;
+          const down = css.getPropertyValue('--down').trim() || CHART_COLORS.down;
+          manager[type].consensusBars.forEach((series, index) => series.setData(
+            (manager[type].consensusPoints[index] || []).map(p => ({time:p.time,value:1,color:p.value===1?up:p.value===-1?down:'rgba(128,128,128,0.55)'}))));
+        }
       }
     }
   }
@@ -449,8 +459,8 @@ function resizeChartPanelNow(id) {
   } else if (w > 0) {
     try { r.mainChart?.applyOptions({ width: w }); } catch(e) {}
   }
-  for (const chart of [r.rsiChart, r.adxChart, r.macdChart, r.ippChart]) {
-    try { chart?.applyOptions({ width: w, height: 80 }); } catch(e) {}
+  for (const [chart, height] of [[r.rsiChart,80],[r.adxChart,80],[r.macdChart,80],[r.ippChart,80],[r.consensusChart,68]]) {
+    try { chart?.applyOptions({ width: w, height }); } catch(e) {}
   }
 }
 
@@ -733,12 +743,13 @@ function toggleIndicator(pid, ind) {
 function updateSubVisibility(pid) {
   const r = registry[pid]; if (!r) return;
   const showRsi = r.indicators.rsi, showAdx = r.indicators.adx;
-  const showMacd = r.indicators.macd, showIpp = r.indicators.ipp;
+  const showMacd = r.indicators.macd, showIpp = r.indicators.ipp, showConsensus = r.indicators.consensus;
+  document.getElementById(`sub-consensus-${pid}`)?.classList.toggle('hidden', !showConsensus);
   document.getElementById(`sub-rsi-${pid}`)?.classList.toggle('hidden', !showRsi);
   document.getElementById(`sub-adx-${pid}`)?.classList.toggle('hidden', !showAdx);
   document.getElementById(`sub-macd-${pid}`)?.classList.toggle('hidden', !showMacd);
   document.getElementById(`sub-ipp-${pid}`)?.classList.toggle('hidden', !showIpp);
-  document.getElementById(`chart-${pid}`)?.classList.toggle('with-sub', showRsi || showAdx || showMacd || showIpp);
+  document.getElementById(`chart-${pid}`)?.classList.toggle('with-sub', showRsi || showAdx || showMacd || showIpp || showConsensus);
   requestAnimationFrame(() => {
     resizeChartPanelNow(pid);
     requestAnimationFrame(() => resizeChartPanelNow(pid));
@@ -751,6 +762,7 @@ function updateSubVisibility(pid) {
       if (showAdx  && r.adxChart)  r.adxChart.resize(w, 80);
       if (showMacd && r.macdChart) r.macdChart.resize(w, 80);
       if (showIpp && r.ippChart) r.ippChart.resize(w, 80);
+      if (showConsensus && r.consensusChart) r.consensusChart.resize(w, 68);
     }
   }, 30);
   // MACD resize po odkrytí
@@ -884,6 +896,7 @@ function ensureRsiChart(id, r) {
   r.syncFrom(r.rsiChart,  [r.mainChart]);
   if (r.adxChart) { r.syncFrom(r.rsiChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.rsiChart]); }
   if (r.ippChart) { r.syncFrom(r.rsiChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.rsiChart]); }
+  if (r.consensusChart) { r.syncFrom(r.rsiChart,[r.consensusChart]); r.syncFrom(r.consensusChart,[r.rsiChart]); }
 }
 function ensureAdxChart(id, r) {
   if (r.adxChart) return;
@@ -898,6 +911,7 @@ function ensureAdxChart(id, r) {
   r.syncFrom(r.adxChart,  [r.mainChart]);
   if (r.rsiChart) { r.syncFrom(r.rsiChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.rsiChart]); }
   if (r.ippChart) { r.syncFrom(r.adxChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.adxChart]); }
+  if (r.consensusChart) { r.syncFrom(r.adxChart,[r.consensusChart]); r.syncFrom(r.consensusChart,[r.adxChart]); }
 }
 
 function ensureMacdChart(id, r) {
@@ -913,6 +927,7 @@ function ensureMacdChart(id, r) {
   if (r.rsiChart) { r.syncFrom(r.macdChart,[r.rsiChart]); r.syncFrom(r.rsiChart,[r.macdChart]); }
   if (r.adxChart) { r.syncFrom(r.macdChart,[r.adxChart]); r.syncFrom(r.adxChart,[r.macdChart]); }
   if (r.ippChart) { r.syncFrom(r.macdChart,[r.ippChart]); r.syncFrom(r.ippChart,[r.macdChart]); }
+  if (r.consensusChart) { r.syncFrom(r.macdChart,[r.consensusChart]); r.syncFrom(r.consensusChart,[r.macdChart]); }
 }
 
 function ensureIppChart(id, r) {
@@ -925,7 +940,7 @@ function ensureIppChart(id, r) {
   r.ippLine.createPriceLine({ price:0, color:'#88888888', lineWidth:1,
     lineStyle:2, axisLabelVisible:false, title:'' });
   r.ippChart.priceScale('right').applyOptions({ scaleMargins:{top:0.1,bottom:0.1} });
-  for (const chart of [r.mainChart, r.rsiChart, r.adxChart, r.macdChart]) {
+  for (const chart of [r.mainChart, r.rsiChart, r.adxChart, r.macdChart, r.consensusChart]) {
     if (chart) { r.syncFrom(chart, [r.ippChart]); r.syncFrom(r.ippChart, [chart]); }
   }
 }
@@ -956,6 +971,43 @@ function renderIpp(id, data, r) {
     label.title = label.textContent + '. Index prijatia pohybu: −100 až +100. ATR 20, okno 20 dokončených udalostných seáns, vyhodnotenie po 3 seansách, pohyb ≥ 0,7 ATR. Bežné ceny aj pri HA; dnešná UTC sviečka sa nezapočítava. Experimentálny indikátor.';
   }
   alignSubChartToMain(r, r.ippChart);
+}
+
+function ensureConsensusChart(id, r) {
+  if (r.consensusChart) return;
+  r.consensusChart = makeChart(document.getElementById(`sub-consensus-${id}`), 68, {timeVisible:false});
+  // Keep the (empty) right price scale: its fixed width is what aligns the
+  // cells horizontally with the candles of the main chart.
+  r.consensusChart.applyOptions({grid:{vertLines:{visible:false},horzLines:{visible:false}}, crosshair:{horzLine:{visible:false,labelVisible:false},vertLine:{visible:true,labelVisible:false}}});
+  const keys = ['rsi','stoch','macd','ichi'];
+  r.consensusBars = keys.map((key, index) => {
+    const scale = `cs_${key}`;
+    const series = r.consensusChart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:scale,priceLineVisible:false,lastValueVisible:false,base:0});
+    // An overlay scale exists only once a series uses it — options set earlier are lost.
+    r.consensusChart.priceScale(scale).applyOptions({scaleMargins:{top:0.27+index*0.18,bottom:(3-index)*0.18+0.02}});
+    return series;
+  });
+  // Full-domain anchor with a VALUE on every candle (LWC ignores whitespace-only
+  // series for the bar-index domain, see CLAUDE.md pitfall -4); otherwise the
+  // strip would start at the first warmed-up state and sit shifted to the left.
+  r.consensusDomain = r.consensusChart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:'cs_domain',priceLineVisible:false,lastValueVisible:false,color:'rgba(0,0,0,0)'});
+  for (const chart of [r.mainChart,r.rsiChart,r.adxChart,r.macdChart,r.ippChart]) if(chart){r.syncFrom(chart,[r.consensusChart]);r.syncFrom(r.consensusChart,[chart]);}
+}
+
+function renderConsensus(id, data, r) {
+  ensureConsensusChart(id,r);
+  ensureSubChartTimeAnchor(r,r.consensusChart,'consensusAnchor',data);
+  const style=getComputedStyle(document.documentElement);
+  const up=style.getPropertyValue('--up').trim() || '#00c99a';
+  const down=style.getPropertyValue('--down').trim() || '#ff4560';
+  const colors={1:up,'-1':down,0:'rgba(128,128,128,0.55)'};
+  ['rsi','stoch','macd','ichi'].forEach((key,i)=>r.consensusBars[i].setData(data.filter(d=>d[`cs_${key}`]===-1||d[`cs_${key}`]===0||d[`cs_${key}`]===1).map(d=>({time:d.time,value:1,color:colors[d[`cs_${key}`]]}))));
+  r.consensusDomain?.setData(data.map(d=>({time:d.time,value:0})));
+  const latest=data[data.length-1]||{};
+  const summary=consensusSummary(latest);
+  const label=document.getElementById(`consensus-label-${id}`);
+  if(label){label.textContent=summary.text;label.title=summary.title;}
+  alignSubChartToMain(r,r.consensusChart);
 }
 
 // ── CREATE PANEL ──────────────────────────────────────────────────────────────
@@ -1012,12 +1064,13 @@ function createPanel(cfg) {
       <button id="ind-${id}-adx"      class="ind-btn${inds.adx      ?' active-adx':''}"      onclick="toggleIndicator('${id}','adx')">ADX</button>
       <button id="ind-${id}-macd"     class="ind-btn${inds.macd     ?' active-macd':''}"     onclick="toggleIndicator('${id}','macd')">MACD</button>
       <button id="ind-${id}-ipp" class="ind-btn${inds.ipp ?' active-ipp':''}" onclick="toggleIndicator('${id}','ipp')" title="Index prijatia pohybu · denný interval · experimentálny">IPP</button>
+      <button id="ind-${id}-consensus" class="ind-btn${inds.consensus?' active-consensus':''}" onclick="toggleIndicator('${id}','consensus')" title="Čítacia pomôcka, nie signál">ZHODA</button>
       <div style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></div>
       <button id="wiz-btn-${id}" class="ind-btn${inds.wizard?' active-adx':''}" style="${inds.wizard?'border-color:var(--blue);color:var(--blue);background:var(--blue-dim);':''}" onclick="toggleWizard('${id}')">⚡ WIZARD</button>
       <button id="news-btn-${id}" class="ind-btn" style="${inds.news?'border-color:var(--muted2);color:var(--text);background:var(--bg2);':''}" onclick="toggleNews('${id}')">📰 NEWS</button>
     </div>
     <div class="p-info" id="info-${id}" onclick="setActivePanel('${id}')"><span class="p-name">—</span></div>
-    <div class="p-chart${inds.rsi||inds.adx||inds.macd||inds.ipp?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
+    <div class="p-chart${inds.rsi||inds.adx||inds.macd||inds.ipp||inds.consensus?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
       <div class="p-ov" id="ov-${id}">Načítava sa…</div>
     </div>
     <div class="p-sub${inds.rsi?'':' hidden'}" id="sub-rsi-${id}" style="height:80px;" onclick="setActivePanel('${id}')">
@@ -1032,6 +1085,7 @@ function createPanel(cfg) {
     <div class="p-sub${inds.ipp?'':' hidden'}" id="sub-ipp-${id}" style="height:80px;flex-shrink:0;" onclick="setActivePanel('${id}')">
       <div class="p-sub-label" id="ipp-label-${id}" style="color:#a070ff">IPP · Načítava sa…</div>
     </div>
+    <div class="p-sub consensus-strip${inds.consensus?'':' hidden'}" id="sub-consensus-${id}" style="height:68px;flex-shrink:0;" onclick="setActivePanel('${id}')"><div class="consensus-summary" id="consensus-label-${id}"></div><div class="consensus-captions"><span>RSI</span><span>Stoch</span><span>MACD</span><span>Ichi</span></div></div>
     <div class="p-news${inds.news?'':' hidden'}" id="news-${id}">
       <div class="news-loading">Načítava správy…</div>
     </div>
@@ -1097,7 +1151,7 @@ function createPanel(cfg) {
       const w = mainCont.clientWidth, h = mainCont.clientHeight;
       if (!(w > 0 && h > 0)) return;
       try { reg.mainChart.applyOptions({ width: w, height: h }); } catch (e) {}
-      [reg.rsiChart, reg.adxChart, reg.macdChart, reg.ippChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
+      [reg.rsiChart, reg.adxChart, reg.macdChart, reg.ippChart, reg.consensusChart].forEach(c => { try { c?.applyOptions({ width: w }); } catch (e) {} });
       // LWC dokončí interný layout až po aktuálnom frame. Kumo preto kreslíme
       // v nasledujúcom frame, keď už majú time/price súradnice finálne rozmery.
       requestAnimationFrame(() => {
@@ -1114,6 +1168,7 @@ function createPanel(cfg) {
     adxChart:null, adxLine:null, diPLine:null, diMLine:null, adxThr:null,
     macdChart:null, macdLine:null, macdSignal:null, macdHist:null,
     ippChart:null, ippLine:null, ippAnchor:null,
+    consensusChart:null, consensusBars:null, consensusAnchor:null, consensusDomain:null,
     syncFrom, overlaySeries:{}, indicators:{...inds, ipp:!!inds.ipp}, ro,
     viewRange: initialViewRange,
     suppressViewSave: false,
@@ -1433,6 +1488,7 @@ function applyOverlays(id, data, r) {
   }
 
   if (r.indicators.ipp) renderIpp(id, data, r);
+  if (r.indicators.consensus) renderConsensus(id,data,r);
 
   // MACD
   if (r.indicators.macd) {
@@ -2551,6 +2607,7 @@ function removePanel(id) {
     if (r.adxChart)  r.adxChart.remove();
     if (r.macdChart) r.macdChart.remove();
     if (r.ippChart) r.ippChart.remove();
+    if (r.consensusChart) r.consensusChart.remove();
     delete registry[id];
   }
   document.getElementById(id)?.remove();

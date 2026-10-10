@@ -236,6 +236,49 @@ def calc_ipp(df, atr_period=20, lookback=20, horizon=3,
     }, index=df.index)
 
 
+def calc_stoch(df: pd.DataFrame, period: int = 14, smooth: int = 3) -> pd.Series:
+    """Classic stochastic %K, smoothed over `smooth` bars."""
+    highest = df["High"].rolling(period, min_periods=period).max()
+    lowest = df["Low"].rolling(period, min_periods=period).min()
+    span = (highest - lowest).replace(0, np.nan)
+    raw = 100 * (pd.to_numeric(df["Close"], errors="coerce") - lowest) / span
+    return raw.rolling(smooth, min_periods=smooth).mean()
+
+
+def calc_consensus_states(df: pd.DataFrame) -> pd.DataFrame:
+    """Return causal indicator states for the chart reading-aid strip only."""
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    rsi = calc_rsi(close, 14)
+    delta = close.diff()
+    avg_gain = delta.clip(lower=0).ewm(com=13, min_periods=14).mean()
+    avg_loss = (-delta.clip(upper=0)).ewm(com=13, min_periods=14).mean()
+    rsi = rsi.mask(rsi.isna() & avg_gain.notna() & avg_gain.gt(0) & avg_loss.eq(0), 100)
+    rsi = rsi.mask(rsi.isna() & avg_gain.eq(0) & avg_loss.gt(0), 0)
+    stoch = calc_stoch(df, 14, 3)
+    _macd, _signal, hist = calc_macd(df["Close"], 12, 26, 9)
+    _tenkan, _kijun, span_a, span_b, _chikou = calc_ichimoku(df)
+    upper = pd.concat([span_a, span_b], axis=1).max(axis=1, skipna=False)
+    lower = pd.concat([span_a, span_b], axis=1).min(axis=1, skipna=False)
+    ichi = pd.Series(np.nan, index=df.index, dtype=float)
+    valid = close.notna() & upper.notna() & lower.notna()
+    ichi.loc[valid & (close > upper)] = 1
+    ichi.loc[valid & (close < lower)] = -1
+    ichi.loc[valid & (close >= lower) & (close <= upper)] = 0
+    states = pd.DataFrame(index=df.index)
+    states["cs_rsi"] = np.where(rsi.notna(), np.where(rsi >= 50, 1, -1), np.nan)
+    states["cs_stoch"] = np.where(stoch.notna(), np.where(stoch >= 50, 1, -1), np.nan)
+    states["cs_macd"] = np.where(hist.notna(), np.sign(hist), np.nan)
+    states["cs_ichi"] = ichi
+    return states.astype(float)
+
+
+def _consensus_state_payload(states: pd.DataFrame) -> list[dict]:
+    """Serialize consensus rows with integers and JSON nulls, never NaN."""
+    return [{key: int(value) if pd.notna(value) and np.isfinite(value) else None
+             for key, value in row.items()}
+            for row in states[["cs_rsi", "cs_stoch", "cs_macd", "cs_ichi"]].to_dict("records")]
+
+
 def add_indicators(df):
     df = df.copy()
     df["ema10"]      = calc_ema(df["Close"], 10)
@@ -5861,6 +5904,8 @@ def get_ohlcv(
             raise HTTPException(404, "Resample vrátil prázdny DataFrame")
 
     ipp_frame = None
+    consensus_frame = calc_consensus_states(df) if "consensus" in {i.strip() for i in indicators.split(",")} else None
+    consensus_payload = _consensus_state_payload(consensus_frame) if consensus_frame is not None else None
     if "ipp" in {i.strip() for i in indicators.split(",")} and interval == "1d":
         # Conservative daily finality: bars dated today UTC remain unconfirmed
         # until the next UTC day. Never use a live/HA candle to mature an event.
@@ -5967,6 +6012,8 @@ def get_ohlcv(
             else:
                 point["ipp"] = None
                 point["ipp_status"] = "unconfirmed_bar"
+        if consensus_frame is not None:
+            point.update(consensus_payload[i])
         if ema20  is not None: point["ema20"]  = safe(ema20.iloc[i])
         if ema50  is not None: point["ema50"]  = safe(ema50.iloc[i])
         if ema200 is not None: point["ema200"] = safe(ema200.iloc[i])
@@ -6403,6 +6450,13 @@ def _trim_indicators_to_candles(indicators: dict, candles: list) -> dict:
         if isinstance(series, list) and series and isinstance(series[0], dict):
             trimmed[key] = [p for p in series if p.get("time") is None
                             or p["time"] >= first_time]
+        elif isinstance(series, dict):
+            trimmed[key] = {
+                name: ([p for p in values if p.get("time") is None or p["time"] >= first_time]
+                       if isinstance(values, list) and values and isinstance(values[0], dict)
+                       else values)
+                for name, values in series.items()
+            }
         else:
             trimmed[key] = series
     return trimmed
@@ -6440,6 +6494,7 @@ def _indicators_from_display_candles(candles: list, include_stoch: bool = True) 
     if len(frame) < 2:
         return {}
     enriched = add_indicators(frame)
+    consensus = calc_consensus_states(frame)
 
     def series(column: str) -> list:
         out = []
@@ -6474,6 +6529,13 @@ def _indicators_from_display_candles(candles: list, include_stoch: bool = True) 
         "adx": series("adx"),
         "di_plus": series("di_plus"),
         "di_minus": series("di_minus"),
+        "consensus": {
+            key.removeprefix("cs_"): [
+                {"time": int(pd.Timestamp(ts).timestamp()), "value": int(value)}
+                for ts, value in consensus[key].items() if pd.notna(value) and np.isfinite(value)
+            ]
+            for key in ("cs_rsi", "cs_stoch", "cs_macd", "cs_ichi")
+        },
     }
     if include_stoch:
         result["stoch_k"] = series("stoch_k")

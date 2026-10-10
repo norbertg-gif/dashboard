@@ -460,8 +460,8 @@ let pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc__kumoAreaSeries = [];
 // Subpanel
-const PC_INDICATOR_KEYS = ['ema10', 'ema20', 'ema50', 'ema200', 'ichimoku', 'rsi', 'adx', 'macd'];
-const PC_SUBPANEL_KEYS = ['rsi', 'adx', 'macd'];
+const PC_INDICATOR_KEYS = ['ema10', 'ema20', 'ema50', 'ema200', 'ichimoku', 'rsi', 'adx', 'macd', 'consensus'];
+const PC_SUBPANEL_KEYS = ['rsi', 'adx', 'macd', 'consensus'];
 const PC_WEEKLY_INDICATORS_KEY = 'pc_weekly_indicators';
 const PC_DAILY_INDICATORS_KEY = 'pc_daily_indicators';
 
@@ -476,16 +476,16 @@ function pc_loadIndicatorState(key, defaults) {
 
 let pc_weeklyIndicators = pc_loadIndicatorState(PC_WEEKLY_INDICATORS_KEY, {
   ema10:false, ema20:false, ema50:false, ema200:false, ichimoku:false,
-  rsi:false, adx:false, macd:false,
+  rsi:false, adx:false, macd:false, consensus:false,
   vp:isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1',
 });
 let pc_dailyIndicators = pc_loadIndicatorState(PC_DAILY_INDICATORS_KEY, {
   ema10:false, ema20:true, ema50:false, ema200:false, ichimoku:true,
-  rsi:false, adx:false, macd:false,
+  rsi:false, adx:false, macd:false, consensus:false,
 });
 const pc_subpanels = {
-  weekly: { syncing:false, rsi:null, adx:null, macd:null },
-  daily: { syncing:false, rsi:null, adx:null, macd:null },
+  weekly: { syncing:false, rsi:null, adx:null, macd:null, consensus:null },
+  daily: { syncing:false, rsi:null, adx:null, macd:null, consensus:null },
 };
 
 function getPcChartOpts() {
@@ -2213,6 +2213,25 @@ function pc_buildSubpanel(view, type, ind, candles, mainChart) {
     const hist=chart.addSeries(LightweightCharts.HistogramSeries,{priceLineVisible:false,lastValueVisible:false,color:CHART_COLORS.up});
     macd.setData(ind.macd||[]); signal.setData(ind.macd_sig||[]);
     hist.setData((ind.macd_hist||[]).map(d=>({time:d.time,value:d.value,color:d.value>=0?CHART_COLORS.up:CHART_COLORS.down})));
+  } else if (type === 'consensus') {
+    chart.applyOptions({timeScale:{visible:false},grid:{vertLines:{visible:false},horzLines:{visible:false}},crosshair:{horzLine:{visible:false,labelVisible:false},vertLine:{visible:true,labelVisible:false}}});
+    entry.consensusBars=[]; entry.consensusPoints=[];
+    const css=getComputedStyle(document.documentElement);
+    const up=css.getPropertyValue('--up').trim() || CHART_COLORS.up;
+    const down=css.getPropertyValue('--down').trim() || CHART_COLORS.down;
+    const names=['rsi','stoch','macd','ichi'], states={};
+    const lastTime=candles[candles.length-1]?.time;
+    names.forEach((name,index)=>{
+      const scale=`cs_${name}`;
+      const bars=chart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:scale,priceLineVisible:false,lastValueVisible:false,base:0});
+      chart.priceScale(scale).applyOptions({scaleMargins:{top:0.27+index*0.18,bottom:(3-index)*0.18+0.02}});
+      const points=ind.consensus?.[name]||[];
+      entry.consensusBars.push(bars); entry.consensusPoints.push(points);
+      bars.setData(points.map(p=>({time:p.time,value:1,color:p.value===1?up:p.value===-1?down:'rgba(128,128,128,0.55)'})));
+      states[`cs_${name}`]=points.find(p=>p.time===lastTime)?.value;
+    });
+    const label=block.querySelector('.consensus-summary'), summary=consensusSummary(states);
+    if(label){label.textContent=summary.text;label.title=summary.title;}
   }
 
   entry.mainRangeHandler=range=>{
