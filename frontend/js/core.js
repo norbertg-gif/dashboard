@@ -963,20 +963,29 @@ async function loadMemProfileChip() {
 // Hover popup for the consensus strip: names every row and its state on the
 // candle under the cursor. One shared element on <body> — the strip itself is
 // 68 px high with overflow hidden, so a tooltip inside it would be clipped.
-const CONSENSUS_DEFAULT_PARAMS = Object.freeze({rsi_period:14,rsi_bull:50,rsi_bear:50,stoch_period:14,stoch_smooth:3,stoch_bull:50,stoch_bear:50,macd_fast:12,macd_slow:26,macd_signal:9,ichi_tenkan:9,ichi_kijun:26,ichi_senkou:52});
+const CONSENSUS_DEFAULT_PARAMS = Object.freeze({rsi_period:14,rsi_mode:'dip',rsi_bull:50,rsi_bear:50,rsi_oversold:35,rsi_overbought:70,stoch_period:14,stoch_smooth:3,stoch_mode:'trend',stoch_bull:50,stoch_bear:50,stoch_oversold:20,stoch_overbought:80,macd_fast:12,macd_slow:26,macd_signal:9,ichi_tenkan:9,ichi_kijun:26,ichi_senkou:52});
 
 function consensusRows(params = CONSENSUS_DEFAULT_PARAMS) {
   const p = {...CONSENSUS_DEFAULT_PARAMS, ...(params || {})};
+  const oscillatorRow = (name, key) => {
+    const mode=p[`${key}_mode`];
+    const thresholdText=mode==='dip'
+      ? `dip: priaznivé < ${p[`${key}_oversold`]}, nepriaznivé > ${p[`${key}_overbought`]}`
+      : `trend: priaznivé ≥ ${p[`${key}_bull`]}, nepriaznivé < ${p[`${key}_bear`]}`;
+    return `${name} (${p[`${key}_period`]}) · ${thresholdText}`;
+  };
   return [
-    ['cs_rsi', `RSI (${p.rsi_period}) · býčie ≥ ${p.rsi_bull}, medvedie < ${p.rsi_bear}`],
-    ['cs_stoch', `Stochastic (${p.stoch_period}, ${p.stoch_smooth}) · býčie ≥ ${p.stoch_bull}, medvedie < ${p.stoch_bear}`],
-    ['cs_macd', `MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal})`],
-    ['cs_ichi', `Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}) · oblak`],
+    ['cs_rsi', oscillatorRow('RSI', 'rsi')],
+    ['cs_stoch', `Stochastic (${p.stoch_period}, ${p.stoch_smooth}) · ${p.stoch_mode==='dip'
+      ? `dip: priaznivé < ${p.stoch_oversold}, nepriaznivé > ${p.stoch_overbought}`
+      : `trend: priaznivé ≥ ${p.stoch_bull}, nepriaznivé < ${p.stoch_bear}`}`],
+    ['cs_macd', `MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal}) · histogram nad nulou priaznivé`],
+    ['cs_ichi', `Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}) · nad oblakom priaznivé`],
   ];
 }
 
 function consensusTooltipHtml(time, states, params = CONSENSUS_DEFAULT_PARAMS) {
-  const stateText = { '1': ['býčie', 'up'], '-1': ['medvedie', 'down'], '0': ['neutrálne', 'flat'] };
+  const stateText = { '1': ['priaznivé', 'up'], '-1': ['nepriaznivé', 'down'], '0': ['neutrálne', 'flat'] };
   const date = Number.isFinite(Number(time)) ? new Date(Number(time) * 1000).toLocaleDateString('sk-SK') : '';
   const rows = consensusRows(params).map(([key, name]) => {
     const [text, cls] = stateText[String(states?.[key])] || ['bez dát', 'none'];
@@ -1017,25 +1026,31 @@ function consensusSummary(states, params = CONSENSUS_DEFAULT_PARAMS) {
   const labels = [['RSI', states?.cs_rsi], ['Stoch', states?.cs_stoch], ['MACD', states?.cs_macd], ['Ichimoku', states?.cs_ichi]];
   const available = labels.filter(([, value]) => value === -1 || value === 0 || value === 1);
   const missing = labels.filter(([, value]) => value !== -1 && value !== 0 && value !== 1).map(([name]) => name);
-  const bullish = available.filter(([, value]) => value === 1).map(([name]) => name);
-  const bearish = available.filter(([, value]) => value === -1).map(([name]) => name);
+  const favourable = available.filter(([, value]) => value === 1).map(([name]) => name);
+  const unfavourable = available.filter(([, value]) => value === -1).map(([name]) => name);
   const neutral = available.filter(([, value]) => value === 0).map(([name]) => name);
   let text;
-  if (available.length === 4 && (bullish.length === 4 || bearish.length === 4)) {
-    text = `Zhoda 4/4 ${bullish.length ? 'býčie' : 'medvedie'}`;
-  } else if (available.length === 4 && bullish.length === 3) {
-    text = `Zhoda 3/4 býčie · inak: ${bearish[0] || neutral[0]}`;
-  } else if (available.length === 4 && bearish.length === 3) {
-    text = `Zhoda 3/4 medvedie · inak: ${bullish[0] || neutral[0]}`;
+  if (available.length === 4 && (favourable.length === 4 || unfavourable.length === 4)) {
+    text = `Zhoda 4/4 ${favourable.length ? 'priaznivé' : 'nepriaznivé'}`;
+  } else if (available.length === 4 && favourable.length === 3 && unfavourable.length === 1) {
+    text = `Zhoda 3/4 priaznivé · inak: ${unfavourable[0]}`;
+  } else if (available.length === 4 && unfavourable.length === 3 && favourable.length === 1) {
+    text = `Zhoda 3/4 nepriaznivé · inak: ${favourable[0]}`;
   } else {
-    const parts = [`Zhoda ${bullish.length}/${available.length}${available.length ? '' : ''}`];
-    if (bullish.length) parts.push(`býčie: ${bullish.join(', ')}`);
-    if (bearish.length) parts.push(`medvedie: ${bearish.join(', ')}`);
+    const parts = [`Zhoda ${favourable.length}/${available.length}`];
+    if (favourable.length) parts.push(`priaznivé: ${favourable.join(', ')}`);
+    if (unfavourable.length) parts.push(`nepriaznivé: ${unfavourable.join(', ')}`);
     if (neutral.length) parts.push(`neutrálne: ${neutral.join(', ')}`);
     text = parts.join(' · ');
   }
   if (missing.length) text += `${text ? ' · ' : ''}bez dát: ${missing.join(', ')}`;
   const p = {...CONSENSUS_DEFAULT_PARAMS, ...(params || {})};
-  const title = `${consensusRows(p)[0][1]}. Stochastic %K (${p.stoch_period}) so smoothingom ${p.stoch_smooth}: býčie ≥ ${p.stoch_bull}, medvedie < ${p.stoch_bear}. MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal}) histogram: > 0 býčie, < 0 medvedie, = 0 neutrálne. Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}): close nad oblakom býčie, pod oblakom medvedie, vnútri neutrálne. Čítacia pomôcka, nie signál.`;
+  const rsiRule=p.rsi_mode==='dip'
+    ? `RSI (${p.rsi_period}) dip: priaznivé pod ${p.rsi_oversold}, nepriaznivé nad ${p.rsi_overbought}, medzi prahmi neutrálne.`
+    : `RSI (${p.rsi_period}) trend: priaznivé od ${p.rsi_bull}, nepriaznivé pod ${p.rsi_bear}, medzi prahmi neutrálne.`;
+  const stochRule=p.stoch_mode==='dip'
+    ? `Stochastic %K (${p.stoch_period}) vyhladený ${p.stoch_smooth}, dip: priaznivé pod ${p.stoch_oversold}, nepriaznivé nad ${p.stoch_overbought}, medzi prahmi neutrálne.`
+    : `Stochastic %K (${p.stoch_period}) vyhladený ${p.stoch_smooth}, trend: priaznivé od ${p.stoch_bull}, nepriaznivé pod ${p.stoch_bear}, medzi prahmi neutrálne.`;
+  const title = `${rsiRule} ${stochRule} MACD (${p.macd_fast}, ${p.macd_slow}, ${p.macd_signal}) histogram: nad nulou priaznivé, pod nulou nepriaznivé, nula neutrálna. Ichimoku (${p.ichi_tenkan}, ${p.ichi_kijun}, ${p.ichi_senkou}): close nad oblakom priaznivé, pod oblakom nepriaznivé, vnútri neutrálne. Čítacia pomôcka, nie signál.`;
   return { text, title };
 }

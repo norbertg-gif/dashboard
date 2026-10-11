@@ -3267,8 +3267,9 @@ class ConsensusStripRegressionTests(unittest.TestCase):
 
     def test_strong_trends_drive_all_states(self):
         import numpy as np
-        up = tb.calc_consensus_states(self.frame(np.arange(180) + 100)).iloc[-1]
-        down = tb.calc_consensus_states(self.frame(300 - np.arange(180))).iloc[-1]
+        trend={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_mode":"trend"}
+        up = tb.calc_consensus_states(self.frame(np.arange(180) + 100),trend).iloc[-1]
+        down = tb.calc_consensus_states(self.frame(300 - np.arange(180)),trend).iloc[-1]
         self.assertEqual(up.tolist(), [1.0, 1.0, 1.0, 1.0])
         self.assertEqual(down.tolist(), [-1.0, -1.0, -1.0, -1.0])
 
@@ -4086,7 +4087,7 @@ class ConsensusSettingsRegressionTests(unittest.TestCase):
 
     def test_threshold_neutral_band_matches_rsi(self):
         frame=self.frame()
-        params={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_bull":60,"rsi_bear":40}
+        params={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_mode":"trend","rsi_bull":60,"rsi_bear":40}
         states=tb.calc_consensus_states(frame,params).cs_rsi
         rsi=tb.calc_rsi(frame.Close,params["rsi_period"])
         valid=rsi.notna()
@@ -4096,10 +4097,64 @@ class ConsensusSettingsRegressionTests(unittest.TestCase):
         expected.loc[valid & rsi.between(40,60,inclusive="left")]=0
         pd.testing.assert_series_equal(states,expected,check_names=False)
 
+    def test_dip_states_match_oversold_and_overbought_values(self):
+        import numpy as np
+        frame=self.frame()
+        for prefix,series in (("rsi",tb.calc_rsi(frame.Close,tb.CONSENSUS_SETTINGS_DEFAULTS["rsi_period"])),
+                              ("stoch",tb.calc_stoch(frame,tb.CONSENSUS_SETTINGS_DEFAULTS["stoch_period"],tb.CONSENSUS_SETTINGS_DEFAULTS["stoch_smooth"]))):
+            params={**tb.CONSENSUS_SETTINGS_DEFAULTS,f"{prefix}_mode":"dip"}
+            states=tb.calc_consensus_states(frame,params)[f"cs_{prefix}"]
+            oversold=params[f"{prefix}_oversold"]; overbought=params[f"{prefix}_overbought"]
+            expected=pd.Series(np.nan,index=frame.index,dtype=float)
+            valid=series.notna()
+            expected.loc[valid & (series<oversold)]=1
+            expected.loc[valid & (series>overbought)]=-1
+            expected.loc[valid & series.between(oversold,overbought)]=0
+            pd.testing.assert_series_equal(states,expected,check_names=False)
+            self.assertTrue(states[~valid].isna().all())
+
+    def test_default_rsi_dip_favours_downtrend_while_macd_and_cloud_remain_adverse(self):
+        import numpy as np
+        close=300-np.arange(220,dtype=float)
+        frame=pd.DataFrame({"Open":close,"High":close+0.5,"Low":close-0.5,"Close":close,"Volume":1000.0},
+                           index=pd.bdate_range("2024-01-01",periods=len(close)))
+        state=tb.calc_consensus_states(frame).iloc[-1]
+        self.assertEqual(state.cs_rsi,1)
+        self.assertEqual(state.cs_macd,-1)
+        self.assertEqual(state.cs_ichi,-1)
+
+    def test_mode_switch_keeps_other_thresholds_on_partial_post(self):
+        frame=self.frame()
+        dip=tb.calc_consensus_states(frame).cs_rsi
+        trend_params={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_mode":"trend"}
+        trend=tb.calc_consensus_states(frame,trend_params).cs_rsi
+        self.assertFalse(dip.equals(trend))
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"consensus_settings.json"
+            with patch.object(tb,"CONSENSUS_SETTINGS_FILE",path):
+                tb._consensus_settings_cache_key=None
+                saved=self._post({"rsi_oversold":31,"rsi_overbought":72,"rsi_mode":"trend"})
+                switched=self._post({"rsi_mode":"dip"})
+                self.assertEqual(switched["rsi_mode"],"dip")
+                self.assertEqual(switched["rsi_oversold"],31)
+                self.assertEqual(switched["rsi_overbought"],72)
+
+    def test_legacy_settings_file_merges_new_mode_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"consensus_settings.json"
+            legacy={k:v for k,v in tb.CONSENSUS_SETTINGS_DEFAULTS.items()
+                    if k not in {"rsi_mode","rsi_oversold","rsi_overbought","stoch_mode","stoch_oversold","stoch_overbought"}}
+            path.write_text(json.dumps(legacy),encoding="utf-8")
+            with patch.object(tb,"CONSENSUS_SETTINGS_FILE",path):
+                tb._consensus_settings_cache_key=None
+                loaded=tb.read_consensus_settings()
+                for key in ("rsi_mode","rsi_oversold","rsi_overbought","stoch_mode","stoch_oversold","stoch_overbought"):
+                    self.assertEqual(loaded[key],tb.CONSENSUS_SETTINGS_DEFAULTS[key])
+
     def test_custom_periods_match_independent_indicator_computation(self):
         import numpy as np
         frame=self.frame()
-        p={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_period":21,"stoch_period":18,"stoch_smooth":4,
+        p={**tb.CONSENSUS_SETTINGS_DEFAULTS,"rsi_mode":"trend","stoch_mode":"trend","rsi_period":21,"stoch_period":18,"stoch_smooth":4,
            "macd_fast":8,"macd_slow":23,"macd_signal":5,"ichi_tenkan":7,"ichi_kijun":22,"ichi_senkou":48}
         actual=tb.calc_consensus_states(frame,p)
         close=frame.Close
@@ -4131,6 +4186,11 @@ class ConsensusSettingsRegressionTests(unittest.TestCase):
              {"stoch_smooth":21},{"macd_signal":1},{"ichi_senkou":301},{"rsi_bull":101},
              {"rsi_bear":51,"rsi_bull":50},{"stoch_bear":51,"stoch_bull":50},
              {"macd_fast":26},{"ichi_tenkan":26},{"ichi_kijun":52}]
+        new_bad=[{"rsi_mode":"mean"},{"stoch_mode":True},{"rsi_oversold":"20"},{"rsi_overbought":True},
+                 {"rsi_oversold":-0.1},{"rsi_overbought":100.1},{"rsi_oversold":35,"rsi_overbought":35},
+                 {"stoch_oversold":"20"},{"stoch_overbought":False},{"stoch_oversold":-1},
+                 {"stoch_overbought":101},{"stoch_oversold":80,"stoch_overbought":20},
+                 {"rsi_oversold":float("nan")}]
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/"consensus_settings.json"
             with patch.object(tb,"CONSENSUS_SETTINGS_FILE",path):
@@ -4143,7 +4203,7 @@ class ConsensusSettingsRegressionTests(unittest.TestCase):
                 self.assertEqual(tb.get_consensus_settings(),saved)
                 self.assertEqual(saved["macd_fast"],12)
                 before=path.read_bytes()
-                for payload in ([1],*bad[1:]):
+                for payload in ([1],*bad[1:],*new_bad):
                     with self.assertRaises(tb.HTTPException) as ctx:self._post(payload)
                     self.assertEqual(ctx.exception.status_code,400)
                     self.assertEqual(path.read_bytes(),before)
@@ -4170,6 +4230,14 @@ class ConsensusSettingsRegressionTests(unittest.TestCase):
         self.assertIn("consensusSummary(states,params)",predictive)
         self.assertRegex(charts,r"attachConsensusTooltip\(r\.consensusChart,[\s\S]*?\(\) => r\.consensusParams \|\| consensusSettings\)")
         self.assertRegex(predictive,r"attachConsensusTooltip\(chart,block,[\s\S]*?,params\)")
+
+    def test_consensus_functions_use_favourable_wording(self):
+        core=(Path(__file__).parent/"frontend/js/core.js").read_text(encoding="utf-8")
+        rows=core[core.index("function consensusRows("):core.index("function attachConsensusTooltip(")]
+        summary_start=core.index("function consensusSummary(")
+        for region in (rows,core[summary_start:]):
+            self.assertNotIn("býčie",region.casefold())
+            self.assertNotIn("medvedie",region.casefold())
 
 
 class ChartDefaultsRegressionTests(unittest.TestCase):

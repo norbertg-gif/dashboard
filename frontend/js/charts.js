@@ -141,8 +141,10 @@ const CHART_DEFAULT_LABELS = [
 let chartDefaults = null;
 let consensusSettings = {...CONSENSUS_DEFAULT_PARAMS};
 const CONSENSUS_SETTING_FIELDS = [
-  ['RSI','rsi_period','RSI obdobie',2,200,1],['RSI','rsi_bull','Býčie od',0,100,0.1],['RSI','rsi_bear','Medvedie pod',0,100,0.1],
-  ['Stochastic','stoch_period','Obdobie',2,200,1],['Stochastic','stoch_smooth','Vyhladenie',1,20,1],['Stochastic','stoch_bull','Býčie od',0,100,0.1],['Stochastic','stoch_bear','Medvedie pod',0,100,0.1],
+  ['RSI','rsi_period','Obdobie',2,200,1],['RSI','rsi_bull','Priaznivé od',0,100,0.1],['RSI','rsi_bear','Nepriaznivé pod',0,100,0.1],
+  ['RSI','rsi_oversold','Priaznivé pod (prepredané)',0,100,0.1],['RSI','rsi_overbought','Nepriaznivé nad (prekúpené)',0,100,0.1],
+  ['Stochastic','stoch_period','Obdobie',2,200,1],['Stochastic','stoch_smooth','Vyhladenie',1,20,1],['Stochastic','stoch_bull','Priaznivé od',0,100,0.1],['Stochastic','stoch_bear','Nepriaznivé pod',0,100,0.1],
+  ['Stochastic','stoch_oversold','Priaznivé pod (prepredané)',0,100,0.1],['Stochastic','stoch_overbought','Nepriaznivé nad (prekúpené)',0,100,0.1],
   ['MACD','macd_fast','Rýchla',2,200,1],['MACD','macd_slow','Pomalá',2,200,1],['MACD','macd_signal','Signál',2,50,1],
   ['Ichimoku','ichi_tenkan','Tenkan',2,200,1],['Ichimoku','ichi_kijun','Kijun',2,200,1],['Ichimoku','ichi_senkou','Senkou',2,300,1],
 ];
@@ -154,16 +156,36 @@ function openConsensusSettingsModal() {
   const root=document.getElementById('consensus-settings-sections');
   if(root) root.innerHTML=['RSI','Stochastic','MACD','Ichimoku'].map(section=>{
     const fields=CONSENSUS_SETTING_FIELDS.filter(x=>x[0]===section);
-    const hint=(section==='RSI'||section==='Stochastic')?'Prahy býčie a medvedie; medzi prahmi = neutrálne.':section==='MACD'?'Histogram nad nulou býčí, pod nulou medvedí.':'Close voči oblaku Senkou, posunutému o Kijun.';
-    return `<section class="consensus-settings-section"><h3>${section}</h3><div class="consensus-settings-grid">${fields.map(([,key,label,min,max,step])=>`<label>${label}<input type="number" data-consensus-setting="${key}" min="${min}" max="${max}" step="${step}" value="${consensusSettings[key]}"></label>`).join('')}</div><small>${hint}</small></section>`;
+    const oscillator=section==='RSI'||section==='Stochastic';
+    const prefix=section==='RSI'?'rsi':section==='Stochastic'?'stoch':'';
+    const mode=oscillator?`<label>Režim<select data-consensus-setting="${prefix}_mode"><option value="trend">Trend — zelená nad prahom</option><option value="dip">Dip — zelená pri prepredanosti</option></select></label>`:'';
+    const inputs=fields.map(([,key,label,min,max,step])=>{
+      const isTrend=key.endsWith('_bull')||key.endsWith('_bear');
+      const isDip=key.endsWith('_oversold')||key.endsWith('_overbought');
+      const group=!oscillator?'':isTrend?'trend':isDip?'dip':'';
+      return `<label data-consensus-section="${prefix}" data-consensus-mode-group="${group}">${label}<input type="number" data-consensus-setting="${key}" min="${min}" max="${max}" step="${step}" value="${consensusSettings[key]}"></label>`;
+    }).join('');
+    const hint=oscillator?'':section==='MACD'?'Histogram nad nulou priaznivé, pod nulou nepriaznivé.':'Close voči oblaku Senkou, posunutému o Kijun.';
+    return `<section class="consensus-settings-section"><h3>${section}</h3><div class="consensus-settings-grid">${mode}${inputs}</div><small data-consensus-hint="${prefix}">${hint}</small></section>`;
   }).join('');
+  document.querySelectorAll('[data-consensus-setting]').forEach(el=>{el.value=consensusSettings[el.dataset.consensusSetting];});
+  document.querySelectorAll('[data-consensus-setting$="_mode"]').forEach(el=>el.addEventListener('change',updateConsensusModeFields));
+  updateConsensusModeFields();
   const note=document.getElementById('consensus-settings-status'); if(note)note.textContent='';
   document.getElementById('consensus-settings-modal-bg')?.classList.add('open');
 }
 function closeConsensusSettingsModal(){document.getElementById('consensus-settings-modal-bg')?.classList.remove('open');}
-function resetConsensusSettingsModal(){document.querySelectorAll('[data-consensus-setting]').forEach(el=>{el.value=CONSENSUS_DEFAULT_PARAMS[el.dataset.consensusSetting];});}
+function updateConsensusModeFields(){
+  for(const prefix of ['rsi','stoch']){
+    const mode=document.querySelector(`[data-consensus-setting="${prefix}_mode"]`)?.value||CONSENSUS_DEFAULT_PARAMS[`${prefix}_mode`];
+    document.querySelectorAll(`[data-consensus-section="${prefix}"]`).forEach(el=>{el.hidden=!!el.dataset.consensusModeGroup&&el.dataset.consensusModeGroup!==mode;});
+    const hint=document.querySelector(`[data-consensus-hint="${prefix}"]`);
+    if(hint)hint.textContent=mode==='dip'?'Zelená pod prahom prepredanosti, červená nad prahom prekúpenosti, medzi nimi neutrálne.':'Zelená nad priaznivým prahom, červená pod nepriaznivým prahom, medzi nimi neutrálne.';
+  }
+}
+function resetConsensusSettingsModal(){document.querySelectorAll('[data-consensus-setting]').forEach(el=>{el.value=CONSENSUS_DEFAULT_PARAMS[el.dataset.consensusSetting];});updateConsensusModeFields();}
 async function saveConsensusSettingsModal(){
-  const body={}; document.querySelectorAll('[data-consensus-setting]').forEach(el=>{body[el.dataset.consensusSetting]=Number(el.value);});
+  const body={}; document.querySelectorAll('[data-consensus-setting]').forEach(el=>{body[el.dataset.consensusSetting]=el.tagName==='SELECT'?el.value:Number(el.value);});
   const note=document.getElementById('consensus-settings-status');
   try {
     const response=await fetch(`${API}/api/charts/consensus-settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

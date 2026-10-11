@@ -7091,7 +7091,8 @@ body.light-mode .port-table td.port-ticker-tag {
 .consensus-settings-section h3 { margin:2px 0 8px; color:var(--text); font-size:13px; }
 .consensus-settings-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
 .consensus-settings-grid label { display:flex; flex-direction:column; gap:4px; color:var(--muted2); font-size:11px; }
-.consensus-settings-grid input { width:100%; min-width:0; box-sizing:border-box; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm); padding:6px; }
+.consensus-settings-grid label[hidden] { display:none; }
+.consensus-settings-grid input, .consensus-settings-grid select { width:100%; min-width:0; box-sizing:border-box; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm); padding:6px; }
 .consensus-settings-section small { color:var(--muted); font-size:10px; }
 #consensus-settings-status:empty { display:none; }
 #consensus-settings-status { color:var(--down); }

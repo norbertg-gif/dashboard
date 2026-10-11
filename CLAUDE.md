@@ -1375,6 +1375,14 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
   popup rows and summaries never hard-code periods. The server caches raw OHLCV
   bars, not consensus states; the browser had Grafy OHLCV/batch and Analytika
   `/api/chart` caches, so successful saves bypass/clear those before reload.
+- RSI and Stochastic each support `trend` and `dip`. Defaults are RSI `dip`
+  (oversold 35 / overbought 70) and Stochastic `trend`; both threshold sets are
+  retained when switching modes. In dip mode, oversold is favourable and
+  overbought is unfavourable. The strip wording is now favourable/unfavourable
+  because the user buys dips: green should mean favourable for entry, matching
+  C2's RSI < 45 reading. In dip mode a 4/4 favourable reading is expected to be
+  rare because oversold RSI and a positive MACD histogram seldom coincide; this
+  is an expectation, not a measured frequency.
 
 ## File touch policy
 

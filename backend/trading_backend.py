@@ -268,10 +268,20 @@ def calc_consensus_states(df: pd.DataFrame, params: dict | None = None) -> pd.Da
     ichi.loc[valid & (close < lower)] = -1
     ichi.loc[valid & (close >= lower) & (close <= upper)] = 0
     states = pd.DataFrame(index=df.index)
-    states["cs_rsi"] = np.where(rsi.notna(), np.where(rsi >= settings["rsi_bull"], 1,
-        np.where(rsi < settings["rsi_bear"], -1, 0)), np.nan)
-    states["cs_stoch"] = np.where(stoch.notna(), np.where(stoch >= settings["stoch_bull"], 1,
-        np.where(stoch < settings["stoch_bear"], -1, 0)), np.nan)
+    if settings["rsi_mode"] == "dip":
+        rsi_state = np.where(rsi < settings["rsi_oversold"], 1,
+            np.where(rsi > settings["rsi_overbought"], -1, 0))
+    else:
+        rsi_state = np.where(rsi >= settings["rsi_bull"], 1,
+            np.where(rsi < settings["rsi_bear"], -1, 0))
+    if settings["stoch_mode"] == "dip":
+        stoch_state = np.where(stoch < settings["stoch_oversold"], 1,
+            np.where(stoch > settings["stoch_overbought"], -1, 0))
+    else:
+        stoch_state = np.where(stoch >= settings["stoch_bull"], 1,
+            np.where(stoch < settings["stoch_bear"], -1, 0))
+    states["cs_rsi"] = np.where(rsi.notna(), rsi_state, np.nan)
+    states["cs_stoch"] = np.where(stoch.notna(), stoch_state, np.nan)
     states["cs_macd"] = np.where(hist.notna(), np.sign(hist), np.nan)
     states["cs_ichi"] = ichi
     return states.astype(float)
@@ -2850,7 +2860,9 @@ _chart_defaults_lock = threading.Lock()
 CONSENSUS_SETTINGS_FILE = DATA_ROOT / "consensus_settings.json"
 CONSENSUS_SETTINGS_DEFAULTS = {
     "rsi_period": 14, "rsi_bull": 50, "rsi_bear": 50,
+    "rsi_mode": "dip", "rsi_oversold": 35, "rsi_overbought": 70,
     "stoch_period": 14, "stoch_smooth": 3, "stoch_bull": 50, "stoch_bear": 50,
+    "stoch_mode": "trend", "stoch_oversold": 20, "stoch_overbought": 80,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
     "ichi_tenkan": 9, "ichi_kijun": 26, "ichi_senkou": 52,
 }
@@ -2860,6 +2872,18 @@ _CONSENSUS_PERIOD_RANGES = {
     "ichi_tenkan": (2, 200), "ichi_kijun": (2, 200), "ichi_senkou": (2, 300),
 }
 _CONSENSUS_THRESHOLD_KEYS = ("rsi_bull", "rsi_bear", "stoch_bull", "stoch_bear")
+_CONSENSUS_MODE_KEYS = ("rsi_mode", "stoch_mode")
+_CONSENSUS_DIP_THRESHOLD_KEYS = ("rsi_oversold", "rsi_overbought", "stoch_oversold", "stoch_overbought")
+_CONSENSUS_FIELD_LABELS = {
+    "rsi_period": "RSI obdobie", "rsi_bull": "RSI priaznivé od", "rsi_bear": "RSI nepriaznivé pod",
+    "rsi_oversold": "RSI prepredanosť", "rsi_overbought": "RSI prekúpenosť", "rsi_mode": "RSI režim",
+    "stoch_period": "Stochastic obdobie", "stoch_smooth": "Stochastic vyhladenie",
+    "stoch_bull": "Stochastic priaznivé od", "stoch_bear": "Stochastic nepriaznivé pod",
+    "stoch_oversold": "Stochastic prepredanosť", "stoch_overbought": "Stochastic prekúpenosť",
+    "stoch_mode": "Stochastic režim", "macd_fast": "MACD rýchla perióda",
+    "macd_slow": "MACD pomalá perióda", "macd_signal": "MACD signálová perióda",
+    "ichi_tenkan": "Ichimoku Tenkan", "ichi_kijun": "Ichimoku Kijun", "ichi_senkou": "Ichimoku Senkou",
+}
 _consensus_settings_lock = threading.Lock()
 _consensus_settings_cache = None
 _consensus_settings_cache_key = None
@@ -2868,31 +2892,39 @@ _consensus_settings_cache_key = None
 def _validate_consensus_settings(settings: dict) -> dict:
     unknown = sorted(set(settings) - set(CONSENSUS_SETTINGS_DEFAULTS))
     if unknown:
-        raise HTTPException(400, f"Unknown consensus settings: {unknown!r}")
+        raise HTTPException(400, "Neznáme nastavenie semafora.")
     clean = dict(settings)
     for key, (minimum, maximum) in _CONSENSUS_PERIOD_RANGES.items():
         value = clean.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise HTTPException(400, f"{key} must be numeric")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or (isinstance(value, float) and not math.isfinite(value)):
+            raise HTTPException(400, f"{_CONSENSUS_FIELD_LABELS[key]} musí byť číslo.")
         if not float(value).is_integer() or not minimum <= value <= maximum:
-            raise HTTPException(400, f"{key} must be an integer from {minimum} to {maximum}")
+            raise HTTPException(400, f"{_CONSENSUS_FIELD_LABELS[key]} musí byť celé číslo od {minimum} do {maximum}.")
         clean[key] = int(value)
-    for key in _CONSENSUS_THRESHOLD_KEYS:
+    for key in (*_CONSENSUS_THRESHOLD_KEYS, *_CONSENSUS_DIP_THRESHOLD_KEYS):
         value = clean.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise HTTPException(400, f"{key} must be numeric")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or (isinstance(value, float) and not math.isfinite(value)):
+            raise HTTPException(400, f"{_CONSENSUS_FIELD_LABELS[key]} musí byť číslo.")
         if not 0 <= value <= 100:
-            raise HTTPException(400, f"{key} must be from 0 to 100")
+            raise HTTPException(400, f"{_CONSENSUS_FIELD_LABELS[key]} musí byť od 0 do 100.")
+    for key in _CONSENSUS_MODE_KEYS:
+        if clean.get(key) not in ("trend", "dip"):
+            name = "RSI" if key == "rsi_mode" else "Stochastic"
+            raise HTTPException(400, f"{name}: režim musí byť Trend alebo Dip.")
     if clean["rsi_bear"] > clean["rsi_bull"]:
-        raise HTTPException(400, "rsi_bear must be less than or equal to rsi_bull")
+        raise HTTPException(400, "RSI: prah „nepriaznivé pod“ nesmie byť vyšší než „priaznivé od“.")
     if clean["stoch_bear"] > clean["stoch_bull"]:
-        raise HTTPException(400, "stoch_bear must be less than or equal to stoch_bull")
+        raise HTTPException(400, "Stochastic: prah „nepriaznivé pod“ nesmie byť vyšší než „priaznivé od“.")
+    if clean["rsi_oversold"] >= clean["rsi_overbought"]:
+        raise HTTPException(400, "RSI: prepredanosť musí byť nižšia než prekúpenosť.")
+    if clean["stoch_oversold"] >= clean["stoch_overbought"]:
+        raise HTTPException(400, "Stochastic: prepredanosť musí byť nižšia než prekúpenosť.")
     if clean["macd_fast"] >= clean["macd_slow"]:
-        raise HTTPException(400, "macd_fast must be less than macd_slow")
+        raise HTTPException(400, "MACD: rýchla perióda musí byť kratšia než pomalá.")
     if clean["ichi_tenkan"] >= clean["ichi_kijun"]:
-        raise HTTPException(400, "ichi_tenkan must be less than ichi_kijun")
+        raise HTTPException(400, "Ichimoku: Tenkan musí byť kratší než Kijun.")
     if clean["ichi_kijun"] >= clean["ichi_senkou"]:
-        raise HTTPException(400, "ichi_kijun must be less than ichi_senkou")
+        raise HTTPException(400, "Ichimoku: Kijun musí byť kratší než Senkou.")
     return clean
 
 
@@ -2929,12 +2961,12 @@ async def save_consensus_settings(request: Request):
     global _consensus_settings_cache, _consensus_settings_cache_key
     body = await request.json()
     if not isinstance(body, dict):
-        raise HTTPException(400, "Consensus settings must be an object")
+        raise HTTPException(400, "Nastavenia semafora musia byť objekt.")
     with _consensus_settings_lock:
         current = _read_consensus_settings()
         unknown = sorted(set(body) - set(CONSENSUS_SETTINGS_DEFAULTS))
         if unknown:
-            raise HTTPException(400, f"Unknown consensus settings: {unknown!r}")
+            raise HTTPException(400, "Neznáme nastavenie semafora.")
         candidate = _validate_consensus_settings({**current, **body})
         _atomic_write_json(CONSENSUS_SETTINGS_FILE, candidate)
         _consensus_settings_cache = dict(candidate)
