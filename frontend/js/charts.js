@@ -1510,6 +1510,9 @@ function drawCloudCanvas(id, r) {
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, w, h);
+    // applyOverlays() nulls cloudData before rebuilding the series; a range
+    // change fired in that window (HA toggle) must not crash the whole load.
+    if (!r.cloudData?.length) return;
 
     const pts = r.cloudData.map(d => {
       try {
@@ -1603,6 +1606,10 @@ function applyOverlays(id, data, r) {
   });
   // Odstráň cloud canvas
   document.getElementById('cloud-canvas-' + id)?.remove();
+  if (r.cloudCanvasRender) {
+    try { mc.timeScale().unsubscribeVisibleTimeRangeChange(r.cloudCanvasRender); } catch(e) {}
+    r.cloudCanvasRender = null;
+  }
   r.cloudData = null;
   if (r.indicators.ichimoku) {
     const OPT = { lastValueVisible:false, priceLineVisible:false };

@@ -4313,5 +4313,16 @@ class ChartDefaultsRegressionTests(unittest.TestCase):
         self.assertEqual(intervals, list(tb.CHART_DEFAULT_INTERVALS))
 
 
+class CloudCanvasNullGuardRegressionTests(unittest.TestCase):
+    """HA toggle with Ichimoku on: the stale cloud render ran while cloudData was null."""
+
+    def test_cloud_render_guards_null_data_and_overlay_reset_unsubscribes(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
+        render = src.split("function render() {", 1)[1].split("const pts = r.cloudData.map", 1)[0]
+        self.assertIn("if (!r.cloudData?.length) return;", render)
+        reset = src.split("r.cloudData = null;", 1)[0][-400:]
+        self.assertIn("unsubscribeVisibleTimeRangeChange(r.cloudCanvasRender)", reset)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
