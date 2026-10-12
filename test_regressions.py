@@ -4324,5 +4324,35 @@ class CloudCanvasNullGuardRegressionTests(unittest.TestCase):
         self.assertIn("unsubscribeVisibleTimeRangeChange(r.cloudCanvasRender)", reset)
 
 
+class AlphaVantagePremiumRefusalRegressionTests(unittest.TestCase):
+    """2026-10-12: AV answered "premium endpoint" and the UI called it a daily limit."""
+
+    PREMIUM = {"Information": "Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe..."}
+
+    def test_premium_answer_is_not_reported_or_remembered_as_quota(self):
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(inner): return self.PREMIUM
+        with patch.dict(tb.os.environ, {"ALPHA_VANTAGE_API_KEY": "k"}),              patch.object(tb, "_av_limit_exhausted_until", 0.0),              patch.object(tb.requests, "get", return_value=_Resp()):
+            with self.assertRaises(RuntimeError) as ctx:
+                tb._news_fetch_av("TTD")
+            self.assertEqual(str(ctx.exception), tb.AV_PREMIUM_MESSAGE)
+            self.assertFalse(tb._av_limit_active())
+
+    def test_browser_ingest_path_gets_the_same_message(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            tb._news_parse_feed("TTD", self.PREMIUM)
+        self.assertEqual(str(ctx.exception), tb.AV_PREMIUM_MESSAGE)
+
+    def test_real_quota_note_still_marks_the_limit(self):
+        class _Resp:
+            def raise_for_status(self): pass
+            def json(inner): return {"Note": "our standard API rate limit is 25 requests per day"}
+        with patch.dict(tb.os.environ, {"ALPHA_VANTAGE_API_KEY": "k"}),              patch.object(tb, "_av_limit_exhausted_until", 0.0),              patch.object(tb.requests, "get", return_value=_Resp()):
+            with self.assertRaises(RuntimeError):
+                tb._news_fetch_av("TTD")
+            self.assertTrue(tb._av_limit_active())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

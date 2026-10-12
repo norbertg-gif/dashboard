@@ -11707,6 +11707,8 @@ def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
     # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
     if "feed" not in data:
         msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
+        if _av_is_premium_refusal(msg):
+            raise RuntimeError(AV_PREMIUM_MESSAGE)
         raise RuntimeError(_news_scrub_error(msg))
 
     items = []
@@ -11740,6 +11742,14 @@ def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
     return _news_cluster_items(items)
 
 
+AV_PREMIUM_MESSAGE = "Alpha Vantage sentiment správ už nie je vo free pláne (platený endpoint)."
+
+
+def _av_is_premium_refusal(message) -> bool:
+    """A paywall answer is not a quota answer: do not report it as a daily limit."""
+    return "premium" in str(message or "").lower()
+
+
 def _news_fetch_av(ticker: str) -> list[dict]:
     """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
@@ -11755,6 +11765,8 @@ def _news_fetch_av(ticker: str) -> list[dict]:
     )
     resp.raise_for_status()
     data = resp.json() or {}
+    if _av_is_premium_refusal(data.get("Note") or data.get("Information")):
+        raise RuntimeError(AV_PREMIUM_MESSAGE)
     if data.get("Note") or data.get("Information"):
         _av_mark_limit_exhausted()
         raise RuntimeError("Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň).")
