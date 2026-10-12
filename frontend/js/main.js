@@ -327,7 +327,7 @@ document.addEventListener('mousedown', e => {
 
 // ── View switcher ────────────────────────────────────────────────────────────
 
-// ── Earnings warnings + Analytika news sentiment popup ──────────────────────
+// ── Earnings warnings + Analytika context ──────────────────────
 
 // enter key handled in onTickerKeydown
 

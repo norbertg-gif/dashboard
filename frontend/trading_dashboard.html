@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261011-104912">
+<link rel="stylesheet" href="/dashboard.css?v=20261012-155551">
 </head>
 <body data-main-tab="home">
 
@@ -224,7 +224,6 @@
     <span class="tb-label">Sledovanie</span>
     <div class="tb-items">
       <button class="btn" onclick="addCurrentToWatchlist(null,event)" title="Pridať aktuálny ticker do watchlistu">+ WL</button>
-      <button class="toggle-btn" id="pcNewsBtn" onclick="pc_openNewsModal()" title="Načítať správy a sentiment pre aktuálny ticker">📰 Správy</button>
     </div>
   </div>
   <div class="tb-sep"></div>
@@ -253,19 +252,6 @@
 
 <div id="pcDecisionBar" class="predictive-decision-bar">
   <div class="pc-decision-empty">Načítaj ticker a zobrazí sa rýchle rozhodnutie, sila setupu a kontext signálu.</div>
-</div>
-
-<div id="pcNewsOverlay" class="pc-news-overlay" style="display:none;" onclick="pc_closeNewsModal(event)">
-  <div class="pc-news-modal" onclick="event.stopPropagation()">
-    <div class="pc-news-modal-head">
-      <div>
-        <div class="pc-news-modal-title">Správy &amp; sentiment</div>
-        <div class="pc-news-modal-sub" id="pcNewsSubtitle">—</div>
-      </div>
-      <button class="pc-news-close" onclick="pc_closeNewsModal()" title="Zavrieť">×</button>
-    </div>
-    <div id="pcNewsBody" class="pc-news-modal-body"></div>
-  </div>
 </div>
 
 <div class="layout">
@@ -563,17 +549,17 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20261011-104912"></script>
-  <script src="/js/live.js?v=20261011-104912"></script>
-  <script src="/js/portfolio.js?v=20261011-104912"></script>
-  <script src="/js/watchlist.js?v=20261011-104912"></script>
-  <script src="/js/scanner-table-sort.js?v=20261011-104912"></script>
-  <script src="/js/scanner.js?v=20261011-104912"></script>
-  <script src="/js/predictive.js?v=20261011-104912"></script>
-  <script src="/js/verdict.js?v=20261011-104912"></script>
-  <script src="/js/home.js?v=20261011-104912"></script>
-  <script src="/js/newsfeed.js?v=20261011-104912"></script>
-  <script src="/js/charts.js?v=20261011-104912"></script>
-  <script src="/js/main.js?v=20261011-104912"></script>
+  <script src="/js/core.js?v=20261012-155551"></script>
+  <script src="/js/live.js?v=20261012-155551"></script>
+  <script src="/js/portfolio.js?v=20261012-155551"></script>
+  <script src="/js/watchlist.js?v=20261012-155551"></script>
+  <script src="/js/scanner-table-sort.js?v=20261012-155551"></script>
+  <script src="/js/scanner.js?v=20261012-155551"></script>
+  <script src="/js/predictive.js?v=20261012-155551"></script>
+  <script src="/js/verdict.js?v=20261012-155551"></script>
+  <script src="/js/home.js?v=20261012-155551"></script>
+  <script src="/js/newsfeed.js?v=20261012-155551"></script>
+  <script src="/js/charts.js?v=20261012-155551"></script>
+  <script src="/js/main.js?v=20261012-155551"></script>
 </body>
 </html>

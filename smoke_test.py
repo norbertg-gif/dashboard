@@ -77,7 +77,6 @@ CORE = [
     ("/api/scanner/notes", "scanner notes", lambda b: isinstance(_json(b), dict)),
     ("/api/scanner/nasdaq/results", "scanner results", lambda b: isinstance(_json(b), dict)),
     # /api/scanner/finviz/screeners zámerne chýba — legacy bookmarklet endpoint vracia 410 Gone
-    ("/api/news/summary?tickers=AAPL", "news summary", lambda b: isinstance(_json(b)["summary"], dict)),
     ("/api/movers?n=3", "movers", lambda b: isinstance(_json(b)["movers"], list)),
     ("/api/ticker/exchanges?tickers=AAPL&limit=0", "exchanges", lambda b: isinstance(_json(b)["exchanges"], dict)),
     ("/api/investor/inbox", "investor inbox", lambda b: isinstance(_json(b)["items"], list)),

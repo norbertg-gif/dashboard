@@ -468,17 +468,6 @@
   <h3>Fundamentálna kvalita</h3>
   <p>Karta používa výhradne Finnhub <code>/stock/metric</code> (free tier; na AAPL/NU/ON bolo nameraných 120–133 polí). Štandardizované výkazy sú platené (HTTP 403), preto ich karta nepoužíva. Percentuálne metriky sa pred skórovaním delia 100; D/E bánk nie je zmysluplné. FMP zostáva pre cieľovú cenu a earnings surprises.</p>
 
-  <h3>Správy a sentiment (📰 v Analytike)</h3>
-  <p>Správy sa neťahajú priamo v Scanneri, aby sa šetril limit free API. V záložke <strong>Analytika</strong> je tlačidlo <strong>📰 Správy</strong> pri horných ovládačoch. Po kliknutí sa pre aktuálny ticker otvorí zavriteľné popup okno so zoznamom článkov a sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).</p>
-  <ul>
-    <li><strong>Badge pri článku</strong>: Bullish / Somewhat bullish / Neutral / Somewhat bearish / Bearish + číselné skóre. Sentiment je <strong>ticker-špecifický</strong> — zobrazuje sa hodnotenie pre daný ticker, nie celkové vyznenie článku.</li>
-    <li><strong>Relevancia</strong>: články s relevanciou &lt; 15 % sa odfiltrujú; zvyšok je zoradený podľa času a relevancie, max. 10 položiek.</li>
-    <li><strong>Klastrovanie duplicít</strong>: viac vydavateľov často prevezme tú istú správu s takmer rovnakým titulkom. Do priemerného sentimentu sa počíta len jeden reprezentant na udalosť; zoznam článkov sa nekráti, duplicity sú len označené ako „duplicita" / „+N zdrojov".</li>
-    <li><strong>Cache</strong>: výsledky sa držia 7 dní na disku — opakované otvorenie toho istého tickera neminie API request. <strong>⟳ Obnoviť</strong> vynúti čerstvé načítanie.</li>
-    <li><strong>Limity</strong>: free API kľúč má 25 requestov/deň. Server beží na zdieľanej IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami — vtedy prehliadač automaticky stiahne dáta priamo z tvojej IP a pošle ich serveru do cache (fallback je transparentný).</li>
-    <li><strong>Načo to je</strong>: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva iracionálna — žaloby, profit warningy, sektorové správy. News blok pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať, až keď ich reálne analyzuješ.</li>
-  </ul>
-
   <h3>Reddit zmienky (r/N)</h3>
   <p>V riadkoch DIP universe scannera sa vedľa tickera môže zobraziť badge <strong><code>r/N↑</code></strong> alebo <strong><code>r/N↓</code></strong> — počet nedávnych zmienok tickera v obchodných subredditoch. Zdroj: <strong>ApeWisdom</strong>, ktorý agreguje komunity r/WallStreetBets, r/stocks, r/investing a podobné.</p>
   <ul>
@@ -504,7 +493,7 @@
   <p>Priamo v riadku tabuľky pri tickeri sa zobrazujú earnings indikátory:</p>
   <ul>
     <li><strong>E: dátum</strong> (sivý) — najbližší známy earnings termín. Ak ešte nie je zverejnený alebo zdroj nemá údaje, zobrazí sa <strong>E: n/a</strong>.</li>
-    <li><strong>⚠ E: dátum</strong> (oranžový) — ticker má <strong>earnings do 7 dní</strong>. Zdroj: Finnhub (Alpha Vantage fallback bol odstránený — AV sa volá len na explicitné vyžiadanie); cache 24 h. Čísla pred reportom nemusia platiť.</li>
+    <li><strong>E: earnings</strong> ? najbližší termín; upozornenie je oranžové pri termíne do 7 dní. Zdroje: Finnhub, potom Yahoo a yfinance; cache 24 h. Čísla pred reportom nemusia platiť.</li>
   </ul>
   <p>Karta <strong>Najbližší Earnings</strong> v Analytike zostáva vždy viditeľná. Bez známeho termínu ukáže „Zatiaľ nedostupné“.</p>
 
@@ -533,26 +522,6 @@
 
   <h3>O firme</h3>
   <p>Karta <strong>O firme</strong> (nad Firmou &amp; očakávaniami) ukazuje firemný profil: popis biznisu (v angličtine), odvetvie, market cap, počet zamestnancov, rok vstupu na burzu, sídlo a web. Dlhý popis je orezaný — <strong>viac ▾ / menej ▴</strong> ho rozbalí. Zdroje: Massive → Yahoo → Finnhub, cache 30 dní. Ak žiadny zdroj nie je dostupný, karta sa nezobrazí. Čisto informačný kontext — nevstupuje do C1–C4, ML ani Verdiktu.</p>
-
-  <h3>Interpretácia sentiment hodnôt</h3>
-  <p>Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:</p>
-  <table>
-    <tr><th>Pásmo</th><th>Význam</th></tr>
-    <tr><td>≥ +0.35</td><td>Bullish</td></tr>
-    <tr><td>+0.15 až +0.35</td><td>Somewhat bullish</td></tr>
-    <tr><td>−0.15 až +0.15</td><td>Neutral (sivý badge)</td></tr>
-    <tr><td>−0.35 až −0.15</td><td>Somewhat bearish</td></tr>
-    <tr><td>≤ −0.35</td><td>Bearish</td></tr>
-  </table>
-  <p>Extrémy (±0.5+) sa takmer nevyskytujú — finančné spravodajstvo je opatrne formulované, aj „výrazný" priemer býva okolo ±0.3. Praktické čítanie:</p>
-  <ul>
-    <li><strong>Červený badge = povinné čítanie</strong> — rozklikni 📰 a zisti prečo (žaloby, guidance cut, zlý report). Najcennejší signál je nesúlad: top kandidát zo scannera, ktorý svieti na červeno.</li>
-    <li><strong>Sivý = šum</strong>, žiadny príbeh.</li>
-    <li><strong>Zelený = potvrdenie</strong> čísel zo scannera.</li>
-    <li><strong>Pozor: priemer maskuje rozptyl.</strong> 9 bullish + 1 bearish článok dá pekný priemer — ale ten jeden negatívny môže byť práve podstatný. Pri tituloch, kde zvažuješ vstup, si zoznam vždy prejdi.</li>
-    <li>Váha podľa relevancie znamená, že článok celý o danej firme ovplyvní priemer viac než zmienka v prehľade trhu.</li>
-  </ul>
-  <p>Tip k limitom: AV limit (25 req/deň) je per-IP — ak dashboard používaš z viacerých sietí (domov, práca, mobil), každá má vlastný budget a server cache zdieľa výsledky medzi všetkými zariadeniami.</p>
 
   <h3>Poznámky (bočný panel)</h3>
   <p>Vpravo od tabuľky je <strong>resizovateľný panel s poznámkami</strong> — globálny, nezávislý od tickerov (jeden zdieľaný blok textu).</p>
@@ -660,9 +629,8 @@
   <blockquote><p>Čítaj skôr, než podľa dashboardu spravíš rozhodnutie. Nič z toho nie je hypotetické — všetko sú veci, ktoré sa už stali alebo sú namerané.</p></blockquote>
 
   <h3>Dátové zdroje sú krehké</h3>
-  <p class="warn">Celý nástroj stojí na bezplatných tieroch, ktoré sa menia bez ohlásenia. <strong>25. 7. 2026</strong> prestal Finnhub vracať insider aj earnings dáta (HTTP 200 s prázdnymi poľami) a FMP začal na <code>earnings-surprises</code> odpovedať 403. Earnings preto majú reťaz štyroch zdrojov: Finnhub → FMP → Alpha Vantage → Yahoo.</p>
+  <p class="warn">Celý nástroj stojí na bezplatných tieroch, ktoré sa menia bez ohlásenia. 25. 7. 2026 prestal Finnhub vracať insider aj earnings dáta a FMP začal na earnings-surprises odpovedať 403. Earnings používajú Finnhub a pri nedostupnosti per-ticker fallback Finnhub → Yahoo → yfinance.</p>
   <ul>
-    <li><strong>Alpha Vantage</strong> má 25 volaní denne. Alpha Vantage slúži iba na news sentiment; fundamentálna kvalita používa Finnhub.</li>
     <li><strong>Yahoo quoteSummary</strong> je neoficiálny endpoint bez SLA. Môže kedykoľvek zmeniť tvar alebo prestať odpovedať.</li>
     <li><strong>eToro</strong> sa volá cez lokálny proxy na neverejné API. Nie je to podporovaná integrácia.</li>
     <li>Podmienky väčšiny zdrojov <strong>zakazujú ďalšie šírenie dát</strong>. Pre osobné použitie to je iná situácia než pre čokoľvek zdieľané.</li>
@@ -742,7 +710,6 @@ render.yaml            # web service + 1GB disk na /data</code></pre>
     <tr><td><code>DASH_USER</code> / <code>DASH_PASS</code></td><td>Basic auth (povinné v produkcii).</td></tr>
     <tr><td><code>PUBLIC_API_TOKEN</code></td><td>Token pre <code>/api/public/*</code>; bezpečne sa posiela v hlavičke <code>Authorization: Bearer</code> alebo <code>X-API-Token</code>.</td></tr>
     <tr><td><code>ETORO_API_KEY_1</code> …</td><td>eToro kľúče (nikdy hardcoded v zdroji).</td></tr>
-    <tr><td><code>ALPHA_VANTAGE_API_KEY</code></td><td>News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie).</td></tr>
     <tr><td><code>FMP_API_KEY</code></td><td>Cieľová cena a earnings surprises.</td></tr>
     <tr><td><code>FINNHUB_API_KEY</code></td><td>Earnings, insider, EPS, analytický konsenzus, sektorová relatívna sila a fundamentálna kvalita (/stock/metric).</td></tr>
     <tr><td><code>MASSIVE_API_KEY</code></td><td>End-of-day trhový kontext Nasdaq-100 a S&amp;P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako primárny zdroj denných/týždenných OHLCV (yfinance fallback).</td></tr>

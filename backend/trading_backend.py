@@ -1695,32 +1695,6 @@ def delete_preset(name: str):
 
 # ── NEWS ─────────────────────────────────────────────────────────────────────
 
-@app.get("/api/news")
-def get_news(symbol: str = Query(...)):
-    sym = symbol.upper().strip()
-    url = (
-        f"https://query2.finance.yahoo.com/v1/finance/search"
-        f"?q={requests.utils.quote(sym)}&quotesCount=0&newsCount=8"
-        f"&enableFuzzyQuery=false&enableCb=false"
-    )
-    try:
-        resp = requests.get(url, headers=YF_HEADERS, timeout=6)
-        resp.raise_for_status()
-        news = resp.json().get("news", [])
-    except Exception as e:
-        raise HTTPException(502, f"News fetch zlyhalo: {e}")
-
-    result = []
-    for item in news:
-        pub = item.get("providerPublishTime", 0)
-        result.append({
-            "title":     item.get("title", ""),
-            "url":       item.get("link", ""),
-            "source":    item.get("publisher", ""),
-            "published": pub,
-        })
-    return result
-
 # ── ETORO INTERVAL MAPPING ───────────────────────────────────────────────────
 
 # Yahoo Finance period/interval -> eToro candlesCount + interval
@@ -3728,7 +3702,6 @@ def _log_ext_api_call(provider: str, endpoint: str):
 # Lokálne volania (eToro proxy na localhost) sa nelogujú.
 _orig_requests_get = requests.get
 _API_HOST_PROVIDERS = (
-    ("alphavantage.co", "alpha_vantage"),
     ("financialmodelingprep.com", "fmp"),
     ("finnhub.io", "finnhub"),
     ("api.massive.com", "massive"),
@@ -3739,14 +3712,6 @@ _API_HOST_PROVIDERS = (
 
 def _api_endpoint_label(host: str, path: str, query: str, params) -> str:
     parts = [p for p in path.split("/") if p]
-    if "alphavantage" in host:
-        # AV má jediný /query endpoint — rozlišuje sa parametrom function
-        # (posiela sa cez params= kwarg, výnimočne priamo v URL)
-        fn = (params or {}).get("function") if isinstance(params, dict) else None
-        if not fn:
-            m = re.search(r"function=([A-Za-z_]+)", query or "")
-            fn = m.group(1) if m else None
-        return str(fn) if fn else "query"
     if "massive" in host:
         return "/".join(parts[:3]) or "root"
     if "yahoo" in host:
@@ -3811,19 +3776,6 @@ def get_api_usage(days: int = Query(14)):
         for provider, endpoints in providers.items():
             totals[provider] = totals.get(provider, 0) + sum(endpoints.values())
     return {"days": days, "per_day": filtered, "provider_totals": totals}
-
-# Po prvom 429 nevoláme AV do polnoci UTC (vtedy sa denný limit resetuje) —
-# šetrí márne requesty aj latenciu pri prechádzaní ďalších tickerov.
-_av_limit_exhausted_until = 0.0
-
-def _av_mark_limit_exhausted():
-    global _av_limit_exhausted_until
-    now = datetime.now(timezone.utc)
-    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    _av_limit_exhausted_until = midnight.timestamp()
-
-def _av_limit_active() -> bool:
-    return time.time() < _av_limit_exhausted_until
 
 def _build_fund_analysis_from_metrics(sym: str, metric: dict, company: str | None) -> dict:
     metric = metric if isinstance(metric, dict) else {}
@@ -10472,7 +10424,7 @@ def _heatmap_change(change: tuple[float, float] | None) -> float | None:
     return round(float(change[0]), 2) if change is not None else None
 
 
-# Portfolio news is independent of the chart/Alpha Vantage news endpoints.
+# Portfolio news uses its own aggregated Yahoo/Finnhub feed and cache.
 _portfolio_news_lock = threading.Lock()
 # Studený beh nesmie držať Prehľad minúty. Yahoo z Render IP nie je overený —
 # ak by visel, 50 titulov × 2 zdroje × timeout / 4 vlákna by bolo 1–3 minúty
@@ -11520,14 +11472,8 @@ def backfill_regime_context(target: str = Query("log"), ticker: str = Query(None
     return summary
 
 
-# ── News sentiment (Alpha Vantage) ────────────────────────────────────────────
-# Lazy, cache-first: free tier = 25 req/deň, preto 12h TTL na persistent disku
-# a stale fallback pri chybe/limite. Nikdy nesmie zhodiť scanner.
-
+# Shared cache root for the earnings calendar and ApeWisdom Reddit mentions.
 NEWS_CACHE_DIR = DATA_ROOT / "news_cache"
-NEWS_CACHE_TTL_H = 168  # 7 dní — AV len na explicitné vyžiadanie, modal má ⟳ refresh
-NEWS_RELEVANCE_MIN = 0.15
-NEWS_MAX_ITEMS = 10
 
 # ── ApeWisdom Reddit mentions ──────────────────────────────────────────────────
 
@@ -11646,254 +11592,10 @@ async def get_reddit_mentions(tickers: str = Query("")):
 
 
 
-def _news_cache_path(ticker: str) -> Path:
-    return NEWS_CACHE_DIR / f"{ticker.upper()}.json"
-
-
-def _news_cache_read(ticker: str) -> dict | None:
-    p = _news_cache_path(ticker)
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-    return None
-
-
-def _news_scrub_error(msg: str) -> str:
-    """AV vkladá API kľúč do rate-limit hlášky — nikdy ho nepustiť do UI/cache."""
-    key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    text = str(msg)
-    if key:
-        text = text.replace(key, "***")
-    return text[:200]
-
-
-# ── News clustering ────────────────────────────────────────────────────────
-# Viac vydavateľov často prevezme tú istú správu (wire story) takmer s rovnakým
-# titulkom. Bez klastrovania by taká udalosť vážila v priemernom sentimente
-# N-krát namiesto raz. Lacná heuristika (Jaccard prienik tokenov titulku) —
-# žiadne NLP knižnice, žiadny nový RAM footprint.
-_NEWS_STOPWORDS = {
-    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "is", "are",
-    "as", "at", "by", "its", "it", "with", "after", "before", "amid", "says",
-    "say", "will", "has", "have", "had", "from", "into", "over", "up", "down",
-    "than", "that", "this", "be", "was", "were", "vs",
-}
-
-
-def _news_title_tokens(title: str) -> set:
-    words = re.findall(r"[a-z0-9]+", (title or "").lower())
-    return {w for w in words if len(w) > 2 and w not in _NEWS_STOPWORDS}
-
-
-def _news_cluster_items(items: list[dict], threshold: float = 0.5) -> list[dict]:
-    """Zoskupí články pokrývajúce tú istú udalicu — Jaccard prienik tokenov titulku
-    >= threshold. Union-find, O(n^2) na n<=NEWS_MAX_ITEMS (lacné, žiadny externý
-    volanie). Pridá cluster_id/cluster_size/cluster_primary; poradie a obsah
-    zoznamu inak nemení — čisto anotácia nad už vybranými top-N článkami."""
-    n = len(items)
-    if n <= 1:
-        for it in items:
-            it["cluster_id"] = 0
-            it["cluster_size"] = 1
-            it["cluster_primary"] = True
-        return items
-    token_sets = [_news_title_tokens(it.get("title")) for it in items]
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    for i in range(n):
-        if not token_sets[i]:
-            continue
-        for j in range(i + 1, n):
-            if not token_sets[j]:
-                continue
-            inter = token_sets[i] & token_sets[j]
-            uni = token_sets[i] | token_sets[j]
-            if uni and len(inter) / len(uni) >= threshold:
-                union(i, j)
-
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        groups.setdefault(find(i), []).append(i)
-    # zoradenie klastrov podľa najsilnejšieho člena — len pre stabilné cluster_id,
-    # neovplyvňuje poradie v zozname (to ostáva podľa items ako prišli)
-    ordered = sorted(groups.values(),
-                      key=lambda idxs: max(items[i].get("relevance") or 0 for i in idxs),
-                      reverse=True)
-    for cid, idxs in enumerate(ordered):
-        primary = max(idxs, key=lambda i: items[i].get("relevance") or 0)
-        for i in idxs:
-            items[i]["cluster_id"] = cid
-            items[i]["cluster_size"] = len(idxs)
-            items[i]["cluster_primary"] = (i == primary)
-    return items
-
-
-def _news_parse_feed(ticker: str, data: dict) -> list[dict]:
-    """Normalizuje surovú AV NEWS_SENTIMENT odpoveď na zoznam položiek."""
-    # AV vracia 200 aj pri rate-limite — limit hláška je v "Note"/"Information"
-    if "feed" not in data:
-        msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
-        if _av_is_premium_refusal(msg):
-            raise RuntimeError(AV_PREMIUM_MESSAGE)
-        raise RuntimeError(_news_scrub_error(msg))
-
-    items = []
-    for art in data.get("feed", []):
-        # ticker-specific sentiment, nie overall (článok môže hodnotiť iný titul)
-        ts = next((t for t in art.get("ticker_sentiment", [])
-                   if t.get("ticker", "").upper() == ticker.upper()), None)
-        if not ts:
-            continue
-        relevance = _num_or_none(ts.get("relevance_score")) or 0.0
-        if relevance < NEWS_RELEVANCE_MIN:
-            continue
-        # time_published: "20260610T143000" → ISO
-        tp_raw = art.get("time_published", "")
-        try:
-            tp = datetime.strptime(tp_raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc).isoformat()
-        except Exception:
-            tp = None
-        items.append({
-            "title": art.get("title"),
-            "url": art.get("url"),
-            "source": art.get("source"),
-            "time_published": tp,
-            "sentiment_label": ts.get("ticker_sentiment_label"),
-            "sentiment_score": _num_or_none(ts.get("ticker_sentiment_score")),
-            "relevance": round(relevance, 3),
-        })
-    # aktuálnosť + relevancia: novšie a relevantnejšie hore
-    items.sort(key=lambda a: (a.get("time_published") or "", a.get("relevance") or 0), reverse=True)
-    items = items[:NEWS_MAX_ITEMS]
-    return _news_cluster_items(items)
-
-
-AV_PREMIUM_MESSAGE = "Alpha Vantage sentiment správ už nie je vo free pláne (platený endpoint)."
-
-
-def _av_is_premium_refusal(message) -> bool:
-    """A paywall answer is not a quota answer: do not report it as a daily limit."""
-    return "premium" in str(message or "").lower()
-
-
-def _news_fetch_av(ticker: str) -> list[dict]:
-    """Stiahne a normalizuje news sentiment z Alpha Vantage pre jeden ticker."""
-    api_key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("ALPHA_VANTAGE_API_KEY nie je nastavený")
-    if _av_limit_active():
-        raise RuntimeError("Alpha Vantage denný limit vyčerpaný — resetuje sa o polnoci UTC.")
-    resp = requests.get(
-        "https://www.alphavantage.co/query",
-        params={"function": "NEWS_SENTIMENT", "tickers": ticker.upper(),
-                "limit": 50, "apikey": api_key},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    data = resp.json() or {}
-    if _av_is_premium_refusal(data.get("Note") or data.get("Information")):
-        raise RuntimeError(AV_PREMIUM_MESSAGE)
-    if data.get("Note") or data.get("Information"):
-        _av_mark_limit_exhausted()
-        raise RuntimeError("Alpha Vantage denný limit vyčerpaný (free tier 25 req/deň).")
-    return _news_parse_feed(ticker, data)
-
-
-def _news_save_cache(ticker: str, items: list[dict]) -> dict:
-    payload = {
-        "ticker": ticker,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "items": items,
-    }
-    NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    _news_cache_path(ticker).write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return payload
-
-
-@app.get("/api/news/clientkey")
-def get_news_clientkey():
-    """Vydá AV kľúč prehliadaču — fallback keď je Render zdieľaná IP rate-limitnutá.
-    Endpoint je za basic auth ako všetko ostatné; kľúč nikdy necachovať na disk."""
-    key = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    if not key:
-        raise HTTPException(404, "ALPHA_VANTAGE_API_KEY nie je nastavený")
-    return {"key": key}
-
-
-@app.get("/api/news/summary")
-def get_news_summary(tickers: str = Query("")):
-    """Agregovaný sentiment z disk cache — žiadne AV requesty, len prečíta
-    čo už bolo stiahnuté cez 📰. Relevance-weighted priemer sentiment skóre.
-
-    Počíta sa len z cluster_primary článkov (jeden reprezentant na udalosť) —
-    inak by udalosť pokrytá 5 vydavateľmi vážila v priemere 5x viac než udalosť
-    s jediným článkom. Staré cache záznamy bez cluster_primary poľa (pred
-    zavedením clusteringu) sa berú ako primary, kým sa cache neobnoví (12h TTL)."""
-    out = {}
-    for t in tickers.split(","):
-        t = t.strip().upper()
-        if not t or len(t) > 12:
-            continue
-        cached = _news_cache_read(t)
-        items = (cached or {}).get("items") or []
-        primary_items = [i for i in items if i.get("cluster_primary", True)]
-        scored = [(i.get("sentiment_score"), i.get("relevance") or 0.0)
-                  for i in primary_items if i.get("sentiment_score") is not None]
-        if not scored:
-            continue
-        wsum = sum(r for _, r in scored) or 1.0
-        avg = sum(s * r for s, r in scored) / wsum
-        out[t] = {"avg": round(avg, 3), "n": len(primary_items), "n_articles": len(items),
-                  "fetched_at": cached.get("fetched_at")}
-    return {"summary": out}
-
-
-# ── Earnings calendar (Alpha Vantage EARNINGS_CALENDAR, 1 request pre celý trh) ──
+# ── Earnings calendar ────────────────────────────────────────────────────────
 
 EARNINGS_CACHE_FILE = NEWS_CACHE_DIR / "_earnings_calendar.json"
 EARNINGS_CACHE_TTL_H = 24
-
-
-def _earnings_parse_csv(text: str) -> dict:
-    """CSV: symbol,name,reportDate,... → {SYMBOL: najbližší reportDate}."""
-    if not text or text.lstrip().startswith("{"):
-        # AV vracia JSON namiesto CSV pri chybe/rate-limite
-        try:
-            data = json.loads(text)
-            msg = data.get("Note") or data.get("Information") or data.get("Error Message") or "unexpected response"
-        except Exception:
-            msg = "unexpected response"
-        raise RuntimeError(_news_scrub_error(msg))
-    dates: dict = {}
-    lines = text.strip().splitlines()
-    if not lines or "symbol" not in lines[0].lower():
-        raise RuntimeError("unexpected CSV format")
-    for line in lines[1:]:
-        parts = line.split(",")
-        if len(parts) < 3:
-            continue
-        sym, report = parts[0].strip().upper(), parts[2].strip()
-        if not sym or not report:
-            continue
-        if sym not in dates or report < dates[sym]:
-            dates[sym] = report
-    if not dates:
-        raise RuntimeError("empty earnings calendar")
-    return dates
 
 
 def _earnings_cache_read() -> dict | None:
@@ -11939,9 +11641,9 @@ def _earnings_fetch_finnhub() -> dict:
     return dates
 
 
-_earnings_bulk_failed_at = 0.0   # 2026-07-09: backoff keď OBAJA provideri zlyhali,
+_earnings_bulk_failed_at = 0.0   # backoff po zlyhaní zdroja,
                                  # ale cache má (staršie) dates — bez toho by sa
-                                 # Finnhub+AV skúšali odznova pri každom volaní
+                                 # volania opakovali pri každom requeste
                                  # (get_chart, inbox, calendar widget...) donekonečna
 EARNINGS_BULK_FAIL_BACKOFF = 900  # 15 min
 
@@ -11961,14 +11663,12 @@ def get_earnings_calendar(refresh: int = Query(0)):
             pass
     if not refresh and cached and cached.get("dates") and time.time() < _earnings_bulk_failed_at + EARNINGS_BULK_FAIL_BACKOFF:
         return {**cached, "stale": True}
-    # Iba Finnhub — automatický Alpha Vantage fallback odstránený (2026-07-16):
-    # AV sa volá výhradne na explicitnú požiadavku používateľa, nie na pozadí.
     try:
         payload = _earnings_save_cache(_earnings_fetch_finnhub())
         return {**payload, "stale": False}
     except Exception as e:
         _earnings_bulk_failed_at = time.time()
-        err = _news_scrub_error(str(e))
+        err = _scrub_token(str(e))
         if cached and cached.get("dates"):
             return {**cached, "stale": True, "error": err}
         payload = {"fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -11979,20 +11679,6 @@ def get_earnings_calendar(refresh: int = Query(0)):
         except Exception:
             pass
         return {**payload, "stale": False}
-
-
-@app.post("/api/earnings/ingest")
-async def ingest_earnings_calendar(request: Request):
-    """Surové CSV stiahnuté prehliadačom (browser-direct fallback ako pri news)."""
-    text = (await request.body()).decode("utf-8", errors="replace")
-    try:
-        dates = _earnings_parse_csv(text)
-    except Exception as e:
-        return {"dates": {}, "stale": False,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "error": _news_scrub_error(str(e))}
-    payload = _earnings_save_cache(dates)
-    return {**payload, "stale": False}
 
 
 _earnings_sym_failed_at: dict[str, float] = {}   # sym → ts neúspechu (1h backoff)
@@ -12302,10 +11988,9 @@ def _scrub_token(msg: str) -> str:
     apiKey pridané 2026-07-09: Massive volania (raise_for_status()) mohli
     dostať MASSIVE_API_KEY do error stringu, ktorý sa ukladal aj do
     company_profiles/{SYM}.json na disku.
-    2026-07-16: navyše maskuj aj holé hodnoty známych API kľúčov — Alpha
-    Vantage vkladá kľúč do prostého textu chybovej hlášky, nie do URL."""
+    Maskuje aj holé hodnoty známych API kľúčov."""
     msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("ALPHA_VANTAGE_API_KEY", "FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
+    for env_name in ("FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
         secret = os.getenv(env_name, "").strip()
         if secret and (env_name == "FINVIZ_COOKIE" or len(secret) >= 8):
             msg = msg.replace(secret, "***")
@@ -12424,9 +12109,8 @@ def _yahoo_earnings_chart(sym: str) -> tuple[list[dict], bool, str | None]:
     koniec fiškálneho kvartálu, čo bola pôvodná chyba tejto feature.
 
     Pozor na výklad extrémnych prekvapení: GOOG Q2 2026 tu vyjde 9.11 vs odhad
-    2.91 (+213 %), ale Alpha Vantage nezávisle hlási to isté (9.11 vs 2.88).
-    Dva nezávislé zdroje s tou istou hodnotou => je to reálne vykázané GAAP EPS
-    a nesedí len POROVNANIE s non-GAAP konsenzom. Nefiltruje sa to tu — rieši to
+    2.91 (+213 %), pričom news-independent actual value sa zachováva aj pri
+    extrémnom percentuálnom prekvapení. Nefiltruje sa to tu — rieši to
     centrálne `get_ticker_insights()` cez `EPS_MAX_TRUSTED_SURPRISE_PCT` tak, že
     riadok ponechá a zneplatní iba `surprise_pct`/`beat`.
     """
@@ -13689,8 +13373,8 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
             core = {**_insights_parse(qs), "source": "yahoo"}
         else:
             errs.append("yahoo unavailable")
-    # Yahoo EPS stays deliberately disabled. FMP then cached Alpha Vantage are
-    # the safe fallbacks whenever Finnhub produced no usable historical rows.
+    # Yahoo EPS stays deliberately disabled here; FMP is the first fallback
+    # whenever Finnhub produced no usable historical rows.
     fmp_succeeded = False
     fmp_error = None
     if core is None or not core.get("eps_history"):
@@ -13748,10 +13432,9 @@ def get_ticker_insights(symbol: str, refresh: int = Query(0)):
         if core.get("source") != "finnhub" and errs:
             core["finnhub_error"] = " | ".join(errs)
         # Nedôveryhodné porovnanie NEZAHADZUJ — zneplatni len samotné porovnanie.
-        # Overené 2026-07-25 na GOOG Q2 2026: Alpha Vantage aj Yahoo nezávisle
-        # hlásia actual 9.11 proti odhadu ~2.88 (+216 %). Dva nezávislé zdroje
-        # s tým istým číslom => 9.11 je reálne vykázané (GAAP) EPS, nie dátová
-        # chyba; konsenzus je len na inej báze (non-GAAP), takže nesedí
+        # Overené 2026-07-25 na GOOG Q2 2026: Yahoo hlásil actual 9.11 proti
+        # odhadu ~2.88 (+216 %). Hodnota je reálne vykázané (GAAP) EPS, nie
+        # dátová chyba; konsenzus je len na inej báze (non-GAAP), takže nesedí
         # porovnanie, nie hodnota. Zahodenie riadku by skrylo skutočný earnings
         # event — a marker má v prvom rade hovoriť "tu boli výsledky".
         # `beat: None` znamená "nevieme posúdiť" (frontend to farbí neutrálne).
@@ -15050,68 +14733,6 @@ def get_massive_market_context(refresh: int = Query(0)):
     if not data:
         raise HTTPException(status_code=503, detail="Massive market snapshot is unavailable")
     return data
-
-
-@app.post("/api/news/{ticker}/ingest")
-async def ingest_ticker_news(ticker: str, request: Request):
-    """Prijme surovú AV odpoveď stiahnutú prehliadačom (klientova IP obchádza
-    rate-limit zdieľanej Render IP), rozparsuje ju rovnakou logikou a uloží do cache."""
-    ticker = ticker.strip().upper()
-    if not ticker or len(ticker) > 12:
-        raise HTTPException(400, "Neplatný ticker")
-    try:
-        data = await request.json()
-    except Exception:
-        raise HTTPException(400, "Neplatné JSON telo")
-    try:
-        items = _news_parse_feed(ticker, data if isinstance(data, dict) else {})
-    except Exception as e:
-        return {"ticker": ticker, "items": [], "stale": False,
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "error": _news_scrub_error(str(e))}
-    payload = _news_save_cache(ticker, items)
-    return {**payload, "stale": False}
-
-
-@app.get("/api/news/{ticker}")
-def get_ticker_news(ticker: str, refresh: int = Query(0)):
-    ticker = ticker.strip().upper()
-    if not ticker or len(ticker) > 12:
-        raise HTTPException(400, "Neplatný ticker")
-
-    cached = _news_cache_read(ticker)
-    if cached and not refresh:
-        age_h = None
-        try:
-            fetched = datetime.fromisoformat(cached["fetched_at"])
-            age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
-        except Exception:
-            pass
-        # error záznam (negatívna cache, napr. rate-limit) drží len 1h,
-        # plnohodnotné dáta 12h — nech reload stránky nepáli requesty do vyčerpaného limitu
-        ttl = 1 if cached.get("error") else NEWS_CACHE_TTL_H
-        if age_h is not None and age_h < ttl:
-            return {**cached, "stale": False}
-
-    try:
-        items = _news_fetch_av(ticker)
-        payload = _news_save_cache(ticker, items)
-        return {**payload, "stale": False}
-    except Exception as e:
-        err = _news_scrub_error(str(e))
-        # stale fallback — radšej staré správy než chyba; cache s dátami neprepisujeme
-        if cached and cached.get("items"):
-            return {**cached, "stale": True, "error": err}
-        # negatívna cache (1h TTL) — nech opakované otvorenie nepáli requesty
-        payload = {"ticker": ticker, "items": [],
-                   "fetched_at": datetime.now(timezone.utc).isoformat(), "error": err}
-        try:
-            NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            _news_cache_path(ticker).write_text(
-                json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
-        return {**payload, "stale": False}
 
 
 @app.get("/api/checklist")

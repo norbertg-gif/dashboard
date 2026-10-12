@@ -1712,17 +1712,6 @@ async function loadEarningsCalendar() {
   } catch (e) { _earningsDates = {}; }
 }
 
-function newsSummaryFromItems(items) {
-  // Len cluster_primary (jeden reprezentant na udalosť) — viac vydavateľov
-  // s tou istou wire story inak násobí váhu jednej udalosti v priemere.
-  const primary = (items || []).filter(i => i.cluster_primary !== false);
-  const scored = primary.filter(i => Number.isFinite(i.sentiment_score));
-  if (!scored.length) return null;
-  const wsum = scored.reduce((s, i) => s + (i.relevance || 0), 0) || 1;
-  const avg = scored.reduce((s, i) => s + i.sentiment_score * (i.relevance || 0), 0) / wsum;
-  return { avg: Math.round(avg * 1000) / 1000, n: primary.length, nArticles: (items || []).length };
-}
-
 function applyScannerBadges() {
   if (_holdings) {
     document.querySelectorAll('[data-hold]').forEach(el => {
@@ -1854,40 +1843,6 @@ async function loadNasdaqScannerResults() {
 function scheduleNasdaqScannerPoll() {
   if (pc_scannerPollTimer) clearTimeout(pc_scannerPollTimer);
   pc_scannerPollTimer = setTimeout(loadNasdaqScannerResults, 2500);
-}
-
-async function fetchTickerNewsDirect(ticker) {
-  try {
-    const kr = await fetch('/api/news/clientkey');
-    if (!kr.ok) return null;
-    const { key } = await kr.json();
-    if (!key) return null;
-    const av = await fetch(`https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(ticker)}&limit=50&apikey=${encodeURIComponent(key)}`);
-    if (!av.ok) return null;
-    const raw = await av.json();
-    // parsovanie + cache nechávame na backende — jedna logika pre obe cesty
-    const ir = await fetch(`/api/news/${encodeURIComponent(ticker)}/ingest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(raw),
-    });
-    if (!ir.ok) return null;
-    const data = await ir.json();
-    // ak aj priame volanie narazilo na limit (per-key limit), nechaj pôvodnú chybu
-    if (data.error && !(data.items || []).length) return null;
-    return data;
-  } catch (e) {
-    return null;
-  }
-}
-
-function newsSentimentBadge(label, score) {
-  const l = String(label || '').toLowerCase();
-  let cls = 'neutral', txt = 'Neutral';
-  if (l.includes('bullish')) { cls = 'bull'; txt = l.includes('somewhat') ? 'Somewhat bullish' : 'Bullish'; }
-  else if (l.includes('bearish')) { cls = 'bear'; txt = l.includes('somewhat') ? 'Somewhat bearish' : 'Bearish'; }
-  const scoreTxt = Number.isFinite(score) ? ` ${score >= 0 ? '+' : ''}${score.toFixed(2)}` : '';
-  return `<span class="news-badge ${cls}">${txt}${scoreTxt}</span>`;
 }
 
 async function runNasdaqScanner() {

@@ -9,10 +9,10 @@ const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
 const CHART_INITIAL_BARS = 300;
 const CHART_HISTORY_PAGE = 300;
 const DEFAULTS = [
-  {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'NVDA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
-  {symbol:'TSLA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false}},
+  {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
+  {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
+  {symbol:'NVDA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
+  {symbol:'TSLA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
 ];
 
 const TAGS = [
@@ -241,7 +241,7 @@ function chartDefaultPanelCfg(symbol, extra = {}) {
   const d = getChartDefaults();
   return {
     symbol, period: 'auto', interval: d.interval,
-    indicators: { ...d.indicators, wizard: false, news: false },
+    indicators: { ...d.indicators, wizard: false },
     ...extra,
   };
 }
@@ -342,7 +342,6 @@ function onChartPanelContextMenu(event, id) {
     { label: 'Nastaviť semafor…', action: () => openConsensusSettingsModal() },
     { sep: true },
     { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
-    { label: 'Správy', checked: !!inds.news, action: () => toggleNews(id) },
   ];
   // Hromadné nastavenie má zmysel len pre panely v mriežke Grafov — dock a
   // Verdikt panel sú samostatné pohľady mimo nej.
@@ -369,10 +368,8 @@ function onChartPanelContextMenu(event, id) {
 }
 
 // ── Hromadné zobrazenie grafov ───────────────────────────────────────────────
-// Kopíruje sa interval, HA, čiarové/oscilátorové indikátory, Wizard aj Správy.
-// Správy v grafoch idú cez Yahoo vyhľadávanie (`/api/news`), NIE cez Alpha
-// Vantage — kvótu 25 req/deň míňajú len Správy v Analytike, takže kopírovanie
-// na všetky grafy nič nestojí. Zoom sa nekopíruje: pri inom intervale ho
+// Kopíruje sa interval, HA, čiarové/oscilátorové indikátory a Wizard.
+// Zoom sa nekopíruje: pri inom intervale ho
 // loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
 const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp', 'consensus'];
 const PANEL_DEFAULT_INTERVAL = '1d';
@@ -408,7 +405,6 @@ function applyViewToAllCharts(sourceId) {
   targets.forEach(pid => {
     setPanelView(pid, interval, src.indicators);
     setPanelWizard(pid, src.indicators.wizard, { load: false });
-    setPanelNews(pid, src.indicators.news);
   });
   saveLayout();
   setStatus(`Zobrazenie použité na ${targets.length} grafov`, 'ok');
@@ -420,7 +416,6 @@ function resetAllChartsToDefault() {
   ids.forEach(pid => {
     setPanelView(pid, getChartDefaults().interval, getChartDefaults().indicators);
     setPanelWizard(pid, false);
-    setPanelNews(pid, false);
   });
   saveLayout();
   setStatus(`${ids.length} grafov nastavených na predvolené`, 'ok');
@@ -537,7 +532,7 @@ function getCurrentConfig() {
         symbol: symEl.value.trim().toUpperCase(),
         period: 'auto',
         interval: p.querySelector('.interval-sel')?.value || '1d',
-        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
         view: r?.viewRange || null,
         // offsetHeight je 0 keď je záložka Grafy skrytá (saveLayout beží aj z
         // pozadia) — fallback na inline style.height, ktorý prežije display:none
@@ -675,7 +670,7 @@ function openChartDock(symbol) {
   }
   const cfg = {
     symbol: sym, period: 'auto', interval: '1d',
-    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
     container: 'dock-grid',
   };
   dockPanelId = createPanel(cfg);
@@ -702,7 +697,7 @@ function openVerdictChart(symbol) {
   }
   verdictPanelId = createPanel({
     symbol: sym, period: 'auto', interval: '1d',
-    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false},
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
     container: 'verdict-grid',
   });
   loadChart(verdictPanelId);
@@ -1183,7 +1178,8 @@ function renderConsensus(id, data, r) {
 // ── CREATE PANEL ──────────────────────────────────────────────────────────────
 function createPanel(cfg) {
   const id = 'pnl' + (++panelSeq);
-  const inds = cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,news:false};
+  const inds = {...(cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false})};
+  delete inds.news; // old saved layouts/presets may still carry this removed key
   const initialViewRange = cfg.view && Number.isFinite(Number(cfg.view.from)) && Number.isFinite(Number(cfg.view.to))
     ? { from: Number(cfg.view.from), to: Number(cfg.view.to) }
     : null;
@@ -1237,7 +1233,6 @@ function createPanel(cfg) {
       <button id="ind-${id}-consensus" class="ind-btn${inds.consensus?' active-consensus':''}" onclick="toggleIndicator('${id}','consensus')" title="Čítacia pomôcka, nie signál">ZHODA</button>
       <div style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></div>
       <button id="wiz-btn-${id}" class="ind-btn${inds.wizard?' active-adx':''}" style="${inds.wizard?'border-color:var(--blue);color:var(--blue);background:var(--blue-dim);':''}" onclick="toggleWizard('${id}')">⚡ WIZARD</button>
-      <button id="news-btn-${id}" class="ind-btn" style="${inds.news?'border-color:var(--muted2);color:var(--text);background:var(--bg2);':''}" onclick="toggleNews('${id}')">📰 NEWS</button>
     </div>
     <div class="p-info" id="info-${id}" onclick="setActivePanel('${id}')"><span class="p-name">—</span></div>
     <div class="p-chart${inds.rsi||inds.adx||inds.macd||inds.ipp||inds.consensus?' with-sub':''}" id="chart-${id}" onclick="setActivePanel('${id}')">
@@ -1255,9 +1250,6 @@ function createPanel(cfg) {
     </div>
     <div class="p-sub${inds.ipp?'':' hidden'}" id="sub-ipp-${id}" style="height:80px;flex-shrink:0;" onclick="setActivePanel('${id}')">
       <div class="p-sub-label" id="ipp-label-${id}" style="color:#a070ff">IPP · Načítava sa…</div>
-    </div>
-    <div class="p-news${inds.news?'':' hidden'}" id="news-${id}">
-      <div class="news-loading">Načítava správy…</div>
     </div>
     <div class="p-wizard${inds.wizard?'':' hidden'}" id="wizard-${id}">
       <div class="wizard-empty">Načítava…</div>
@@ -1309,7 +1301,7 @@ function createPanel(cfg) {
     });
   }
 
-  // RO: šírka panela + výška grafu (auto-fill po skrytí subpanelu/wizardu/news).
+  // RO: šírka panela + výška grafu (auto-fill po skrytí subpanelu/wizardu).
   // Drží LWC canvasy (main výška+šírka, subpanely šírka) a kumo canvas v sync.
   let _roRaf = null;
   const ro = new ResizeObserver(() => {
@@ -1955,60 +1947,6 @@ function renderWizard(id, data) {
   ).join('');
 }
 
-// ── NEWS ─────────────────────────────────────────────────────────────────────
-function setPanelNews(id, on) {
-  const r = registry[id]; if (!r) return;
-  const changed = !!r.indicators.news !== !!on;
-  r.indicators.news = !!on;
-  const btn = document.getElementById('news-btn-' + id);
-  const panel = document.getElementById('news-' + id);
-  if (btn) {
-    btn.style.borderColor = on ? 'var(--muted2)' : '';
-    btn.style.color = on ? 'var(--text)' : '';
-    btn.style.background = on ? 'var(--bg)' : '';
-  }
-  panel?.classList.toggle('hidden', !on);
-  // Už otvorené správy sa znova nesťahujú — ticker sa nezmenil.
-  if (on && changed) loadNews(id);
-}
-
-function toggleNews(id) {
-  const r = registry[id]; if (!r) return;
-  setPanelNews(id, !r.indicators.news);
-  saveLayout();
-}
-
-async function loadNews(id) {
-  const panel = document.getElementById('news-' + id); if (!panel) return;
-  const sym = document.getElementById(id)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
-  if (!sym) return;
-  panel.innerHTML = '<div class="news-loading">Načítavam správy pre ' + sym + '…</div>';
-  try {
-    const r = await fetch(`${API}/api/news?symbol=${encodeURIComponent(sym)}`);
-    if (!r.ok) throw new Error(r.statusText);
-    const news = await r.json();
-    if (!news.length) { panel.innerHTML = '<div class="news-loading">Žiadne správy</div>'; return; }
-    const now = Date.now() / 1000;
-    panel.innerHTML =
-      `<div class="news-hdr">📰 <span class="news-hdr-sym">${sym}</span> — posledné správy</div>` +
-      news.map(n => {
-        const age = now - n.published;
-        const ageStr = age < 3600 ? Math.round(age/60) + 'min'
-          : age < 86400 ? Math.round(age/3600) + 'h'
-          : Math.round(age/86400) + 'd';
-        return `<a class="news-item" href="${n.url}" target="_blank" rel="noopener">
-          <span class="news-title">${n.title}</span>
-          <span class="news-meta">
-            <span class="news-source">${n.source}</span><br>
-            <span class="news-time">${ageStr}</span>
-          </span>
-        </a>`;
-      }).join('');
-  } catch(e) {
-    panel.innerHTML = `<div class="news-loading">⚠ ${e.message}</div>`;
-  }
-}
-
 // ── HEIKIN ASHI ──────────────────────────────────────────────────────────────
 function toggleHA(id) {
   const r = registry[id]; if (!r) return;
@@ -2540,7 +2478,6 @@ async function loadChart(id, opts = {}) {
   try {
     // Zabezpeč že všetky indicators existujú
     if (r.indicators.macd === undefined) r.indicators.macd = false;
-    if (r.indicators.news === undefined) r.indicators.news = false;
     if (r.indicators.ha   === undefined) r.indicators.ha   = false;
     const indParam = getActiveIndicators(id);
     // Náročnejšie indikátory pre Wizard žiadaj iba keď je Wizard otvorený.
@@ -2642,7 +2579,6 @@ async function loadChart(id, opts = {}) {
     applyTagToPanel(id, getTag(sym));
     r.lastWizardData = data;
     if (r.indicators.wizard) renderWizard(id, data);
-    if (r.indicators.news) loadNews(id);
 
     const last = data[data.length-1], prev = data.length>1?data[data.length-2]:null;
     const pct  = prev ? (last.close-prev.close)/prev.close*100 : 0;

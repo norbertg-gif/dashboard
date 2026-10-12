@@ -238,26 +238,6 @@ class NewsTabRegressionTests(unittest.TestCase):
         self.assertEqual(items[0]["title"], "ADI results")
         self.assertEqual(get.call_args.kwargs["params"]["q"], "ADI")
 
-    def test_sentiment_is_only_fetched_on_click(self):
-        src = (Path(__file__).parent / "frontend" / "js" / "newsfeed.js").read_text(encoding="utf-8")
-        # exactly one place may call the per-ticker (Alpha Vantage) endpoint, and it must be the click handler
-        self.assertEqual(src.count("/api/news/${"), 1)
-        body = src.split("async function newsfeedLoadSentiment(", 1)[1].split("\nfunction ", 1)[0]
-        self.assertIn("/api/news/${", body)
-        loader = src.split("async function loadNewsTab(", 1)[1].split("\nasync function loadHomeNewsSummary", 1)[0]
-        self.assertNotIn("newsfeedLoadSentiment(", loader)
-        # definition + the click listener are the ONLY references
-        self.assertEqual(src.count("newsfeedLoadSentiment("), 2)
-
-    def test_alpha_vantage_articles_panel_escapes_and_reuses_loaded_data(self):
-        src = (Path(__file__).parent / "frontend" / "js" / "newsfeed.js").read_text(encoding="utf-8")
-        panel = src.split("function newsfeedAvPanelHtml(", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("newsfeedSafeUrl(item.url)", panel)
-        self.assertIn("escHtml(item.title", panel)
-        self.assertNotIn("fetch(", panel)   # opening the list must not cost another AV request
-        toggle = src.split("function newsfeedToggleAv(", 1)[1].split("\n}\n", 1)[0]
-        self.assertNotIn("fetch(", toggle)
-
     def test_real_yahoo_shape_survives_cache_round_trip(self):
         """Cold fetch -> cache -> warm read must both return the article.
         (Cached items have relatedTickers stripped; re-selecting them dropped every Yahoo item.)"""
@@ -2950,9 +2930,8 @@ class ApiCallStatsRegressionTests(unittest.TestCase):
                 tb._api_stats_mem.clear()
                 tb._log_ext_api_call("fmp", "income-statement")
                 tb._log_ext_api_call("fmp", "income-statement")
-                tb._log_ext_api_call("alpha_vantage", "OVERVIEW")
                 result = tb.get_api_usage(days=1)
-        self.assertEqual(result["provider_totals"], {"fmp": 2, "alpha_vantage": 1})
+        self.assertEqual(result["provider_totals"], {"fmp": 2})
 
     def test_instrumented_get_detects_provider(self):
         seen = []
@@ -2961,15 +2940,11 @@ class ApiCallStatsRegressionTests(unittest.TestCase):
             patch.object(tb, "_orig_requests_get", lambda url, *a, **kw: "resp"),
         ):
             tb._instrumented_requests_get(
-                "https://www.alphavantage.co/query",
-                params={"function": "OVERVIEW", "apikey": "x"})
-            tb._instrumented_requests_get(
                 "https://api.massive.com/v2/aggs/ticker/AAPL/range/1/day/a/b")
             tb._instrumented_requests_get("http://localhost:8765/instruments")
             tb._instrumented_requests_get(
                 "https://financialmodelingprep.com/api/v3/income-statement/AAPL")
         self.assertEqual(seen, [
-            ("alpha_vantage", "OVERVIEW"),
             ("massive", "v2/aggs/ticker"),
             ("fmp", "income-statement"),
         ])
@@ -3859,37 +3834,6 @@ class Ema200ScopeRegressionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
 
 
-class AlphaVantageQuotaRegressionTests(unittest.TestCase):
-    """AV free tier = 25 req/den. Automaticky nacitane insights ho nesmu minat."""
-
-    class _Resp:
-        def __init__(self, status, payload=None, text=""):
-            self.status_code = status
-            self._payload = payload
-            self.text = text
-
-        def json(self):
-            return self._payload
-
-    def test_insights_do_not_fetch_alpha_vantage(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.object(tb, "YAHOO_INSIGHTS_DIR", Path(tmp) / "ins"),
-                patch.dict("os.environ", {"ALPHA_VANTAGE_API_KEY": "testkey123"}),
-                patch.object(tb, "_av_limit_active", return_value=False),
-                patch.object(tb, "_insights_fetch_finnhub", side_effect=RuntimeError("down")),
-                patch.object(tb, "_yahoo_quote_summary", return_value=None),
-                patch.object(tb, "_fmp_price_target", return_value=None),
-                patch.object(tb, "_fmp_earnings_surprises", return_value=([], False, "HTTP 402")),
-                patch.object(tb, "_yahoo_earnings_chart", return_value=([], False, "down")),
-                patch.object(tb.requests, "get") as get,
-            ):
-                tb.get_ticker_insights("AAPL", refresh=1)
-        av_calls = [c for c in get.call_args_list if "alphavantage" in str(c)]
-        self.assertEqual(av_calls, [])
-
-
-
 class ReviewSeptemberRegressionTests(unittest.TestCase):
     """Nálezy z externej revízie (watchlist XSS, eToro search bez tokenu)."""
 
@@ -4324,34 +4268,38 @@ class CloudCanvasNullGuardRegressionTests(unittest.TestCase):
         self.assertIn("unsubscribeVisibleTimeRangeChange(r.cloudCanvasRender)", reset)
 
 
-class AlphaVantagePremiumRefusalRegressionTests(unittest.TestCase):
-    """2026-10-12: AV answered "premium endpoint" and the UI called it a daily limit."""
+class AlphaVantageRemovedRegressionTests(unittest.TestCase):
+    def test_removed_routes_are_absent_and_portfolio_news_remains(self):
+        paths = {route.path for route in tb.app.routes}
+        for path in ("/api/news/{ticker}", "/api/news/clientkey", "/api/news/summary",
+                     "/api/news/{ticker}/ingest", "/api/earnings/ingest"):
+            self.assertNotIn(path, paths)
+        self.assertIn("/api/news/portfolio", paths)
 
-    PREMIUM = {"Information": "Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe..."}
+    def test_sources_and_frontend_assets_have_no_provider_references(self):
+        root = Path(__file__).parent
+        targets = list((root / "backend").rglob("*.py"))
+        targets.extend((root / "frontend" / "js").rglob("*"))
+        targets.extend((root / "frontend").rglob("*.html"))
+        for path in targets:
+            if not path.is_file():
+                continue
+            data = path.read_text(encoding="utf-8").lower()
+            self.assertNotIn("alphavantage", data, str(path))
+            self.assertNotIn("alpha_vantage", data, str(path))
 
-    def test_premium_answer_is_not_reported_or_remembered_as_quota(self):
-        class _Resp:
-            def raise_for_status(self): pass
-            def json(inner): return self.PREMIUM
-        with patch.dict(tb.os.environ, {"ALPHA_VANTAGE_API_KEY": "k"}),              patch.object(tb, "_av_limit_exhausted_until", 0.0),              patch.object(tb.requests, "get", return_value=_Resp()):
-            with self.assertRaises(RuntimeError) as ctx:
-                tb._news_fetch_av("TTD")
-            self.assertEqual(str(ctx.exception), tb.AV_PREMIUM_MESSAGE)
-            self.assertFalse(tb._av_limit_active())
-
-    def test_browser_ingest_path_gets_the_same_message(self):
-        with self.assertRaises(RuntimeError) as ctx:
-            tb._news_parse_feed("TTD", self.PREMIUM)
-        self.assertEqual(str(ctx.exception), tb.AV_PREMIUM_MESSAGE)
-
-    def test_real_quota_note_still_marks_the_limit(self):
-        class _Resp:
-            def raise_for_status(self): pass
-            def json(inner): return {"Note": "our standard API rate limit is 25 requests per day"}
-        with patch.dict(tb.os.environ, {"ALPHA_VANTAGE_API_KEY": "k"}),              patch.object(tb, "_av_limit_exhausted_until", 0.0),              patch.object(tb.requests, "get", return_value=_Resp()):
-            with self.assertRaises(RuntimeError):
-                tb._news_fetch_av("TTD")
-            self.assertTrue(tb._av_limit_active())
+    def test_removed_frontend_functions_have_no_dangling_references(self):
+        root = Path(__file__).parent / "frontend"
+        removed = ("newsfeedSentimentCellHtml", "newsfeedLoadSentiment", "newsfeedPatchSentiment",
+                   "newsfeedBindSentiment", "newsfeedAvPanelHtml", "newsfeedToggleAv",
+                   "pc_openNewsModal", "pc_renderNewsModalBlock", "pc_closeNewsModal",
+                   "pc_fetchNews", "pc_refreshNewsModal", "fetchTickerNewsDirect",
+                   "newsSummaryFromItems", "newsSentimentBadge", "setPanelNews",
+                   "toggleNews")
+        files = [p for p in root.rglob("*") if p.is_file()]
+        for name in removed:
+            for path in files:
+                self.assertNotIn(name, path.read_bytes().decode("utf-8", errors="ignore"), f"{name} in {path}")
 
 
 if __name__ == "__main__":

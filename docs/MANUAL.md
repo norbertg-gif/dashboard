@@ -732,89 +732,19 @@ je v niektorom eToro portfóliu; **+ WL** pridá ticker do serverového watchlis
 Verdikt si pri otvorení z Grafov, Scannera alebo Analytiky preberá aktuálny
 ticker, aby nebolo nutné ho znova opisovať.
 
-### Správy a sentiment (📰 v Analytike)
+### Správy
 
-Správy sa neťahajú priamo v Scanneri, aby sa šetril limit free API. V záložke
-**Analytika** je tlačidlo **📰 Správy** pri horných ovládačoch. Po kliknutí sa
-pre aktuálny ticker otvorí zavriteľné popup okno so zoznamom článkov a
-sentimentom (zdroj: Alpha Vantage NEWS_SENTIMENT).
-
-- **Badge pri článku**: Bullish / Somewhat bullish / Neutral / Somewhat
-  bearish / Bearish + číselné skóre. Sentiment je **ticker-špecifický**
-  (článok môže hodnotiť viacero titulov — zobrazuje sa hodnotenie pre daný
-  ticker, nie celkové vyznenie článku).
-- **Relevancia**: články s relevanciou < 15 % pre ticker sa odfiltrujú;
-  zvyšok je zoradený podľa času a relevancie, max. 10 položiek.
-- **Klastrovanie duplicít**: viac vydavateľov často prevezme tú istú správu
-  takmer s rovnakým titulkom. Takéto články sa zoskupia (podľa podobnosti
-  titulku) a do **priemerného sentimentu** sa počíta len jeden reprezentant
-  na udalosť — inak by udalosť pokrytá 5 zdrojmi vážila 5x viac než udalosť
-  s jediným článkom. Zoznam článkov sa nekráti, duplicity ostávajú viditeľné
-  s označením „duplicita" / „+N zdrojov", takže si vieš dohľadať pôvodné zdroje.
-- **Cache**: výsledky sa držia 7 dní na disku — opakované otvorenie toho istého
-  tickera neminie
-  API request. **⟳ Obnoviť** vynúti čerstvé načítanie.
-- **Limity**: free API kľúč má 25 requestov/deň. Server beží na zdieľanej
-  IP (Render free tier), ktorej limit býva vyčerpaný cudzími aplikáciami —
-  vtedy prehliadač automaticky stiahne dáta **priamo z tvojej IP** a pošle
-  ich serveru do cache (fallback je transparentný, nič netreba robiť).
-- **Načo to je**: čísla (C1–C4, DIP skóre) hovoria jedno, ale realita býva
-  iracionálna — žaloby, profit warningy, sektorové správy. News blok
-  pomáha odfiltrovať tituly, ktorými sa nemá zmysel zaoberať, až keď ich
-  reálne analyzuješ.
-
-### Reddit zmienky (r/N)
-
-V riadkoch DIP universe scannera sa vedľa tickera môže zobraziť badge
-**`r/N↑`** alebo **`r/N↓`** — počet nedávnych zmienok tickera v obchodných
-subredditoch. Zdroj: **ApeWisdom**, ktorý agreguje komunity r/WallStreetBets,
-r/stocks, r/investing a podobné.
-
-- **N** — celkový počet zaznamenaných zmienok za sledované obdobie.
-- **↑ žltá** — rank tickera sa za posledných 24 hodín *zlepšil*: titul sa
-  diskutuje aktívnejšie ako včera.
-- **↓ modrá** — rank sa *zhoršil*: menej pozornosti než deň predtým.
-- **Hover nad badge** — zobrazí presné čísla: aktuálne zmienky, zmienky pred
-  24 hodinami, aktuálny rank a rank pred 24 hodinami.
-
-**Dôležité:** Farba badge-u meria **pozornosť, nie smer pohybu.** Žltá ↑ nie
-je bullish signál — ticker môže byť diskutovaný práve preto, že prudko rastie,
-ale rovnako preto, že sa rúca. Farby boli zámerne zvolené ako žltá/modrá, aby
-sa nepomiešali so zelenými/červenými P/L farbami.
-
-| Kombinácia | Čo to naznačuje |
-|---|---|
-| Silný Buy 3–4/4 + ↑ rastúce zmienky | Titul si všíma retail aj technický setup — potenciálne výbušný kandidát. |
-| Silný Buy 3–4/4 bez badge | „Tichý" kandidát pod radarom. Pohyb poháňaný inštitucionálnym flow bez retailového FOMO. Často spoľahlivejší. |
-| Vysoké zmienky bez technického signálu | Špekulatívny pohyb; ťažko načasovateľný. |
-| Extrémne zmienky (stovky–tisíce) | Aktívna špekulačná fáza. Zvýšené riziko prestreleniaerzie a prudkého obratu. |
-
-Dáta sa obnovujú každých **6 hodín** na serveri a načítavajú sa automaticky pri
-otvorení scannera. Badge sa zobrazí len pre tickery, ktoré figurujú v aktuálnych
-top výsledkoch ApeWisdom. Ticker bez badge neznamená nutne nula zmienok — len
-sa nenachádza v top zozname.
-
-### Portfólio príznak (●)
-
-Ak ticker už **držíš v eToro portfóliu** (ktorýkoľvek z dvoch účtov),
-zobrazí sa pri ňom farebná bodka s P/L:
-
-- **zelená ●+5.2%** — pozícia v zisku,
-- **červená ●−3.1%** — v strate,
-- sivá ● — P/L sa nepodarilo vypočítať.
-
-Pomáha okamžite rozhodnúť: nový signál na titule, ktorý už máš → otázka
-DCA (dokúpiť) vs. ignorovať, nie fresh entry. Dáta z portfolio cache,
-žiadne extra eToro volania.
-
-### Earnings termín
+Správy k držaným titulom sú v samostatnej záložke **Správy** (zdroj Yahoo a
+Finnhub, posledných 7 dní, najprv tituly v strate). Sentiment článkov dashboard
+nezobrazuje: Alpha Vantage ho v októbri 2026 spoplatnil a FMP ani Finnhub ho vo
+free pláne nedávajú.
 
 Priamo v riadku tabuľky pri tickeri sa zobrazujú earnings indikátory:
 
 - **E: dátum** (sivý) — najbližší známy earnings termín. Ak termín ešte nie je
   zverejnený alebo zdroj nemá údaje, zobrazí sa **E: n/a**.
-- **⚠ E: dátum** (oranžový) — ticker má **earnings do 7 dní**. Zdroj: Finnhub
-  s fallbackom Alpha Vantage EARNINGS_CALENDAR; kalendár sa cachuje 24 h.
+- **⚠ E: dátum** (oranžový) — ticker má **earnings do 7 dní**. Zdroj: Finnhub;
+  kalendár sa cachuje 24 h.
   Najčastejší dôvod, prečo „top kôň" sklame, je report o pár dní — čísla
   pred earnings nemusia platiť.
 
@@ -915,36 +845,6 @@ ML ani Verdiktu.
 - Technika / Trh / Firma / Earnings sú indikátory dostupnosti zdrojov.
   Chýbajúci zdroj znižuje istotu, ale automaticky nevytvára negatívny verdikt.
 - Verdikt je transparentný preklad existujúcich dát, nie ďalší black-box model.
-
-### Interpretácia sentiment hodnôt
-
-Škála je zhruba −1 až +1, pásma podľa Alpha Vantage:
-
-| Pásmo | Význam |
-|---|---|
-| ≥ +0.35 | Bullish |
-| +0.15 až +0.35 | Somewhat bullish |
-| −0.15 až +0.15 | Neutral (sivý badge) |
-| −0.35 až −0.15 | Somewhat bearish |
-| ≤ −0.35 | Bearish |
-
-Extrémy (±0.5+) sa takmer nevyskytujú — finančné spravodajstvo je opatrne
-formulované, aj „výrazný" priemer býva okolo ±0.3. Praktické čítanie:
-
-- **Červený badge = povinné čítanie** — rozklikni 📰 a zisti prečo (žaloby,
-  guidance cut, zlý report). Najcennejší signál je nesúlad: top kandidát zo
-  scannera, ktorý svieti na červeno.
-- **Sivý = šum**, žiadny príbeh.
-- **Zelený = potvrdenie** čísel zo scannera.
-- **Pozor: priemer maskuje rozptyl.** 9 bullish + 1 bearish článok dá pekný
-  priemer — ale ten jeden negatívny môže byť práve podstatný. Pri tituloch,
-  kde zvažuješ vstup, si zoznam vždy prejdi.
-- Váha podľa relevancie znamená, že článok celý o danej firme ovplyvní
-  priemer viac než zmienka v prehľade trhu.
-
-Tip k limitom: AV limit (25 req/deň) je per-IP — ak dashboard používaš
-z viacerých sietí (domov, práca, mobil), každá má vlastný budget a server
-cache zdieľa výsledky medzi všetkými zariadeniami.
 
 ### Poznámky (bočný panel)
 
@@ -1169,7 +1069,6 @@ render.yaml            # web service + 1GB disk na /data
 | `DASH_USER` / `DASH_PASS` | Basic auth (povinné v produkcii). |
 | `PUBLIC_API_TOKEN` | Token pre `/api/public/*`; posielajte ho v `Authorization: Bearer` alebo `X-API-Token` hlavičke. |
 | `ETORO_API_KEY_1` … | eToro kľúče (nikdy hardcoded v zdroji). |
-| `ALPHA_VANTAGE_API_KEY` | News sentiment v Analytike (free tier: 25 req/deň, načítanie len na vyžiadanie). |
 | `FINNHUB_API_KEY` | Earnings, insider, EPS, analytický konsenzus a **mapa ticker→sektor** (profile2) pre sektorovú relatívnu silu. |
 | `MASSIVE_API_KEY` | EOD kontext Nasdaq-100 a S&P 500, VWAP, objem a transakčná aktivita. Ak free plán podporuje per-ticker agregáty, slúži aj ako **primárny zdroj denných/týždenných OHLCV** (yfinance fallback). |
 | `FRED_API_KEY` | Makro dáta (Federal Reserve): výnosová krivka, CPI inflácia, fed funds, nezamestnanosť → makro chip ⬢ v TRH lište. Voliteľné; bez kľúča sa makro vrstva ticho vynechá. |
