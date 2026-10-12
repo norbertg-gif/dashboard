@@ -13287,12 +13287,40 @@ def diag_fmp(symbol: str):
             rec["body"] = _scrub(e)
         attempts.append(rec)
 
+    # News/sentiment probes (2026-10-12): which FMP news endpoints this key may call.
+    news_probes = []
+    for label, url, params in (
+        ("sentiment-rss (v4, legacy)", "https://financialmodelingprep.com/api/v4/stock-news-sentiments-rss-feed", {"page": 0}),
+        ("stock_news (v3, legacy)", "https://financialmodelingprep.com/api/v3/stock_news", {"tickers": sym, "limit": 5}),
+        ("news/stock (stable)", "https://financialmodelingprep.com/stable/news/stock", {"symbols": sym, "limit": 5}),
+        ("news/stock-latest (stable)", "https://financialmodelingprep.com/stable/news/stock-latest", {"page": 0, "limit": 5}),
+    ):
+        rec = {"endpoint": label}
+        try:
+            r = requests.get(url, params={**params, "apikey": api_key}, timeout=10)
+            rec["status"] = r.status_code
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if isinstance(body, list):
+                rec["rows"] = len(body)
+                rec["fields"] = sorted(body[0].keys()) if body and isinstance(body[0], dict) else []
+                rec["symbols"] = sorted({str(row.get("symbol")) for row in body if isinstance(row, dict)})[:15]
+            else:
+                rec["body"] = _scrub(r.text)[:300]
+        except Exception as e:
+            rec["status"] = "exception"
+            rec["body"] = _scrub(e)[:300]
+        news_probes.append(rec)
+
     data, url_used, status = _fmp_price_target_raw(sym)
     return {
         "ticker": sym,
         "endpoint": url_used,
         "http_status": status,
         "attempts": attempts,
+        "news_probes": news_probes,
         "raw": data,
         "parsed": _fmp_price_target(sym),
     }
