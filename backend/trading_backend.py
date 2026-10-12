@@ -4097,6 +4097,45 @@ def get_ticker_corporate_actions(symbol: str, refresh: int = Query(0)):
         pass
     return payload
 
+@app.get("/api/diagnostics/finnhub-sentiment/{symbol}")
+def diag_finnhub_sentiment(symbol: str):
+    """Debug (2026-10-12): which Finnhub sentiment endpoints the free key may call. No key in output."""
+    sym = _validate_ticker_symbol(symbol)
+    key = os.getenv("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return {"symbol": sym, "ok": False, "error": "FINNHUB_API_KEY nie je nastavený"}
+    today = datetime.now(timezone.utc).date()
+    week_ago = today - timedelta(days=7)
+    probes = []
+    for name, path, params in (
+        ("news-sentiment", "/news-sentiment", {"symbol": sym}),
+        ("social-sentiment", "/stock/social-sentiment", {"symbol": sym}),
+        ("insider-sentiment", "/stock/insider-sentiment", {"symbol": sym, "from": str(today - timedelta(days=180)), "to": str(today)}),
+        ("company-news", "/company-news", {"symbol": sym, "from": str(week_ago), "to": str(today)}),
+    ):
+        rec: dict = {"endpoint": name}
+        try:
+            r = requests.get(f"https://finnhub.io/api/v1{path}", params={**params, "token": key}, timeout=15)
+            rec["http"] = r.status_code
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if r.status_code == 200 and isinstance(body, list):
+                rec["rows"] = len(body)
+                rec["fields"] = sorted(body[0].keys()) if body and isinstance(body[0], dict) else []
+            elif r.status_code == 200 and isinstance(body, dict):
+                rec["keys"] = sorted(body.keys())
+                rec["sample"] = _scrub_token(json.dumps(body)[:600]).replace(key, "***")
+            else:
+                rec["body"] = _scrub_token(r.text[:300]).replace(key, "***")
+        except Exception as e:
+            rec["http"] = "exception"
+            rec["body"] = _scrub_token(str(e)[:300]).replace(key, "***")
+        probes.append(rec)
+    return {"symbol": sym, "probes": probes}
+
+
 @app.get("/api/diagnostics/finnhub-metric/{symbol}")
 def diag_finnhub_metric(symbol: str):
     """Debug: ktoré polia Finnhub free tier pre titul naozaj vracia (`metric=all`).
