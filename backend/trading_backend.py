@@ -2366,6 +2366,10 @@ def get_portfolio(account: str = Query("1"), refresh: int = Query(0)):
             "currentRate":  current_rate,
             "previousClose": prev_close,
             "dailyPnl":     daily_pnl,
+            # Týždenné % sa počíta vo frontende z ceny titulu, nie z pozície —
+            # nezávisí od nákupu v priebehu týždňa (rozhodnutie používateľa).
+            "weeklyClose":  _etoro_official_weekly_close(iid)
+                            if str(asset_type or "").lower() in ("stock", "etf") else None,
             "pnl":          round(pnl, 2),
             "pnlPct":       round(pnl / amount * 100, 2) if amount else 0,
             "fees":         round(pos.get("totalFees") or pos.get("fees") or 0, 2),
@@ -5535,7 +5539,12 @@ def _etoro_official_close_cache_path() -> _Path:
 
 
 def _parse_etoro_official_closes(payload) -> dict:
-    """[{instrumentId, closingPrices:{daily:{price,date}}}] → {iid: (price, date)}."""
+    """[{instrumentId, closingPrices:{daily,weekly}}] → {iid: (daily, date, weekly, wdate)}.
+
+    Týždenný close je "official closing price from the previous trading week"
+    — z tej istej odpovede, takže týždenné % v Portfóliu nestojí ani jedno
+    volanie navyše. Chýbajúci týždenný (sentinel -1 / 0001-01-01) je None;
+    denný ostáva povinný, bez neho sa záznam preskočí ako doteraz."""
     out = {}
     if not isinstance(payload, list):
         return out
@@ -5548,7 +5557,13 @@ def _parse_etoro_official_closes(payload) -> dict:
         date = str(daily.get("date") or "")
         if not isinstance(iid, int) or price is None or price <= 0 or date.startswith("0001"):
             continue
-        out[iid] = (float(price), date[:10])
+        weekly = (row.get("closingPrices") or {}).get("weekly") or {}
+        wprice = _num_or_none(weekly.get("price"))
+        wdate = str(weekly.get("date") or "")
+        if wprice is None or wprice <= 0 or wdate.startswith("0001"):
+            wprice, wdate = None, ""
+        out[iid] = (float(price), date[:10],
+                    float(wprice) if wprice else None, wdate[:10] or None)
     return out
 
 
@@ -5572,7 +5587,11 @@ def _get_etoro_official_closes() -> dict:
             try:
                 cached = cache_read(path)
                 if cached and isinstance(cached.get("closes"), dict):
-                    state["data"] = {int(k): (float(v[0]), str(v[1]))
+                    # Starší disk zápis má len (daily, date) — týždenný doplní
+                    # najbližší fetch (TTL 30 min), dovtedy None.
+                    state["data"] = {int(k): (float(v[0]), str(v[1]),
+                                              v[2] if len(v) > 2 else None,
+                                              v[3] if len(v) > 3 else None)
                                      for k, v in cached["closes"].items()}
                     state["fetched_at"] = now - cache_age_seconds(path)
                     if now - state["fetched_at"] < ETORO_OFFICIAL_CLOSE_TTL:
@@ -5609,6 +5628,15 @@ def _etoro_official_prev_close(instrument_id) -> float | None:
         return None
     hit = _get_etoro_official_closes().get(iid)
     return hit[0] if hit else None
+
+
+def _etoro_official_weekly_close(instrument_id) -> float | None:
+    try:
+        iid = int(instrument_id)
+    except (TypeError, ValueError):
+        return None
+    hit = _get_etoro_official_closes().get(iid)
+    return hit[2] if hit and len(hit) > 2 else None
 
 
 def _get_market_prev_close(sym: str, asset_type: str | None = None,

@@ -3937,7 +3937,29 @@ class EtoroOfficialCloseRegressionTests(unittest.TestCase):
 
     def test_parser_reads_daily_and_drops_sentinels(self):
         parsed = tb._parse_etoro_official_closes(self.PAYLOAD)
-        self.assertEqual(parsed, {1127: (68.69, "2026-10-06")})
+        self.assertEqual(parsed, {1127: (68.69, "2026-10-06", 67.0, "2026-10-02")})
+
+    def test_weekly_close_parsed_and_missing_weekly_is_none(self):
+        payload = [
+            {"instrumentId": 7, "closingPrices": {
+                "daily": {"price": 10.0, "date": "2026-10-06 00:00:00Z"},
+                "weekly": {"price": -1, "date": "0001-01-01 00:00:00Z"}}},
+        ]
+        self.assertEqual(tb._parse_etoro_official_closes(payload),
+                         {7: (10.0, "2026-10-06", None, None)})
+        tb._etoro_official_closes.update(
+            data=tb._parse_etoro_official_closes(self.PAYLOAD), fetched_at=tb.time.time())
+        self.assertEqual(tb._etoro_official_weekly_close(1127), 67.0)
+        self.assertIsNone(tb._etoro_official_weekly_close(42))
+
+    def test_old_two_field_disk_cache_still_loads(self):
+        """Disk cache spred týždenného close má len (daily, date)."""
+        with (
+            patch.object(tb, "cache_read", return_value={"closes": {"1127": [68.69, "2026-10-06"]}}),
+            patch.object(tb, "cache_age_seconds", return_value=5),
+        ):
+            self.assertEqual(tb._etoro_official_prev_close(1127), 68.69)
+            self.assertIsNone(tb._etoro_official_weekly_close(1127))
 
     def test_official_close_wins_over_exchange_close(self):
         tb._etoro_official_closes.update(data={1127: (68.69, "2026-10-06")},

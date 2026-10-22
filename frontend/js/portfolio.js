@@ -1418,6 +1418,7 @@ const PORT_COLS = [
   { key:'currentRate', label:'Aktuálna',     def:false, fmt:'price'  },
   { key:'analystTarget',label:'Cieľ',         def:false, fmt:'analystTarget' },
   { key:'dailyPnl',    label:'Denný P/L',    def:true,  fmt:'pnl'    },
+  { key:'weeklyPct',   label:'Týždeň %',     def:false, fmt:'pct'    },
   { key:'pnl',         label:'P/L ($)',      def:true,  fmt:'pnl'    },
   { key:'pnlPct',      label:'P/L (%)',      def:true,  fmt:'pct'    },
   { key:'fees',        label:'Poplatky',     def:false, fmt:'usd'    },
@@ -1430,7 +1431,7 @@ const PORT_COLS = [
 const PORT_DEFAULT_WIDTHS = {
   symbol: 230, trade: 90, type: 90, isBuy: 90, openDateTime: 120,
   amount: 120, units: 110, openRate: 110, currentRate: 110,
-  analystTarget: 110, dailyPnl: 110, pnl: 105, pnlPct: 105,
+  analystTarget: 110, dailyPnl: 110, weeklyPct: 95, pnl: 105, pnlPct: 105,
   fees: 100, leverage: 90, stopLoss: 110, takeProfit: 110, positionId: 150,
 };
 
@@ -1883,6 +1884,17 @@ async function ensurePortfolioAnalystTargets(pid) {
   await Promise.all([worker(), worker()]);
 }
 
+// Týždenný pohyb CENY titulu voči eToro oficiálnemu close minulého týždňa
+// (`weeklyClose` z backendu). Zámerne nie P/L pozície: tranža kúpená v stredu
+// by inak dostala pohyb od piatku, ktorý nevlastnila (rozhodnutie používateľa).
+// Rovnaké pre všetky tranže titulu, takže per-ticker riadok ho nesčítava.
+function portWeeklyPct(row) {
+  const base = Number(row?.weeklyClose);
+  const price = Number(row?.currentRate);
+  if (!(base > 0) || !(price > 0)) return null;
+  return (price - base) / base * 100;
+}
+
 function fmtPortVal(val, fmt) {
   if (val == null || val === '') return '<span style="color:var(--muted)">—</span>';
   if (fmt === 'analystTarget') {
@@ -2168,6 +2180,7 @@ function updatePortfolioTickerRowsDom(pid, state, sym) {
       const values = {
         currentRate: [pos.currentRate, 'price'],
         dailyPnl: [pos._liveDailyPnl ?? pos.dailyPnl, 'pnl'],
+        weeklyPct: [portWeeklyPct(pos), 'pct'],
         pnl: [livePnl, 'pnl'],
         pnlPct: [livePct, 'pct'],
       };
@@ -2196,6 +2209,9 @@ function updatePortfolioTickerRowsDom(pid, state, sym) {
     });
     document.querySelectorAll(`[data-port-cell="${pid}-${sym}-dailyPnl"]`).forEach(el => {
       el.innerHTML = fmtPortVal(row.dailyPnl, 'pnl');
+    });
+    document.querySelectorAll(`[data-port-cell="${pid}-${sym}-weeklyPct"]`).forEach(el => {
+      el.innerHTML = fmtPortVal(portWeeklyPct(row), 'pct');
     });
     break;
   }
@@ -2427,6 +2443,8 @@ function getFilteredPositions(s) {
   // (updatePositionRowsWithLive prepisuje pos.dailyPnl), netreba špeciálny prípad.
   const resolveSortVal = (r) => {
     if (s.sortCol === 'pnl') return Number(r._livePnl ?? r.pnl ?? 0);
+    // null (krypto, chýbajúci close) na koniec v oboch smeroch triedenia
+    if (s.sortCol === 'weeklyPct') return portWeeklyPct(r) ?? 1e15 * s.sortDir;
     if (s.sortCol === 'pnlPct') {
       if (r._livePnlPct != null) return Number(r._livePnlPct);
       const livePnl = Number(r._livePnl ?? r.pnl ?? 0);
@@ -2666,7 +2684,7 @@ function renderPortPanel(pid) {
             ? '<span class="port-analyst-loading">…</span>'
             : fmtPortVal(info, 'analystTarget')}</td>`;
         } else {
-          const liveCols = ['currentRate','dailyPnl','pnl','pnlPct'];
+          const liveCols = ['currentRate','dailyPnl','weeklyPct','pnl','pnlPct'];
           const liveRowKey = s.view === 'ticker' ? `${pid}-${sym}` : `${pid}-${row.positionId || sym}`;
           const liveAttr = liveCols.includes(col.key) ? `data-port-cell="${liveRowKey}-${col.key}"` : '';
           // Live hodnoty v OBOCH pohľadoch — currentRate/dailyPnl sa mutujú
@@ -2679,8 +2697,10 @@ function renderPortPanel(pid) {
               ? (row._livePnlPct ?? (row.amount ? Number(livePnlVal ?? 0) / row.amount * 100 : row.pnlPct))
               : col.key === 'dailyPnl'
                 ? (row._liveDailyPnl ?? row.dailyPnl)
-                : row[col.key];
-          html += `<td ${liveAttr} class="${['amount','units','openRate','currentRate','dailyPnl','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(val, col.fmt)}</td>`;
+                : col.key === 'weeklyPct'
+                  ? portWeeklyPct(row)
+                  : row[col.key];
+          html += `<td ${liveAttr} class="${['amount','units','openRate','currentRate','dailyPnl','weeklyPct','pnl','pnlPct','fees'].includes(col.key)?'r':''}">${fmtPortVal(val, col.fmt)}</td>`;
         }
       }
       html += `</tr>`;
