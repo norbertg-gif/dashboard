@@ -8585,6 +8585,49 @@ def _parse_finviz_screener_html(html: str, headers: list[str] | None = None) -> 
     return page_headers, rows, total
 
 
+@app.get("/api/diagnostics/finviz-export")
+def diag_finviz_export(f: str = Query("idx_ndx")):
+    """Trial check for Finviz Elite (2026-10-23): does the CSV export work from
+    the server with FINVIZ_API_KEY alone, and does it carry the two columns the
+    DIP score needs? Returns statuses and column names only, never the key."""
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if not key:
+        return {"ok": False, "error": "FINVIZ_API_KEY nie je nastavený"}
+    if not re.fullmatch(r"[A-Za-z0-9_,.\-]{1,200}", f or ""):
+        raise HTTPException(400, "Invalid filter")
+    all_columns = ",".join(str(i) for i in range(0, 200))
+    attempts = []
+    for label, params in (
+        ("saved view 151", {"v": "151", "f": f}),
+        ("saved view 150", {"v": "150", "f": f}),
+        ("all columns c=0..199", {"v": "152", "f": f, "c": all_columns}),
+    ):
+        rec = {"attempt": label}
+        try:
+            r = requests.get("https://elite.finviz.com/export.ashx",
+                             params={**params, "auth": key}, timeout=30,
+                             headers={"User-Agent": "Mozilla/5.0"})
+            rec["http"] = r.status_code
+            rec["content_type"] = r.headers.get("content-type", "")
+            text = r.text or ""
+            if r.status_code == 200 and text and not text.lstrip().startswith("<"):
+                rows = list(csv.reader(text.splitlines()))
+                headers = [h.strip() for h in (rows[0] if rows else [])]
+                rec["rows"] = max(0, len(rows) - 1)
+                rec["columns"] = len(headers)
+                rec["headers"] = headers
+                rec["has_required"] = FINVIZ_REQUIRED_TEMPLATE_COLUMNS.issubset(set(headers))
+                rec["missing_required"] = sorted(FINVIZ_REQUIRED_TEMPLATE_COLUMNS - set(headers))
+            else:
+                rec["body"] = _scrub_token(text[:300])
+        except Exception as e:
+            rec["http"] = "exception"
+            rec["body"] = _scrub_token(str(e))[:300]
+        attempts.append(rec)
+    return {"ok": any(a.get("has_required") for a in attempts),
+            "required": sorted(FINVIZ_REQUIRED_TEMPLATE_COLUMNS), "attempts": attempts}
+
+
 def _require_finviz_template_headers(headers: list[str]) -> None:
     if not FINVIZ_REQUIRED_TEMPLATE_COLUMNS.issubset(set(headers)):
         raise HTTPException(
@@ -12017,8 +12060,8 @@ def _scrub_token(msg: str) -> str:
     dostať MASSIVE_API_KEY do error stringu, ktorý sa ukladal aj do
     company_profiles/{SYM}.json na disku.
     Maskuje aj holé hodnoty známych API kľúčov."""
-    msg = re.sub(r"(token|apikey|key)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
-    for env_name in ("FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE"):
+    msg = re.sub(r"(token|apikey|key|auth)=[^&\s]+", r"\1=***", str(msg), flags=re.I)
+    for env_name in ("FINNHUB_API_KEY", "FMP_API_KEY", "FRED_API_KEY", "MASSIVE_API_KEY", "PUBLIC_API_TOKEN", "ETORO_PROXY_TOKEN", "FINVIZ_COOKIE", "FINVIZ_API_KEY"):
         secret = os.getenv(env_name, "").strip()
         if secret and (env_name == "FINVIZ_COOKIE" or len(secret) >= 8):
             msg = msg.replace(secret, "***")

@@ -4372,5 +4372,21 @@ class PortfolioChartBasketRegressionTests(unittest.TestCase):
         self.assertIn("checked: isInChartBasket(sym), action: () => toggleChartBasket(sym)", menu)
 
 
+class FinvizExportDiagnosticRegressionTests(unittest.TestCase):
+    def test_export_diagnostic_parses_csv_and_never_returns_the_key(self):
+        class _Resp:
+            status_code = 200
+            headers = {"content-type": "text/csv"}
+            text = "No.,Ticker,Sales YoY TTM,EPS YoY TTM\n1,AAPL,5%,10%\n"
+        with patch.dict(tb.os.environ, {"FINVIZ_API_KEY": "secret-finviz-key"}),              patch.object(tb.requests, "get", return_value=_Resp()):
+            out = tb.diag_finviz_export(f="idx_ndx")
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["attempts"][0]["rows"], 1)
+        self.assertNotIn("secret-finviz-key", json.dumps(out))
+
+    def test_scrub_masks_finviz_auth_parameter(self):
+        self.assertNotIn("abc123", tb._scrub_token("https://elite.finviz.com/export.ashx?v=1&auth=abc123&f=x"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
