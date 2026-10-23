@@ -8246,6 +8246,7 @@ ROIC_DIP_MIN = 100
 ROIC_MIN_REQUEST_INTERVAL_SECONDS = 13.0
 SCANNER_DAILY_CACHE_DIR = DATA_ROOT / "scanner_daily_bars"
 SCANNER_AUTO_STATE_FILE = DATA_ROOT / "scanner_auto_rescan.json"
+EMA200_SCAN_FILES = {scope: DATA_ROOT / f"ema200_scan_{scope}.json" for scope in ("all", "portfolio")}
 SCANNER_DAILY_CACHE_MIN_ROWS = 100
 # Weekly EMA200 nestačí "mať 200 týždňov" — EMA s adjust=False sa ustaľuje až
 # okolo 3× periódy. Váha úvodnej sviečky: 200 týždňov 13.5 %, 260 (=5y) 7.4 %,
@@ -8453,7 +8454,9 @@ def scanner_universe_from_dip() -> tuple[list[str], str, str]:
             if sym not in seen:
                 out.append(sym)
                 seen.add(sym)
-        label, key = "DIP import", "dip_import"
+        dip_meta = dip_scores.get("_meta") if isinstance(dip_scores.get("_meta"), dict) else {}
+        label = "DIP Finviz Elite" if dip_meta.get("source") == "finviz_elite" else "DIP import"
+        key = "dip_import"
     else:
         out = NASDAQ100_TICKERS[:]
         label, key = "Nasdaq-100 fallback", "nasdaq100"
@@ -9994,6 +9997,10 @@ def _run_nasdaq_scanner(days: int, trigger: str = "manual", auto_trading_day: da
                 "current": None,
                 "error": None,
             })
+        try:
+            _after_nasdaq_scanner(trigger, succeeded=True)
+        except Exception as exc:
+            print(f"[ema200-scan] automatic refresh hook failed: {type(exc).__name__}: {exc}")
     except Exception as e:
         with _scanner_lock:
             _scanner_state.update({
@@ -10066,6 +10073,39 @@ def _scanner_scheduler_loop():
         except Exception as exc:
             print(f"[scanner] automatic rescan check failed: {type(exc).__name__}: {exc}")
         _time_module.sleep(60)
+
+
+def _run_automatic_ema200_scans() -> None:
+    """Refresh interpretation-only EMA200 snapshots after a successful scan."""
+    for scope in ("portfolio", "all"):
+        try:
+            _compute_ema200_scan(scope, None, trigger="automatic")
+        except Exception as exc:
+            print(f"[ema200-scan] automatic {scope} failed: {type(exc).__name__}: {exc}")
+            previous = _ema200_stored_result(scope)
+            if previous is not None:
+                previous["status"] = {"ok": False, "last_error": f"{type(exc).__name__}: {exc}"[:240],
+                                       "failed_at": datetime.now(timezone.utc).isoformat()}
+                try:
+                    _atomic_write_json(EMA200_SCAN_FILES[scope], _json_safe(previous))
+                except Exception as write_exc:
+                    print(f"[ema200-scan] could not persist failure status for {scope}: {write_exc}")
+            else:
+                try:
+                    _atomic_write_json(EMA200_SCAN_FILES[scope], {
+                        "scope": scope, "available": False,
+                        "status": {"ok": False, "last_error": f"{type(exc).__name__}: {exc}"[:240],
+                                   "failed_at": datetime.now(timezone.utc).isoformat()},
+                    })
+                except Exception as write_exc:
+                    print(f"[ema200-scan] could not persist failure status for {scope}: {write_exc}")
+        finally:
+            gc.collect()
+
+
+def _after_nasdaq_scanner(trigger: str, *, succeeded: bool) -> None:
+    if succeeded and trigger == "automatic":
+        _run_automatic_ema200_scans()
 
 
 def start_scanner_scheduler_thread():
@@ -11698,11 +11738,22 @@ def _portfolio_order_rates() -> dict[str, list[float]]:
 @app.get("/api/scanner/ema200-scan")
 def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50),
                         scope: str = Query("all")):
-    """Ad-hoc: naimportované DIP univerzum vs weekly EMA200. Žiadny scheduled
-    job, žiadna server cache — spúšťa sa výhradne na klik z UI a číta z tej
-    istej zdieľanej daily-history cache ako ostatné scanner operácie
-    (_scanner_download_cached), takže pre už poskenované tickery je to takmer
-    zadarmo. Interpretačné, NEVSTUPUJE do C1-C4/DIP/scoringu."""
+    """Manually compute and persist the interpretation-only weekly EMA200 scan."""
+    return _compute_ema200_scan(scope, threshold, trigger="manual")
+
+
+def _ema200_stored_result(scope: str) -> dict | None:
+    path = EMA200_SCAN_FILES[scope]
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) and isinstance(value.get("results"), list) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _compute_ema200_scan(scope: str, threshold: float | None,
+                         *, trigger: str = "manual") -> dict:
+    """Shared scan body for the route and the nightly automatic refresh."""
     # scope=portfolio skenuje LEN držané tituly + tituly s orderom. Nie je to filter
     # nad celým výsledkom: titul, na ktorý je len order a nie je v DIP importe,
     # by v celom skene vôbec nebol. Je to aj ~4× rýchlejšie.
@@ -11722,26 +11773,22 @@ def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50),
     thr = threshold if threshold is not None else float(_dash_settings().get("ema200_scan_threshold_pct", 5.0))
     results: list[dict] = []
     errors: list[dict] = []
-    max_workers = max(1, min(SCANNER_MAX_WORKERS, len(tickers) or 1))
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_scan_ema200_distance, t): t for t in tickers}
-        for i, fut in enumerate(futures, 1):
-            ticker = futures[fut]
-            try:
-                row = fut.result()
-            except Exception as e:
-                row = {"ticker": ticker, "error": str(e)[:80]}
-            if row.get("error"):
-                errors.append(row)
-            else:
-                row["near"] = abs(row["dist_pct"]) <= thr
-                row["held"] = ticker in held
-                row["order_rates"] = order_rates.get(ticker, [])
-                results.append(row)
-            if SCANNER_GC_INTERVAL > 0 and i % SCANNER_GC_INTERVAL == 0:
-                gc.collect()
+    for i, ticker in enumerate(tickers, 1):
+        try:
+            row = _scan_ema200_distance(ticker)
+        except Exception as e:
+            row = {"ticker": ticker, "error": str(e)[:80]}
+        if row.get("error"):
+            errors.append(row)
+        else:
+            row["near"] = abs(row["dist_pct"]) <= thr
+            row["held"] = ticker in held
+            row["order_rates"] = order_rates.get(ticker, [])
+            results.append(row)
+        if SCANNER_GC_INTERVAL > 0 and i % SCANNER_GC_INTERVAL == 0:
+            gc.collect()
     results.sort(key=lambda r: abs(r["dist_pct"]))
-    return {
+    payload = {
         "scope": scope,
         "universe": universe_key,
         "universe_label": universe_label,
@@ -11753,7 +11800,24 @@ def scanner_ema200_scan(threshold: float | None = Query(None, ge=0.1, le=50),
         "errors": len(errors),
         "error_samples": errors[:15],
         "results": results,
+        "trigger": trigger,
+        "threshold": thr,
+        "status": {"ok": True},
     }
+    payload = _json_safe(payload)
+    _atomic_write_json(EMA200_SCAN_FILES[scope], payload)
+    return payload
+
+
+@app.get("/api/scanner/ema200-scan/latest")
+def scanner_ema200_scan_latest(scope: str = Query("all")):
+    if scope not in EMA200_SCAN_SCOPES:
+        raise HTTPException(400, f"scope musí byť jedno z: {', '.join(EMA200_SCAN_SCOPES)}")
+    try:
+        result = json.loads(EMA200_SCAN_FILES[scope].read_text(encoding="utf-8"))
+        return result if isinstance(result, dict) else {"available": False}
+    except (OSError, ValueError, TypeError):
+        return {"available": False}
 
 
 @app.get("/api/scanner/notes")

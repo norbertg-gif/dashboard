@@ -976,28 +976,19 @@ Main source sections:
 - **Watchlist / eToro radar** — `renderOpportunities()`, data from `/api/checklist`. Shows tier, sila x/4, weekly context and reasons. Setup score hidden from UI (internal sort only). Výsledok používa spoločnú `scannerCachedJson` 24h client cache; obyčajný render nikdy nevolá force refresh, explicitné ⟳ áno.
 - **Checklist** — batch-check custom ticker list or CSV import. Exposed as “Skenuj watchlist”, not a separate analytical philosophy.
 - **DIP universe scanner** — legacy endpoints remain `/api/scanner/nasdaq/*`, but an imported DIP ranking XLSX is now the primary scanned universe (capped by `SCANNER_DIP_UNIVERSE_MAX`, default 300). Nasdaq-100 is only the fallback when no DIP import exists. Both universes append missing held Stock/ETF symbols from `_get_portfolio_holdings()` (RAM/disk cache only, no eToro calls; empty/failing cache preserves the original universe), normalized/validated and sorted after the DIP ranking; `SCANNER_DIP_UNIVERSE_MAX` caps only the DIP slice, never held additions. This gives held positions outside the import scanner coverage for AI export (`dip_score`, `daily_state`, `weekly_state` and candle-derived fields). The display label gains ` + portfólio` only when holdings add symbols; keys stay `dip_import` / `nasdaq100`, and `_dip_universe` / `top_ranked_not_selected` remain strictly the imported ranking. This matters because the XLSX ranking can include NYSE/non-Nasdaq stocks and scanning Nasdaq on top of it created avoidable timeouts. The scanner uses a bounded worker queue, so waiting tickers are not timed out before they actually start. The result table keeps every successfully scanned imported ticker with `TOTAL >= 85` (`DIP_SCANNER_VISIBILITY_THRESHOLD`) even without a fresh technical signal, **and every held Stock/ETF position regardless of signal or DIP** (`_include_scanner_result(row, dip_scores, held)`, 2026-10-10); other lower-ranked rows remain signal-only. Pridanie držaných titulov do univerza (2026-09-22) samo nestačilo: riadok bez signálu a bez DIP ≥ 85 sa po skene zahodil, takže 2026-10-10 nemalo stav grafu 34 zo 61 držaných titulov (NET, META, PLTR, TSM, TTD…) a štyri BUILD pozície s medzerou nad tranžu (LMT, GFS, NU, ON) hlásili „scanner titul nepokrýva“. Dôsledok opravy: držané tituly sú aj v hlavnej tabuľke Scannera (rozhodnutie používateľa) a Inbox/Pozornosť môže ukázať viac položiek „zlý graf“, lebo ich teraz vidí. Therefore `recent_signal` is nullable in cached scanner results: always use `(row.get("recent_signal") or {})`, including sort keys and crossover counters. HTML/bookmarklet import is intentionally disabled; legacy endpoints return 410. Large KPI cards were replaced by a compact status line.
-- **EMA200 scan (ad-hoc, HOTOVO 2026-08-18, prerobené z modalu na kartu v ten
-  istý deň).** `GET /api/scanner/ema200-scan` prebehne `scanner_universe_from_dip()`
-  (rovnaké naimportované univerzum ako klasický scan, Nasdaq-100 fallback bez
-  importu), pre každý ticker spočíta weekly EMA200 z `_scan_ema200_distance()`
-  cez `_scanner_download_cached(ticker,"5y","1wk")` — zdieľaná daily-history
-  cache, žiadny nový fetch mechanizmus. Zdroj sviečok je od 2026-08-19 eToro
-  (`_etoro_display_candles`, `refresh=0`) s yfinance fallbackom pre tickery
-  mimo eToro univerza — inak sa scanner rozchádzal s grafom, viď pitfall
-  o zameniteľnosti zdrojov.
-  **Server cache NIE JE a nebude** (na rozdiel od ostatných scanner sekcií) —
-  je to explicitne "spusti keď chceš", nie denný snapshot. **Klientská
-  perzistencia ÁNO, od 2026-08-19:** výsledok sa ukladá do localStorage
-  (`td_ema200_scan_result`, tvar `{data, ts}`) a prežije zavretie prehliadača.
-  **Nemá TTL** — drží sa, kým používateľ sám nespustí nový beh; automaticky sa
-  neobnovuje nikdy. Dôvod: pri ~20-30s behu je strata výsledku otravnejšia než
-  jeho vek. Preto ale MUSÍ byť vedľa výsledku vždy vidno čas posledného behu
-  (`⏱` pill v rozbalenom stave, súčasť súhrnu v zbalenom) — starý výsledok je
-  v poriadku, tváriť sa ako čerstvý nesmie. Obnova z localStorage je zámerne
-  lenivá (`ensureEma200Restored()` volaná z oboch render funkcií), nie
-  top-level — `scanner.js` smie obsahovať len deklarácie. Poškodený alebo
-  starý tvar zápisu sa ticho ignoruje (fail-soft na `null`), plná kvóta
-  výsledok nezneplatní.
+- **EMA200 scan (serverový snapshot, rozhodnutie používateľa 2026-10-23).**
+  `GET /api/scanner/ema200-scan` naďalej spúšťa manuálny beh; po úspešnom
+  automatickom nočnom Scanneri sa sekvenčne obnovia scope `portfolio` a potom
+  `all`. Výsledky sú atómovo uložené v `DATA_ROOT/ema200_scan_{scope}.json`;
+  `GET /api/scanner/ema200-scan/latest` ich iba číta. Chyba behu zachová posledný
+  dobrý výsledok a zapíše diagnostiku do `status`. Karta pri otvorení načíta
+  serverový výsledok; localStorage je fallback, keď server ešte nemá výsledok.
+  Existujúci ⏱ pill ukazuje vek aj zdroj („automaticky“ / „ručne“). Dôvod zmeny:
+  používateľ chce, aby všetko vychádzalo z aktuálnych dát automaticky (2026-10-23).
+  Výsledok je interpretačný a NEVSTUPUJE do C1–C4, DIP, DCA ani BUILD. Výpočet
+  používa `_scan_ema200_distance()`, rovnaké `scanner_universe_from_dip()`
+  univerzum a zdieľanú cache weekly sviečok. `scanner.js` ostáva deklaráciami;
+  načítanie snapshotu sa spúšťa lenivo pri renderi.
   **Prvá verzia (modal) bola zlý dizajn — nahlásené hneď pri prvom použití:**
   beh trvá ~20-30s (studená cache), modal ukazoval spinner, ale bez jasného
   vizuálu to pôsobilo ako "nič sa nedeje"; a keď sa modal zavrel (klik mimo,

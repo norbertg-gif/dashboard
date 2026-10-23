@@ -38,6 +38,7 @@ memtest_data/
 # Scanner cache pri lokálnom behu bez DATA_DIR (DATA_ROOT padá na APP_ROOT)
 market_scanner_cache.json
 scanner_auto_rescan.json
+ema200_scan_*.json
 scanner_daily_bars/
 
 # Lokálne runtime dáta a pracovné súbory, ktoré nikdy nepatria do repa.

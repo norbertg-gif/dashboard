@@ -1958,6 +1958,7 @@ function saveEma200ScanToStorage(data, scope = ema200ScanScope) {
 let ema200ScanData = null;
 let ema200ScanRanAt = null;
 let ema200ScanRestored = false;
+const ema200LatestRequested = new Set();
 
 // Obnova z localStorage je ZÁMERNE lenivá, nie na top-level. `scanner.js`
 // smie obsahovať len deklarácie — jediný modul s top-level exec kódom je
@@ -1966,10 +1967,38 @@ let ema200ScanRestored = false;
 function ensureEma200Restored() {
   if (ema200ScanRestored) return;
   ema200ScanRestored = true;
-  const saved = loadEma200ScanFromStorage();
-  if (saved) {
-    ema200ScanData = saved.data;
-    ema200ScanRanAt = saved.ts;
+}
+
+async function loadLatestEma200Scan(scope = ema200ScanScope) {
+  if (ema200ScanData || ema200LatestRequested.has(scope)) return;
+  ema200LatestRequested.add(scope);
+  try {
+    const resp = await fetch(`${API}/api/scanner/ema200-scan/latest?scope=${scope}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const stored = await resp.json();
+    if (scope !== ema200ScanScope || ema200ScanData) return;
+    if (stored.available !== false && Array.isArray(stored.results)) {
+      ema200ScanData = stored;
+      ema200ScanRanAt = stored.generated_at ? Date.parse(stored.generated_at) : null;
+      saveEma200ScanToStorage(stored, scope);
+    } else {
+      const saved = loadEma200ScanFromStorage();
+      if (saved) {
+        ema200ScanData = saved.data;
+        ema200ScanRanAt = saved.data.generated_at ? Date.parse(saved.data.generated_at) : saved.ts;
+      }
+    }
+    renderEma200Card();
+  } catch (e) {
+    // Server nedostupný: localStorage je len núdzový fallback.
+    if (scope === ema200ScanScope && !ema200ScanData) {
+      const saved = loadEma200ScanFromStorage();
+      if (saved) {
+        ema200ScanData = saved.data;
+        ema200ScanRanAt = saved.data.generated_at ? Date.parse(saved.data.generated_at) : saved.ts;
+      }
+      renderEma200Card();
+    }
   }
 }
 let ema200ScanLoading = false;
@@ -1986,6 +2015,7 @@ function toggleEma200CardCollapsed() {
 
 function ema200CardHead() {
   ensureEma200Restored();
+  if (!ema200ScanData) loadLatestEma200Scan();
   const collapsed = isEma200CardCollapsed();
   return `<div class="scanner-source-head">
     ${scannerAuxGripHtml()}
@@ -2020,12 +2050,16 @@ function ema200ScanAgeLabel() {
   return days === 1 ? 'včera' : `pred ${days} dňami`;
 }
 
+function ema200ScanSourceLabel() {
+  return ema200ScanData?.trigger === 'automatic' ? 'automaticky' : 'ručne';
+}
+
 function ema200CardBodyHtml() {
   ensureEma200Restored();
   if (isEma200CardCollapsed()) {
     if (!ema200ScanData) return 'Zatiaľ nespustené.';
     const age = ema200ScanAgeLabel();
-    return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200${age ? ` · ${age}` : ''}`;
+    return `${ema200ScanData.scanned}/${ema200ScanData.total} tickerov · ${ema200ScanData.near_count}× do ±${ema200ScanData.threshold_pct}% od EMA200${age ? ` · ${age}` : ''} · ${ema200ScanSourceLabel()}`;
   }
   if (ema200ScanLoading && ema200ScanLoadingScope === ema200ScanScope) {
     return `<div style="color:var(--muted);font-size:11px;padding:6px 0;"><span class="cl-spinner"></span> ${ema200ScanScope === 'portfolio'
@@ -2086,7 +2120,7 @@ function ema200ResultsTableHtml() {
       <span class="dca-pill neutral">${escHtml(data.universe_label)}</span>
       <span class="dca-pill neutral">${data.scanned}/${data.total} tickerov</span>
       <span class="dca-pill warn">${data.near_count}× do ±${data.threshold_pct}%</span>
-      ${ema200ScanRanAt ? `<span class="dca-pill neutral" title="Výsledok sa drží, kým nespustíš nový sken — automaticky sa neobnovuje">⏱ ${ema200ScanAgeLabel()}</span>` : ''}
+      ${ema200ScanRanAt ? `<span class="dca-pill neutral" title="Posledný serverový výsledok: ${ema200ScanSourceLabel()}">⏱ ${ema200ScanAgeLabel()} · ${ema200ScanSourceLabel()}</span>` : ''}
     </div>
     <div style="max-height:360px;overflow:auto;">
     <table class="tool-table"><thead><tr>
@@ -2117,7 +2151,7 @@ async function runEma200Scan() {
     saveEma200ScanToStorage(data, scope);
     if (scope === ema200ScanScope) {
       ema200ScanData = data;
-      ema200ScanRanAt = Date.now();
+      ema200ScanRanAt = data.generated_at ? Date.parse(data.generated_at) : Date.now();
       ema200ScanSort = { key: 'dist_pct', dir: 1 };
     }
   } catch (e) {
@@ -2134,9 +2168,8 @@ function setEma200ScanScope(scope) {
   if (scope === ema200ScanScope) return;
   ema200ScanScope = scope;
   localStorage.setItem(EMA200_SCAN_SCOPE_KEY, scope);
-  const saved = loadEma200ScanFromStorage();
-  ema200ScanData = saved ? saved.data : null;
-  ema200ScanRanAt = saved ? saved.ts : null;
+  ema200ScanData = null;
+  ema200ScanRanAt = null;
   ema200ScanError = null;
   ema200ScanSort = { key: 'dist_pct', dir: 1 };
   renderEma200Card();

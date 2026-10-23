@@ -4031,6 +4031,70 @@ class Ema200ScopeRegressionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
 
 
+class Ema200ServerSnapshotRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        patcher = patch.object(tb, "EMA200_SCAN_FILES", {
+            scope: root / f"ema200_scan_{scope}.json" for scope in tb.EMA200_SCAN_SCOPES
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_latest_without_file_is_available_false(self):
+        self.assertEqual(tb.scanner_ema200_scan_latest("all"), {"available": False})
+
+    def test_manual_scan_round_trips_each_scope_through_latest(self):
+        def fake_distance(ticker):
+            return {"ticker": ticker, "close": 100.0, "ema200": 95.0, "dist_pct": 5.26,
+                    "weeks": 300, "source": "etoro"}
+        with (patch.object(tb, "_get_portfolio_holdings", return_value={"HELD": {}}),
+              patch.object(tb, "_portfolio_order_rates", return_value={}),
+              patch.object(tb, "scanner_universe_from_dip", return_value=( ["DIP"], "DIP import", "dip_import")),
+              patch.object(tb, "_scan_ema200_distance", side_effect=fake_distance),
+              patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS)):
+            for scope in tb.EMA200_SCAN_SCOPES:
+                result = tb.scanner_ema200_scan(threshold=None, scope=scope)
+                stored = tb.scanner_ema200_scan_latest(scope)
+                self.assertEqual(result, stored)
+                self.assertEqual(stored["scope"], scope)
+                self.assertEqual(stored["trigger"], "manual")
+                self.assertEqual(stored["threshold"], stored["threshold_pct"])
+                json.dumps(stored, allow_nan=False)
+
+    def test_automatic_hook_runs_scopes_in_order_only_after_automatic_success(self):
+        with patch.object(tb, "_run_automatic_ema200_scans") as run:
+            tb._after_nasdaq_scanner("manual", succeeded=True)
+            tb._after_nasdaq_scanner("automatic", succeeded=False)
+            run.assert_not_called()
+        seen = []
+        def compute(scope, threshold, *, trigger):
+            seen.append((scope, trigger))
+            return {}
+        with patch.object(tb, "_compute_ema200_scan", side_effect=compute), patch.object(tb.gc, "collect"):
+            tb._after_nasdaq_scanner("automatic", succeeded=True)
+        self.assertEqual(seen, [("portfolio", "automatic"), ("all", "automatic")])
+
+    def test_ema_failure_preserves_last_good_results_and_records_status(self):
+        good = {"scope": "all", "generated_at": "2026-10-01T00:00:00+00:00",
+                "results": [{"ticker": "AAPL"}], "trigger": "automatic", "threshold": 5.0}
+        tb._atomic_write_json(tb.EMA200_SCAN_FILES["all"], good)
+        with patch.object(tb, "_compute_ema200_scan", side_effect=RuntimeError("upstream failed")), \
+             patch.object(tb.gc, "collect"):
+            tb._run_automatic_ema200_scans()
+        stored = tb.scanner_ema200_scan_latest("all")
+        self.assertEqual(stored["results"], good["results"])
+        self.assertFalse(stored["status"]["ok"])
+        self.assertEqual(stored["generated_at"], good["generated_at"])
+
+    def test_universe_label_distinguishes_finviz_elite_and_xlsx(self):
+        for source, expected in (("finviz_elite", "DIP Finviz Elite"), ("xlsx", "DIP import")):
+            with (patch.object(tb, "load_dip_scores", return_value={"AAPL": {}, "_meta": {"source": source}}),
+                  patch.object(tb, "_get_portfolio_holdings", return_value={})):
+                self.assertEqual(tb.scanner_universe_from_dip()[1], expected)
+
+
 class ReviewSeptemberRegressionTests(unittest.TestCase):
     """Nálezy z externej revízie (watchlist XSS, eToro search bez tokenu)."""
 
