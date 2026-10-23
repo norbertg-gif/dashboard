@@ -26,6 +26,203 @@ from backend import etoro_proxy as ep
 
 
 
+class DipServerScoringRegressionTests(unittest.TestCase):
+    FIXTURE = [{'inputs': {'No.': 45, 'Ticker': 'HONA', 'Company': 'Honeywell Aerospace Inc', 'Fwd P/E': 0, 'PEG': 0, 'P/S': 0, 'P/B': 0, 'P/FCF': 0, 'EPS This Y': 0, 'EPS Next Y': 0, 'Sales Q/Q': 0, 'Curr R': 1.53, 'Debt/Eq': 0, 'Perf Half': 0, 'Beta': 0, 'SMA50': -0.038, 'SMA200': -0.1566, '52W High': -0.4691, 'RSI': 47.39, 'Rel Volume': 0.78, 'Price': 157.94, 'ROIC': 0, 'Oper M': 0, 'Sales YoY TTM': 0, 'EPS YoY TTM': 0, 'LTDebt/Eq': 0, 'Short Float': 0.0272}, 'expected_fa_from_excel': 56, 'expected_ta_same_row': 20}, {'inputs': {'No.': 19, 'Ticker': 'BKNG', 'Company': 'Booking Holdings Inc', 'Fwd P/E': 12.98, 'PEG': 0.79, 'P/S': 4.27, 'P/B': 0, 'P/FCF': 12.63, 'EPS This Y': 0.1467, 'EPS Next Y': 0.1808, 'Sales Q/Q': 0.0815, 'Curr R': 1.09, 'Debt/Eq': 0, 'Perf Half': -0.0756, 'Beta': 1.16, 'SMA50': -0.1392, 'SMA200': -0.1152, '52W High': -0.2738, 'RSI': 36.48, 'Rel Volume': 0.62, 'Price': 160.34, 'ROIC': 0.9113, 'Oper M': 0.3517, 'Sales YoY TTM': 0.1285, 'EPS YoY TTM': 0.5624, 'LTDebt/Eq': 0, 'Short Float': 0.0302}, 'expected_fa_from_excel': 88, 'expected_ta_same_row': 26}, {'inputs': {'No.': 14, 'Ticker': 'APP', 'Company': 'Applovin Corp', 'Fwd P/E': 13.81, 'PEG': 0.37, 'P/S': 13.58, 'P/B': 29.37, 'P/FCF': 20.48, 'EPS This Y': 0.615, 'EPS Next Y': 0.2736, 'Sales Q/Q': 0.5282, 'Curr R': 4.3, 'Debt/Eq': 1.11, 'Perf Half': -0.2921, 'Beta': 2.47, 'SMA50': -0.1293, 'SMA200': -0.3785, '52W High': -0.6246, 'RSI': 35.41, 'Rel Volume': 0.56, 'Price': 277.04, 'ROIC': 0.6603, 'Oper M': 0.7774, 'Sales YoY TTM': 0.2852, 'EPS YoY TTM': 0.9065000000000001, 'LTDebt/Eq': 1.11, 'Short Float': 0.0435}, 'expected_fa_from_excel': 81, 'expected_ta_same_row': 32}, {'inputs': {'No.': 43, 'Ticker': 'MRP', 'Company': 'Millrose Properties Inc', 'Fwd P/E': 6.91, 'PEG': 0.73, 'P/S': 4.53, 'P/B': 0.63, 'P/FCF': 0.66, 'EPS This Y': 0.2541, 'EPS Next Y': 0.05769999999999999, 'Sales Q/Q': 0.3211, 'Curr R': 0.09, 'Debt/Eq': 0.43, 'Perf Half': -0.2686, 'Beta': 0.44, 'SMA50': -0.2176, 'SMA200': -0.2345, '52W High': -0.3323, 'RSI': 19.63, 'Rel Volume': 2.57, 'Price': 22.36, 'ROIC': 0.0571, 'Oper M': 0.8511, 'Sales YoY TTM': 2.2824, 'EPS YoY TTM': 8.9054, 'LTDebt/Eq': 0.42, 'Short Float': 0.0549}, 'expected_fa_from_excel': 80, 'expected_ta_same_row': 43}, {'inputs': {'No.': 48, 'Ticker': 'INTU', 'Company': 'Intuit Inc', 'Fwd P/E': 11.52, 'PEG': 0.54, 'P/S': 3.77, 'P/B': 4.28, 'P/FCF': 9.39, 'EPS This Y': 0.3697, 'EPS Next Y': 0.1388, 'Sales Q/Q': 0.1365, 'Curr R': 1.51, 'Debt/Eq': 0.44, 'Perf Half': -0.1373, 'Beta': 0.96, 'SMA50': -0.05889999999999999, 'SMA200': -0.2124, '52W High': -0.5607, 'RSI': 50.92, 'Rel Volume': 0.66, 'Price': 302.75, 'ROIC': 0.1751, 'Oper M': 0.288, 'Sales YoY TTM': 0.139, 'EPS YoY TTM': 0.1957, 'LTDebt/Eq': 0.37, 'Short Float': 0.0278}, 'expected_fa_from_excel': 91, 'expected_ta_same_row': 28}, {'inputs': {'No.': 16, 'Ticker': 'ASML', 'Company': 'ASML Holding NV', 'Fwd P/E': 29.44, 'PEG': 0.77, 'P/S': 16.66, 'P/B': 27.5, 'P/FCF': 60.58, 'EPS This Y': 0.4767, 'EPS Next Y': 0.3862, 'Sales Q/Q': 0.2438, 'Curr R': 1.33, 'Debt/Eq': 0.09, 'Perf Half': 0.2043, 'Beta': 1.78, 'SMA50': 0.024, 'SMA200': 0.1399, '52W High': -0.1098, 'RSI': 52.44, 'Rel Volume': 0.81, 'Price': 1780.34, 'ROIC': 0.4557, 'Oper M': 0.3542, 'Sales YoY TTM': 0.1787, 'EPS YoY TTM': 0.2314, 'LTDebt/Eq': 0.09, 'Short Float': 0.0038}, 'expected_fa_from_excel': 81, 'expected_ta_same_row': 10}, {'inputs': {'No.': 12, 'Ticker': 'GRAB', 'Company': 'Grab Holdings Limited', 'Fwd P/E': 18.5, 'PEG': 0.33, 'P/S': 3.49, 'P/B': 1.92, 'P/FCF': 0, 'EPS This Y': 1.4809, 'EPS Next Y': 0.1581, 'Sales Q/Q': 0.2173, 'Curr R': 1.52, 'Debt/Eq': 0.3, 'Perf Half': -0.1332, 'Beta': 0.81, 'SMA50': -0.0426, 'SMA200': -0.1587, '52W High': -0.5015999999999999, 'RSI': 51.79, 'Rel Volume': 1.43, 'Price': 3.19, 'ROIC': 0.08310000000000001, 'Oper M': 0.08839999999999999, 'Sales YoY TTM': 0.2145, 'EPS YoY TTM': 4.3018, 'LTDebt/Eq': 0.06, 'Short Float': 0.0942}, 'expected_fa_from_excel': 77, 'expected_ta_same_row': 31}, {'inputs': {'No.': 66, 'Ticker': 'MU', 'Company': 'Micron Technology Inc', 'Fwd P/E': 4.93, 'PEG': 0.12, 'P/S': 8.73, 'P/B': 8.41, 'P/FCF': 19.71, 'EPS This Y': 1.3058, 'EPS Next Y': 0.1992, 'Sales Q/Q': 3.7927, 'Curr R': 3.31, 'Debt/Eq': 0.04, 'Perf Half': 1.4466, 'Beta': 2.33, 'SMA50': 0.0541, 'SMA200': 0.4665, '52W High': -0.1801, 'RSI': 50.2, 'Rel Volume': 0.61, 'Price': 1029, 'ROIC': 0.5939, 'Oper M': 0.7501000000000001, 'Sales YoY TTM': 2.5633, 'EPS YoY TTM': 8.8473, 'LTDebt/Eq': 0.03, 'Short Float': 0.0231}, 'expected_fa_from_excel': 92, 'expected_ta_same_row': 8}, {'inputs': {'No.': 92, 'Ticker': 'TMUS', 'Company': 'T-Mobile US Inc', 'Fwd P/E': 10.64, 'PEG': 0.53, 'P/S': 1.73, 'P/B': 2.84, 'P/FCF': 10.07, 'EPS This Y': 0.1238, 'EPS Next Y': 0.2784, 'Sales Q/Q': 0.0785, 'Curr R': 0.92, 'Debt/Eq': 2.12, 'Perf Half': -0.2408, 'Beta': 0.38, 'SMA50': -0.1502, 'SMA200': -0.2196, '52W High': -0.3569, 'RSI': 29.06, 'Rel Volume': 4.1, 'Price': 148.58, 'ROIC': 0.0641, 'Oper M': 0.2117, 'Sales YoY TTM': 0.0968, 'EPS YoY TTM': -0.1002, 'LTDebt/Eq': 1.93, 'Short Float': 0.0301}, 'expected_fa_from_excel': 55, 'expected_ta_same_row': 41}, {'inputs': {'No.': 30, 'Ticker': 'FOUR', 'Company': 'Shift4 Payments Inc', 'Fwd P/E': 6.54, 'PEG': 0.52, 'P/S': 0.66, 'P/B': 5.15, 'P/FCF': 7.29, 'EPS This Y': 0.0062, 'EPS Next Y': 0.1753, 'Sales Q/Q': 0.3403, 'Curr R': 1.21, 'Debt/Eq': 2.82, 'Perf Half': -0.0946, 'Beta': 1.52, 'SMA50': -0.0723, 'SMA200': -0.1711, '52W High': -0.5, 'RSI': 49.67, 'Rel Volume': 0.91, 'Price': 40, 'ROIC': 0.0171, 'Oper M': 0.0966, 'Sales YoY TTM': 0.3244, 'EPS YoY TTM': -0.7881999999999999, 'LTDebt/Eq': 2.81, 'Short Float': 0.2626}, 'expected_fa_from_excel': 46, 'expected_ta_same_row': 25}, {'inputs': {'No.': 42, 'Ticker': 'GOOG', 'Company': 'Alphabet Inc', 'Fwd P/E': 22.94, 'PEG': 1.23, 'P/S': 9.59, 'P/B': 6.83, 'P/FCF': 80.34, 'EPS This Y': 0.9062, 'EPS Next Y': -0.264, 'Sales Q/Q': 0.2398, 'Curr R': 2.72, 'Debt/Eq': 0.18, 'Perf Half': 0.1018, 'Beta': 1.19, 'SMA50': 0.013, 'SMA200': 0.028, '52W High': -0.14, 'RSI': 55.93, 'Rel Volume': 0.63, 'Price': 347.86, 'ROIC': 0.3233, 'Oper M': 0.3396, 'Sales YoY TTM': 0.2023, 'EPS YoY TTM': 1.1271, 'LTDebt/Eq': 0.18, 'Short Float': 0.0101}, 'expected_fa_from_excel': 80, 'expected_ta_same_row': 8}, {'inputs': {'No.': 11, 'Ticker': 'AMD', 'Company': 'Advanced Micro Devices Inc', 'Fwd P/E': 37.91, 'PEG': 0.49, 'P/S': 24.03, 'P/B': 14.76, 'P/FCF': 118.14, 'EPS This Y': 0.8321, 'EPS Next Y': 1.0994, 'Sales Q/Q': 0.5011, 'Curr R': 2.61, 'Debt/Eq': 0.06, 'Perf Half': 1.4816, 'Beta': 2.46, 'SMA50': 0.1497, 'SMA200': 0.5782, '52W High': -0.0766, 'RSI': 57.19, 'Rel Volume': 0.59, 'Price': 608.1, 'ROIC': 0.0911, 'Oper M': 0.1571, 'Sales YoY TTM': 0.3954, 'EPS YoY TTM': 1.2582, 'LTDebt/Eq': 0.05, 'Short Float': 0.0242}, 'expected_fa_from_excel': 74, 'expected_ta_same_row': 0}, {'inputs': {'No.': 76, 'Ticker': 'PDD', 'Company': 'PDD Holdings Inc ADR', 'Fwd P/E': 6.65, 'PEG': 0.69, 'P/S': 1.8, 'P/B': 1.75, 'P/FCF': 0, 'EPS This Y': -0.0552, 'EPS Next Y': 0.1989, 'Sales Q/Q': 0.1482, 'Curr R': 2.62, 'Debt/Eq': 0.01, 'Perf Half': -0.1879, 'Beta': -0.04, 'SMA50': -0.0208, 'SMA200': -0.1325, '52W High': -0.4165, 'RSI': 55.91, 'Rel Volume': 1.13, 'Price': 81.35, 'ROIC': 0.2014, 'Oper M': 0.222, 'Sales YoY TTM': 0.1353, 'EPS YoY TTM': -0.0242, 'LTDebt/Eq': 0.01, 'Short Float': 0.0213}, 'expected_fa_from_excel': 83, 'expected_ta_same_row': 25}, {'inputs': {'No.': 69, 'Ticker': 'NVDA', 'Company': 'NVIDIA Corp', 'Fwd P/E': 14.54, 'PEG': 0.22, 'P/S': 18.24, 'P/B': 24.18, 'P/FCF': 43.51, 'EPS This Y': 0.9451, 'EPS Next Y': 0.6999, 'Sales Q/Q': 1.0585, 'Curr R': 4.59, 'Debt/Eq': 0.17, 'Perf Half': 0.2155, 'Beta': 2.19, 'SMA50': 0.03240000000000001, 'SMA200': 0.1342, '52W High': -0.0579, 'RSI': 52.96, 'Rel Volume': 0.7, 'Price': 229.28, 'ROIC': 0.7242000000000001, 'Oper M': 0.6520999999999999, 'Sales YoY TTM': 0.8338, 'EPS YoY TTM': 1.2442, 'LTDebt/Eq': 0.16, 'Short Float': 0.0134}, 'expected_fa_from_excel': 89, 'expected_ta_same_row': 3}]
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        for name, value in {"DIP_SCORES_FILE": root / "dip_scores.json",
+                            "DIP_ELITE_STATE_FILE": root / "dip_elite_state.json",
+                            "DIP_HISTORY_DIR": root / "dip_history",
+                            "FINVIZ_SCREENERS_FILE": root / "finviz_screeners.json"}.items():
+            patcher = patch.object(tb, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.dict(tb.os.environ, {"FINVIZ_API_KEY": "test-only-secret"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ("_prepare_scanner_daily_cache", "start_roic_fundamentals_enrichment"):
+            patcher = patch.object(tb, name, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def csv_text(self, rows=None, omit=None, percent_sign=True):
+        rows = rows or [item["inputs"] for item in self.FIXTURE]
+        headers = list(reversed(["Ticker", "Company", *tb.DIP_EXPORT_COLUMNS]))
+        if omit:
+            headers.remove(omit)
+        stream = io.StringIO()
+        writer = csv.DictWriter(stream, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            record = {"Ticker": row["Ticker"], "Company": row.get("Company", "")}
+            for header, name in tb.DIP_EXPORT_COLUMNS.items():
+                value = row.get(name)
+                if value is None:
+                    value = "-"
+                elif name in tb.DIP_PERCENT_INPUTS:
+                    value = str(value * 100) + ("%" if percent_sign else "")
+                record[header] = value
+            writer.writerow({h: record[h] for h in headers})
+        return stream.getvalue()
+
+    def response(self, text):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.status_code = 200
+        response.content = text.encode()
+        response.__enter__.return_value = response
+        return response
+
+    def test_golden_fa_and_same_row_ta(self):
+        for fixture in self.FIXTURE:
+            with self.subTest(ticker=fixture["inputs"]["Ticker"]):
+                score = tb.compute_dip_scores_v3(fixture["inputs"])
+                self.assertEqual(score["fa"], fixture["expected_fa_from_excel"])
+                self.assertEqual(score["ta"], fixture["expected_ta_same_row"])
+                self.assertEqual(score["total"], score["fa"] + score["ta"])
+
+    def test_cross_row_independence(self):
+        rows = [dict(f["inputs"]) for f in self.FIXTURE]
+        before = {r["Ticker"]: tb.compute_dip_scores_v3(r) for r in rows}
+        rows[0].update({"RSI": 50, "SMA50": 0.1, "SMA200": 0.1,
+                        "52W High": 0, "Perf Half": 0.1, "Beta": 2, "Rel Volume": 3})
+        after = {r["Ticker"]: tb.compute_dip_scores_v3(r) for r in rows}
+        self.assertNotEqual(before[rows[0]["Ticker"]]["ta"], after[rows[0]["Ticker"]]["ta"])
+        self.assertEqual(before[rows[0]["Ticker"]]["fa"], after[rows[0]["Ticker"]]["fa"])
+        for row in rows[1:]:
+            self.assertEqual(before[row["Ticker"]], after[row["Ticker"]])
+
+    def test_csv_shuffled_headers_percent_and_missing(self):
+        row = dict(self.FIXTURE[1]["inputs"], **{"Fwd P/E": None, "ROIC": 0.152})
+        for signed in (True, False):
+            parsed = tb._parse_dip_elite_csv(self.csv_text([row], percent_sign=signed))[0]
+            self.assertAlmostEqual(parsed["ROIC"], 0.152)
+            self.assertEqual(parsed["RSI"], row["RSI"])
+            self.assertEqual(parsed["Rel Volume"], row["Rel Volume"])
+            score = tb.compute_dip_scores_v3(parsed)
+            self.assertEqual(score["components"]["Fwd P/E"], 6)
+            self.assertIn("Fwd P/E", score["components"]["missing_inputs"])
+        for invalid in ("", "-", "bad", float("nan"), float("inf")):
+            score = tb.compute_dip_scores_v3({"Fwd P/E": invalid})
+            self.assertIn("Fwd P/E", score["components"]["missing_inputs"])
+            json.dumps(score, allow_nan=False)
+
+    def test_missing_ttm_keeps_previous_file(self):
+        tb.save_dip_scores({"OLD": {"total": 95}})
+        original = tb.DIP_SCORES_FILE.read_bytes()
+        for header in ("Sales Year Over Year TTM", "EPS Year Over Year TTM"):
+            with patch.object(tb.requests, "get", return_value=self.response(self.csv_text(omit=header))):
+                result = tb.refresh_dip_from_finviz_elite("manual")
+            self.assertFalse(result["ok"])
+            self.assertIn(header, result["error"])
+            self.assertEqual(tb.DIP_SCORES_FILE.read_bytes(), original)
+        self.assertFalse(tb.DIP_HISTORY_DIR.exists())
+
+    def test_output_consumers_dedupe_history_and_export_params(self):
+        import gzip
+        first = self.FIXTURE[1]["inputs"]
+        second = dict(first, **{"Price": 999, "RSI": 1})
+        with patch.object(tb.requests, "get", side_effect=[self.response(self.csv_text([first])),
+                self.response(self.csv_text([second, self.FIXTURE[0]["inputs"]]))]) as fetch:
+            result = tb.refresh_dip_from_finviz_elite("manual")
+        self.assertTrue(result["ok"])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(fetch.call_args_list[0].kwargs["params"]["v"], "151")
+        self.assertEqual(fetch.call_args_list[1].kwargs["params"]["ft"], "4")
+        self.assertNotIn("r", fetch.call_args_list[0].kwargs["params"])
+        scores = tb.load_dip_scores()
+        self.assertEqual(scores["BKNG"]["price"], first["Price"])
+        self.assertEqual(len(scores["BKNG"]["screeners"]), 2)
+        self.assertEqual(scores["BKNG"]["rank"], 1)
+        self.assertIsNone(scores["BKNG"]["sheet_rank"])
+        self.assertEqual(scores["BKNG"]["label"], tb._dip_label(scores["BKNG"]["total"]))
+        with patch.object(tb, "_get_portfolio_holdings", return_value=[]):
+            self.assertEqual(tb.scanner_universe_from_dip()[0], ["BKNG", "HONA"])
+        total, _ = tb._position_dip_metrics("BKNG", 100, 1000, scores)
+        state = tb._dca_trigger_state([{"amount": 100, "pnl": -30, "pnlPct": -30,
+            "openDateTime": "2026-01-01"}], total, {},
+            {"dca_dip_min": 95, "dca_last_tranche_pct": 20, "dca_loss_pct": 20})
+        self.assertTrue(state["dip_score_threshold_met"])
+        self.assertEqual(state["status"], "eligible")
+        snapshot = next(tb.DIP_HISTORY_DIR.glob("*.json.gz"))
+        with gzip.open(snapshot, "rt", encoding="utf-8") as handle:
+            history = json.load(handle)
+        self.assertEqual(history, scores)
+        self.assertEqual(history["_meta"]["rules_version"], 3)
+        self.assertEqual(history["BKNG"]["raw_inputs"]["Ticker"], "BKNG")
+        self.assertNotIn("test-only-secret", json.dumps(history))
+
+    def test_scheduler_once_on_disk_restart_and_no_key(self):
+        now = datetime(2026, 10, 23, 23, 25, tzinfo=timezone.utc)
+        with patch.object(tb.requests, "get", return_value=self.response(self.csv_text())) as fetch:
+            self.assertIsNone(tb._maybe_refresh_dip_elite(now.replace(minute=24)))
+            self.assertTrue(tb._maybe_refresh_dip_elite(now)["ok"])
+            # No in-memory scheduler marker survives: a new lock plus the disk state is enough.
+            with patch.object(tb, "_dip_elite_lock", threading.Lock()):
+                self.assertIsNone(tb._maybe_refresh_dip_elite(now.replace(minute=26)))
+            self.assertEqual(fetch.call_count, 2)
+            with patch.dict(tb.os.environ, {"FINVIZ_API_KEY": ""}):
+                self.assertIsNone(tb._maybe_refresh_dip_elite(now.replace(day=26)))
+                self.assertIsNone(tb.get_dip_elite_status()["next_scheduled_run"])
+            self.assertIsNone(tb._maybe_refresh_dip_elite(now.replace(day=24)))
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_failed_or_interrupted_schedule_does_not_repeat_and_secrets_scrubbed(self):
+        now = datetime(2026, 10, 23, 23, 25, tzinfo=timezone.utc)
+        with patch.object(tb.requests, "get", side_effect=RuntimeError("auth=test-only-secret test-only-secret")) as fetch:
+            result = tb._maybe_refresh_dip_elite(now)
+            self.assertFalse(result["ok"])
+            self.assertIsNone(tb._maybe_refresh_dip_elite(now))
+            self.assertEqual(fetch.call_count, 1)
+        self.assertNotIn("test-only-secret", json.dumps(result))
+        self.assertNotIn("test-only-secret", json.dumps(tb.get_dip_elite_status()))
+        self.assertNotIn("test-only-secret", tb.DIP_ELITE_STATE_FILE.read_text())
+        tb._atomic_write_json(tb.DIP_ELITE_STATE_FILE, {"last_scheduled_day": "2026-10-23", "running": True})
+        with patch.object(tb.requests, "get", return_value=self.response(self.csv_text())) as fetch:
+            self.assertTrue(tb._maybe_refresh_dip_elite(now)["ok"])
+            self.assertEqual(fetch.call_count, 2)
+        # A crash after scores were saved but before the final state write is recoverable.
+        tb._atomic_write_json(tb.DIP_ELITE_STATE_FILE, {"last_scheduled_day": "2026-10-23", "running": True})
+        with patch.object(tb.requests, "get") as fetch:
+            self.assertIsNone(tb._maybe_refresh_dip_elite(now))
+            fetch.assert_not_called()
+        self.assertTrue(tb._load_dip_elite_state()["ok"])
+
+    def test_refresh_pipeline_keeps_ta_on_its_own_ticker(self):
+        rows = [dict(f["inputs"]) for f in self.FIXTURE]
+        with patch.object(tb.requests, "get", return_value=self.response(self.csv_text(rows))):
+            self.assertTrue(tb.refresh_dip_from_finviz_elite("manual")["ok"])
+        before = tb.load_dip_scores()
+        for fixture in self.FIXTURE:
+            score = before[fixture["inputs"]["Ticker"]]
+            self.assertEqual(score["fa"], fixture["expected_fa_from_excel"])
+            self.assertEqual(score["ta"], fixture["expected_ta_same_row"])
+        rows[0]["RSI"] = 20
+        with patch.object(tb.requests, "get", return_value=self.response(self.csv_text(rows))):
+            self.assertTrue(tb.refresh_dip_from_finviz_elite("manual")["ok"])
+        after = tb.load_dip_scores()
+        self.assertNotEqual(before["HONA"]["ta"], after["HONA"]["ta"])
+        for row in rows[1:]:
+            self.assertEqual(before[row["Ticker"]]["ta"], after[row["Ticker"]]["ta"])
+
+    def test_stable_ties_and_pagination_is_dropped(self):
+        first = dict(self.FIXTURE[0]["inputs"], Ticker="ZZZ")
+        second = dict(first, Ticker="AAA")
+        tb._atomic_write_json(tb.FINVIZ_SCREENERS_FILE,
+            [tb.FINVIZ_DEFAULT_SCREENERS[0] + "&r=21", tb.FINVIZ_DEFAULT_SCREENERS[1]])
+        with patch.object(tb.requests, "get", return_value=self.response(self.csv_text([first, second]))) as fetch:
+            self.assertTrue(tb.refresh_dip_from_finviz_elite("manual")["ok"])
+        self.assertEqual(list(tb.load_dip_scores())[:2], ["ZZZ", "AAA"])
+        self.assertNotIn("r", fetch.call_args_list[0].kwargs["params"])
+
+    def test_single_flight(self):
+        with tb._dip_elite_lock:
+            self.assertTrue(tb.refresh_dip_from_finviz_elite("manual")["running"])
+
+
 class PortfolioPerformanceRegressionTests(unittest.TestCase):
     def fixture(self):
         dates = [date(2025, 1, d) for d in (3, 6, 7)]

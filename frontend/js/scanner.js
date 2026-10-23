@@ -1067,6 +1067,23 @@ async function loadDipStatus() {
 // FINVIZ_COOKIE — a bežná cesta je dnes prevzatie prihlásenej browser session
 // cez Claude Code, kde sa so žiadnym cookie manipulovať netreba.
 
+async function refreshDipElite(button) {
+  const status = document.getElementById('dipImportStatus');
+  button.disabled = true;
+  if (status) status.textContent = 'Obnovujem DIP z Finvizu...';
+  try {
+    const response = await fetch('/api/scanner/dip/elite-refresh', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || data.detail || 'Obnova zlyhala');
+    clearScannerClientCache('dipStatus');
+    if (status) status.textContent = `DIP ranking: ${data.count} titulov · Finviz Elite, automaticky · ${fmtImportTime(data.finished_at)} · vek 0 h`;
+  } catch (error) {
+    if (status) status.textContent = 'DIP obnova zlyhala: ' + error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function importDipExcel() {
   const input = document.getElementById('dipImportInput');
   const status = document.getElementById('dipImportStatus');
@@ -1250,9 +1267,19 @@ async function renderScannerView() {
   const status = document.getElementById('dipImportStatus');
   if (status) {
     if (dip.error) status.textContent = 'DIP stav nedostupný: ' + dip.error;
-    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.filename || dip.sheet || 'Ranking'} · import ${fmtImportTime(dip.updated_at)}`;
+    else if (dip.count) status.textContent = `DIP ranking: ${dip.count} titulov · ${dip.source === 'finviz_elite' ? 'Finviz Elite, automaticky' : 'import z Excelu'} · ${fmtImportTime(dip.updated_at)} · vek ${Math.max(0, Math.floor((Date.now() - Date.parse(dip.updated_at)) / 3600000)) || 0} h`;
     else status.textContent = 'DIP ranking zatiaľ nie je importovaný.';
   }
+  fetch('/api/scanner/dip/elite-status').then(response => response.json()).then(elite => {
+    if (elite.configured && status && status.isConnected && !document.getElementById('dipEliteRefresh')) {
+      const button = document.createElement('button');
+      button.id = 'dipEliteRefresh';
+      button.className = 'btn';
+      button.textContent = 'Obnoviť DIP z Finvizu';
+      button.onclick = () => refreshDipElite(button);
+      status.after(button);
+    }
+  }).catch(() => {});
   // Posledný scan ide z cache — načítaj okamžite a nezávisle od pomalých sekcií
   await loadNasdaqScannerResults();
   loadWeeklyPlan();

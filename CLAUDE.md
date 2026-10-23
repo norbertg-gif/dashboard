@@ -4,6 +4,57 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 
 **User trading profile (premisa pre feature decisions):** obchody na 12+ mesiacov, pozície sa prioritne zatvárajú až po ročnom časovom teste (SR daňové oslobodenie), niektoré bežia 3+ roky. 90D validácia signálov je analytický checkpoint, nie obchodný horizont. Týždenný smer modelovej sviečky je pri tomto horizonte šum — UI ho má prezentovať ako kontext, nie ako signál.
 
+## DIP scoring on the server (Finviz Elite), 2026-10-23
+
+`refresh_dip_from_finviz_elite(trigger)` requests `https://elite.finviz.com/export.ashx`
+with env-only `auth=FINVIZ_API_KEY`. One request per screener from
+`DATA_ROOT/finviz_screeners.json`; only v/f/ft/o are kept, pagination r is dropped.
+Defaults: `v=151&f=idx_ndx&o=ticker` and
+`v=150&f=cap_midover,fa_peg_u2,sh_insidertrans_pos&ft=4&o=peg`.
+The user verified production CSV availability on 2026-10-23; live units still need
+Render verification. The old cookie/HTML fetch below is a legacy local fallback.
+
+`DIP_EXPORT_COLUMNS` maps LONG headers by name, never position:
+Forward P/E -> Fwd P/E; P/Free Cash Flow -> P/FCF; EPS Growth This Year -> EPS This Y;
+EPS Growth Next Year -> EPS Next Y; Sales Growth Quarter Over Quarter -> Sales Q/Q;
+Current Ratio -> Curr R; Total Debt/Equity -> Debt/Eq; Performance (Half Year) -> Perf Half;
+50-Day Simple Moving Average -> SMA50; 200-Day Simple Moving Average -> SMA200;
+52-Week High -> 52W High; Relative Strength Index (14) -> RSI; Relative Volume -> Rel Volume;
+Return on Invested Capital -> ROIC; Operating Margin -> Oper M;
+Sales Year Over Year TTM -> Sales YoY TTM; EPS Year Over Year TTM -> EPS YoY TTM;
+LT Debt/Equity -> LTDebt/Eq. Other field names stay unchanged. Either missing LONG
+TTM header aborts before saving scores. Percentage columns become fractions: signed
+percent strings and plain CSV percent points are divided by 100 once. RSI, relative
+volume, beta, prices and ratios stay numeric. No magnitude-based guessing.
+
+`compute_dip_scores_v3` and `DIP_RULES_VERSION = 3` reproduce build_v3.py rules;
+`DipServerScoringRegressionTests` embeds 14 workbook rows. Missing values deliberately
+score as zero (missing Fwd P/E earns 6 points); components.missing_inputs exposes this
+known flaw. All rule awards are retained for future measured tuning; Beta adds only to TA.
+
+Workbook bug found 2026-10-23: 198/200 TA rows referenced another ticker's Data row
+(HONA used F, BKNG used KDP). Median TOTAL error 10 points; 45 tickers crossed DIP 95.
+The old backlog -12 claim checked arithmetic sums, not ticker references. Server FA
+and TA take one ticker row, guarded by golden and cross-row independence tests.
+Ranking is stable TOTAL-descending; first occurrence wins, all screeners are recorded.
+
+Atomic snapshots: DATA_ROOT/dip_history/YYYY-MM-DD.json.gz, retained indefinitely,
+same-day overwrite. Includes normalized raw inputs (null for missing), components,
+scores, rules_version and screener provenance. Snapshot succeeds before score save;
+existing daily-cache preparation and ROIC enrichment follow. Consumer thresholds stay unchanged.
+
+Existing scanner scheduler refreshes weekdays five minutes before scanner time
+(currently 23:25 UTC before 23:30). Late weekday starts catch up. dip_elite_state.json
+records the scheduled date atomically before network I/O. Completed attempts, including
+failures, are not repeated automatically. Interrupted attempts before publication retry
+after restart; scores metadata scheduled_day recovers publication without a second save.
+Manual refresh can retry a failed attempt.
+No key means no scheduled refresh. A single-flight lock covers both triggers.
+POST /api/scanner/dip/elite-refresh refreshes manually; GET /api/scanner/dip/elite-status
+reports configuration, last attempt, counts, current source and next schedule.
+Errors are scrubbed; the key is never persisted or returned. Scanner shows source and
+age; the button appears only with a configured key. XLSX import remains a fallback.
+
 ## Stack
 
 - **Backend:** FastAPI (Python 3.14), Uvicorn, pandas/numpy, scikit-learn, yfinance, hmmlearn
@@ -250,7 +301,9 @@ These were already in the codebase and need to stay fixed:
    pohne raz za rok). Pre pozíciu, do ktorej sa pridáva párkrát ročne, je
    správny nástroj weekly EMA20 alebo daily EMA50.
 
--12. **DIP `rank` zo zošita je nepoužiteľný — OPRAVENÉ 2026-09-21 v parseri, zošit NEOPRAVENÝ.**
+-12. **UPDATE 2026-10-23:** Server v3 replaces workbook scoring; see the Finviz Elite section above.
+   The old arithmetic checks below did not verify TA ticker references: 198/200 were wrong.
+   Historical rank issue: **DIP `rank` zo zošita je nepoužiteľný — OPRAVENÉ 2026-09-21 v parseri, zošit NEOPRAVENÝ.**
    **Príznak:** v exporte z 2026-09-21 malo NVDA najvyššie TOTAL (122) a rank 68;
    MU so 116 malo rank 160; GPGI so 44 malo rank 10. Korelácia `rank` ↔ `TOTAL`
    bola **−0,029** (7. 9. ešte −0,985), 51 z 99 susedných dvojíc porušovalo
@@ -985,6 +1038,8 @@ Main source sections:
   behu — prepnutie počas behu neukáže cudzí spinner, výsledok ani chybu.
   ako ďalší tunable. Čisto interpretačné — NEVSTUPUJE do C1–C4, DIP skóre ani
   scoringu.
+- **Finviz DIP fetch update 2026-10-23:** Elite CSV is now the automatic server source
+  when FINVIZ_API_KEY is configured. See the server scoring section above. Legacy notes follow.
 - **Finviz DIP fetch (`POST /api/scanner/dip/finviz-fetch`) — LOKÁLNE IBA, HOTOVO 2026-08-23, UI TLAČIDLO ODSTRÁNENÉ V TEN ISTÝ DEŇ.**
   **Bežná cesta dnes NIE JE tento endpoint** — je to prevzatie používateľovej
   prihlásenej browser session cez Claude Code (Claude in Chrome rozšírenie

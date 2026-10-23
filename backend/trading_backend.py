@@ -8524,6 +8524,266 @@ def _load_finviz_screeners() -> list[str]:
     return screeners
 
 
+# Server rules consume workbook units (percentage fields are fractions).
+DIP_RULES_VERSION = 3
+DIP_ELITE_STATE_FILE = DATA_ROOT / "dip_elite_state.json"
+DIP_HISTORY_DIR = DATA_ROOT / "dip_history"
+_dip_elite_lock = threading.Lock()
+DIP_EXPORT_COLUMNS = {
+    "Forward P/E": "Fwd P/E", "PEG": "PEG", "P/S": "P/S", "P/B": "P/B",
+    "P/Free Cash Flow": "P/FCF", "EPS Growth This Year": "EPS This Y",
+    "EPS Growth Next Year": "EPS Next Y", "Sales Growth Quarter Over Quarter": "Sales Q/Q",
+    "Current Ratio": "Curr R", "Total Debt/Equity": "Debt/Eq",
+    "Performance (Half Year)": "Perf Half", "Beta": "Beta",
+    "50-Day Simple Moving Average": "SMA50", "200-Day Simple Moving Average": "SMA200",
+    "52-Week High": "52W High", "Relative Strength Index (14)": "RSI",
+    "Relative Volume": "Rel Volume", "Price": "Price",
+    "Return on Invested Capital": "ROIC", "Operating Margin": "Oper M",
+    "Sales Year Over Year TTM": "Sales YoY TTM", "EPS Year Over Year TTM": "EPS YoY TTM",
+    "LT Debt/Equity": "LTDebt/Eq", "Short Float": "Short Float",
+}
+DIP_PERCENT_INPUTS = frozenset({"EPS This Y", "EPS Next Y", "Sales Q/Q", "Perf Half",
+    "SMA50", "SMA200", "52W High", "ROIC", "Oper M", "Sales YoY TTM", "EPS YoY TTM", "Short Float"})
+
+
+def compute_dip_scores_v3(row: dict) -> dict:
+    """Exact build_v3 rules, including the deliberate missing-as-zero flaw."""
+    values = {name: _num_or_none(row.get(name)) for name in DIP_EXPORT_COLUMNS.values()}
+    missing = [name for name, value in values.items() if value is None]
+    v = {name: value if value is not None else 0 for name, value in values.items()}
+
+    def below(name, bands):
+        return next((points for limit, points in bands if v[name] < limit), 0)
+
+    def above(name, bands):
+        return next((points for limit, points in bands if v[name] > limit), 0)
+
+    fa = {
+        "Fwd P/E": below("Fwd P/E", [(15,6),(20,5),(30,3),(50,1)]),
+        "PEG": below("PEG", [(0.8,6),(1,5),(1.5,3),(2.5,1)]),
+        "P/S": below("P/S", [(2,5),(5,3),(10,2),(20,1)]),
+        "P/B": below("P/B", [(2,3),(5,2),(10,1)]),
+        "P/FCF": below("P/FCF", [(15,5),(20,4),(40,2),(60,1)]),
+        "ROIC": above("ROIC", [(0.15,10),(0.08,6),(0,2)]),
+        "Oper M": above("Oper M", [(0.18,10),(0.10,6),(0,2)]),
+        "Curr R": above("Curr R", [(2,5),(1.5,3),(1,1)]),
+        "Sales YoY TTM": -5 if v["Sales YoY TTM"] < 0 else (5 if v["Sales YoY TTM"] < 0.06 else 12),
+        "EPS YoY TTM": 0 if v["EPS YoY TTM"] < 0 else (6 if v["EPS YoY TTM"] < 0.10 else 13),
+        "Debt/Eq": below("Debt/Eq", [(0.5,5),(1,4),(1.5,2),(2,1)]),
+        "LTDebt/Eq": 0 if v["LTDebt/Eq"] > 1.5 or v["LTDebt/Eq"] < 0 else (8 if v["LTDebt/Eq"] < 0.5 else 4),
+        "EPS Next Y": above("EPS Next Y", [(0.2,4),(0.1,2),(0,1)]),
+        "Short Float": below("Short Float", [(0.03,4),(0.08,2)]),
+        "Sales Q/Q": above("Sales Q/Q", [(0.15,4),(0.08,2),(0,1)]),
+    }
+    sma50, sma200, beta = v["SMA50"], v["SMA200"], v["Beta"]
+    ta = {
+        "RSI": below("RSI", [(25,12),(30,10),(35,8),(45,5),(55,3)]),
+        "52W High": below("52W High", [(-0.6,12),(-0.4,10),(-0.2,8),(-0.1,5)]),
+        "SMA trend": 10 if sma50 < 0 and sma200 > 0 else (7 if sma50 < 0 and sma200 < 0 else (0 if sma50 > 0 and sma200 > 0 else 3)),
+        "Perf Half": below("Perf Half", [(-0.4,10),(-0.2,8),(-0.1,5),(0,3)]),
+        "Rel Volume": above("Rel Volume", [(2,8),(1.5,6),(1,3)]),
+        "Beta": 3 if 0.5 <= beta <= 1.2 else (2 if 1.2 < beta <= 1.8 else 0),
+    }
+    return {"fa": sum(fa.values()), "ta": sum(ta.values()),
+            "total": sum(fa.values()) + sum(ta.values()),
+            "components": {**fa, **ta, "missing_inputs": missing}}
+
+
+def _parse_dip_elite_csv(text: str) -> list[dict]:
+    from io import StringIO
+    reader = csv.DictReader(StringIO(text.lstrip("\ufeff")))
+    headers = set(reader.fieldnames or [])
+    required = {"Ticker", "Sales Year Over Year TTM", "EPS Year Over Year TTM"}
+    if not required.issubset(headers):
+        raise ValueError("Finviz Elite CSV missing required template headers: " + ", ".join(sorted(required - headers)))
+    rows = []
+    for raw in reader:
+        ticker = str(raw.get("Ticker") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9.\-]{1,12}", ticker):
+            continue
+        row = {"Ticker": ticker, "Company": str(raw.get("Company") or "").strip()}
+        for header, name in DIP_EXPORT_COLUMNS.items():
+            cell = str(raw.get(header) or "").strip()
+            value = _num_or_none(_finviz_fix_number(cell))
+            # Finviz CSV omits % signs in some exports: these columns are percent points.
+            if value is not None and name in DIP_PERCENT_INPUTS and not cell.endswith("%"):
+                value /= 100
+            row[name] = value
+        rows.append(row)
+    if not rows:
+        raise ValueError("Finviz Elite CSV contains no ticker rows")
+    return rows
+
+
+def _load_dip_elite_state() -> dict:
+    try:
+        state = json.loads(DIP_ELITE_STATE_FILE.read_text(encoding="utf-8"))
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _dip_elite_schedule(now: datetime) -> datetime:
+    return now.replace(hour=SCANNER_AUTO_HOUR_UTC, minute=SCANNER_AUTO_MINUTE_UTC,
+                       second=0, microsecond=0) - timedelta(minutes=5)
+
+
+def _maybe_refresh_dip_elite(now: datetime | None = None):
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if not os.getenv("FINVIZ_API_KEY", "").strip() or now.weekday() >= 5 or now < _dip_elite_schedule(now):
+        return None
+    return refresh_dip_from_finviz_elite("automatic", scheduled_day=now.date().isoformat())
+
+
+def _fetch_dip_elite_scores(key: str, scheduled_day: str | None = None) -> tuple[dict, list[str]]:
+    """Download both screeners from the Elite export and score them (no writes)."""
+    screeners = []
+    merged = {}
+    for url in _load_finviz_screeners():
+        params = {k: v for k, v in urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)
+                  if k in {"v", "f", "ft", "o"}}
+        source = urllib.parse.urlencode(params)
+        screeners.append(source)
+        with requests.get("https://elite.finviz.com/export.ashx",
+                          params={**params, "auth": key}, timeout=45,
+                          allow_redirects=False) as response:
+            if response.status_code != 200:
+                raise ValueError(f"Finviz Elite HTTP {response.status_code}")
+            rows = _parse_dip_elite_csv(response.content.decode("utf-8-sig"))
+        for row in rows:
+            ticker = row["Ticker"]
+            if ticker in merged:
+                if source not in merged[ticker]["screeners"]:
+                    merged[ticker]["screeners"].append(source)
+                continue
+            scored = compute_dip_scores_v3(row)
+            merged[ticker] = {"ticker": ticker, "company": row["Company"],
+                "price": row["Price"], "sheet_rank": None, "raw_inputs": row,
+                "screeners": [source], "rules_version": DIP_RULES_VERSION, **scored, "label": _dip_label(scored["total"])}
+    scores = {}
+    for rank, item in enumerate(sorted(merged.values(), key=lambda r: -r["total"]), 1):
+        scores[item["ticker"]] = {**item, "rank": rank}
+    scores["_meta"] = {"source": "finviz_elite", "rules_version": DIP_RULES_VERSION,
+        "scheduled_day": scheduled_day,
+        "updated_at": datetime.now(timezone.utc).isoformat(), "count": len(merged), "screeners": screeners}
+    return scores, screeners
+
+
+def refresh_dip_from_finviz_elite(trigger: str, *, scheduled_day: str | None = None) -> dict:
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if not key:
+        return {"ok": False, "error": "FINVIZ_API_KEY is not configured"}
+    if not _dip_elite_lock.acquire(blocking=False):
+        return {"ok": False, "running": True, "error": "DIP refresh already running"}
+    try:
+        previous = _load_dip_elite_state()
+        if scheduled_day and previous.get("last_scheduled_day") == scheduled_day:
+            if not previous.get("running"):
+                return None
+            # Recover a restart after publication without publishing the same day twice.
+            meta = load_dip_scores().get("_meta", {})
+            if meta.get("scheduled_day") == scheduled_day:
+                previous.update(running=False, ok=True, count=meta.get("count", 0),
+                                finished_at=meta.get("updated_at"))
+                _atomic_write_json(DIP_ELITE_STATE_FILE, previous)
+                return None
+            # An interrupted attempt before publication must be retried after restart.
+        state = {"trigger": trigger, "started_at": datetime.now(timezone.utc).isoformat(),
+                 "ok": None, "running": True, "count": 0,
+                 "last_scheduled_day": scheduled_day or previous.get("last_scheduled_day")}
+        # Persist the attempt before I/O; completed attempts are never repeated.
+        _atomic_write_json(DIP_ELITE_STATE_FILE, state)
+        try:
+            scores, screeners = _fetch_dip_elite_scores(key, scheduled_day)
+            merged = {k: v for k, v in scores.items() if not k.startswith("_")}
+            # Use the same atomic gzip pattern as cache_write, but propagate failures.
+            target = DIP_HISTORY_DIR / (datetime.now(timezone.utc).date().isoformat() + ".json.gz")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp = target.with_name(f"{target.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp")
+            try:
+                with _gzip.open(temp, "wt", encoding="utf-8") as handle:
+                    json.dump(scores, handle, ensure_ascii=False, allow_nan=False)
+                os.replace(temp, target)
+            finally:
+                temp.unlink(missing_ok=True)
+            save_dip_scores(scores)
+            state.update(ok=True, count=len(merged), screeners=screeners)
+            # A follow-up failure must not misreport the successfully saved source as failed.
+            try:
+                state["daily_cache_cold"] = _prepare_scanner_daily_cache(scores)
+                start_roic_fundamentals_enrichment(scores)
+            except Exception as exc:
+                state["follow_up_error"] = _scrub_token(str(exc)).replace(key, "***")
+        except Exception as exc:
+            state.update(ok=False, error=_scrub_token(str(exc)).replace(key, "***"))
+        state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat())
+        _atomic_write_json(DIP_ELITE_STATE_FILE, state)
+        return state
+    finally:
+        _dip_elite_lock.release()
+
+
+@app.post("/api/scanner/dip/elite-refresh")
+def refresh_dip_elite_endpoint():
+    return refresh_dip_from_finviz_elite("manual")
+
+
+@app.get("/api/scanner/dip/elite-preview")
+def preview_dip_elite():
+    """Dry run: score the live export and compare with the current dip_scores.json
+    WITHOUT writing anything. Used before the first real switch to the server source."""
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if not key:
+        return {"ok": False, "error": "FINVIZ_API_KEY is not configured"}
+    try:
+        scores, screeners = _fetch_dip_elite_scores(key)
+    except Exception as exc:
+        return {"ok": False, "error": _scrub_token(str(exc)).replace(key, "***")}
+    current = load_dip_scores()
+    rows = []
+    for ticker, item in scores.items():
+        if ticker.startswith("_"):
+            continue
+        old = current.get(ticker) if isinstance(current.get(ticker), dict) else {}
+        rows.append({"ticker": ticker, "total": item["total"], "fa": item["fa"], "ta": item["ta"],
+                     "old_total": old.get("total"), "old_fa": old.get("fa"), "old_ta": old.get("ta"),
+                     "missing_inputs": (item.get("components") or {}).get("missing_inputs") or item.get("missing_inputs")})
+    rows.sort(key=lambda r: -r["total"])
+    sample = next((v for k, v in scores.items() if not k.startswith("_")), {})
+    return {"ok": True, "count": len(rows), "screeners": screeners,
+            "current_source": (current.get("_meta") or {}).get("source", "xlsx"),
+            "current_updated_at": (current.get("_meta") or {}).get("updated_at"),
+            "sample_raw_inputs": sample.get("raw_inputs"), "rows": rows}
+
+
+@app.get("/api/scanner/dip/elite-status")
+def get_dip_elite_status():
+    configured = bool(os.getenv("FINVIZ_API_KEY", "").strip())
+    now = datetime.now(timezone.utc)
+    next_run = _dip_elite_schedule(now)
+    state = _load_dip_elite_state()
+    while next_run.weekday() >= 5 or (next_run <= now and state.get("last_scheduled_day") == next_run.date().isoformat() and not state.get("running")):
+        next_run += timedelta(days=1)
+    if state.get("running") and not _dip_elite_lock.locked():
+        state.update(ok=False, error="Previous DIP refresh was interrupted; retry is pending or available manually")
+    # An overdue unclaimed weekday run is due on the next scheduler tick.
+    meta = load_dip_scores().get("_meta", {})
+    result = {**state, "configured": configured, "running": _dip_elite_lock.locked(),
+        "source": meta.get("source", "xlsx"), "updated_at": meta.get("updated_at"),
+        "current_count": meta.get("count", 0),
+        "next_scheduled_run": max(now, next_run).isoformat() if configured else None}
+    def scrub(value):
+        if isinstance(value, str):
+            key = os.getenv("FINVIZ_API_KEY", "").strip()
+            return _scrub_token(value).replace(key, "***") if key else _scrub_token(value)
+        if isinstance(value, dict):
+            return {name: scrub(item) for name, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+    return scrub(result)
+
+
 def _finviz_fix_number(value):
     """Match scraper4_claude.py's cell conversion exactly."""
     if not isinstance(value, str):
@@ -8843,7 +9103,7 @@ def get_dip_html_preview():
 def get_dip_status():
     scores = load_dip_scores()
     meta = scores.get("_meta", {}) if isinstance(scores.get("_meta"), dict) else {}
-    return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet"), "filename": meta.get("filename")}
+    return {"count": meta.get("count", len([k for k in scores if not k.startswith("_")])), "updated_at": meta.get("updated_at"), "sheet": meta.get("sheet"), "filename": meta.get("filename"), "source": meta.get("source", "xlsx")}
 
 
 # In-process yfinance download cache — scanner aj /api/checklist ťahajú tie isté
@@ -9778,6 +10038,7 @@ def _start_nasdaq_scanner(
 def _scanner_scheduler_loop():
     while True:
         try:
+            _maybe_refresh_dip_elite()
             trading_day = _automatic_scanner_trading_day()
             if trading_day is not None:
                 _start_nasdaq_scanner(

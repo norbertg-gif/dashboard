@@ -52,3 +52,7 @@ Trading Dashboard.html
 # cache Správ k portfóliu (lokálne DATA_ROOT = repo)
 portfolio_news.json
 portfolio_news_v2.json
+
+# Server DIP refresh runtime data
+dip_history/
+dip_elite_state.json
