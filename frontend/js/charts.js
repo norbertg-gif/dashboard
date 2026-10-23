@@ -1404,8 +1404,11 @@ function createPanel(cfg) {
   // vyšle synchrónne EŠTE PREDTÝM, než by udalosť prebublala sem — v bubble
   // fáze by sa príznak nastavil až po tom evente a prvé priblíženie by sa
   // neuložilo (uložilo by sa až to druhé).
+  // On the whole PANEL, not only the main chart: zooming with the wheel over
+  // the ZHODA strip or an RSI/MACD sub-chart moves the main chart through the
+  // sync, and before 2026-10-23 such a zoom was shown but never saved.
   ['wheel', 'mousedown', 'touchstart'].forEach(ev =>
-    mainCont.addEventListener(ev, () => {
+    panel.addEventListener(ev, () => {
       const reg = registry[id];
       if (reg) reg.userAdjustedView = true;
     }, { passive: true, capture: true }));

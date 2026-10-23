@@ -4355,6 +4355,9 @@ class ChartPanelGeometryRegressionTests(unittest.TestCase):
         self.assertLess(movers.index("gridPanelGeometry()"), movers.index("removePanel(p.id)"))
         self.assertIn("...geometryForSlot(geometry, i)", movers)
         self.assertIn("if (r.loadedChartKey.split('|')[2] !== interval) r.viewRange = null;", src)
+        # a zoom started over the ZHODA strip or a sub-chart must count as a user zoom
+        flag = src.split("reg.userAdjustedView = true;", 1)[0][-200:]
+        self.assertIn("panel.addEventListener(ev", flag)
         # height saved is the dragged one, not the row-stretched offsetHeight
         self.assertIn("return parseInt(cEl?.style.flexBasis) || cEl?.offsetHeight", src)
         # zoom is re-applied after overlays/sub-charts rebuild the time scale
