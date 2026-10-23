@@ -1345,6 +1345,13 @@ opportunities belong in `GET /api/investor/inbox`, grouped by ticker.
 - **Platí VÝHRADNE pre panely v mriežke Grafov** (rozhodnutie používateľa): `openNewChartPanel`, vloženie zoznamu „Tickery“ a „Top pohyby“ idú cez `chartDefaultPanelCfg()`. Top pohyby si nechávajú `1d` (percento pohybu je denné), berú len indikátory. Bočný graf v Portfóliu (`dock-grid`), panel vo Verdikte (`verdict-grid`) a Analytika default NEPOUŽÍVAJÚ — test to stráži. Už otvorené panely, uložené rozloženia a presety sa nemenia.
 - UI: tlačidlo `⚙ Predvolené` v skupine Zobrazenie lišty Grafov (vlastné okno, nie spoločné ⚙ s prahmi) a položka pravého tlačidla „Nastaviť toto zobrazenie ako predvolené“. „Všetky grafy na predvolené zobrazenie“ teraz aplikuje tieto hodnoty namiesto natvrdo 1D bez indikátorov. Zoznam kľúčov v JS (`PANEL_VIEW_KEYS`, `ALL_INTERVALS`) musí sedieť so serverom — nový indikátor v paneli = doplniť aj `CHART_DEFAULT_INDICATORS`, inak test spadne.
 
+## Grafy: zoom a výška panelu (2026-10-23)
+
+- **Zoom sa ukladá ukotvený vpravo: `{bars, right}`** (počet viditeľných sviečok + odstup pravého okraja od poslednej sviečky), nie ako logický `{from,to}`. Index sa posunie pri každom dotiahnutí staršej histórie (+300 sviečok), takže produkcia mala uložené napr. `300..600` a po reloade s 300 sviečkami graf skočil na celý rozsah. Staré `{from,to}` sa ešte čítajú (šírka okna sa zachová, prilepí sa ku koncu).
+- **Zoom treba obnoviť AŽ PO `applyOverlays()`** — overlaye a sub-grafy pri prestavbe vrátia spoločnú časovú os na celý rozsah, takže skorší `restorePanelView` sa ticho zahodil pri každom reloade.
+- **Ukladá sa `flexBasis` (výška, ktorú používateľ ťahal), nie `offsetHeight`** — graf v riadku vedľa panelu so sub-grafmi je natiahnutý na výšku riadku a výšky by po každom reloade rástli.
+- Výška je v mriežke spoločná pre všetky panely (zámerne, riadky musia lícovať). Top pohyby a „Tickery" si pred nahradením panelov zoberú výšku aj zoom podľa pozície (`gridPanelGeometry`), zmena tickera v paneli zoom ponechá, zmena intervalu ho zruší.
+
 ## Consensus strip (Zhoda), 2026-10-10
 
 - **Tri pasce nájdené až v prehliadači (2026-10-10), testy ich nevideli:** (1) `priceScale(id).applyOptions()` pred `addSeries` sa stratí — overlay stupnica vznikne až so sériou, takže štyri riadky splývali do jedného bloku; (2) pás musí mať sériu s HODNOTOU na každej sviečke (`consensusDomain`), inak začne pri prvom nahriatom stave a je posunutý doľava (pitfall -4), a pravá cenová stupnica musí ostať viditeľná, lebo jej pevná šírka zarovnáva políčka so sviečkami; (3) CSS `order` na deťoch `.panel` presunul `.p-resize-handle` medzi graf a pás a `min-height` prebil `.p-sub.hidden` — veľkosť sa preto viaže na `:not(.hidden)` a úchyt má `order:4`.

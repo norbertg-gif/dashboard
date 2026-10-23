@@ -237,6 +237,52 @@ async function saveChartDefaults(raw) {
 
 // Config for a NEW grid panel. `interval` can be forced (Top pohyby stay 1d,
 // because the mover percentage is a daily figure).
+// Zoom is stored RIGHT-ANCHORED: how many bars are visible and how far the
+// right edge sits from the last bar. A raw logical {from,to} range is an index
+// into one particular data array: once older history is prepended (scrolling
+// left loads +300 bars) every index shifts, and after a reload with fewer bars
+// the saved range pointed past the data and the chart fell back to the default
+// view. Bars + right offset survive prepends, reloads and a different ticker.
+function panelViewFromRange(r, from, to) {
+  const last = (r?._chartData?.length || 0) - 1;
+  if (last < 0 || !Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return { bars: Math.max(1, to - from), right: last - to };
+}
+function cleanPanelView(view) {
+  if (!view) return null;
+  if (Number.isFinite(Number(view.bars)) && Number(view.bars) > 0) {
+    return { bars: Number(view.bars), right: Number.isFinite(Number(view.right)) ? Number(view.right) : 0 };
+  }
+  if (Number.isFinite(Number(view.from)) && Number.isFinite(Number(view.to))) {
+    return { from: Number(view.from), to: Number(view.to) };   // legacy layouts
+  }
+  return null;
+}
+function panelRangeFromView(view, bars) {
+  const v = cleanPanelView(view);
+  const last = bars - 1;
+  if (!v || last < 0) return null;
+  let span, right;
+  if (v.bars != null) { span = v.bars; right = v.right; }
+  else { span = Math.max(1, v.to - v.from); right = Math.max(0, last - v.to); }
+  const to = last - right;
+  return { from: Math.max(0, to - span), to };
+}
+// Height and zoom of the grid panels by position, taken before a bulk replace
+// (Top pohyby, Tickery) so the new charts keep the size the user had set.
+function gridPanelGeometry() {
+  return getCurrentConfig().filter(c => c && c.symbol)
+    .map(c => ({ chartHeight: c.chartHeight || null, view: cleanPanelView(c.view) }));
+}
+function geometryForSlot(geometry, i) {
+  const g = geometry[i] || {};
+  const out = {};
+  const h = g.chartHeight || geometry.find(x => x.chartHeight)?.chartHeight;
+  if (h) out.chartHeight = h;
+  if (g.view) out.view = g.view;
+  return out;
+}
+
 function chartDefaultPanelCfg(symbol, extra = {}) {
   const d = getChartDefaults();
   return {
@@ -538,7 +584,10 @@ function getCurrentConfig() {
         // pozadia) — fallback na inline style.height, ktorý prežije display:none
         chartHeight: (() => {
           const cEl = p.querySelector('.p-chart');
-          return cEl?.offsetHeight || parseInt(cEl?.style.height) || null;
+          // flexBasis is the height the user dragged to. offsetHeight is NOT:
+          // a chart in a grid row next to a panel with sub-charts is stretched
+          // to the row, so saving it made heights creep up on every reload.
+          return parseInt(cEl?.style.flexBasis) || cEl?.offsetHeight || parseInt(cEl?.style.height) || null;
         })(),
       };
     }).filter(Boolean);
@@ -1180,9 +1229,7 @@ function createPanel(cfg) {
   const id = 'pnl' + (++panelSeq);
   const inds = {...(cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false})};
   delete inds.news; // old saved layouts/presets may still carry this removed key
-  const initialViewRange = cfg.view && Number.isFinite(Number(cfg.view.from)) && Number.isFinite(Number(cfg.view.to))
-    ? { from: Number(cfg.view.from), to: Number(cfg.view.to) }
-    : null;
+  const initialViewRange = cleanPanelView(cfg.view);
   // Bez uloženej výšky prevezmi tú, ktorú má mriežka teraz — inak by novo
   // otvorený graf (Top pohyby, klik z watchlistu) vytŕčal z ostatných.
   const gridHeight = parseInt(
@@ -1369,7 +1416,7 @@ function createPanel(cfg) {
     const from = Number(range.from), to = Number(range.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
     if (reg.userAdjustedView) {
-      reg.viewRange = { from, to };
+      reg.viewRange = panelViewFromRange(reg, from, to) || reg.viewRange;
       clearTimeout(reg.viewSaveTimer);
       reg.viewSaveTimer = setTimeout(saveLayout, 350);
     }
@@ -2298,24 +2345,11 @@ function applyPanelSeriesData(r, data) {
 // snapshot s iným počtom sviečok). Bez tohto by graf skočil na fitContent —
 // teda "odzoomovaný" pohľad, ktorý si používateľ nenastavil.
 function restorePanelView(id, r) {
-  const saved = r.viewRange &&
-    Number.isFinite(Number(r.viewRange.from)) && Number.isFinite(Number(r.viewRange.to))
-    ? { from: Number(r.viewRange.from), to: Number(r.viewRange.to) }
-    : null;
   const bars = r._chartData?.length || 0;
-  if (!saved || !bars) { r.mainChart.timeScale().fitContent(); return; }
-  // Rozsah je INDEXOVÝ, takže ho treba prispôsobiť počtu práve načítaných
-  // sviečok. Keď sa počas posúvania dotiahla história (600 sviečok) a po
-  // reloade ich je zase 300, pôvodný rozsah mieri za koniec dát — graf potom
-  // vyzerá prázdny a sviečky sú odtlačené vľavo. Zachovaj úroveň priblíženia
-  // (šírku okna) a prilep ho na koniec dostupných dát.
-  const lastIdx = bars - 1;
-  const span = Math.max(1, saved.to - saved.from);
-  if (saved.to > lastIdx) {
-    saved.to = lastIdx;
-    saved.from = lastIdx - span;
-  }
-  if (saved.from < 0) saved.from = 0;
+  // Right-anchored view (see panelViewFromRange): the same number of bars and
+  // the same gap to the last candle, whatever the length of the loaded data.
+  const saved = panelRangeFromView(r.viewRange, bars);
+  if (!saved) { r.mainChart.timeScale().fitContent(); return; }
   try {
     r.suppressViewSave = true;
     r.mainChart.timeScale().setVisibleLogicalRange(saved);
@@ -2445,7 +2479,9 @@ async function loadChart(id, opts = {}) {
   r._bypassSnapshot = !!opts.bypassDataCache;
   const chartKey = `${sym}|${period}|${interval}`;
   if (r.loadedChartKey && r.loadedChartKey !== chartKey) {
-    r.viewRange = null;
+    // A new ticker keeps the zoom (bars visible); a new interval does not,
+    // 120 daily bars and 120 weekly bars are different views.
+    if (r.loadedChartKey.split('|')[2] !== interval) r.viewRange = null;
     r._rawChartData = [];
     r._chartData = [];
     r.hasMoreHistory = false;
@@ -2569,6 +2605,10 @@ async function loadChart(id, opts = {}) {
     restorePanelView(id, r);
     r.loadedChartKey = chartKey;
     applyOverlays(id, data, r);
+    // Overlays and indicator sub-charts are (re)built above and their own data
+    // resets the shared time scale to the whole series, which silently undid
+    // the saved zoom on every reload. Apply it once more after them.
+    restorePanelView(id, r);
     r.etoroPct = null;
     if (r.indicators.ha) {
       // Pri HA sú ceny syntetické, takže cenové čiary sa zahodia — markery ale
@@ -2792,9 +2832,10 @@ function openChartsForSymbols(symbols) {
     .map(s => String(s || '').trim().toUpperCase()).filter(Boolean))].slice(0, 20);
   if (!tickers.length) return;
   switchMainTab('charts');
+  const geometry = gridPanelGeometry();
   clearChartPanelsForImport();
   setActivePanel(null);
-  const ids = tickers.map(symbol => createPanel(chartDefaultPanelCfg(symbol)));
+  const ids = tickers.map((symbol, i) => createPanel(chartDefaultPanelCfg(symbol, geometryForSlot(geometry, i))));
   saveLayout();
   applyAllChartPortfolioFlags();
   ids.forEach(id => loadChart(id));
@@ -2833,10 +2874,12 @@ async function loadMovers() {
       setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
       return;
     }
+    const geometry = gridPanelGeometry();
     [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
     setActivePanel(null);
-    movers.forEach(m => createPanel({
+    movers.forEach((m, i) => createPanel({
       ...chartDefaultPanelCfg(m.symbol),
+      ...geometryForSlot(geometry, i),
       interval: '1d',   // the mover percentage is a daily figure
       moverChangePct: Number(m.change_pct),
       moverLastPrice: Number(m.last_close),

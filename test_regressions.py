@@ -4262,9 +4262,9 @@ class ChartDefaultsRegressionTests(unittest.TestCase):
     def test_frontend_uses_defaults_only_for_grid_panels(self):
         src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
         self.assertIn("const cfg = chartDefaultPanelCfg(symbol);", src)
-        self.assertIn("createPanel(chartDefaultPanelCfg(symbol))", src)
+        self.assertIn("createPanel(chartDefaultPanelCfg(symbol, geometryForSlot(geometry, i)))", src)
         # Top pohyby keep the daily interval (the mover percentage is daily)
-        movers = src.split("movers.forEach(m => createPanel({", 1)[1].split("}));", 1)[0]
+        movers = src.split("movers.forEach((m, i) => createPanel({", 1)[1].split("}));", 1)[0]
         self.assertIn("...chartDefaultPanelCfg(m.symbol)", movers)
         self.assertLess(movers.index("...chartDefaultPanelCfg"), movers.index("interval: '1d'"))
         # dock (Portfolio) and the Verdikt panel are deliberately NOT driven by the defaults
@@ -4322,6 +4322,44 @@ class AlphaVantageRemovedRegressionTests(unittest.TestCase):
         for name in removed:
             for path in files:
                 self.assertNotIn(name, path.read_bytes().decode("utf-8", errors="ignore"), f"{name} in {path}")
+
+
+class ChartPanelGeometryRegressionTests(unittest.TestCase):
+    """2026-10-23: Grafy forgot zoom after reload and after Top pohyby / Tickery."""
+
+    def _js(self, expr):
+        import subprocess
+        src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
+        start = src.index("function panelViewFromRange(")
+        end = src.index("function gridPanelGeometry(")
+        code = src[start:end] + "\nconsole.log(JSON.stringify(" + expr + "));"
+        out = subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True)
+        return json.loads(out.stdout)
+
+    def test_zoom_survives_prepended_history_and_reload(self):
+        # 300 bars, user shows the last 90 with 10 empty bars on the right
+        view = self._js("panelViewFromRange({_chartData:new Array(300)}, 219, 309)")
+        self.assertEqual(view, {"bars": 90, "right": -10})
+        # older history prepended: 600 bars, same zoom must map to the same place
+        self.assertEqual(self._js("panelRangeFromView(%s, 600)" % json.dumps(view)), {"from": 519, "to": 609})
+        # after reload only 300 bars again
+        self.assertEqual(self._js("panelRangeFromView(%s, 300)" % json.dumps(view)), {"from": 219, "to": 309})
+
+    def test_legacy_index_range_keeps_width_and_sticks_to_the_end(self):
+        # the broken production value: whole prepended range saved as 300..600
+        self.assertEqual(self._js("panelRangeFromView({from:231.5,to:320}, 300)"), {"from": 210.5, "to": 299})
+
+    def test_bulk_replace_and_ticker_change_keep_geometry(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
+        movers = src.split("async function loadMovers()", 1)[1].split("saveLayout();", 1)[0]
+        self.assertLess(movers.index("gridPanelGeometry()"), movers.index("removePanel(p.id)"))
+        self.assertIn("...geometryForSlot(geometry, i)", movers)
+        self.assertIn("if (r.loadedChartKey.split('|')[2] !== interval) r.viewRange = null;", src)
+        # height saved is the dragged one, not the row-stretched offsetHeight
+        self.assertIn("return parseInt(cEl?.style.flexBasis) || cEl?.offsetHeight", src)
+        # zoom is re-applied after overlays/sub-charts rebuild the time scale
+        load = src.split("applyPanelSeriesData(r, data);", 2)[-1].split("r.etoroPct = null;", 1)[0]
+        self.assertLess(load.index("applyOverlays(id, data, r);"), load.rindex("restorePanelView(id, r);"))
 
 
 if __name__ == "__main__":
