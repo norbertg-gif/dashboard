@@ -8500,7 +8500,11 @@ def _load_finviz_screeners() -> list[str]:
             )
 
     if not isinstance(configured, list) or not configured:
-        raise HTTPException(500, f"{FINVIZ_SCREENERS_FILE.name} musi obsahovat neprázdny JSON zoznam URL.")
+        # An empty list on the Render disk (left by an older version) must not
+        # stop the automatic DIP refresh: fall back to the two known screeners.
+        configured = list(FINVIZ_DEFAULT_SCREENERS)
+        with _FINVIZ_CONFIG_LOCK:
+            _atomic_write_json(FINVIZ_SCREENERS_FILE, configured)
 
     screeners: list[str] = []
     for value in configured:

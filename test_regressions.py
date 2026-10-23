@@ -4585,5 +4585,16 @@ class FinvizExportDiagnosticRegressionTests(unittest.TestCase):
         self.assertNotIn("abc123", tb._scrub_token("https://elite.finviz.com/export.ashx?v=1&auth=abc123&f=x"))
 
 
+class FinvizScreenerListFallbackRegressionTests(unittest.TestCase):
+    def test_empty_screener_file_falls_back_to_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "finviz_screeners.json"
+            path.write_text("[]", encoding="utf-8")
+            with patch.object(tb, "FINVIZ_SCREENERS_FILE", path):
+                urls = tb._load_finviz_screeners()
+            self.assertEqual(len(urls), 2)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), tb.FINVIZ_DEFAULT_SCREENERS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
