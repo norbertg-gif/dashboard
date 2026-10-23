@@ -2907,6 +2907,9 @@ function onPortRowContextMenu(event, pid, sym, isTickerView) {
     isTickerView
       ? { label: 'Zobraziť tranže', action: () => portDrillDown(pid, sym) }
       : { label: 'Otvoriť v Grafoch', action: () => portRowClick(pid, sym) },
+    // The chart basket existed on Home and Scanner since 2026-08-06 but was
+    // never offered here, although Portfolio is where most tickers are picked.
+    { label: 'Košík grafov', checked: isInChartBasket(sym), action: () => toggleChartBasket(sym) },
     { sep: true },
     { label: 'Google Finance ↗', action: () => window.open(gfHref, '_blank', 'noopener') },
     { label: 'Trade na eToro ↗', action: () => window.open(etoroTradeUrl(sym), '_blank', 'noopener') },

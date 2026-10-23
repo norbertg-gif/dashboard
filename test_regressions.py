@@ -4365,5 +4365,12 @@ class ChartPanelGeometryRegressionTests(unittest.TestCase):
         self.assertLess(load.index("applyOverlays(id, data, r);"), load.rindex("restorePanelView(id, r);"))
 
 
+class PortfolioChartBasketRegressionTests(unittest.TestCase):
+    def test_portfolio_row_menu_offers_the_chart_basket(self):
+        src = (Path(__file__).parent / "frontend" / "js" / "portfolio.js").read_text(encoding="utf-8")
+        menu = src.split("function onPortRowContextMenu(", 1)[1].split("showContextMenu(", 1)[0]
+        self.assertIn("checked: isInChartBasket(sym), action: () => toggleChartBasket(sym)", menu)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
