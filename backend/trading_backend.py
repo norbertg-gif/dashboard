@@ -8648,12 +8648,25 @@ def _fetch_dip_elite_scores(key: str, scheduled_day: str | None = None) -> tuple
                   if k in {"v", "f", "ft", "o"}}
         source = urllib.parse.urlencode(params)
         screeners.append(source)
-        with requests.get("https://elite.finviz.com/export.ashx",
-                          params={**params, "auth": key}, timeout=45,
-                          allow_redirects=False) as response:
-            if response.status_code != 200:
-                raise ValueError(f"Finviz Elite HTTP {response.status_code}")
-            rows = _parse_dip_elite_csv(response.content.decode("utf-8-sig"))
+        # export.ashx answers 301 to its new path (as screener.ashx did in
+        # 2026-08). Redirects are followed by hand and only while they stay on
+        # finviz.com, so the key in the query string never leaves Finviz.
+        url, query = "https://elite.finviz.com/export.ashx", {**params, "auth": key}
+        for _hop in range(4):
+            with requests.get(url, params=query, timeout=45, allow_redirects=False) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = urllib.parse.urljoin(url, response.headers.get("location", ""))
+                    host = urllib.parse.urlsplit(location).hostname or ""
+                    if not (host == "finviz.com" or host.endswith(".finviz.com")):
+                        raise ValueError("Finviz Elite redirected outside finviz.com")
+                    url, query = location, None
+                    continue
+                if response.status_code != 200:
+                    raise ValueError(f"Finviz Elite HTTP {response.status_code}")
+                rows = _parse_dip_elite_csv(response.content.decode("utf-8-sig"))
+                break
+        else:
+            raise ValueError("Finviz Elite: too many redirects")
         for row in rows:
             ticker = row["Ticker"]
             if ticker in merged:

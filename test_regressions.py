@@ -4596,5 +4596,35 @@ class FinvizScreenerListFallbackRegressionTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), tb.FINVIZ_DEFAULT_SCREENERS)
 
 
+class FinvizEliteRedirectRegressionTests(unittest.TestCase):
+    class _R:
+        def __init__(self, status, location="", text=""):
+            self.status_code = status
+            self.headers = {"location": location}
+            self.content = text.encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def test_follows_redirect_within_finviz_only(self):
+        csv_text = "Ticker,Company,Sales Year Over Year TTM,EPS Year Over Year TTM" + chr(10) + "AAPL,Apple,5%,10%" + chr(10)
+        calls = []
+        def fake_get(url, params=None, **kw):
+            calls.append(url)
+            if len(calls) == 1:
+                return self._R(301, "https://elite.finviz.com/export?v=151&auth=x")
+            return self._R(200, text=csv_text)
+        with patch.object(tb, "_load_finviz_screeners", return_value=["https://finviz.com/screener?v=151&f=idx_ndx"]),              patch.object(tb.requests, "get", side_effect=fake_get):
+            scores, _ = tb._fetch_dip_elite_scores("x")
+        self.assertIn("AAPL", scores)
+        self.assertEqual(calls[1], "https://elite.finviz.com/export?v=151&auth=x")
+
+    def test_redirect_off_finviz_is_refused(self):
+        with patch.object(tb, "_load_finviz_screeners", return_value=["https://finviz.com/screener?v=151&f=idx_ndx"]),              patch.object(tb.requests, "get", return_value=self._R(302, "https://evil.example.com/steal")):
+            with self.assertRaises(ValueError):
+                tb._fetch_dip_elite_scores("x")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
