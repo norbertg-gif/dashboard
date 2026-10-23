@@ -3997,7 +3997,11 @@ class Ema200ScopeRegressionTests(unittest.TestCase):
               patch.object(tb, "_get_portfolio_holdings", return_value={"HELD": {}, "held2": {}}),
               patch.object(tb, "scanner_universe_from_dip", return_value=(["DIP1", "HELD"], "DIP import", "dip_import")),
               patch.object(tb, "_scan_ema200_distance", side_effect=fake_distance),
-              patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS)):
+              patch.object(tb, "_dash_settings", return_value=tb.DASH_SETTINGS_DEFAULTS),
+              tempfile.TemporaryDirectory() as tmp,
+              patch.object(tb, "EMA200_SCAN_FILES",
+                           {sc: Path(tmp) / f"ema200_scan_{sc}.json" for sc in tb.EMA200_SCAN_SCOPES})):
+            # The route now stores its result; keep test data out of the real data dir.
             return tb.scanner_ema200_scan(threshold=None, scope=scope)
 
     def test_order_rates_from_cache_only_stock_etf(self):
