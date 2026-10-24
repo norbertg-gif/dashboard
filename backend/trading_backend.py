@@ -8866,7 +8866,7 @@ def _parse_finviz_screener_html(html: str, headers: list[str] | None = None) -> 
 
 
 @app.get("/api/diagnostics/finviz-export")
-def diag_finviz_export(f: str = Query("idx_ndx")):
+def diag_finviz_export(f: str = Query("idx_ndx"), t: str = Query("")):
     """Trial check for Finviz Elite (2026-10-23): does the CSV export work from
     the server with FINVIZ_API_KEY alone, and does it carry the two columns the
     DIP score needs? Returns statuses and column names only, never the key."""
@@ -8875,12 +8875,15 @@ def diag_finviz_export(f: str = Query("idx_ndx")):
         return {"ok": False, "error": "FINVIZ_API_KEY nie je nastavený"}
     if not re.fullmatch(r"[A-Za-z0-9_,.\-]{1,200}", f or ""):
         raise HTTPException(400, "Invalid filter")
+    if t and not re.fullmatch(r"[A-Za-z0-9,.\-]{1,400}", t):
+        raise HTTPException(400, "Invalid ticker list")
+    extra = {"t": t} if t else {}
     all_columns = ",".join(str(i) for i in range(0, 200))
     attempts = []
     for label, params in (
-        ("saved view 151", {"v": "151", "f": f}),
-        ("saved view 150", {"v": "150", "f": f}),
-        ("all columns c=0..199", {"v": "152", "f": f, "c": all_columns}),
+        ("saved view 151", {"v": "151", "f": f, **extra}),
+        ("saved view 150", {"v": "150", "f": f, **extra}),
+        ("all columns c=0..199", {"v": "152", "f": f, "c": all_columns, **extra}),
     ):
         rec = {"attempt": label}
         try:
@@ -8898,6 +8901,8 @@ def diag_finviz_export(f: str = Query("idx_ndx")):
                 rec["headers"] = headers
                 rec["has_required"] = FINVIZ_REQUIRED_TEMPLATE_COLUMNS.issubset(set(headers))
                 rec["missing_required"] = sorted(FINVIZ_REQUIRED_TEMPLATE_COLUMNS - set(headers))
+                # Raw sample of the first rows (formats of dates/targets), no secrets in CSV.
+                rec["sample_rows"] = [dict(zip(headers, (c[:40] for c in row))) for row in rows[1:4]]
             else:
                 rec["body"] = _scrub_token(text[:300])
         except Exception as e:
