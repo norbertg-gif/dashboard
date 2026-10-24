@@ -116,7 +116,7 @@ function homeTodayHtml(data) {
     <p class="home-today-stamp">Portfólio z ${escHtml(data.snapshot_at ? new Date(data.snapshot_at).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '—')}${otherUnavailable.length ? ' · ' + escHtml(otherUnavailable.join(' · ')) : ''}</p>
     ${card('is-act', 'Urob', actBody)}
     ${card('is-warn', 'Pozor tento týždeň · výsledky', earnBody)}
-    ${card('', 'Čakaj · dashboard sa ozve sám', waiting)}
+    ${card('', 'Čakaj · keď sa podmienka splní, presunie sa do Urob', waiting)}
     ${card('', `Týždenná EMA200${emaWeek}`, emaBody)}
     ${card('', `Drž · ${hold.length} pozícií`, holdBody)}
     <section class="home-today-card is-quiet"><h2>Znižovanie počtu titulov</h2><p class="home-today-sub">${yearText}</p></section>
