@@ -1068,7 +1068,13 @@ function chartEventTooltip(event) {
         ? `<div>Prekvapenie: ${((Number(event.eps_actual) - Number(event.eps_estimate)) / Math.abs(Number(event.eps_estimate)) * 100).toFixed(1)} %</div>` : '') +
       `<div>Tržby ${upcoming ? 'odhad' : 'skutočnosť / odhad'}: ${upcoming ? fmt(event.sales_estimate) : `${fmt(event.sales_actual)} / ${fmt(event.sales_estimate)}`}</div>`;
   }
-  if (event.type === 'R') return `<b>Zmena odporúčania</b><div>${esc(event.analyst)}</div><div>${esc(event.action)} · ${esc(event.rating)}</div><div>Cieľ: ${fmt(event.target_price)}</div>`;
+  if (event.type === 'R') {
+    const items = Array.isArray(event.ratings) && event.ratings.length ? event.ratings : [event];
+    const decode = value => String(value ?? '').replace(/&rarr;/g, '→');
+    return `<b>Zmena odporúčania · ${esc(event.date)}</b>` + items.map(item =>
+      `<div><b>${esc(item.analyst)}</b>: ${esc(item.action)} · ${esc(decode(item.rating))}` +
+      (item.target_price != null && item.target_price !== '' ? ` · cieľ ${esc(item.target_price)}` : '') + '</div>').join('');
+  }
   if (event.type === 'D') return `<b>Dividenda · ${esc(event.date)}</b><div>Bežná: ${fmt(event.ordinary)} / akciu</div><div>Mimoriadna: ${fmt(event.special)} / akciu</div>`;
   return `<b>Split · ${esc(event.date)}</b><div>Pomer: ${esc(event.ratio)}</div>`;
 }
@@ -1088,11 +1094,13 @@ function eventStripSeries(chart, holder, key, candles) {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
       pointMarkersVisible: false,
     });
-    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.88, bottom: 0.06 }, visible: false });
+    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.84, bottom: 0.05 }, visible: false });
     holder[key] = series;
     holder[key + 'Chart'] = chart;
   }
-  series.setData((candles || []).filter(c => c && c.time != null).map(c => ({ time: c.time, value: 0 })));
+  const points = (candles || []).filter(c => c && c.time != null);
+  // Hodnoty 0 a 3 na striedavých sviečkach rozpínajú stupnicu na všetky štyri riadky.
+  series.setData(points.map((c, i) => ({ time: c.time, value: i % 2 ? 3 : 0 })));
   return series;
 }
 
@@ -1101,8 +1109,11 @@ function eventStripHasEarnings(markers) {
 }
 
 function eventStripMarker(marker) {
-  return { ...marker, position: 'inBar', shape: 'square', size: 0 };
+  return { ...marker, position: 'atPriceMiddle', price: EVENT_STRIP_ROWS[marker.text] ?? 0, shape: 'square', size: 0 };
 }
+
+// Každé písmeno má vlastný riadok pásu, takže E a R na tej istej sviečke sa neprekryjú.
+const EVENT_STRIP_ROWS = { E: 3, R: 2, D: 1, S: 0 };
 
 function clearEventStrip(holder, key) {
   const series = holder?.[key];

@@ -2025,6 +2025,19 @@ class ChartEventsRegressionTests(unittest.TestCase):
                                                "epsActual":float("nan")})
         self.assertIsNone(earnings["eps_actual"])
 
+    def test_nested_ratings_from_real_finviz_shape(self):
+        raw = {"dateTimestamp": 1792555200, "eventType": "chartEvent/ratings", "ratings": [
+            {"action": "Upgrade", "analyst": "Robert W. Baird", "rating": "Neutral &rarr; Outperform", "targetPrice": "$675"},
+            {"action": "Reiterated", "analyst": "Citi", "rating": "Buy", "targetPrice": "$700"}]}
+        event = tb._normalize_chart_event(raw)
+        self.assertEqual(event["analyst"], "Robert W. Baird")
+        self.assertEqual([r["analyst"] for r in event["ratings"]], ["Robert W. Baird", "Citi"])
+        self.assertEqual(event["ratings"][0]["rating"], "Neutral → Outperform")
+        broken = {"type": "R", "date": "2026-10-20", "id": "x", "analyst": None}
+        merged = tb._merge_chart_events([broken], [raw], today=date(2026, 10, 24))
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["ratings"]), 2)
+
     def test_suffix_is_rejected_without_network(self):
         with patch.object(tb.requests, "get") as get:
             result = tb._get_chart_events("SAP.DE")

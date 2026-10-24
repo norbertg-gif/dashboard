@@ -9164,7 +9164,8 @@ def _chart_event_key(event: dict) -> str:
     if kind == "E":
         identity = (kind, day, event.get("fiscal_period"))
     elif kind == "R":
-        identity = (kind, day, event.get("analyst"), event.get("action"), event.get("rating"))
+        items = event.get("ratings") or [event]
+        identity = (kind, day, [(i.get("analyst"), i.get("action"), i.get("rating")) for i in items])
     elif kind == "D":
         identity = (kind, day, event.get("ordinary"), event.get("special"))
     else:
@@ -9189,9 +9190,16 @@ def _normalize_chart_event(raw: dict, *, today: date | None = None) -> dict | No
             "upcoming": date.fromisoformat(day) > (today or datetime.now(timezone.utc).date()),
         })
     elif kind == "R":
-        event.update({key: decode(raw.get(source)) for key, source in (
+        # Finviz nests ratings in a list (several analysts can act on one day).
+        items = raw.get("ratings") if isinstance(raw.get("ratings"), list) else [raw]
+        ratings = [{key: decode(item.get(source)) for key, source in (
             ("action", "action"), ("analyst", "analyst"), ("rating", "rating"),
-            ("target_price", "targetPrice"))})
+            ("target_price", "targetPrice"))} for item in items if isinstance(item, dict)]
+        ratings = [item for item in ratings if item.get("analyst") or item.get("rating")]
+        if not ratings:
+            return None
+        event.update(ratings[0])
+        event["ratings"] = ratings
     elif kind == "D":
         event.update({"ordinary": decode(raw.get("ordinary")), "special": decode(raw.get("special"))})
     else:
@@ -9203,6 +9211,11 @@ def _normalize_chart_event(raw: dict, *, today: date | None = None) -> dict | No
     return event
 
 
+def _chart_event_broken(event: dict) -> bool:
+    """Ratings stored before 2026-10-24 lost their nested fields; drop and refetch them."""
+    return isinstance(event, dict) and event.get("type") == "R" and not event.get("ratings")
+
+
 def _merge_chart_events(existing: list[dict], incoming: list[dict], *, today: date | None = None) -> list[dict]:
     """Append unseen facts forever within the five-year window; finalize upcoming earnings."""
     now_day = today or datetime.now(timezone.utc).date()
@@ -9212,7 +9225,7 @@ def _merge_chart_events(existing: list[dict], incoming: list[dict], *, today: da
         if not isinstance(event, dict):
             continue
         normalized = _normalize_chart_event(event, today=now_day) if "eventType" in event else event
-        if not isinstance(normalized, dict) or not normalized.get("date"):
+        if not isinstance(normalized, dict) or not normalized.get("date") or _chart_event_broken(normalized):
             continue
         try:
             event_day = date.fromisoformat(normalized["date"])
@@ -9286,6 +9299,8 @@ def _get_chart_events(symbol: str, *, now: datetime | None = None) -> dict:
                 stamp = stamp.replace(tzinfo=timezone.utc)
             age = (current - stamp).total_seconds() if stamp else float("inf")
         except (TypeError, ValueError):
+            age = float("inf")
+        if any(_chart_event_broken(e) for e in stored.get("events", [])):
             age = float("inf")
         if age < CHART_EVENTS_TTL_SECONDS:
             return {"symbol": sym, "events": stored.get("events", []), "fetched_at": fetched_at,
