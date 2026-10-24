@@ -9063,6 +9063,53 @@ def _parse_finviz_screener_html(html: str, headers: list[str] | None = None) -> 
     return page_headers, rows, total
 
 
+@app.get("/api/diagnostics/finviz-events/{symbol}")
+def diag_finviz_events(symbol: str, bars: int = Query(400, ge=50, le=5000)):
+    """Probe (2026-10-24): can the server read Finviz chart events (earnings,
+    ratings, dividends) from the UNDOCUMENTED api.finviz.com/api/quote endpoint
+    the Finviz chart itself uses? Tries without and with the Elite key.
+    Returns counts, date range and one sample per event type, never the key."""
+    sym = _validate_ticker_symbol(symbol)
+    bars = bars if isinstance(bars, int) else 400
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    base = {"ticker": sym, "timeframe": "d", "instrument": "stock", "events": "true",
+            "chartEventsVersion": "2", "barsCount": str(bars), "patterns": "false"}
+    attempts = []
+    for label, extra in (("anonymous", {}), ("with auth", {"auth": key} if key else None)):
+        if extra is None:
+            continue
+        rec = {"attempt": label}
+        try:
+            r = requests.get("https://api.finviz.com/api/quote", params={**base, **extra}, timeout=20,
+                             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://elite.finviz.com/charts"})
+            rec["http"] = r.status_code
+            try:
+                body = r.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                events = body.get("chartEvents") or []
+                types = {}
+                for ev in events:
+                    t = str(ev.get("eventType"))
+                    types.setdefault(t, {"count": 0, "first": None, "last": None, "sample": ev})
+                    types[t]["count"] += 1
+                    ts = ev.get("dateTimestamp")
+                    if isinstance(ts, (int, float)):
+                        d = datetime.fromtimestamp(ts, timezone.utc).date().isoformat()
+                        types[t]["first"] = min(filter(None, [types[t]["first"], d]))
+                        types[t]["last"] = max(filter(None, [types[t]["last"], d]))
+                rec["bars"] = len(body.get("date") or [])
+                rec["event_types"] = types
+            else:
+                rec["body"] = _scrub_token((r.text or "")[:300]).replace(key, "***") if key else (r.text or "")[:300]
+        except Exception as exc:
+            rec["http"] = "exception"
+            rec["body"] = _scrub_token(str(exc))[:300]
+        attempts.append(rec)
+    return {"symbol": sym, "attempts": attempts}
+
+
 @app.get("/api/diagnostics/finviz-export")
 def diag_finviz_export(f: str = Query("idx_ndx"), t: str = Query("")):
     """Trial check for Finviz Elite (2026-10-23): does the CSV export work from
