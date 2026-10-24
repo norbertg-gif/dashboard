@@ -1079,11 +1079,75 @@ function chartEventTooltip(event) {
   return `<b>Split · ${esc(event.date)}</b><div>Pomer: ${esc(event.ratio)}</div>`;
 }
 
-// Finviz udalosti sa kreslia v páse na spodku grafu (ako na Finvize), nie pri
-// sviečkach: neviditeľná séria s hodnotou na KAŽDEJ sviečke na vlastnej overlay
-// stupnici stiahnutej k dolnému okraju. Hodnota na každej sviečke je nutná,
-// inak by séria posunula doménu (pitfall -4); applyOptions stupnice až PO
-// addSeries (pasca z Consensus strip).
+// Finviz udalosti sa kreslia ako odznaky (štvorček s tučným písmenom) v jednom
+// riadku na spodku grafu, ako na Finvize. Kreslí ich vlastný primitive na
+// neviditeľnej sérii s hodnotou na KAŽDEJ sviečke (inak by séria posunula
+// doménu, pitfall -4). Viac udalostí na jednej sviečke ide vedľa seba.
+// hitTest vracia externalId = id udalosti, takže tooltip ide cez ten istý
+// attachMarkerTooltip / _markerMeta mechanizmus ako ostatné značky.
+const EVENT_BADGE = { size: 13, gap: 2, bottom: 6, order: { E: 0, R: 1, D: 2, S: 3 } };
+
+class EventBadgesPrimitive {
+  constructor() { this._items = []; this._boxes = []; this._chart = null; this._request = null; }
+  attached({ chart, requestUpdate }) { this._chart = chart; this._request = requestUpdate; }
+  detached() { this._chart = null; this._request = null; }
+  setItems(items) { this._items = items || []; this._request?.(); }
+  updateAllViews() {}
+  paneViews() {
+    return [{ zOrder: () => 'top', renderer: () => ({ draw: target => this._draw(target) }) }];
+  }
+  hitTest(x, y) {
+    const box = this._boxes.find(b => x >= b.x - 1 && x <= b.x + b.w + 1 && y >= b.y - 1 && y <= b.y + b.h + 1);
+    return box ? { externalId: box.id, zOrder: 'top', cursorStyle: 'pointer' } : null;
+  }
+  _draw(target) {
+    const boxes = [];
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      const ts = this._chart?.timeScale();
+      if (!ts) return;
+      const groups = new Map();
+      for (const item of this._items) {
+        if (!groups.has(item.time)) groups.set(item.time, []);
+        groups.get(item.time).push(item);
+      }
+      const { gap, bottom, order } = EVENT_BADGE;
+      // Veľkosť podľa hustoty sviečok: odznak nesmie zasahovať do susednej
+      // sviečky. Pod 9 px už písmeno nie je čitateľné — ostane farebný štvorček,
+      // detail ukáže tooltip.
+      const spacing = Number(ts.options().barSpacing) || EVENT_BADGE.size;
+      const size = Math.max(5, Math.min(EVENT_BADGE.size, Math.floor(spacing - 1)));
+      const showText = size >= 9;
+      const y = Math.round(mediaSize.height - bottom - size);
+      ctx.save();
+      ctx.font = `700 ${size >= 11 ? 9 : 8}px ${getComputedStyle(document.body).fontFamily || 'sans-serif'}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const [time, list] of groups) {
+        const cx = ts.timeToCoordinate(time);
+        if (cx == null || cx < -size || cx > mediaSize.width + size) continue;
+        list.sort((a, b) => (order[a.text] ?? 9) - (order[b.text] ?? 9));
+        // Jedna udalosť = spodný riadok (všetky zarovnané); ďalšie na tej istej
+        // sviečke idú nad ňu.
+        const x = Math.round(cx - size / 2);
+        list.forEach((item, row) => {
+          const yRow = y - row * (size + gap);
+          ctx.fillStyle = item.color;
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(x, yRow, size, size, 2); else ctx.rect(x, yRow, size, size);
+          ctx.fill();
+          if (showText) {
+            ctx.fillStyle = '#0d1015';
+            ctx.fillText(item.text, x + size / 2, yRow + size / 2 + 0.5);
+          }
+          boxes.push({ id: item.id, x, y: yRow, w: size, h: size, row });
+        });
+      }
+      ctx.restore();
+    });
+    this._boxes = boxes;
+  }
+}
+
 function eventStripSeries(chart, holder, key, candles) {
   if (!chart) return null;
   let series = holder[key];
@@ -1094,30 +1158,33 @@ function eventStripSeries(chart, holder, key, candles) {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
       pointMarkersVisible: false,
     });
-    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.84, bottom: 0.05 }, visible: false });
+    chart.priceScale('finviz_events').applyOptions({ visible: false });
+    const prim = new EventBadgesPrimitive();
+    series.attachPrimitive(prim);
     holder[key] = series;
     holder[key + 'Chart'] = chart;
+    holder[key + 'Prim'] = prim;
   }
-  const points = (candles || []).filter(c => c && c.time != null);
-  // Hodnoty 0 a 3 na striedavých sviečkach rozpínajú stupnicu na všetky štyri riadky.
-  series.setData(points.map((c, i) => ({ time: c.time, value: i % 2 ? 3 : 0 })));
+  series.setData((candles || []).filter(c => c && c.time != null).map(c => ({ time: c.time, value: 0 })));
   return series;
+}
+
+function setEventStrip(holder, key, items) {
+  holder?.[key + 'Prim']?.setItems(items);
 }
 
 function eventStripHasEarnings(markers) {
   return (markers || []).some(m => m && m.text === 'E');
 }
 
+// Badge farby: E zelená/červená podľa beat/miss (sivomodrá nadchádzajúce),
+// R neutrálna, D zelenkavá — výplň odznaku, písmeno je tmavé.
 function eventStripMarker(marker) {
-  return { ...marker, position: 'atPriceMiddle', price: EVENT_STRIP_ROWS[marker.text] ?? 0, shape: 'square', size: 0 };
+  return { id: marker.id, time: marker.time, text: marker.text, color: marker.color };
 }
 
-// Každé písmeno má vlastný riadok pásu, takže E a R na tej istej sviečke sa neprekryjú.
-const EVENT_STRIP_ROWS = { E: 3, R: 2, D: 1, S: 0 };
-
 function clearEventStrip(holder, key) {
-  const series = holder?.[key];
-  if (series) setSeriesMarkers(series, []);
+  setEventStrip(holder, key, []);
 }
 
 function applyChartEventMarkers(id, symbol, r, candles) {
@@ -1137,7 +1204,7 @@ function applyChartEventMarkers(id, symbol, r, candles) {
     return eventStripMarker({ id: markerId, time, color, text: event.type });
   }).filter(Boolean);
   const strip = eventStripSeries(r.mainChart, r, '_eventStrip', candles);
-  if (strip) setSeriesMarkers(strip, r._eventMarkersList);
+  if (strip) setEventStrip(r, '_eventStrip', r._eventMarkersList);
   setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
 }
 
