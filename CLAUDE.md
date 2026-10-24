@@ -1496,3 +1496,9 @@ no changes to C1–C4, DIP, DCA, BUILD, Verdikt or AI-export decisions.
 ## Udalosti na grafe (Finviz), 2026-10-24
 
 `GET /api/chart-events/{symbol}` uses Finviz's unofficial undocumented chart endpoint; it works without Elite key. Store at `DATA_ROOT/chart_events/{SYM}.json`, atomically, keeping five years; merge by event identity and replace upcoming earnings once actuals arrive. Refresh at most every 24h, single-flight per ticker; a failed fetch serves stored data with `stale=true`. Daily held US Stock/ETF prefetch is sequential from cache only; non-US suffixes are skipped. E/R/D/S markers are optional, default off, and merge with existing LWC v5 markers through stable IDs and `_markerMeta` / `pc_markerMeta`; tooltips use `attachMarkerTooltip`. Events never affect scoring, DCA, BUILD, Verdikt or AI export. Keep Query defaults out of internal calls and scrub provider errors via `_scrub_token`.
+Týždenná EMA200 v Dnes (2026-10-24): `_weekly_ema200_event` v EMA200 skene hodnotí
+poslednú UZAVRETÚ týždennú sviečku (po piatku 21:00 UTC; rozpracovaný týždeň nie):
+cross_up / cross_down voči predošlému týždňu, bounce_up (nad EMA200, low sa dotkol),
+reject_down (pod EMA200, high sa dotkol). Riadok skenu nesie `weekly_event`; Dnes ho
+číta z uloženého `portfolio` snapshotu len pre držané tituly účtu 1 ako informačnú
+kartu mimo single-membership. Bez vplyvu na skóre a rozhodovacie pravidlá.

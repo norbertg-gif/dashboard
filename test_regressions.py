@@ -1830,6 +1830,36 @@ class _JsonRequest:
         return self._payload
 
 
+class WeeklyEma200EventRegressionTests(unittest.TestCase):
+    def _frame(self, closes, lows=None, highs=None, emas=None):
+        import pandas as pd
+        idx = pd.to_datetime(["2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"])
+        lows = lows or closes
+        highs = highs or closes
+        return pd.DataFrame({"Close": closes, "Low": lows, "High": highs,
+                             "ema200": emas or [100.0] * 4}, index=idx)
+
+    SAT = datetime(2026, 10, 24, 12, tzinfo=timezone.utc)   # week of 10-19 closed
+    WED = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)   # week of 10-19 still open
+
+    def test_cross_up_and_down_on_closed_week(self):
+        self.assertEqual(tb._weekly_ema200_event(self._frame([95, 96, 98, 103]), self.SAT)["kind"], "cross_up")
+        self.assertEqual(tb._weekly_ema200_event(self._frame([105, 104, 102, 97]), self.SAT)["kind"], "cross_down")
+
+    def test_bounce_and_reject(self):
+        f = self._frame([105, 104, 103, 104], lows=[104, 103, 102, 99])
+        self.assertEqual(tb._weekly_ema200_event(f, self.SAT)["kind"], "bounce_up")
+        f = self._frame([95, 96, 97, 96], highs=[96, 97, 98, 101])
+        self.assertEqual(tb._weekly_ema200_event(f, self.SAT)["kind"], "reject_down")
+        self.assertIsNone(tb._weekly_ema200_event(self._frame([110, 111, 112, 113]), self.SAT))
+
+    def test_open_week_is_not_judged(self):
+        # Mid-week the partial 10-19 bar crossing up must be ignored; 10-12 vs 10-05 decides.
+        self.assertIsNone(tb._weekly_ema200_event(self._frame([95, 96, 98, 103]), self.WED))
+        ev = tb._weekly_ema200_event(self._frame([95, 96, 103, 90]), self.WED)
+        self.assertEqual((ev["kind"], ev["week"]), ("cross_up", "2026-10-12"))
+
+
 class HomeTodayRegressionTests(unittest.TestCase):
     def setUp(self):
         from datetime import timedelta

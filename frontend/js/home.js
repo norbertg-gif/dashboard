@@ -87,11 +87,24 @@ function homeTodayHtml(data) {
     ? `Celý ročný test majú za sebou <b>${candidates.length}</b> ${candidates.length === 1 ? 'titul' : candidates.length < 5 ? 'tituly' : 'titulov'} (${year.lots_passed ?? '—'} z ${year.lots_total ?? '—'} tranží). V zisku: <b>${winners.map(escHtml).join(', ') || 'žiadny'}</b>. Kandidáti na zváženie, nie pokyn na predaj.`
     : `Celý ročný test zatiaľ nemá za sebou žiadny titul (${year.lots_passed ?? '—'} z ${year.lots_total ?? '—'} tranží).`;
 
+  // 6) Týždenná EMA200 — tituly, ktorých posledná uzavretá týždenná sviečka
+  // prerazila alebo sa odrazila od EMA200. Len kontext, nie signál.
+  const emaItems = (data.ema200_week || {}).items || [];
+  const emaGroups = [
+    ['cross_up', 'Prerazili nahor'], ['bounce_up', 'Odrazili sa od EMA200 nahor'],
+    ['cross_down', 'Prerazili nadol'], ['reject_down', 'Odmietnuté zdola (high sa dotkol EMA200)'],
+  ].map(([kind, label]) => {
+    const list = emaItems.filter(r => r.kind === kind);
+    return list.length ? `<div class="home-today-day home-today-ema"><span class="home-today-date">${label}</span><span class="home-today-chips">${list.map(r => tickerBtn(r.ticker)).join('')}</span></div>` : '';
+  }).join('');
+  const emaWeek = emaItems[0]?.week ? ` · týždeň od ${new Date(emaItems[0].week).toLocaleDateString('sk-SK', {day:'numeric', month:'numeric'})}` : '';
+  const emaBody = emaGroups || '<p class="home-today-sub">Minulý týždeň žiadny tvoj titul neprerazil EMA200 ani sa od nej neodrazil.</p>';
+
   const summary = data.summary || {};
   const daily = Number(summary.daily_pnl);
   const otherUnavailable = Object.entries(unavailable)
     .filter(([key]) => !['dca', 'build', 'earnings', 'portfolio'].includes(key))
-    .map(([key, note]) => `${({settings:'Nastavenia', scanner:'Scanner', cash:'Hotovosť', year_test:'Ročný test'})[key] || key}: ${note}`);
+    .map(([key, note]) => `${({settings:'Nastavenia', scanner:'Scanner', cash:'Hotovosť', year_test:'Ročný test', ema200_week:'EMA200 týždenne'})[key] || key}: ${note}`);
   return `<div class="home-today">
     <div class="home-eyebrow">ÚČET 1 · LEN DRŽANÉ AKCIE A ETF</div>
     <h1>${escHtml(data.headline || 'Prehľad nedostupný')}</h1>
@@ -104,6 +117,7 @@ function homeTodayHtml(data) {
     ${card('is-act', 'Urob', actBody)}
     ${card('is-warn', 'Pozor tento týždeň · výsledky', earnBody)}
     ${card('', 'Čakaj · dashboard sa ozve sám', waiting)}
+    ${card('', `Týždenná EMA200${emaWeek}`, emaBody)}
     ${card('', `Drž · ${hold.length} pozícií`, holdBody)}
     <section class="home-today-card is-quiet"><h2>Znižovanie počtu titulov</h2><p class="home-today-sub">${yearText}</p></section>
   </div>`;

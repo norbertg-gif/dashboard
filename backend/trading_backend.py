@@ -10299,6 +10299,46 @@ def _scan_buy_signal_for_ticker(ticker: str, days: int, ticker_slog: dict | None
     }
 
 
+def _weekly_ema200_event(df_w, now: datetime | None = None) -> dict | None:
+    """Posledná UZAVRETÁ týždenná sviečka voči weekly EMA200 (interpretačné, bez vplyvu na skóre).
+
+    Týždeň je uzavretý po piatkovom close (21:00 UTC piatku v týždni sviečky);
+    rozpracovaný týždeň sa nehodnotí, aby sa výsledok cez týždeň neprevracal.
+    cross_up/cross_down = close prešiel na druhú stranu EMA200 voči predošlému týždňu;
+    bounce_up = držal nad EMA200, low sa jej dotkol; reject_down = držal pod, high sa jej dotkol."""
+    if df_w is None or len(df_w) < 3 or "ema200" not in df_w:
+        return None
+    current = now or datetime.now(timezone.utc)
+    try:
+        start = pd.Timestamp(df_w.index[-1]).to_pydatetime().date()
+    except Exception:
+        return None
+    friday = start + timedelta(days=(4 - start.weekday()) % 7)
+    closed_at = datetime(friday.year, friday.month, friday.day, 21, tzinfo=timezone.utc)
+    last_i = -1 if current >= closed_at else -2
+    cur, prev = df_w.iloc[last_i], df_w.iloc[last_i - 1]
+    close, ema = _finite_float(cur.get("Close")), _finite_float(cur.get("ema200"))
+    prev_close, prev_ema = _finite_float(prev.get("Close")), _finite_float(prev.get("ema200"))
+    low, high = _finite_float(cur.get("Low")), _finite_float(cur.get("High"))
+    if None in (close, ema, prev_close, prev_ema) or ema <= 0 or prev_ema <= 0:
+        return None
+    above, prev_above = close >= ema, prev_close >= prev_ema
+    kind = None
+    if above and not prev_above:
+        kind = "cross_up"
+    elif prev_above and not above:
+        kind = "cross_down"
+    elif above and low is not None and low <= ema:
+        kind = "bounce_up"
+    elif not above and high is not None and high >= ema:
+        kind = "reject_down"
+    if not kind:
+        return None
+    week = pd.Timestamp(df_w.index[last_i]).date().isoformat()
+    return {"kind": kind, "week": week, "close": round(close, 4), "ema200": round(ema, 4),
+            "dist_pct": round((close - ema) / ema * 100, 2)}
+
+
 def _scan_ema200_distance(ticker: str) -> dict:
     """Ad-hoc pomôcka: aktuálna cena vs weekly EMA200, žiadny vplyv na C1-C4/DIP.
 
@@ -10331,6 +10371,7 @@ def _scan_ema200_distance(ticker: str) -> dict:
     close = _finite_float(last.get("Close"))
     ema200 = _finite_float(last.get("ema200"))
     weeks = len(df_w)
+    weekly_event = _weekly_ema200_event(df_w)
     del raw_w, df_w
     if close is None or ema200 is None or ema200 <= 0:
         return {"ticker": ticker, "error": "EMA200 nedostupná"}
@@ -10342,6 +10383,7 @@ def _scan_ema200_distance(ticker: str) -> dict:
         "dist_pct": dist_pct,
         "weeks": weeks,
         "source": source,
+        "weekly_event": weekly_event,
         "error": None,
     }
 
@@ -11846,11 +11888,24 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
             year["candidates"].append({"ticker": sym, "in_profit": sum(pnls) > 0 if all(p is not None for p in pnls) else None})
     if year["unknown_dates"]:
         notes["year_test"] = "nedostupné dátumy niektorých tranží"
+    ema_week = {"items": [], "scanned_at": None}
+    try:
+        ema_snap = json.loads(EMA200_SCAN_FILES["portfolio"].read_text(encoding="utf-8"))
+        ema_week["scanned_at"] = ema_snap.get("generated_at") or ema_snap.get("scanned_at") or ema_snap.get("finished_at") or ema_snap.get("ts")
+        held_syms = {str(k).upper() for k in lots_by_symbol}
+        for row in ema_snap.get("rows") or ema_snap.get("results") or []:
+            ev = (row or {}).get("weekly_event")
+            if ev and str(row.get("ticker", "")).upper() in held_syms:
+                ema_week["items"].append({"ticker": row["ticker"], **ev})
+        if not any("weekly_event" in (r or {}) for r in (ema_snap.get("rows") or ema_snap.get("results") or [])):
+            notes["ema200_week"] = "EMA200 sken ešte nebežal s novou verziou"
+    except (OSError, ValueError, TypeError, AttributeError):
+        notes["ema200_week"] = "EMA200 sken nedostupný"
     count = len(sections["actions"])
     total = sum(r["amount"] for r in sections["actions"])
     headline = (f"Tento týždeň {count} {'krok' if count == 1 else 'kroky' if count < 5 else 'krokov'} za ${total:g}. Ostatné drž."
                 if count else f"Dnes nič. Všetkých {len(lots_by_symbol)} pozícií drž.")
-    if notes:
+    if any(k != "ema200_week" for k in notes):
         headline = "Prehľad je neúplný. Skontroluj nedostupné podklady."
     result = _json_safe({"account": "1", "generated_at": now.isoformat(),
         "snapshot_at": _assistant_iso_timestamp(snapshot.get("ts")), "headline": headline,
@@ -11858,7 +11913,7 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
                     "daily_pnl": _assistant_number(summary.get("daily_pnl")), **cash,
                     "orders_count": len(orders) if snapshot else None},
         "sections": sections, "membership": membership, "cash_deferred": deferred,
-        "year_test": year, "unavailable": notes})
+        "year_test": year, "ema200_week": ema_week, "unavailable": notes})
     _HOME_TODAY_CACHE.update(data=result, ts=time.time())
     return result
 

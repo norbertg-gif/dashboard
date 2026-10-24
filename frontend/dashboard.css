@@ -7048,6 +7048,7 @@ body.light-mode .port-table td.port-ticker-tag {
 .home-today-day {display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:9px 0;border-top:1px solid var(--border)}
 .home-today-day:first-of-type {border-top:0}
 .home-today-date {width:84px;flex-shrink:0;font-weight:600;font-variant-numeric:tabular-nums}
+.home-today-ema .home-today-date {width:230px}
 .home-today-chips {display:flex;flex-wrap:wrap;gap:6px}
 .home-today-chip {border:1px solid var(--border);background:transparent;color:var(--text);font:600 12px inherit;font-family:inherit;padding:3px 9px;border-radius:999px;cursor:pointer}
 .home-today-chip:hover {border-color:var(--accent);color:var(--accent)}
