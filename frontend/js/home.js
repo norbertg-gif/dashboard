@@ -42,7 +42,7 @@ function homeTodayHtml(data) {
   const unavailable = data.unavailable || {};
   const tickerBtn = t => {
     const sym = encodeURIComponent(t).replace(/'/g, '%27');
-    return `<button type="button" class="home-today-chip" onclick="homeTodayChart('${sym}')" title="Otvoriť graf">${escHtml(t)}</button>`;
+    return `<button type="button" class="home-today-chip" onclick="openScannerTicker(decodeURIComponent('${sym}'))" title="Otvoriť v Analytike">${escHtml(t)}</button>`;
   };
   const card = (cls, title, body) => `<section class="home-today-card ${cls}"><h2>${title}</h2>${body}</section>`;
 
