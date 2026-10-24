@@ -9,10 +9,10 @@ const ALL_INTERVALS = ['1m','5m','15m','30m','1h','4h','12h','1d','1wk','1mo'];
 const CHART_INITIAL_BARS = 300;
 const CHART_HISTORY_PAGE = 300;
 const DEFAULTS = [
-  {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
-  {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
-  {symbol:'NVDA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
-  {symbol:'TSLA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false}},
+  {symbol:'AAPL',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false}},
+  {symbol:'MSFT',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false}},
+  {symbol:'NVDA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false}},
+  {symbol:'TSLA',period:'auto',interval:'1d',indicators:{ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false}},
 ];
 
 const TAGS = [
@@ -137,6 +137,7 @@ const CHART_DEFAULTS_KEY = 'td_chart_defaults';
 const CHART_DEFAULT_LABELS = [
   ['ha', 'Heikin Ashi'], ['ema', 'EMA'], ['ichimoku', 'Ichimoku'], ['rsi', 'RSI'],
   ['adx', 'ADX'], ['macd', 'MACD'], ['ipp', 'IPP'], ['consensus', 'Zhoda'],
+  ['events', 'Udalosti'],
 ];
 let chartDefaults = null;
 let consensusSettings = {...CONSENSUS_DEFAULT_PARAMS};
@@ -417,7 +418,7 @@ function onChartPanelContextMenu(event, id) {
 // Kopíruje sa interval, HA, čiarové/oscilátorové indikátory a Wizard.
 // Zoom sa nekopíruje: pri inom intervale ho
 // loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
-const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp', 'consensus'];
+const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp', 'consensus', 'events'];
 const PANEL_DEFAULT_INTERVAL = '1d';
 
 function gridChartPanelIds() {
@@ -578,7 +579,7 @@ function getCurrentConfig() {
         symbol: symEl.value.trim().toUpperCase(),
         period: 'auto',
         interval: p.querySelector('.interval-sel')?.value || '1d',
-        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
+        indicators: r ? {...r.indicators} : {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false},
         view: r?.viewRange || null,
         // offsetHeight je 0 keď je záložka Grafy skrytá (saveLayout beží aj z
         // pozadia) — fallback na inline style.height, ktorý prežije display:none
@@ -719,7 +720,7 @@ function openChartDock(symbol) {
   }
   const cfg = {
     symbol: sym, period: 'auto', interval: '1d',
-    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false},
     container: 'dock-grid',
   };
   dockPanelId = createPanel(cfg);
@@ -746,7 +747,7 @@ function openVerdictChart(symbol) {
   }
   verdictPanelId = createPanel({
     symbol: sym, period: 'auto', interval: '1d',
-    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false},
+    indicators: {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false},
     container: 'verdict-grid',
   });
   loadChart(verdictPanelId);
@@ -943,6 +944,16 @@ function toggleIndicator(pid, ind) {
   document.getElementById(`ind-${pid}-${ind}`)?.classList.toggle(`active-${ind}`, r.indicators[ind]);
   updateSubVisibility(pid);
   saveLayout();
+  if (ind === 'events') {
+    const symbol = document.getElementById(pid)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+    if (r.indicators.events) loadChartEvents(pid, symbol, r, r._chartData || []);
+    else {
+      for (const key of Object.keys(r._markerMeta || {})) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
+      r._eventMarkersList = [];
+      if (r.candleSeries) setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+    }
+    return;
+  }
   // noLiveAfter: prepnutie indikátora nepotrebuje čerstvejšie sviečky — tie sú
   // už na obrazovke a nemenia sa, mení sa len to, čo sa cez ne kreslí. Bez toho
   // si každý toggle vypýtal aj následný refresh=1 load, ktorý ide na eToro po
@@ -1040,7 +1051,79 @@ function combinedChartMarkers(r) {
     ...(r._etoroMarkersList || []),
     ...(r._patternMarkers || []),
     ...(r._earningsMarkers || []),
+    ...(r._eventMarkersList || []),
   ].sort((a, b) => a.time < b.time ? -1 : 1);
+}
+
+function chartEventTooltip(event) {
+  const esc = value => escHtml(value == null || value === '' ? '—' : String(value));
+  const fmt = value => Number.isFinite(Number(value)) ? Number(value).toLocaleString('sk-SK', {maximumFractionDigits: 4}) : '—';
+  if (event.type === 'E') {
+    const upcoming = event.upcoming;
+    return `<b>Výsledky · ${esc(event.fiscal_period || event.date)}</b>` +
+      (upcoming ? '<div class="tip-muted">nadchádzajúce</div>' : '') +
+      `<div>EPS ${upcoming ? 'odhad' : 'skutočnosť / odhad'}: ${upcoming ? fmt(event.eps_estimate) : `${fmt(event.eps_actual)} / ${fmt(event.eps_estimate)}`}</div>` +
+      (!upcoming && event.eps_actual != null && event.eps_estimate != null && Number(event.eps_estimate) !== 0
+        ? `<div>Prekvapenie: ${((Number(event.eps_actual) - Number(event.eps_estimate)) / Math.abs(Number(event.eps_estimate)) * 100).toFixed(1)} %</div>` : '') +
+      `<div>Tržby ${upcoming ? 'odhad' : 'skutočnosť / odhad'}: ${upcoming ? fmt(event.sales_estimate) : `${fmt(event.sales_actual)} / ${fmt(event.sales_estimate)}`}</div>`;
+  }
+  if (event.type === 'R') return `<b>Zmena odporúčania</b><div>${esc(event.analyst)}</div><div>${esc(event.action)} · ${esc(event.rating)}</div><div>Cieľ: ${fmt(event.target_price)}</div>`;
+  if (event.type === 'D') return `<b>Dividenda · ${esc(event.date)}</b><div>Bežná: ${fmt(event.ordinary)} / akciu</div><div>Mimoriadna: ${fmt(event.special)} / akciu</div>`;
+  return `<b>Split · ${esc(event.date)}</b><div>Pomer: ${esc(event.ratio)}</div>`;
+}
+
+function applyChartEventMarkers(id, symbol, r, candles) {
+  if (!r.indicators?.events || !r.candleSeries || !candles?.length) return;
+  const interval = document.getElementById(id)?.querySelector('.interval-sel')?.value;
+  r._markerMeta ||= {};
+  for (const key of Object.keys(r._markerMeta)) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
+  r._eventMarkersList = (r._chartEvents || []).map(event => {
+    const time = resolveMarkerTime({ openDate: event.date }, candles, interval);
+    if (!time) return null;
+    const markerId = `finviz:${symbol}:${event.id}`;
+    r._markerMeta[markerId] = { html: chartEventTooltip(event) };
+    const estimate = Number(event.eps_estimate), actual = Number(event.eps_actual);
+    const color = event.type === 'E' && !event.upcoming && Number.isFinite(actual) && Number.isFinite(estimate)
+      ? (actual >= estimate ? CHART_COLORS.up : CHART_COLORS.down)
+      : event.type === 'D' ? CHART_COLORS.up : CHART_COLORS.neutral;
+    return { id: markerId, time, position: 'aboveBar', color, shape: 'circle', size: 0, text: event.type };
+  }).filter(Boolean);
+  setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+}
+
+async function loadChartEvents(id, symbol, r, candles) {
+  if (!r.indicators?.events || !symbol || !candles?.length) return;
+  try {
+    const response = await fetch(`${API}/api/chart-events/${encodeURIComponent(symbol)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (registry[id] !== r || document.getElementById(id)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase() !== symbol) return;
+    r._chartEvents = Array.isArray(payload.events) ? payload.events : [];
+    r._chartEventsFetchedFor = symbol;
+    const button = document.getElementById(`events-${id}`);
+    if (button && payload.stale) button.title = payload.reason || 'Teraz sa nepodarilo obnoviť udalosti; zobrazené uložené dáta.';
+    applyChartEventMarkers(id, symbol, r, candles);
+  } catch (error) {
+    const button = document.getElementById(`events-${id}`);
+    if (button) button.title = 'Udalosti sa teraz nepodarilo načítať; skúste to znova neskôr.';
+    console.warn('chart events failed:', error);
+  }
+}
+
+function toggleChartEvents(id) {
+  const r = registry[id];
+  if (!r) return;
+  r.indicators.events = !r.indicators.events;
+  document.getElementById(`events-${id}`)?.classList.toggle('active', r.indicators.events);
+  saveLayout();
+  const panel = document.getElementById(id);
+  const symbol = panel?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
+  if (r.indicators.events) loadChartEvents(id, symbol, r, r._chartData || []);
+  else {
+    for (const key of Object.keys(r._markerMeta || {})) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
+    r._eventMarkersList = [];
+    if (r.candleSeries) setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+  }
 }
 
 function attachMarkerTooltip(chart, container, getMarkerMeta) {
@@ -1227,7 +1310,7 @@ function renderConsensus(id, data, r) {
 // ── CREATE PANEL ──────────────────────────────────────────────────────────────
 function createPanel(cfg) {
   const id = 'pnl' + (++panelSeq);
-  const inds = {...(cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false})};
+  const inds = {...(cfg.indicators || {ema:false,ichimoku:false,rsi:false,adx:false,wizard:false,ha:false,macd:false,events:false})};
   delete inds.news; // old saved layouts/presets may still carry this removed key
   const initialViewRange = cleanPanelView(cfg.view);
   // Bez uloženej výšky prevezmi tú, ktorú má mriežka teraz — inak by novo
@@ -1251,6 +1334,7 @@ function createPanel(cfg) {
       <select class="p-sel interval-sel">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
       <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
+      <button class="p-btn-events${inds.events?' active':''}" id="events-${id}" onclick="event.stopPropagation();toggleChartEvents('${id}')" title="Finviz: výsledky, ratingy, dividendy a splity">UDALOSTI</button>
       <a id="trade-btn-${id}" href="#" target="_blank" rel="noopener"
         onclick="event.stopPropagation()"
         style="font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;
@@ -1264,6 +1348,7 @@ function createPanel(cfg) {
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
     <div class="p-inds" onclick="setActivePanel('${id}')">
+      <button id="ind-${id}-events" class="ind-btn${inds.events?' active-events':''}" onclick="toggleIndicator('${id}','events')" title="Finviz: výsledky, ratingy, dividendy a splity">UDALOSTI</button>
       <span class="ema-indicator-wrap">
         <button id="ind-${id}-ema" class="ind-btn${inds.ema ?' active-ema':''}" onclick="toggleIndicator('${id}','ema')">EMA</button>
         <span class="ema-hover-card">
@@ -1389,6 +1474,7 @@ function createPanel(cfg) {
     abortController: null, loadSeq: 0,
     _rawChartData: [], hasMoreHistory: false, historyLoading: false,
     _markerMeta: {},
+    _eventMarkersList: [], _chartEventsFetchedFor: null,
     moverChangePct: Number.isFinite(Number(cfg.moverChangePct)) ? Number(cfg.moverChangePct) : null,
     moverLastPrice: Number.isFinite(Number(cfg.moverLastPrice)) ? Number(cfg.moverLastPrice) : null,
     moverPriceSource: cfg.moverPriceSource || null,
@@ -2500,6 +2586,9 @@ async function loadChart(id, opts = {}) {
     // vôbec nerefetchlo a ostali by staré, nesediace pozície.
     r._earningsMarkers = [];
     r._earningsFetchedFor = null;
+    r._chartEvents = [];
+    r._eventMarkersList = [];
+    r._chartEventsFetchedFor = null;
   }
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
@@ -2690,6 +2779,8 @@ async function loadChart(id, opts = {}) {
       r._earningsFetchedFor = sym;
       applyEarningsMarkers(id, sym, r, data).catch(e => console.warn('earnings markers failed:', e));
     }
+    if (r.indicators.events && r._chartEventsFetchedFor !== sym) loadChartEvents(id, sym, r, data);
+    else if (r.indicators.events) applyChartEventMarkers(id, sym, r, data);
     if (data.patterns?.length) applyPatternMarkers(id, r, data.patterns);
     if (opts.refresh !== 1 && !opts.noLiveAfter) {
       setTimeout(() => loadChart(id, { refresh: 1, silent: true, noLiveAfter: true }), 0);

@@ -2832,7 +2832,7 @@ def _load_ticker_tags() -> dict:
 # v Portfóliu, Verdiktu ani Analytiky.
 CHART_DEFAULTS_FILE = DATA_ROOT / "chart_defaults.json"
 CHART_DEFAULT_INTERVALS = ("1m", "5m", "15m", "30m", "1h", "4h", "12h", "1d", "1wk", "1mo")
-CHART_DEFAULT_INDICATORS = ("ha", "ema", "ichimoku", "rsi", "adx", "macd", "ipp", "consensus")
+CHART_DEFAULT_INDICATORS = ("ha", "ema", "ichimoku", "rsi", "adx", "macd", "ipp", "consensus", "events")
 _chart_defaults_lock = threading.Lock()
 
 CONSENSUS_SETTINGS_FILE = DATA_ROOT / "consensus_settings.json"
@@ -9110,6 +9110,262 @@ def diag_finviz_events(symbol: str, bars: int = Query(400, ge=50, le=5000)):
     return {"symbol": sym, "attempts": attempts}
 
 
+CHART_EVENTS_DIR = DATA_ROOT / "chart_events"
+CHART_EVENTS_TTL_SECONDS = 24 * 60 * 60
+CHART_EVENTS_MAX_AGE_DAYS = 5 * 365 + 2
+CHART_EVENTS_FAILURE_RETRY_SECONDS = 5 * 60
+_chart_events_lock_guard = threading.Lock()
+_chart_events_symbol_locks: dict[str, threading.Lock] = {}
+_chart_events_failed_until: dict[str, float] = {}
+
+
+def _chart_events_symbol_lock(symbol: str) -> threading.Lock:
+    with _chart_events_lock_guard:
+        return _chart_events_symbol_locks.setdefault(symbol, threading.Lock())
+
+
+def _chart_events_us_ticker(symbol: str) -> tuple[str | None, str | None]:
+    """Return a Finviz US ticker, or an explicit unsupported-market reason."""
+    sym = _validate_ticker_symbol(symbol)
+    suffix = sym.rsplit(".", 1)[1] if "." in sym else ""
+    if suffix:
+        return None, "unsupported_market_suffix"
+    return sym, None
+
+
+def _chart_event_type(raw: dict) -> str | None:
+    value = str(raw.get("eventType") or "").lower().rsplit("/", 1)[-1]
+    return {"earnings": "E", "ratings": "R", "dividends": "D", "split": "S"}.get(value)
+
+
+def _chart_event_value(value):
+    """Make provider values safe for the JSON cache, including non-finite floats."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, str):
+        from html import unescape
+        return unescape(value.strip())
+    return value
+
+
+def _chart_event_date(raw: dict) -> str | None:
+    stamp = raw.get("dateTimestamp")
+    try:
+        value = float(stamp)
+        if abs(value) > 100_000_000_000:
+            value /= 1000
+        return datetime.fromtimestamp(value, timezone.utc).date().isoformat()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _chart_event_key(event: dict) -> str:
+    kind, day = event.get("type"), event.get("date")
+    if kind == "E":
+        identity = (kind, day, event.get("fiscal_period"))
+    elif kind == "R":
+        identity = (kind, day, event.get("analyst"), event.get("action"), event.get("rating"))
+    elif kind == "D":
+        identity = (kind, day, event.get("ordinary"), event.get("special"))
+    else:
+        identity = (kind, day, event.get("ratio"))
+    return json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+
+
+def _normalize_chart_event(raw: dict, *, today: date | None = None) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    kind, day = _chart_event_type(raw), _chart_event_date(raw)
+    if not kind or not day:
+        return None
+    decode = _chart_event_value
+    event = {"type": kind, "date": day}
+    if kind == "E":
+        event.update({
+            "fiscal_period": decode(raw.get("fiscalPeriod")),
+            "eps_actual": decode(raw.get("epsActual")), "eps_estimate": decode(raw.get("epsEstimate")),
+            "eps_reported_actual": decode(raw.get("epsReportedActual")),
+            "sales_actual": decode(raw.get("salesActual")), "sales_estimate": decode(raw.get("salesEstimate")),
+            "upcoming": date.fromisoformat(day) > (today or datetime.now(timezone.utc).date()),
+        })
+    elif kind == "R":
+        event.update({key: decode(raw.get(source)) for key, source in (
+            ("action", "action"), ("analyst", "analyst"), ("rating", "rating"),
+            ("target_price", "targetPrice"))})
+    elif kind == "D":
+        event.update({"ordinary": decode(raw.get("ordinary")), "special": decode(raw.get("special"))})
+    else:
+        event["ratio"] = decode(raw.get("split") or raw.get("ratio") or raw.get("splitRatio"))
+    if kind == "E" and event["eps_actual"] is not None:
+        event["upcoming"] = False
+    key = _chart_event_key(event)
+    event["id"] = "finviz:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+    return event
+
+
+def _merge_chart_events(existing: list[dict], incoming: list[dict], *, today: date | None = None) -> list[dict]:
+    """Append unseen facts forever within the five-year window; finalize upcoming earnings."""
+    now_day = today or datetime.now(timezone.utc).date()
+    cutoff = now_day - timedelta(days=CHART_EVENTS_MAX_AGE_DAYS)
+    merged = {}
+    for event in [*(existing or []), *(incoming or [])]:
+        if not isinstance(event, dict):
+            continue
+        normalized = _normalize_chart_event(event, today=now_day) if "eventType" in event else event
+        if not isinstance(normalized, dict) or not normalized.get("date"):
+            continue
+        try:
+            event_day = date.fromisoformat(normalized["date"])
+        except (TypeError, ValueError):
+            continue
+        if event_day < cutoff:
+            continue
+        key = _chart_event_key(normalized)
+        previous = merged.get(key)
+        if previous is None:
+            merged[key] = normalized
+        elif (previous.get("upcoming") and not normalized.get("upcoming")) or (
+            normalized.get("type") == "E" and normalized.get("eps_actual") is not None
+            and previous.get("eps_actual") is None
+        ):
+            merged.pop(key)
+            merged[_chart_event_key(normalized)] = normalized
+    return sorted(merged.values(), key=lambda item: (item["date"], item["type"], item["id"]))
+
+
+def _fetch_finviz_chart_events(symbol: str) -> list[dict]:
+    """Read Finviz chart's unofficial endpoint, anonymously first, as in the probe."""
+    base = {"ticker": symbol, "timeframe": "d", "instrument": "stock", "events": "true",
+            "chartEventsVersion": "2", "barsCount": "1300", "patterns": "false"}
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    attempts = ({}, {"auth": key}) if key else ({},)
+    last_error = None
+    for auth_params in attempts:
+        try:
+            response = requests.get(
+                "https://api.finviz.com/api/quote", params={**base, **auth_params}, timeout=8,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://elite.finviz.com/charts"},
+            )
+            response.raise_for_status()
+            body = response.json()
+            if not isinstance(body, dict) or not isinstance(body.get("chartEvents"), list):
+                raise ValueError("Finviz chartEvents response is unavailable")
+            return _merge_chart_events([], body["chartEvents"])
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(_scrub_token(str(last_error or "Finviz request failed")))
+
+
+def _chart_events_record(symbol: str) -> dict | None:
+    path = CHART_EVENTS_DIR / f"{symbol}.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and isinstance(value.get("events"), list):
+            return value
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
+def _get_chart_events(symbol: str, *, now: datetime | None = None) -> dict:
+    """Single-flight persistent cache; stale data survives upstream failure."""
+    sym = _validate_ticker_symbol(symbol)
+    finviz_symbol, unsupported = _chart_events_us_ticker(sym)
+    if unsupported:
+        return {"symbol": sym, "events": [], "fetched_at": None, "stale": False,
+                "source": "finviz_chart_unofficial", "reason": unsupported}
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    with _chart_events_symbol_lock(sym):
+        stored = _chart_events_record(sym) or {}
+        fetched_at = stored.get("fetched_at")
+        try:
+            stamp = datetime.fromisoformat(fetched_at) if fetched_at else None
+            if stamp is not None and stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            age = (current - stamp).total_seconds() if stamp else float("inf")
+        except (TypeError, ValueError):
+            age = float("inf")
+        if age < CHART_EVENTS_TTL_SECONDS:
+            return {"symbol": sym, "events": stored.get("events", []), "fetched_at": fetched_at,
+                    "stale": False, "source": "finviz_chart_unofficial"}
+        if not fetched_at and not stored.get("events") and _chart_events_failed_until.get(sym, 0) > current.timestamp():
+            return {"symbol": sym, "events": [], "fetched_at": None, "stale": True,
+                    "source": "finviz_chart_unofficial", "reason": "Teraz sa nepodarilo načítať udalosti."}
+        if _chart_events_failed_until.get(sym, 0) > current.timestamp():
+            return {"symbol": sym, "events": stored.get("events", []), "fetched_at": fetched_at,
+                    "stale": True, "source": "finviz_chart_unofficial",
+                    "reason": "Teraz sa nepodarilo obnoviť; zobrazené uložené udalosti."}
+        try:
+            incoming = _fetch_finviz_chart_events(finviz_symbol)
+            events = _merge_chart_events(stored.get("events", []), incoming, today=current.date())
+            fetched_at = current.isoformat()
+            _atomic_write_json(CHART_EVENTS_DIR / f"{sym}.json", {"symbol": sym, "events": events,
+                                                                  "fetched_at": fetched_at})
+            _chart_events_failed_until.pop(sym, None)
+            return {"symbol": sym, "events": events, "fetched_at": fetched_at,
+                    "stale": False, "source": "finviz_chart_unofficial"}
+        except Exception as exc:
+            _chart_events_failed_until[sym] = current.timestamp() + CHART_EVENTS_FAILURE_RETRY_SECONDS
+            reason = _scrub_token(f"teraz sa nepodarilo: {exc}")
+            return {"symbol": sym, "events": stored.get("events", []), "fetched_at": fetched_at,
+                    "stale": True, "source": "finviz_chart_unofficial", "reason": reason}
+
+
+@app.get("/api/chart-events/{symbol}")
+def get_chart_events(symbol: str, refresh: int = Query(0)):
+    refresh = refresh if isinstance(refresh, int) else 0
+    # refresh=1 is intentionally a force-bypass of the 24h throttle for manual
+    # recovery/diagnosis; regular chart calls use the persistent cache.
+    if refresh == 1:
+        symbol = _validate_ticker_symbol(symbol)
+        ticker, unsupported = _chart_events_us_ticker(symbol)
+        if unsupported:
+            return _get_chart_events(symbol)
+        with _chart_events_symbol_lock(symbol):
+            _chart_events_failed_until.pop(symbol, None)
+            stored = _chart_events_record(symbol) or {}
+            try:
+                today = datetime.now(timezone.utc).date()
+                events = _merge_chart_events(stored.get("events", []), _fetch_finviz_chart_events(ticker), today=today)
+                stamp = datetime.now(timezone.utc).isoformat()
+                _atomic_write_json(CHART_EVENTS_DIR / f"{symbol}.json", {"symbol": symbol, "events": events, "fetched_at": stamp})
+                return {"symbol": symbol, "events": events, "fetched_at": stamp, "stale": False, "source": "finviz_chart_unofficial"}
+            except Exception as exc:
+                _chart_events_failed_until[symbol] = time.time() + CHART_EVENTS_FAILURE_RETRY_SECONDS
+                return {"symbol": symbol, "events": stored.get("events", []), "fetched_at": stored.get("fetched_at"), "stale": True, "source": "finviz_chart_unofficial", "reason": _scrub_token(f"teraz sa nepodarilo: {exc}")}
+    return _get_chart_events(symbol)
+
+
+_chart_events_prefetch_day = None
+_chart_events_prefetch_lock = threading.Lock()
+
+
+def _prefetch_held_chart_events() -> None:
+    """Sequential daily cache warming for held US Stock/ETF symbols only."""
+    symbols = sorted(_get_portfolio_holdings())
+    for index, symbol in enumerate(symbols):
+        try:
+            _get_chart_events(symbol)
+        except Exception as exc:
+            print(f"[chart-events] {symbol}: {_scrub_token(str(exc))}")
+        if index + 1 < len(symbols):
+            _time_module.sleep(1.25)
+
+
+def _start_chart_events_prefetch() -> None:
+    global _chart_events_prefetch_day
+    day_key = datetime.now(timezone.utc).date().isoformat()
+    with _chart_events_prefetch_lock:
+        if _chart_events_prefetch_day == day_key:
+            return
+        # Mark before starting so concurrent scheduler ticks cannot start a second pass.
+        _chart_events_prefetch_day = day_key
+    thread = threading.Thread(target=_prefetch_held_chart_events, name="chart-events-prefetch", daemon=True)
+    thread.start()
+
+
 @app.get("/api/diagnostics/finviz-export")
 def diag_finviz_export(f: str = Query("idx_ndx"), t: str = Query("")):
     """Trial check for Finviz Elite (2026-10-23): does the CSV export work from
@@ -10314,6 +10570,7 @@ def _scanner_scheduler_loop():
     while True:
         try:
             _maybe_refresh_dip_elite()
+            _start_chart_events_prefetch()
             trading_day = _automatic_scanner_trading_day()
             if trading_day is not None:
                 _start_nasdaq_scanner(

@@ -1172,6 +1172,8 @@ body.sidebar-collapsed #sb-resizer {
   color: var(--yellow);
   background: var(--yellow-soft);
 }
+.p-btn-events { font-family:var(--font-mono); font-size:10px; font-weight:700; padding:4px 8px; border-radius:var(--radius-md); border:1px solid var(--border); background:transparent; color:var(--muted2); cursor:pointer; transition:var(--transition); }
+.p-btn-events:hover,.p-btn-events.active { border-color:var(--muted); color:var(--text); background:color-mix(in srgb,var(--muted) 12%,transparent); }
 
 .p-btn-an {
   font-size: 12px;
@@ -1428,6 +1430,7 @@ body.sidebar-collapsed #sb-resizer {
 .consensus-tip b.down { color:var(--down); }
 .consensus-tip b.flat, .consensus-tip b.none { color:var(--muted2); }
 .ind-btn.active-consensus { border-color:var(--up); color:var(--up); background:color-mix(in srgb,var(--up) 14%,transparent); }
+.ind-btn.active-events { border-color:var(--muted); color:var(--text); background:color-mix(in srgb,var(--muted) 12%,transparent); }
 .p-ov {
   position: absolute;
   inset: 0;

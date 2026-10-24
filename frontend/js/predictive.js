@@ -388,6 +388,8 @@ let pc_weeklyBaseMarkers = [];
 let pc_dailyMainBaseMarkers = [];
 let pc_earningsHistory = [];
 let pc_earningsTicker = null;
+let pc_chartEvents = [];
+let pc_chartEventsTicker = null;
 
 let pc_realSeries = null, pc_predSeries = null;
 let pc_realVolSeries = null;
@@ -470,7 +472,7 @@ let pc_oTenkan = null, pc_oKijun = null;
 let pc_oKumoA = null, pc_oKumoB = null;
 let pc__kumoAreaSeries = [];
 // Subpanel
-const PC_INDICATOR_KEYS = ['ema10', 'ema20', 'ema50', 'ema200', 'ichimoku', 'rsi', 'adx', 'macd', 'consensus'];
+const PC_INDICATOR_KEYS = ['ema10', 'ema20', 'ema50', 'ema200', 'ichimoku', 'rsi', 'adx', 'macd', 'consensus', 'events'];
 const PC_SUBPANEL_KEYS = ['rsi', 'adx', 'macd', 'consensus'];
 const PC_WEEKLY_INDICATORS_KEY = 'pc_weekly_indicators';
 const PC_DAILY_INDICATORS_KEY = 'pc_daily_indicators';
@@ -486,12 +488,12 @@ function pc_loadIndicatorState(key, defaults) {
 
 let pc_weeklyIndicators = pc_loadIndicatorState(PC_WEEKLY_INDICATORS_KEY, {
   ema10:false, ema20:false, ema50:false, ema200:false, ichimoku:false,
-  rsi:false, adx:false, macd:false, consensus:false,
+  rsi:false, adx:false, macd:false, consensus:false, events:false,
   vp:isAdvancedUiMode() && localStorage.getItem('pc_vp_enabled') === '1',
 });
 let pc_dailyIndicators = pc_loadIndicatorState(PC_DAILY_INDICATORS_KEY, {
   ema10:false, ema20:true, ema50:false, ema200:false, ichimoku:true,
-  rsi:false, adx:false, macd:false, consensus:false,
+  rsi:false, adx:false, macd:false, consensus:false, events:false,
 });
 const pc_subpanels = {
   weekly: { syncing:false, rsi:null, adx:null, macd:null, consensus:null },
@@ -538,6 +540,18 @@ function pc_clearEarningsMarkerMeta() {
   }
 }
 
+function pc_clearChartEventMarkerMeta() {
+  for (const markerId of Object.keys(pc_markerMeta)) {
+    if (markerId.startsWith('finviz:')) delete pc_markerMeta[markerId];
+  }
+}
+
+function pc_clearEarningsMarkerMetaFor(view) {
+  for (const markerId of Object.keys(pc_markerMeta)) {
+    if (markerId.startsWith(`earnings:predictive:${view}:`)) delete pc_markerMeta[markerId];
+  }
+}
+
 function pc_buildEarningsMarkers(view, candles) {
   if (!candles?.length || !pc_earningsHistory.length) return [];
   return pc_earningsHistory.map((h, index) => {
@@ -566,30 +580,80 @@ function pc_buildEarningsMarkers(view, candles) {
   }).filter(Boolean);
 }
 
+function pc_eventMarkerColor(event) {
+  const actual = Number(event.eps_actual), estimate = Number(event.eps_estimate);
+  return event.type === 'E' && !event.upcoming && Number.isFinite(actual) && Number.isFinite(estimate)
+    ? (actual >= estimate ? CHART_COLORS.up : CHART_COLORS.down)
+    : event.type === 'D' ? CHART_COLORS.up : CHART_COLORS.neutral;
+}
+
+function pc_buildChartEventMarkers(view, candles) {
+  const enabled = view === 'weekly' ? pc_weeklyIndicators.events : pc_dailyIndicators.events;
+  if (!enabled || !candles?.length || pc_chartEventsTicker !== String(pc_lastData?.ticker || '').toUpperCase()) return [];
+  return pc_chartEvents.map(event => {
+    const time = resolveMarkerTime({ openDate: event.date }, candles, view === 'weekly' ? '1wk' : '1d');
+    if (!time) return null;
+    const markerId = `finviz:${view}:${pc_chartEventsTicker}:${event.id}`;
+    pc_markerMeta[markerId] = { html: chartEventTooltip(event) };
+    return { id: markerId, time, position: 'aboveBar', color: pc_eventMarkerColor(event), shape: 'circle', size: 0, text: event.type };
+  }).filter(Boolean);
+}
+
+async function pc_loadChartEvents(ticker) {
+  const symbol = String(ticker || '').trim().toUpperCase();
+  if (!symbol) return;
+  try {
+    const response = await fetch(`/api/chart-events/${encodeURIComponent(symbol)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (String(pc_lastData?.ticker || '').trim().toUpperCase() !== symbol) return;
+    pc_chartEvents = Array.isArray(payload.events) ? payload.events : [];
+    pc_chartEventsTicker = symbol;
+    for (const id of ['pc-weekly-events', 'pc-daily-events']) {
+      const button = document.getElementById(id);
+      if (button && payload.stale) button.title = payload.reason || 'Zobrazené sú uložené udalosti; obnovenie sa nepodarilo.';
+    }
+    pc_applyMainChartMarkers();
+  } catch (error) {
+    for (const id of ['pc-weekly-events', 'pc-daily-events']) {
+      const button = document.getElementById(id);
+      if (button) button.title = 'Udalosti sa teraz nepodarilo načítať; skúste to znova neskôr.';
+    }
+    console.warn('chart events failed:', error);
+  }
+}
+
 function pc_applyMainChartMarkers() {
-  pc_clearEarningsMarkerMeta();
   const ticker = String(pc_lastData?.ticker || '').trim().toUpperCase();
   const hasCurrentEarnings = ticker && pc_earningsTicker === ticker;
   if (pc_realSeries) {
+    pc_clearEarningsMarkerMetaFor('weekly');
     const earnings = hasCurrentEarnings
       ? pc_buildEarningsMarkers('weekly', pc_lastData?.candles || [])
       : [];
-    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+    const events = pc_buildChartEventMarkers('weekly', pc_lastData?.candles || []);
+    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings, ...events].sort((a, b) => a.time - b.time));
   }
   if (pc_dailyMainSeries && pc_dailyMainTicker === ticker) {
+    pc_clearEarningsMarkerMetaFor('daily');
     const earnings = hasCurrentEarnings
       ? pc_buildEarningsMarkers('daily', pc_lastData?.daily_candles || [])
       : [];
-    setSeriesMarkers(pc_dailyMainSeries, [...pc_dailyMainBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+    const events = pc_buildChartEventMarkers('daily', pc_lastData?.daily_candles || []);
+    const base = pc_dailyMainBaseMarkers.filter(marker => !String(marker.id || '').startsWith('finviz:'));
+    setSeriesMarkers(pc_dailyMainSeries, [...base, ...earnings, ...events].sort((a, b) => a.time - b.time));
   }
 }
 
 function pc_resetEarningsMarkers(ticker) {
   pc_earningsTicker = String(ticker || '').trim().toUpperCase() || null;
   pc_earningsHistory = [];
+  pc_chartEvents = [];
+  pc_chartEventsTicker = null;
+  pc_clearChartEventMarkerMeta();
   pc_clearEarningsMarkerMeta();
   if (pc_realSeries) setSeriesMarkers(pc_realSeries, pc_weeklyBaseMarkers);
-  if (pc_dailyMainSeries) setSeriesMarkers(pc_dailyMainSeries, pc_dailyMainBaseMarkers);
+  if (pc_dailyMainSeries) setSeriesMarkers(pc_dailyMainSeries, pc_dailyMainBaseMarkers.filter(marker => !String(marker.id || '').startsWith('finviz:')));
 }
 
 function pc_setEarningsHistory(ticker, history) {
@@ -2144,6 +2208,13 @@ function pc_toggleIndicator(view, key) {
     if (view === 'weekly' && key === 'vp') pc_applyVolumeProfile();
     return;
   }
+  if (key === 'events') {
+    if (state.events) {
+      if (pc_chartEventsTicker === String(pc_lastData.ticker || '').toUpperCase()) pc_applyMainChartMarkers();
+      else pc_loadChartEvents(pc_lastData.ticker);
+    } else pc_applyMainChartMarkers();
+    return;
+  }
   if (key === 'consensus' && state.consensus && typeof consensusSettings !== 'undefined'
       && JSON.stringify(pc_lastData.indicators?.consensus?.params || CONSENSUS_DEFAULT_PARAMS)
         !== JSON.stringify(consensusSettings)) {
@@ -2450,6 +2521,18 @@ function renderDailyMain(data) {
     });
     line.setData(ind[key]);
   }
+  // Daily chart recreates its series on data/view changes; include the current
+  // toggle here as well as on async event arrival, preserving buy signals.
+  const dailyEvents = pc_buildChartEventMarkers('daily', data.daily_candles || []);
+  const dailyBuyMarkers = data.daily_buy_signals && data.daily_buy_signals.length
+    ? data.daily_buy_signals.map(s => {
+        const display = pc_dailyMarkerMode === 'return'
+          ? dailySignalReturnMarker(s, data.daily_candles)
+          : { color: sigTierColor(s.tier, s.score), shape: 'arrowUp', text: s.score + '/4' };
+        return { id: `signal:daily:${s.time}`, time: s.time, position: 'belowBar', color: display.color,
+          shape: display.shape, text: display.text, size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1) };
+      }) : [];
+  pc_dailyMainBaseMarkers = [...dailyBuyMarkers, ...dailyEvents];
   if (pc_dailyIndicators.ichimoku) {
     const tenkan = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#34d399', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Tenkan' });
     const kijun = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#f87171', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Kijun' });
@@ -2458,22 +2541,6 @@ function renderDailyMain(data) {
     tenkan.setData(ind.ichi_tenkan || []); kijun.setData(ind.ichi_kijun || []);
     spanA.setData(ind.ichi_sa || []); spanB.setData(ind.ichi_sb || []);
     createKumoPlugin(pc_dailyMainInst, pc_dailyMainSeries, ind.ichi_sa || [], ind.ichi_sb || []);
-  }
-  pc_dailyMainBaseMarkers = [];
-  if (data.daily_buy_signals && data.daily_buy_signals.length) {
-    pc_dailyMainBaseMarkers = data.daily_buy_signals.map(s => {
-      const display = pc_dailyMarkerMode === 'return'
-        ? dailySignalReturnMarker(s, data.daily_candles)
-        : { color: sigTierColor(s.tier, s.score), shape: 'arrowUp', text: s.score + '/4' };
-      return {
-        time: s.time,
-        position: 'belowBar',
-        color: display.color,
-        shape: display.shape,
-        text: display.text,
-        size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1),
-      };
-    });
   }
   pc_applyMainChartMarkers();
 
@@ -3246,6 +3313,7 @@ async function loadData(reoptimize = false, forceRefresh = false) {
     if (seq !== pcLoadSeq) return;
     pc_lastData = data;
     wsSubscribeSymbol(ticker);
+    if (pc_weeklyIndicators.events || pc_dailyIndicators.events) pc_loadChartEvents(ticker);
     renderCharts(data);
     if (pc_currentView === 'daily') renderDailyMain(data);
     pc_applyOverlays();

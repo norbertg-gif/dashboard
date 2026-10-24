@@ -13,7 +13,7 @@ import subprocess
 import http.client
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1974,6 +1974,112 @@ class HomeTodayRegressionTests(unittest.TestCase):
             with self.assertRaises(LookupError):
                 self.real_earnings("MSFT", refresh=0, cache_only=True)
             net.assert_not_called()
+
+
+
+class ChartEventsRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_dir = tb.CHART_EVENTS_DIR
+        tb.CHART_EVENTS_DIR = Path(self.tmp.name)
+        tb._chart_events_failed_until.clear()
+
+    def tearDown(self):
+        tb.CHART_EVENTS_DIR = self.old_dir
+        tb._chart_events_failed_until.clear()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _response(events):
+        class Response:
+            def raise_for_status(self): pass
+            def json(self): return {"chartEvents": events}
+        return Response()
+
+    def test_merge_keeps_old_and_appends_new_with_five_year_cutoff(self):
+        today = date(2026, 10, 24)
+        old = {"type":"D", "date":"2024-01-01", "ordinary":0.2, "special":None, "id":"old"}
+        old_outside = {"type":"D", "date":"2021-01-01", "ordinary":0.3, "special":None, "id":"ancient"}
+        new = {"eventType":"chartEvent/dividends", "dateTimestamp":int(datetime(2025, 1, 2, tzinfo=timezone.utc).timestamp()), "ordinary":0.4}
+        merged = tb._merge_chart_events([old, old_outside], [new], today=today)
+        self.assertEqual([event["date"] for event in merged], ["2024-01-01", "2025-01-02"])
+
+    def test_upcoming_earnings_is_replaced_by_reported_actual(self):
+        today = date(2026, 10, 24)
+        ts = int(datetime(2026, 10, 20, tzinfo=timezone.utc).timestamp())
+        upcoming = {"eventType":"chartEvent/earnings", "dateTimestamp":ts, "fiscalPeriod":"Q3 2026", "epsEstimate":1.2, "salesEstimate":20}
+        actual = {**upcoming, "epsActual":1.4, "salesActual":21}
+        old = tb._normalize_chart_event(upcoming, today=today)
+        new = tb._normalize_chart_event(actual, today=today)
+        merged = tb._merge_chart_events([old], [new], today=today)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["eps_actual"], 1.4)
+        self.assertFalse(merged[0]["upcoming"])
+
+    def test_entity_decode_and_nonfinite_values(self):
+        event = tb._normalize_chart_event({"eventType":"chartEvent/ratings", "dateTimestamp":1792800000,
+                                           "analyst":"A &amp; B", "action":"Buy &rarr; Hold"})
+        self.assertEqual(event["analyst"], "A & B")
+        self.assertEqual(event["action"], "Buy → Hold")
+        earnings = tb._normalize_chart_event({"eventType":"chartEvent/earnings", "dateTimestamp":1792800000,
+                                               "epsActual":float("nan")})
+        self.assertIsNone(earnings["eps_actual"])
+
+    def test_suffix_is_rejected_without_network(self):
+        with patch.object(tb.requests, "get") as get:
+            result = tb._get_chart_events("SAP.DE")
+        get.assert_not_called()
+        self.assertEqual(result["events"], [])
+        self.assertEqual(result["reason"], "unsupported_market_suffix")
+
+    def test_failed_refresh_returns_stored_stale_data(self):
+        now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        stored = {"type":"D", "date":"2025-01-01", "ordinary":0.2, "special":None, "id":"old"}
+        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[stored], "fetched_at":"2026-10-22T00:00:00+00:00"})
+        with patch.object(tb, "_fetch_finviz_chart_events", side_effect=RuntimeError("offline")):
+            result = tb._get_chart_events("AAPL", now=now)
+        self.assertTrue(result["stale"])
+        self.assertEqual(result["events"], [stored])
+
+    def test_throttle_skips_refresh_for_24_hours_and_query_defaults_are_not_passed(self):
+        now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        payload = [{"eventType":"chartEvent/split", "dateTimestamp":1792800000, "split":"2:1"}]
+        with patch.object(tb, "_fetch_finviz_chart_events", return_value=payload) as fetch:
+            tb._get_chart_events("AAPL", now=now)
+            tb._get_chart_events("AAPL", now=now + timedelta(hours=23))
+            self.assertEqual(fetch.call_count, 1)
+            self.assertEqual(fetch.call_args.args, ("AAPL",))
+            tb._get_chart_events("AAPL", now=now + timedelta(hours=24, seconds=1))
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_cooldown_failure_avoids_repeat_and_stays_stale(self):
+        now = datetime(2026, 10, 24, tzinfo=timezone.utc)
+        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[], "fetched_at":"2026-10-22T00:00:00+00:00"})
+        with patch.object(tb, "_fetch_finviz_chart_events", side_effect=RuntimeError("offline")) as fetch:
+            self.assertTrue(tb._get_chart_events("AAPL", now=now)["stale"])
+            self.assertTrue(tb._get_chart_events("AAPL", now=now + timedelta(minutes=2))["stale"])
+            self.assertEqual(fetch.call_count, 1)
+
+    def test_endpoint_failure_is_200_and_exposes_stale_payload(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        app = FastAPI()
+        app.get("/api/chart-events/{symbol}")(tb.get_chart_events)
+        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[], "fetched_at":"2026-10-22T00:00:00+00:00"})
+        with patch.object(tb, "_fetch_finviz_chart_events", side_effect=RuntimeError("offline")):
+            with TestClient(app) as client:
+                response = client.get("/api/chart-events/AAPL")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["stale"])
+        self.assertNotIn("nan", response.text.lower())
+
+    def test_query_default_direct_call_and_force_refresh(self):
+        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[], "fetched_at":"2026-10-24T00:00:00+00:00"})
+        with patch.object(tb, "_fetch_finviz_chart_events", return_value=[]) as fetch:
+            tb.get_chart_events("AAPL")
+            self.assertEqual(fetch.call_count, 0)
+            tb.get_chart_events("AAPL", refresh=1)
+            self.assertEqual(fetch.call_count, 1)
 
 
 class AssistantExportRegressionTests(unittest.TestCase):

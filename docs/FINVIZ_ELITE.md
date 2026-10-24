@@ -7,6 +7,14 @@ vyhodnotiť, čo by sme stratili bez neho, a prehodnotiť prínos.
 Pravidlo: **každá nová vec, ktorá potrebuje `FINVIZ_API_KEY`, sem dostane
 riadok** – dátum, čo robí, čo by sme stratili a aká je záloha.
 
+## Udalosti na grafe (Finviz), 2026-10-24
+
+`GET /api/chart-events/{symbol}` reads Finviz's unofficial, undocumented chart
+endpoint. It works without an Elite key, so E/R/D/S markers are not lost if Elite
+is cancelled. The server retains a rolling five years per ticker, merges newly
+observed events, prefetches held US Stock/ETF tickers daily, and serves stored
+events as stale when refresh fails. This does not affect scoring or trade logic.
+
 ## Čo stojí na Elite
 
 | Od | Funkcia | Čo by sme bez Elite stratili | Záloha bez Elite |
