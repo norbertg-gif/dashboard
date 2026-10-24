@@ -8875,6 +8875,7 @@ def diag_finviz_export(f: str = Query("idx_ndx"), t: str = Query("")):
         return {"ok": False, "error": "FINVIZ_API_KEY nie je nastavený"}
     if not re.fullmatch(r"[A-Za-z0-9_,.\-]{1,200}", f or ""):
         raise HTTPException(400, "Invalid filter")
+    t = t if isinstance(t, str) else ""   # direct calls pass the Query() default object
     if t and not re.fullmatch(r"[A-Za-z0-9,.\-]{1,400}", t):
         raise HTTPException(400, "Invalid ticker list")
     extra = {"t": t} if t else {}
