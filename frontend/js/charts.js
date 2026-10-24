@@ -1050,7 +1050,9 @@ function combinedChartMarkers(r) {
   return [
     ...(r._etoroMarkersList || []),
     ...(r._patternMarkers || []),
-    ...(r._earningsMarkers || []),
+    // Finviz udalosti nesú výsledky (aj nadchádzajúce) – staré earnings značky
+    // by ich zdvojili, takže sa skryjú, kým Finviz pre titul nejaké E dodal.
+    ...(eventStripHasEarnings(r._eventMarkersList) ? [] : (r._earningsMarkers || [])),
   ].sort((a, b) => a.time < b.time ? -1 : 1);
 }
 
@@ -1086,12 +1088,16 @@ function eventStripSeries(chart, holder, key, candles) {
       lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
       pointMarkersVisible: false,
     });
-    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.97, bottom: 0.0 }, visible: false });
+    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.88, bottom: 0.06 }, visible: false });
     holder[key] = series;
     holder[key + 'Chart'] = chart;
   }
   series.setData((candles || []).filter(c => c && c.time != null).map(c => ({ time: c.time, value: 0 })));
   return series;
+}
+
+function eventStripHasEarnings(markers) {
+  return (markers || []).some(m => m && m.text === 'E');
 }
 
 function eventStripMarker(marker) {
@@ -1121,6 +1127,7 @@ function applyChartEventMarkers(id, symbol, r, candles) {
   }).filter(Boolean);
   const strip = eventStripSeries(r.mainChart, r, '_eventStrip', candles);
   if (strip) setSeriesMarkers(strip, r._eventMarkersList);
+  setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
 }
 
 async function loadChartEvents(id, symbol, r, candles) {
@@ -1155,6 +1162,7 @@ function toggleChartEvents(id) {
     for (const key of Object.keys(r._markerMeta || {})) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
     r._eventMarkersList = [];
     clearEventStrip(r, '_eventStrip');
+    if (r.candleSeries) setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
   }
 }
 

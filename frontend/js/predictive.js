@@ -629,20 +629,20 @@ function pc_applyMainChartMarkers() {
   const hasCurrentEarnings = ticker && pc_earningsTicker === ticker;
   if (pc_realSeries) {
     pc_clearEarningsMarkerMetaFor('weekly');
-    const earnings = hasCurrentEarnings
+    const events = pc_buildChartEventMarkers('weekly', pc_lastData?.candles || []);
+    const earnings = hasCurrentEarnings && !eventStripHasEarnings(events)
       ? pc_buildEarningsMarkers('weekly', pc_lastData?.candles || [])
       : [];
-    const events = pc_buildChartEventMarkers('weekly', pc_lastData?.candles || []);
     setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
     const strip = eventStripSeries(pc_realChartInst, pc_eventStrips, 'weekly', pc_lastData?.candles || []);
     if (strip) setSeriesMarkers(strip, events);
   }
   if (pc_dailyMainSeries && pc_dailyMainTicker === ticker) {
     pc_clearEarningsMarkerMetaFor('daily');
-    const earnings = hasCurrentEarnings
+    const events = pc_buildChartEventMarkers('daily', pc_lastData?.daily_candles || []);
+    const earnings = hasCurrentEarnings && !eventStripHasEarnings(events)
       ? pc_buildEarningsMarkers('daily', pc_lastData?.daily_candles || [])
       : [];
-    const events = pc_buildChartEventMarkers('daily', pc_lastData?.daily_candles || []);
     const base = pc_dailyMainBaseMarkers.filter(marker => !String(marker.id || '').startsWith('finviz:'));
     setSeriesMarkers(pc_dailyMainSeries, [...base, ...earnings].sort((a, b) => a.time - b.time));
     const strip = eventStripSeries(pc_dailyMainInst, pc_eventStrips, 'daily', pc_lastData?.daily_candles || []);
