@@ -1830,6 +1830,152 @@ class _JsonRequest:
         return self._payload
 
 
+class HomeTodayRegressionTests(unittest.TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        self.now = datetime.now(timezone.utc)
+        self.tomorrow = (self.now + timedelta(days=1)).date().isoformat()
+        self.old = (self.now - timedelta(days=366)).isoformat()
+        self.young = (self.now - timedelta(days=364)).isoformat()
+        self.snapshot = {"ts": self.now.timestamp(), "summary": {"cash": 250, "equity": 9000, "daily_pnl": 12},
+                         "orders": [{"symbol": "E", "type": "Stock", "amount": 50, "isBuy": True}],
+                         "data": [self.lot(t) for t in ("E", "D", "B", "C", "W", "H")]}
+        self.rows = [{"symbol": t, "readiness": "ready", "readiness_reason": "existing reason", "gap_pct": 10}
+                     for t in ("B", "E", "D")]
+        self.rows += [{"symbol": "W", "readiness": "wait", "readiness_reason": "wait for EMA20"}]
+        self.real_earnings = tb._earnings_next_date
+        for name, kwargs in {
+            "_HOME_TODAY_CACHE": {"new": {}},
+            "_assistant_snapshot": {"side_effect": lambda account: self.snapshot},
+            "_dash_settings": {"return_value": dict(tb.DASH_SETTINGS_DEFAULTS)},
+            "load_scanner_cache": {"return_value": {"results": [{"ticker": "C", "chart_health": {"daily": {"status": "Bad"}}}]}},
+            "load_dip_scores": {"return_value": {t: {"total": 200} for t in ("E", "D", "C")}},
+            "_build_position_rows": {"side_effect": lambda *args: (self.rows, 6000, {})},
+            "_earnings_next_date": {"side_effect": lambda sym, **kw: self.tomorrow if sym == "E" else None},
+            "get_portfolio": {"side_effect": AssertionError("must never fetch portfolio")},
+        }.items():
+            p = patch.object(tb, name, **kwargs); p.start(); self.addCleanup(p.stop)
+        # Fix the tranche while preserving all actual trigger defaults.
+        tb._dash_settings.return_value["build_tranche_usd"] = 100
+
+    def lot(self, ticker, **fields):
+        return {"symbol": ticker, "type": "Stock", "amount": 1000, "pnl": -250 if ticker in ("E", "D", "C", "H") else 50,
+                "pnlPct": -80 if ticker in ("E", "D", "C") else 5, "openDateTime": self.old, **fields}
+
+    def payload(self, refresh=1):
+        return tb.get_home_today(account="1", refresh=refresh)
+
+    def test_single_membership_and_precedence(self):
+        result = self.payload()
+        self.assertEqual(result["membership"], {"E": "earnings", "D": "actions", "B": "actions", "C": "waiting", "W": "waiting", "H": "hold"})
+        rows = [r["ticker"] for section in result["sections"].values() for r in section]
+        self.assertEqual(sorted(rows), sorted(result["membership"]))
+        self.assertEqual(len(rows), len(set(rows)))
+        self.assertEqual([(r["ticker"], r["kind"]) for r in result["sections"]["actions"]], [("D", "dca"), ("B", "build")])
+        self.assertTrue(result["sections"]["hold"][0]["loss_without_dca"])
+        self.assertIn("daily", tb._dca_trigger_state([self.lot("C")], 200, {"daily_state": "Bad"}, tb._dash_settings())["blocking_conditions"][0])
+
+    def test_cash_cap_after_orders_keeps_overflow(self):
+        self.snapshot["summary"]["cash"] = 150
+        result = self.payload()
+        self.assertEqual(result["summary"]["cash_free_after_orders"], 100)
+        self.assertEqual([r["ticker"] for r in result["sections"]["actions"]], ["D"])
+        self.assertEqual(result["cash_deferred"], ["B"])
+        row = next(r for r in result["sections"]["waiting"] if r["ticker"] == "B")
+        self.assertTrue(row["cash_deferred"])
+        self.assertEqual(row["amount"], 100)
+        self.assertEqual(result["membership"]["B"], "waiting")
+
+    def test_pending_order_flag_and_date(self):
+        row = self.payload()["sections"]["earnings"][0]
+        self.assertEqual(row, {"ticker": "E", "date": self.tomorrow, "pending_order": True})
+
+    def test_earnings_window_uses_settings_and_includes_boundary(self):
+        from datetime import timedelta
+        tb._dash_settings.return_value["earnings_warn_days"] = 3
+        boundary = (self.now + timedelta(days=3)).date().isoformat()
+        outside = (self.now + timedelta(days=4)).date().isoformat()
+        tb._earnings_next_date.side_effect = lambda sym, **kw: boundary if sym == "D" else outside
+        result = self.payload()
+        self.assertEqual([r["ticker"] for r in result["sections"]["earnings"]], ["D"])
+        self.assertEqual(result["membership"]["E"], "actions")
+
+    def test_build_order_etf_and_duplicate_lots(self):
+        self.snapshot["summary"]["cash"] = 1000
+        self.snapshot["data"] += [self.lot("B", type="ETF"), self.lot("CRYPTO", type="Crypto")]
+        self.rows.insert(0, {"symbol": "H", "readiness": "ready", "readiness_reason": "largest gap"})
+        result = self.payload()
+        self.assertEqual([r["ticker"] for r in result["sections"]["actions"]], ["D", "H", "B"])
+        self.assertEqual(len(result["membership"]), 6)
+        self.assertNotIn("CRYPTO", result["membership"])
+
+    def test_year_test_requires_all_open_lots(self):
+        self.snapshot["data"] = [self.lot("OLD", pnl=10), self.lot("OLD", pnl=5),
+                                 self.lot("MIX", pnl=10), self.lot("MIX", openDateTime=self.young),
+                                 self.lot("LOSS", pnl=-10), self.lot("UNKNOWN", openDateTime=None)]
+        result = self.payload()["year_test"]
+        self.assertEqual(result["lots_total"], 6)
+        self.assertEqual(result["lots_passed"], 4)
+        self.assertEqual(result["unknown_dates"], 1)
+        self.assertEqual(result["candidates"], [{"ticker": "LOSS", "in_profit": False}, {"ticker": "OLD", "in_profit": True}])
+
+    def test_account_policy_and_failure_are_http_safe(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        app = FastAPI()
+        app.get("/api/home/today")(tb.get_home_today)
+        with TestClient(app) as client:
+            for account in ("2", "both", "0", ""):
+                self.assertEqual(client.get("/api/home/today", params={"account": account}).status_code, 400)
+            with patch.object(tb, "_build_position_rows", side_effect=RuntimeError("broken source")):
+                response = client.get("/api/home/today?refresh=1")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("build", response.json()["unavailable"])
+            self.assertEqual(response.json()["membership"]["D"], "actions")
+
+    def test_failed_earnings_does_not_promote_unknown_to_action(self):
+        with patch.object(tb, "_earnings_next_date", side_effect=LookupError()):
+            result = self.payload()
+        self.assertIn("earnings", result["unavailable"])
+        self.assertFalse(result["sections"]["actions"])
+        self.assertEqual(set(result["membership"].values()), {"waiting"})
+
+    def test_each_failing_source_remains_serializable(self):
+        for name, section in (("_assistant_snapshot", "portfolio"), ("load_scanner_cache", "scanner"),
+                              ("load_dip_scores", "dca"), ("_dash_settings", "settings")):
+            with self.subTest(source=name), patch.object(tb, name, side_effect=RuntimeError("unavailable")):
+                result = self.payload()
+                self.assertIn(section, result["unavailable"])
+                json.dumps(result, allow_nan=False)
+
+    def test_no_nan_and_unknown_cash_never_funds_actions(self):
+        self.snapshot["summary"].update(cash=float("nan"), equity=float("inf"))
+        result = self.payload()
+        json.dumps(result, allow_nan=False)
+        self.assertIsNone(result["summary"]["cash_free_after_orders"])
+        self.assertFalse(result["sections"]["actions"])
+        self.assertIn("cash", result["unavailable"])
+
+    def test_cache_ttl_refresh_and_no_external_fetch(self):
+        one = self.payload(refresh=0)
+        two = self.payload(refresh=0)
+        self.assertEqual(one, two)
+        self.assertEqual(tb._assistant_snapshot.call_count, 1)
+        self.payload(refresh=1)
+        self.assertEqual(tb._assistant_snapshot.call_count, 2)
+        tb.get_portfolio.assert_not_called()
+        for call in tb._earnings_next_date.call_args_list:
+            self.assertEqual(call.kwargs, {"refresh": 0, "cache_only": True})
+
+    def test_earnings_cache_only_never_falls_through_to_network(self):
+        with (patch.object(tb, "_finviz_upcoming_earnings", return_value=None),
+              patch.object(tb, "_read_ticker_json_cache", return_value=None),
+              patch.object(tb, "_earnings_next_date_uncached", side_effect=AssertionError("network")) as net):
+            with self.assertRaises(LookupError):
+                self.real_earnings("MSFT", refresh=0, cache_only=True)
+            net.assert_not_called()
+
+
 class AssistantExportRegressionTests(unittest.TestCase):
     def test_export_has_versioned_schema_and_redacts_internal_ids(self):
         zone = {"timeframe": "weekly", "bars": 52, "ema20_dist_pct": None,

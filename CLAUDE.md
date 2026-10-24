@@ -1474,3 +1474,21 @@ Komplexný audit (3 paralelné agenty: backend výkon/pamäť, frontend perf/dea
 - **`predictive_signals_log.json` bol trackovaný v gite** napriek `.gitignore` pravidlu (pridané, ale súbor bol commitnutý predtým) — `git rm --cached`.
 
 Neopravené/vedomé rozhodnutia z auditu (nižšia priorita, väčší zásah): `get_public_portfolio` má vlastnú (staršiu, mierne odlišnú) summary logiku a niekoľko potvrdených dead-code funkcií vo frontende ostáva nedosiahnuteľných — ponechané, kým sa nepotvrdí zámer.
+
+
+## Prehľad · Dnes (autoritatívny pohľad), 2026-10-24
+
+`GET /api/home/today?account=1&refresh=0`: few-minute, decisions-only view of held
+Stock/ETF positions, account 1 only (400 otherwise). Cached processed portfolio,
+shared DCA trigger, shared BUILD rows and Finviz-first cached earnings; no eToro
+refresh or new scoring. Ten-minute RAM cache; refresh=1 recomposes cached sources.
+Backend single membership precedence: confirmed earnings in earnings_warn_days →
+DCA eligible → BUILD ready → DCA conditional / BUILD wait → hold.
+Missing decision evidence stays explicit in waiting.
+DCA actions precede BUILD in existing gap order. Shared AI-export cash computation
+caps cumulative actions after pending buy orders; overflow stays visible as
+„neskôr, chýba hotovosť“. Year-test candidates are an informational overlay,
+all open lots older than 365 days, never a sell instruction.
+All original Home cards remain unchanged inside localStorage-persisted Podrobnosti
+(default closed); their Home fetches start on first expansion. Interpretation only:
+no changes to C1–C4, DIP, DCA, BUILD, Verdikt or AI-export decisions.

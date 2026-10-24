@@ -11382,6 +11382,168 @@ def get_home_heatmap():
 ASSISTANT_EXPORT_SCHEMA_VERSION = "1.7"
 
 
+def _assistant_cash_summary(summary: dict, orders: list[dict]) -> dict:
+    """Shared cash contract; orders use the compact AI-export shape."""
+    cash = _assistant_number(summary.get("cash"))
+    amounts = [_assistant_number(o.get("invested")) for o in orders if o.get("side") == "buy"]
+    reserved = sum(amounts) if all(v is not None for v in amounts) else None
+    return {"cash_available": round(cash, 2) if cash is not None else None,
+            "cash_reserved_for_orders": round(reserved, 2) if reserved is not None else None,
+            "cash_free_after_orders": round(max(0.0, cash - reserved), 2)
+            if cash is not None and reserved is not None else None}
+
+
+_HOME_TODAY_CACHE = {}
+
+
+@app.get("/api/home/today")
+def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
+    """Decision-only composition of cached account-1 evidence. No scoring or I/O refresh."""
+    if account != "1":
+        raise HTTPException(400, "Prehľad Dnes je dostupný iba pre účet 1")
+    now = datetime.now(timezone.utc)
+    if not refresh and _HOME_TODAY_CACHE.get("data") is not None and time.time() - _HOME_TODAY_CACHE.get("ts", 0) < 600:
+        return _HOME_TODAY_CACHE["data"]
+    notes = {}
+
+    def source(name, fn, fallback):
+        try:
+            return fn()
+        except Exception:
+            notes[name] = "nedostupné"
+            return fallback
+
+    snapshot = source("portfolio", lambda: _assistant_snapshot("1"), {})
+    if not snapshot:
+        notes["portfolio"] = "nedostupné · chýba uložené portfólio"
+    settings = source("settings", _dash_settings, {})
+    scan = source("scanner", load_scanner_cache, None)
+    dip = source("dca", load_dip_scores, None)
+    if scan is None:
+        notes["scanner"] = "nedostupné"
+    if dip is None:
+        notes["dca"] = "nedostupné"
+    scanner = {str(r.get("ticker") or "").upper(): r for r in (scan or {}).get("results", [])}
+    lots_by_symbol = {}
+    for lot in snapshot.get("data") or []:
+        if lot.get("type") in ("Stock", "ETF") and lot.get("symbol"):
+            lots_by_symbol.setdefault(str(lot["symbol"]).upper(), []).append(lot)
+    orders = [{"ticker": str(o.get("symbol") or "").upper(),
+               "side": "buy" if o.get("isBuy", True) else "sell", "invested": o.get("amount")}
+              for o in snapshot.get("orders") or [] if o.get("type") in ("Stock", "ETF")]
+    summary = snapshot.get("summary") or {}
+    cash = _assistant_cash_summary(summary, orders)
+    if not snapshot:
+        cash = {key: None for key in cash}
+    if cash["cash_free_after_orders"] is None:
+        notes["cash"] = "nedostupné"
+    build_rows = source("build", lambda: _build_position_rows(
+        [lot for lots in lots_by_symbol.values() for lot in lots], scanner)[0], []) if settings and scan is not None else []
+    if not settings or scan is None:
+        notes["build"] = "nedostupné"
+    builds = {r["symbol"]: r for r in build_rows}
+    dca, dates, unknown_dates = {}, {}, set()
+    for sym, lots in sorted(lots_by_symbol.items()):
+        if settings and dip is not None and scan is not None:
+            dca[sym] = source("dca", lambda: _dca_trigger_state(lots,
+                _assistant_number((dip.get(sym) or {}).get("total")),
+                _assistant_chart_state(scanner.get(sym) or {}), settings), {})
+        else:
+            notes["dca"] = "nedostupné"
+        try:
+            date = _earnings_next_date(sym, refresh=0, cache_only=True)
+            if date:
+                day = datetime.fromisoformat(date[:10]).date()
+                if settings and 0 <= (day - now.date()).days <= settings["earnings_warn_days"]:
+                    dates[sym] = day.isoformat()
+        except Exception:
+            unknown_dates.add(sym)
+    if unknown_dates:
+        notes["earnings"] = "nedostupné pre: " + ", ".join(sorted(unknown_dates))
+    sections = {key: [] for key in ("earnings", "actions", "waiting", "hold")}
+    membership, candidates = {}, []
+
+    def add(sym, section, **fields):
+        membership[sym] = section
+        sections[section].append({"ticker": sym, **fields})
+
+    for sym in sorted(lots_by_symbol):
+        state, build = dca.get(sym, {}), builds.get(sym, {})
+        if sym in dates:
+            add(sym, "earnings", date=dates[sym], pending_order=any(o["ticker"] == sym for o in orders))
+        elif sym in unknown_dates or not state:
+            add(sym, "waiting", reason="Podklady na rozhodnutie sú nedostupné.")
+        elif state.get("status") == "eligible":
+            candidates.append({"ticker": sym, "kind": "dca", "amount": state.get("suggested_amount") or settings["build_tranche_usd"],
+                               "reason": f"Posledná tranža {state['last_lot_pnl_pct']:g} %; DIP spĺňa nastavený prah."})
+        elif build.get("readiness") == "ready":
+            candidates.append({"ticker": sym, "kind": "build", "amount": settings["build_tranche_usd"],
+                               "reason": build.get("readiness_reason")})
+        elif state.get("status") == "conditional":
+            blockers = state.get("blocking_conditions") or []
+            labels = {"daily_bad": "zlý denný graf", "weekly_bad": "zlý týždenný graf"}
+            add(sym, "waiting", reason="DCA čaká: " + ", ".join(labels.get(b, b) for b in blockers) + ".")
+        elif build.get("readiness") == "wait":
+            add(sym, "waiting", reason=build.get("readiness_reason"))
+        elif "build" in notes:
+            add(sym, "waiting", reason="BUILD podklady sú nedostupné.")
+        else:
+            lots = lots_by_symbol[sym]
+            amount = sum(_assistant_number(l.get("amount")) or 0 for l in lots)
+            pnl = sum(_assistant_number(l.get("pnl")) or 0 for l in lots)
+            add(sym, "hold", loss_without_dca=bool(amount > 0 and pnl / amount <= -0.20
+                                                  and state.get("status") == "not_eligible"))
+    build_order = {r["symbol"]: i for i, r in enumerate(build_rows)}
+    candidates.sort(key=lambda r: (0 if r["kind"] == "dca" else 1,
+                                   dca[r["ticker"]].get("portfolio_pnl_pct") or 0 if r["kind"] == "dca"
+                                   else build_order.get(r["ticker"], 0), r["ticker"]))
+    remaining = cash["cash_free_after_orders"]
+    deferred = []
+    for row in candidates:
+        sym = row.pop("ticker")
+        amount = _assistant_number(row["amount"])
+        if remaining is not None and amount is not None and amount > 0 and amount <= remaining:
+            remaining = round(remaining - amount, 2)
+            add(sym, "actions", **row)
+        else:
+            reason = "neskôr, chýba hotovosť" if remaining is not None else "hotovosť nedostupná"
+            deferred.append(sym)
+            add(sym, "waiting", **row, cash_deferred=True, blocking_reason=reason)
+    sections["earnings"].sort(key=lambda r: (r["date"], r["ticker"]))
+    year = {"candidates": [], "lots_passed": 0, "lots_total": sum(map(len, lots_by_symbol.values())), "unknown_dates": 0}
+    for sym, lots in sorted(lots_by_symbol.items()):
+        passed = 0
+        for lot in lots:
+            try:
+                opened = datetime.fromisoformat(str(lot.get("opened_at") or lot.get("openDateTime")).replace("Z", "+00:00"))
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=timezone.utc)
+                passed += (now - opened).total_seconds() > 365 * 86400
+            except (ValueError, TypeError):
+                year["unknown_dates"] += 1
+        year["lots_passed"] += passed
+        if passed == len(lots):
+            pnls = [_assistant_number(l.get("pnl")) for l in lots]
+            year["candidates"].append({"ticker": sym, "in_profit": sum(pnls) > 0 if all(p is not None for p in pnls) else None})
+    if year["unknown_dates"]:
+        notes["year_test"] = "nedostupné dátumy niektorých tranží"
+    count = len(sections["actions"])
+    total = sum(r["amount"] for r in sections["actions"])
+    headline = (f"Tento týždeň {count} {'krok' if count == 1 else 'kroky' if count < 5 else 'krokov'} za ${total:g}. Ostatné drž."
+                if count else f"Dnes nič. Všetkých {len(lots_by_symbol)} pozícií drž.")
+    if notes:
+        headline = "Prehľad je neúplný. Skontroluj nedostupné podklady."
+    result = _json_safe({"account": "1", "generated_at": now.isoformat(),
+        "snapshot_at": _assistant_iso_timestamp(snapshot.get("ts")), "headline": headline,
+        "summary": {"account_value": _assistant_number(summary.get("equity")),
+                    "daily_pnl": _assistant_number(summary.get("daily_pnl")), **cash,
+                    "orders_count": len(orders) if snapshot else None},
+        "sections": sections, "membership": membership, "cash_deferred": deferred,
+        "year_test": year, "unavailable": notes})
+    _HOME_TODAY_CACHE.update(data=result, ts=time.time())
+    return result
+
+
 def _assistant_snapshot(account: str) -> dict:
     """Return the existing processed portfolio snapshot without triggering eToro."""
     try:
@@ -11810,7 +11972,7 @@ def get_assistant_export(account: str = "1"):
         if len(top_ranked_not_selected) >= 25:
             break
 
-    cash_reserved_for_orders = sum(float(order.get("invested") or 0) for order in orders if order.get("side") == "buy")
+    cash_summary = _assistant_cash_summary(summary, orders)
     watchlist = _read_watchlist_file()
     source_times.update({
         "dip_import": dip_meta.get("updated_at"),
@@ -11875,9 +12037,7 @@ def get_assistant_export(account: str = "1"):
         },
         "portfolio_summary": {
             "account_value": round(summary["equity"], 2), "invested_value": round(summary["invested"], 2),
-            "cash_available": round(summary["cash"], 2),
-            "cash_reserved_for_orders": round(cash_reserved_for_orders, 2),
-            "cash_free_after_orders": round(max(0.0, summary["cash"] - cash_reserved_for_orders), 2),
+            **cash_summary,
             "profit_loss": round(summary["total_pnl"], 2), "daily_profit_loss": round(summary["daily_pnl"], 2),
             "positions_count_total": len(all_position_symbols), "positions_count_exported": len(portfolio),
             "positions_count_excluded_crypto": len(excluded_crypto_symbols), "positions_count_excluded_other": len(excluded_other_symbols),
@@ -14768,7 +14928,7 @@ EARNINGS_SYMBOL_DIR = DATA_ROOT / "earnings_symbol"
 EARNINGS_SYMBOL_TTL_H = 168  # 7 dní — earnings dátum sa nemení z hodiny na hodinu
 EARNINGS_SYMBOL_SCHEMA_VERSION = 1
 
-def _earnings_next_date(symbol: str, refresh: int = 0) -> str | None:
+def _earnings_next_date(symbol: str, refresh: int = 0, *, cache_only: bool = False) -> str | None:
     """Per-symbol 7-dňová disk cache (pozitívna aj negatívna — "nenájdené" sa
     tiež cachuje) okolo _earnings_next_date_uncached. Predtým každý klik na
     Predictive tab pre ticker bez bulk dátumu znova zapaľoval celý
@@ -14782,6 +14942,8 @@ def _earnings_next_date(symbol: str, refresh: int = 0) -> str | None:
         cached = _read_ticker_json_cache(path, EARNINGS_SYMBOL_SCHEMA_VERSION, EARNINGS_SYMBOL_TTL_H)
         if cached is not None:
             return cached.get("date")
+    if cache_only:
+        raise LookupError("earnings cache unavailable")
     d = _earnings_next_date_uncached(sym)
     try:
         _write_ticker_json_cache(path, {

@@ -1,3 +1,92 @@
+// Decision view is account 1 only; legacy account selectors stay in details.
+let _homeTodayLoading = false;
+let _homeTodayData = null;
+let _homeTodayFetchedMs = 0;
+const HOME_DETAILS_KEY = 'td_home_details_open';
+
+function homeDetailsOpen() {
+  try { return localStorage.getItem(HOME_DETAILS_KEY) === '1'; } catch (e) { return false; }
+}
+
+function homeDetailsToggle(el) {
+  try { localStorage.setItem(HOME_DETAILS_KEY, el.open ? '1' : '0'); } catch (e) {}
+  if (el.open && !el.dataset.loaded) {
+    el.dataset.loaded = '1';
+    renderHomeDetails();
+  }
+}
+
+function homeTodayChart(encoded) {
+  switchMainTab('portfolio');
+  openChartDock(decodeURIComponent(encoded));
+}
+
+function homeTodayLinks(ticker) {
+  const sym = encodeURIComponent(ticker).replace(/'/g, '%27');
+  return `<span class="home-today-links"><button class="btn mini" onclick="homeTodayChart('${sym}')">Otvoriť graf</button>
+    <button class="btn mini" onclick="openVerdictTicker(decodeURIComponent('${sym}'), event)">Verdikt</button></span>`;
+}
+
+function homeTodayHtml(data) {
+  const money = v => v === null || v === undefined || !Number.isFinite(Number(v)) ? 'nedostupné' : '$' + Number(v).toLocaleString('sk-SK', {maximumFractionDigits: 2});
+  const sections = data.sections || {};
+  const rows = key => sections[key] || [];
+  const line = r => `<div class="home-today-row"><span><strong>${escHtml(r.ticker)}</strong> · ${r.cash_deferred ? money(r.amount) + ' · ' : ''}${escHtml(r.blocking_reason || r.reason || '')}</span>${homeTodayLinks(r.ticker)}</div>`;
+  const card = (title, body, note = '') => `<section class="home-today-section"><h2>${title}</h2>${note ? `<p class="home-empty">${escHtml(note)}</p>` : ''}${body}</section>`;
+  let lastDate = '';
+  const earnings = rows('earnings').map(r => {
+    let label = '';
+    if (r.date !== lastDate) {
+      lastDate = r.date;
+      const date = new Date(r.date + 'T12:00:00');
+      label = `<h3>${escHtml(date.toLocaleDateString('sk-SK', {weekday:'short', day:'numeric', month:'numeric'}))}</h3>`;
+    }
+    return label + `<div class="home-today-row"><span><strong>${escHtml(r.ticker)}</strong>${r.pending_order ? ` · máš na ${escHtml(r.ticker)} čakajúci order` : ''}</span>${homeTodayLinks(r.ticker)}</div>`;
+  }).join('');
+  const actions = rows('actions').map(r => `<div class="home-today-row"><span><strong>${r.kind === 'dca' ? 'Dokúp' : 'Dobuduj'} ${escHtml(r.ticker)} za ${money(r.amount)}</strong><br>${escHtml(r.reason || '')}</span>${homeTodayLinks(r.ticker)}</div>`).join('');
+  const hold = rows('hold');
+  const losses = hold.filter(r => r.loss_without_dca).length;
+  const year = data.year_test || {};
+  const candidates = year.candidates || [];
+  const winners = candidates.filter(r => r.in_profit).map(r => r.ticker);
+  const summary = data.summary || {};
+  return `<div class="home-today"><div class="home-eyebrow">ÚČET 1 · LEN DRŽANÉ AKCIE A ETF</div>
+    <h1>${escHtml(data.headline || 'Prehľad nedostupný')}</h1>
+    <div class="home-today-numbers"><span>Hodnota účtu <strong>${money(summary.account_value)}</strong></span><span>Dnes <strong>${money(summary.daily_pnl)}</strong></span>
+    <span>Voľná hotovosť po orderoch <strong>${money(summary.cash_free_after_orders)}</strong><small>${money(summary.cash_reserved_for_orders)} rezervovaných v ${summary.orders_count ?? '—'} orderoch</small></span></div>
+    <p class="home-empty">Uložené portfólio: ${escHtml(data.snapshot_at ? new Date(data.snapshot_at).toLocaleString('sk-SK') : 'nedostupné')} · výpočty z cache.</p>
+    ${Object.entries(data.unavailable || {}).map(([key, note]) => `<p class="home-empty">${escHtml(({portfolio:'Portfólio', settings:'Nastavenia', scanner:'Scanner', dca:'DCA', build:'BUILD', cash:'Hotovosť', earnings:'Výsledky', year_test:'Ročný test'})[key] || key)}: ${escHtml(note)}</p>`).join('')}
+    ${card('Pozor tento týždeň · výsledky', earnings || (data.unavailable?.earnings || data.unavailable?.portfolio ? '' : '<p class="home-empty">Žiadne potvrdené výsledky v nastavenom okne.</p>'), data.unavailable?.earnings || data.unavailable?.portfolio)}
+    ${card('Urob', actions || '<p class="home-empty">Žiadny dostupný krok.</p>', [data.unavailable?.dca ? 'DCA: nedostupné' : '', data.unavailable?.build ? 'BUILD: nedostupné' : ''].filter(Boolean).join(' · '))}
+    ${card('Čakaj · dashboard sa ozve sám', rows('waiting').map(line).join('') || '<p class="home-empty">Nič nečaká.</p>')}
+    ${card(`Drž · ${hold.length} pozícií`, `<p>${losses} v strate ≥20 % bez splneného DCA.</p><button class="btn mini" onclick="const list=this.nextElementSibling; list.hidden=!list.hidden; this.textContent=list.hidden?'Zobraziť zoznam':'Skryť zoznam'">Zobraziť zoznam</button><p hidden>${hold.map(r => escHtml(r.ticker)).join(', ') || 'Žiadne.'}</p>`)}
+    <section class="home-today-year"><h2>Znižovanie počtu titulov</h2><p>${candidates.length} titulov má všetky otvorené tranže staršie než 365 dní. Kandidáti na zváženie: ${candidates.map(r => escHtml(r.ticker)).join(', ') || 'žiadni'}. V zisku: ${winners.map(escHtml).join(', ') || 'žiadny potvrdený'}.</p><p>Ročný test: ${year.lots_passed ?? '—'} / ${year.lots_total ?? '—'} tranží. Vek sám osebe nie je dôvod na predaj.</p></section>
+    </div>`;
+}
+
+async function renderHomeView(force = false) {
+  const el = document.getElementById('home-view');
+  if (!el || _homeTodayLoading) return;
+  const shell = () => {
+    disposeHomePerformance();
+    el.innerHTML = `<div class="home-wrap"><div id="home-today-body">${_homeTodayData ? homeTodayHtml(_homeTodayData) : homeSkeletonHtml()}</div>
+      <details id="home-details" ontoggle="homeDetailsToggle(this)"><summary>Podrobnosti</summary><div id="home-details-body"></div></details></div>`;
+    if (homeDetailsOpen()) document.getElementById('home-details').open = true;
+  };
+  if (!document.getElementById('home-today-body')) shell();
+  if (!force && _homeTodayData && Date.now() - _homeTodayFetchedMs < 600000) return;
+  _homeTodayLoading = true;
+  try {
+    _homeTodayData = await homeFetchJson(`${API}/api/home/today?account=1&refresh=${force ? 1 : 0}`);
+    _homeTodayFetchedMs = Date.now();
+    const body = document.getElementById('home-today-body');
+    if (body) body.innerHTML = homeTodayHtml(_homeTodayData);
+  } catch (e) {
+    const body = document.getElementById('home-today-body');
+    if (body) body.innerHTML = '<p class="home-error">Prehľad Dnes je nedostupný.</p>';
+  } finally { _homeTodayLoading = false; }
+}
+
 // ── HOME TAB ─────────────────────────────────────────────────────────────────
 // Prehľadový landing tab — čistá agregácia už existujúcich endpointov
 // (žiadna nová backend logika): denné pohyby, portfólio pulse, "čo riešiť
@@ -109,8 +198,8 @@ function homeStaleBarHtml(ts) {
          `<span class="spinner"></span>Stav z ${hhmm} · aktualizujem…</div>`;
 }
 
-async function renderHomeView(force = false) {
-  const el = document.getElementById('home-view');
+async function renderHomeDetails(force = false) {
+  const el = document.getElementById('home-details-body');
   if (!el || _homeLoading) return;
 
   // Čerstvé dáta z poslednej návštevy — vykresli hneď, bez ďalšieho kola

@@ -7018,3 +7018,17 @@ body.light-mode .port-table td.port-ticker-tag {
 .ind-btn.active-ipp { border-color:var(--ind-ema); color:var(--ind-ema); background:var(--ind-ema-soft); }
 
 [id^="ipp-label-"] { max-width:calc(100% - 80px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:auto; }
+
+/* Home decision layer: neutral theme tokens, including glass/light variants. */
+.home-today h1 {font-size:clamp(22px,3vw,32px);line-height:1.3;margin:12px 0 24px}
+.home-today-numbers {display:flex;flex-wrap:wrap;gap:18px 40px;color:var(--muted)}
+.home-today-numbers strong {display:block;color:var(--text);font-size:19px}
+.home-today-numbers small {display:block;margin-top:4px}
+.home-today-section {border-top:1px solid var(--border);padding:18px 0}
+.home-today h2 {font-size:16px;margin:0 0 12px}
+.home-today h3 {font-size:13px;color:var(--muted);margin:14px 0 4px}
+.home-today-row {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;line-height:1.6}
+.home-today-links {display:flex;gap:8px;flex-shrink:0}
+.home-today-year {border:1px dashed var(--border);padding:16px;color:var(--muted);font-size:12px;margin:12px 0 24px}
+#home-details > summary {cursor:pointer;padding:16px 0;color:var(--muted);border-top:1px solid var(--border)}
+@media(max-width:600px) {.home-today-row {align-items:flex-start;flex-direction:column}}
