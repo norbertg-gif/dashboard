@@ -2762,7 +2762,7 @@ async function pc_loadInsights(ticker) {
     const hasConsensus = !!ac && (buy || hold || sell);
     if (hasConsensus || hasTarget) {
       const targetText = hasTarget
-        ? ` <span style="color:var(--muted)">(${fmtPrice(target)} cieľ)</span>`
+        ? ` <span style="color:var(--muted)">(${fmtPrice(target)} cieľ${pt?.source === 'finviz' ? ' · Finviz' : ''})</span>`
         : '';
       const consensusText = hasConsensus
         ? `<span style="color:var(--up)">${buy} Buy</span> · ${hold} Hold · <span style="color:var(--down)">${sell} Sell</span>`

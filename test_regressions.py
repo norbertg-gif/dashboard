@@ -47,6 +47,9 @@ class DipServerScoringRegressionTests(unittest.TestCase):
             patcher = patch.object(tb, name, return_value=[])
             patcher.start()
             self.addCleanup(patcher.stop)
+        patcher = patch.object(tb, "_fetch_finviz_full_columns", return_value=({}, set(), []))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def csv_text(self, rows=None, omit=None, percent_sign=True):
         rows = rows or [item["inputs"] for item in self.FIXTURE]
@@ -150,7 +153,7 @@ class DipServerScoringRegressionTests(unittest.TestCase):
         snapshot = next(tb.DIP_HISTORY_DIR.glob("*.json.gz"))
         with gzip.open(snapshot, "rt", encoding="utf-8") as handle:
             history = json.load(handle)
-        self.assertEqual(history, scores)
+        self.assertEqual({k: history[k] for k in scores}, scores)
         self.assertEqual(history["_meta"]["rules_version"], 3)
         self.assertEqual(history["BKNG"]["raw_inputs"]["Ticker"], "BKNG")
         self.assertNotIn("test-only-secret", json.dumps(history))
@@ -4692,6 +4695,260 @@ class FinvizEliteRedirectRegressionTests(unittest.TestCase):
         with patch.object(tb, "_load_finviz_screeners", return_value=["https://finviz.com/screener?v=151&f=idx_ndx"]),              patch.object(tb.requests, "get", return_value=self._R(302, "https://evil.example.com/steal")):
             with self.assertRaises(ValueError):
                 tb._fetch_dip_elite_scores("x")
+
+
+class FinvizFullColumnsRegressionTests(unittest.TestCase):
+    KEY = "test-finviz-secret"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        for name, value in {
+            "FINVIZ_ELITE_QUOTES_FILE": root / "finviz_elite_quotes.json",
+            "DIP_SCORES_FILE": root / "dip_scores.json",
+            "DIP_ELITE_STATE_FILE": root / "dip_elite_state.json",
+            "DIP_HISTORY_DIR": root / "dip_history",
+            "EARNINGS_SYMBOL_DIR": root / "earnings_symbol",
+            "YAHOO_INSIGHTS_DIR": root / "insights",
+        }.items():
+            p = patch.object(tb, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        for name in ("_prepare_scanner_daily_cache", "start_roic_fundamentals_enrichment"):
+            p = patch.object(tb, name, return_value=[])
+            p.start()
+            self.addCleanup(p.stop)
+        p = patch.dict(tb.os.environ, {"FINVIZ_API_KEY": self.KEY})
+        p.start()
+        self.addCleanup(p.stop)
+        p = patch.object(tb, "_load_finviz_screeners", return_value=tb.FINVIZ_DEFAULT_SCREENERS)
+        p.start()
+        self.addCleanup(p.stop)
+
+    @staticmethod
+    def full_csv(symbols):
+        headers = ["Ticker", "Company", "Earnings Date", "Target Price", "Analyst Recom", "Sector", "Industry",
+                   "Gross Margin", "Empty", "Missing", "Invalid"]
+        headers += [f"Additional Column {i}" for i in range(154 - len(headers))]
+        stream = io.StringIO()
+        writer = csv.DictWriter(stream, fieldnames=headers)
+        writer.writeheader()
+        for sym in symbols:
+            writer.writerow({"Ticker": sym, "Company": f"{sym} Inc", "Earnings Date": "11/4/2026 4:30:00 PM",
+                "Target Price": "478.05", "Analyst Recom": "1.7", "Sector": "Technology", "Industry": "Software",
+                "Gross Margin": "12.5%", "Empty": "", "Missing": "-", "Invalid": "NaN"})
+        return stream.getvalue()
+
+    def quote(self, **changes):
+        now = datetime.now(timezone.utc)
+        report = (now.date() + tb.timedelta(days=7)).isoformat()
+        return {"earnings_date_iso": report, "earnings_time": "amc", "earnings_raw": "raw date",
+                "target_price": 478.05, "analyst_recom": 1.7, "sector": "Technology", "industry": "Software",
+                "fetched_at": now.isoformat(), **changes}
+
+    def save_quote(self, **changes):
+        quote = self.quote(**changes)
+        tb._atomic_write_json(tb.FINVIZ_ELITE_QUOTES_FILE, {"AAPL": quote})
+        return quote
+
+    def test_earnings_parser_am_pm_and_session_boundaries(self):
+        for clock, expected in (("12:00:00 AM", "bmo"), ("8:30:00 AM", "bmo"),
+                                ("9:30:00 AM", "bmo"), ("9:30:01 AM", None), ("9:31:00 AM", None),
+                                ("12:00:00 PM", None), ("3:59:00 PM", None),
+                                ("4:00:00 PM", "amc"), ("4:30:00 PM", "amc")):
+            with self.subTest(clock=clock):
+                self.assertEqual(tb._parse_finviz_earnings("11/4/2026 " + clock), ("2026-11-04", expected))
+        for invalid in (None, "-", "", "not a date"):
+            self.assertEqual(tb._parse_finviz_earnings(invalid), (None, None))
+
+    def test_full_parser_keeps_every_column_and_strict_json_types(self):
+        row = tb._parse_finviz_full_csv(self.full_csv(["AAPL"]))["AAPL"]
+        self.assertEqual(len(row), 154)
+        self.assertEqual(row["Company"], "AAPL Inc")
+        self.assertEqual(row["Target Price"], 478.05)
+        self.assertEqual(row["Gross Margin"], 0.125)
+        self.assertEqual(row["Earnings Date"], "11/4/2026 4:30:00 PM")
+        for key in ("Empty", "Missing", "Invalid"):
+            self.assertIsNone(row[key])
+        json.dumps(row, allow_nan=False)
+
+    def test_symbol_mapping_and_held_requests_are_chunked_and_mapped_back(self):
+        for original, expected in (("BRK.B", "BRK-B"), ("BRK-B", "BRK-B"), ("ADI.US", "ADI"),
+                                   ("CSG.NV", None), ("RHM.DE", None), ("VOD.L", None)):
+            self.assertEqual(tb._finviz_symbol(original), expected)
+        held = {f"H{i:03d}": {} for i in range(101)}
+        held.update({"BRK.B": {}, "ADI.US": {}, "CSG.NV": {}})
+        calls = []
+        def export(params, key):
+            calls.append(params)
+            return self.full_csv(params["t"].split(",") if "t" in params else ["AAPL", "BRK-B"])
+        with patch.object(tb, "_get_portfolio_holdings", return_value=held), \
+             patch.object(tb, "_finviz_elite_get", side_effect=export):
+            full, selected, errors = tb._fetch_finviz_full_columns(self.KEY, ["v=151&f=idx_ndx"], ["AAPL", "BRK-B"])
+        chunks = [c["t"].split(",") for c in calls if "t" in c]
+        self.assertEqual([len(c) for c in chunks], [50, 50, 3])
+        self.assertEqual(set(sum(chunks, [])), {tb._finviz_symbol(s) for s in held} - {None})
+        self.assertEqual(full["BRK.B"]["Ticker"], "BRK-B")
+        self.assertEqual(full["ADI.US"]["Ticker"], "ADI")
+        self.assertIn("BRK-B", full)  # scored alias remains available too
+        self.assertNotIn("CSG.NV", selected)
+        self.assertEqual(errors, [])
+        self.assertTrue(all(c["v"] == "152" and len(c["c"].split(",")) == 200 for c in calls))
+
+    def scoring_export(self, params, key):
+        if params["v"] != "152":
+            return "Ticker,Company,Price,Sales Year Over Year TTM,EPS Year Over Year TTM\nAAPL,Apple,100,5,10\n"
+        return self.full_csv(params["t"].split(",") if "t" in params else ["AAPL"])
+
+    def test_held_export_uses_stock_etf_cache_from_both_accounts_without_etoro_calls(self):
+        caches = {
+            "1": {"data": [{"symbol": "BRK.B", "type": "Stock", "amount": 100, "pnl": 0}]},
+            "2": {"data": [{"symbol": "VTI", "type": "ETF", "amount": 100, "pnl": 0},
+                           {"symbol": "BTC", "type": "Crypto"}, {"symbol": "CSG.NV", "type": "Stock"}]},
+        }
+        calls = []
+        def export(params, key):
+            calls.append(params)
+            return self.full_csv(params["t"].split(","))
+        with patch.dict(tb._positions_cache, caches, clear=True), \
+             patch.object(tb, "_finviz_elite_get", side_effect=export), \
+             patch.object(tb.requests, "get", side_effect=AssertionError("Unexpected eToro call")):
+            full, held, errors = tb._fetch_finviz_full_columns(self.KEY, [], [])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(set(calls[0]["t"].split(",")), {"BRK-B", "VTI"})
+        self.assertEqual(set(full), {"BRK.B", "VTI"})
+        self.assertEqual(held, {"BRK.B", "VTI"})
+        self.assertEqual(errors, [])
+
+    def test_refresh_writes_full_history_and_compact_lookup_without_bloating_scores(self):
+        import gzip
+        with patch.object(tb, "_get_portfolio_holdings", return_value={"BRK.B": {}, "ADI.US": {}, "CSG.NV": {}}), \
+             patch.object(tb, "_finviz_elite_get", side_effect=self.scoring_export) as fetch:
+            state = tb.refresh_dip_from_finviz_elite("manual")
+        self.assertTrue(state["ok"])
+        self.assertTrue(state["full_columns"]["ok"])
+        self.assertEqual(fetch.call_count, 5)  # 2 scoring + 2 full screeners + held list
+        self.assertEqual([c.args[0]["v"] for c in fetch.call_args_list[:2]], ["151", "150"])
+        scores = tb.load_dip_scores()
+        self.assertNotIn("full_columns", scores["AAPL"])
+        self.assertNotIn("BRK.B", scores)
+        with gzip.open(next(tb.DIP_HISTORY_DIR.glob("*.json.gz")), "rt", encoding="utf-8") as handle:
+            history = json.load(handle)
+        self.assertEqual(len(history["AAPL"]["full_columns"]), 154)
+        self.assertEqual(history["AAPL"]["total"], scores["AAPL"]["total"])
+        self.assertEqual(set(history["_held"]), {"BRK.B", "ADI.US"})
+        self.assertNotIn("total", history["_held"]["BRK.B"])
+        lookup = json.loads(tb.FINVIZ_ELITE_QUOTES_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(set(lookup), {"AAPL", "BRK.B", "ADI.US"})
+        self.assertEqual(lookup["BRK.B"]["earnings_time"], "amc")
+        self.assertEqual(lookup["ADI.US"]["target_price"], 478.05)
+        self.assertEqual(tb._finviz_elite_quote("ADI.US")["target_price"], 478.05)
+        self.assertNotIn(self.KEY, json.dumps([history, scores, lookup, state]))
+        self.assertFalse(list(Path(self.temp.name).rglob("*.tmp")))
+
+    def test_full_export_failure_keeps_scoring_and_previous_lookup_and_scrubs_secrets(self):
+        self.save_quote()
+        previous = tb.FINVIZ_ELITE_QUOTES_FILE.read_bytes()
+        def export(params, key):
+            if params["v"] == "152":
+                raise RuntimeError(f"https://elite.finviz.com/export?auth={key} {key}")
+            return self.scoring_export(params, key)
+        output = io.StringIO()
+        with patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb, "_finviz_elite_get", side_effect=export), patch("sys.stdout", output):
+            state = tb.refresh_dip_from_finviz_elite("manual")
+        self.assertTrue(state["ok"])
+        self.assertFalse(state["full_columns"]["ok"])
+        self.assertIn("AAPL", tb.load_dip_scores())
+        self.assertEqual(tb.FINVIZ_ELITE_QUOTES_FILE.read_bytes(), previous)
+        self.assertNotIn(self.KEY, json.dumps(state) + output.getvalue() + tb.DIP_ELITE_STATE_FILE.read_text())
+
+    def test_lookup_write_failure_does_not_block_score_publication(self):
+        original = tb._atomic_write_json
+        def write(path, data):
+            if path == tb.FINVIZ_ELITE_QUOTES_FILE:
+                raise OSError("disk full")
+            return original(path, data)
+        with patch.object(tb, "_get_portfolio_holdings", return_value={}), \
+             patch.object(tb, "_finviz_elite_get", side_effect=self.scoring_export), \
+             patch.object(tb, "_atomic_write_json", side_effect=write):
+            state = tb.refresh_dip_from_finviz_elite("manual")
+        self.assertTrue(state["ok"])
+        self.assertFalse(state["full_columns"]["ok"])
+        self.assertIn("AAPL", tb.load_dip_scores())
+
+    def test_upcoming_finviz_precedes_negative_symbol_cache_and_records_source(self):
+        quote = self.save_quote()
+        tb._write_ticker_json_cache(tb.EARNINGS_SYMBOL_DIR / "AAPL.json", {
+            "schema_version": tb.EARNINGS_SYMBOL_SCHEMA_VERSION, "date": None,
+            "fetched_at": datetime.now(timezone.utc).isoformat()})
+        with patch.object(tb, "_earnings_next_date_uncached") as fallback:
+            result = tb.get_earnings_for_symbol("AAPL", refresh=0)
+            fallback.assert_not_called()
+        self.assertEqual(result["date"], quote["earnings_date_iso"])
+        self.assertEqual(result["source"], "finviz")
+        self.assertEqual(result["time"], "amc")
+
+    def test_past_or_stale_earnings_falls_back_instead_of_becoming_upcoming(self):
+        now = datetime.now(timezone.utc)
+        for changes in ({"earnings_date_iso": "2026-08-04"}, {"earnings_date_iso": 123},
+                        {"fetched_at": (now - tb.timedelta(days=3, seconds=1)).isoformat()}):
+            self.save_quote(**changes)
+            with patch.object(tb, "_earnings_next_date_uncached", return_value="2026-12-01") as fallback:
+                self.assertEqual(tb._earnings_next_date("AAPL", refresh=1), "2026-12-01")
+                fallback.assert_called_once_with("AAPL")
+
+    def test_upcoming_cutoff_uses_eastern_date_at_utc_midnight(self):
+        now = datetime(2026, 10, 24, 2, tzinfo=timezone.utc)  # still Oct 23 ET
+        self.save_quote(earnings_date_iso="2026-10-23", fetched_at=now.isoformat())
+        self.assertIsNotNone(tb._finviz_upcoming_earnings("AAPL", now))
+        self.assertIsNone(tb._finviz_upcoming_earnings("AAPL", now + tb.timedelta(hours=6)))
+
+    def test_stale_lookup_is_ignored_and_three_day_boundary_is_exact(self):
+        now = datetime.now(timezone.utc)
+        self.save_quote(fetched_at=(now - tb.timedelta(days=3)).isoformat())
+        self.assertIsNotNone(tb._finviz_elite_quote("AAPL", now))
+        self.assertIsNone(tb._finviz_elite_quote("AAPL", now + tb.timedelta(seconds=1)))
+
+    def test_bulk_calendar_overlay_preserves_fallbacks_and_source_metadata(self):
+        quote = self.save_quote()
+        original = {"dates": {"AAPL": "2026-12-01", "MSFT": "2026-12-02"}, "source": "finnhub"}
+        result = tb._with_finviz_earnings(original)
+        self.assertEqual(result["dates"]["AAPL"], quote["earnings_date_iso"])
+        self.assertEqual(result["dates"]["MSFT"], "2026-12-02")
+        self.assertEqual(result["sources"]["AAPL"], "finviz")
+        self.assertEqual(original["dates"]["AAPL"], "2026-12-01")
+
+    def test_insights_target_finviz_precedence_and_fallback_without_mutating_cache(self):
+        cached = {"ticker": "AAPL", "schema_version": tb.INSIGHTS_SCHEMA_VERSION,
+                  "fetched_at": datetime.now(timezone.utc).isoformat(),
+                  "price_target": {"mean": 123.0, "source": "yahoo", "carried_from": "2026-01-01"},
+                  "analyst_consensus": {"buy": 10, "hold": 3, "sell": 1}}
+        tb._atomic_write_json(tb.YAHOO_INSIGHTS_DIR / "AAPL.json", cached)
+        self.save_quote()
+        result = tb.get_ticker_insights("AAPL", refresh=0)
+        self.assertEqual(result["price_target"]["mean"], 478.05)
+        self.assertEqual(result["price_target"]["source"], "finviz")
+        self.assertEqual(result["analyst_consensus"], cached["analyst_consensus"])
+        self.assertEqual(result["finviz_analyst_recom"], 1.7)
+        for changes in ({"target_price": None}, {"target_price": 0},
+                        {"fetched_at": (datetime.now(timezone.utc) - tb.timedelta(days=4)).isoformat()}):
+            self.save_quote(**changes)
+            self.assertEqual(tb.get_ticker_insights("AAPL", refresh=0)["price_target"], cached["price_target"])
+        self.assertEqual(json.loads((tb.YAHOO_INSIGHTS_DIR / "AAPL.json").read_text()), cached)
+
+    def test_shared_get_scrubs_network_exception_and_refuses_redirect_leak(self):
+        with patch.object(tb.requests, "get", side_effect=RuntimeError(f"auth={self.KEY} {self.KEY}")):
+            with self.assertRaises(ValueError) as caught:
+                tb._finviz_elite_get({"v": "152"}, self.KEY)
+        self.assertNotIn(self.KEY, str(caught.exception))
+        response = FinvizEliteRedirectRegressionTests._R(301, "https://evil.example/steal?auth=" + self.KEY)
+        with patch.object(tb.requests, "get", return_value=response) as fetch:
+            with self.assertRaises(ValueError) as caught:
+                tb._finviz_elite_get({"v": "152"}, self.KEY)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertNotIn(self.KEY, str(caught.exception))
 
 
 if __name__ == "__main__":

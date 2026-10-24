@@ -8642,6 +8642,28 @@ def _maybe_refresh_dip_elite(now: datetime | None = None):
     return refresh_dip_from_finviz_elite("automatic", scheduled_day=now.date().isoformat())
 
 
+def _finviz_elite_get(params: dict, key: str) -> str:
+    """Read one export; follow redirects only over HTTPS within finviz.com."""
+    url, query = "https://elite.finviz.com/export.ashx", {**params, "auth": key}
+    try:
+        for _hop in range(4):
+            with requests.get(url, params=query, timeout=45, allow_redirects=False) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = urllib.parse.urljoin(url, response.headers.get("location", ""))
+                    parsed = urllib.parse.urlsplit(location)
+                    host = parsed.hostname or ""
+                    if parsed.scheme != "https" or not (host == "finviz.com" or host.endswith(".finviz.com")):
+                        raise ValueError("Finviz Elite redirected outside HTTPS finviz.com")
+                    url, query = location, None
+                    continue
+                if response.status_code != 200:
+                    raise ValueError(f"Finviz Elite HTTP {response.status_code}")
+                return response.content.decode("utf-8-sig")
+        raise ValueError("Finviz Elite: too many redirects")
+    except Exception as exc:
+        raise ValueError(_scrub_token(str(exc)).replace(key, "***")) from None
+
+
 def _fetch_dip_elite_scores(key: str, scheduled_day: str | None = None) -> tuple[dict, list[str]]:
     """Download both screeners from the Elite export and score them (no writes)."""
     screeners = []
@@ -8651,25 +8673,7 @@ def _fetch_dip_elite_scores(key: str, scheduled_day: str | None = None) -> tuple
                   if k in {"v", "f", "ft", "o"}}
         source = urllib.parse.urlencode(params)
         screeners.append(source)
-        # export.ashx answers 301 to its new path (as screener.ashx did in
-        # 2026-08). Redirects are followed by hand and only while they stay on
-        # finviz.com, so the key in the query string never leaves Finviz.
-        url, query = "https://elite.finviz.com/export.ashx", {**params, "auth": key}
-        for _hop in range(4):
-            with requests.get(url, params=query, timeout=45, allow_redirects=False) as response:
-                if response.status_code in (301, 302, 303, 307, 308):
-                    location = urllib.parse.urljoin(url, response.headers.get("location", ""))
-                    host = urllib.parse.urlsplit(location).hostname or ""
-                    if not (host == "finviz.com" or host.endswith(".finviz.com")):
-                        raise ValueError("Finviz Elite redirected outside finviz.com")
-                    url, query = location, None
-                    continue
-                if response.status_code != 200:
-                    raise ValueError(f"Finviz Elite HTTP {response.status_code}")
-                rows = _parse_dip_elite_csv(response.content.decode("utf-8-sig"))
-                break
-        else:
-            raise ValueError("Finviz Elite: too many redirects")
+        rows = _parse_dip_elite_csv(_finviz_elite_get(params, key))
         for row in rows:
             ticker = row["Ticker"]
             if ticker in merged:
@@ -8687,6 +8691,171 @@ def _fetch_dip_elite_scores(key: str, scheduled_day: str | None = None) -> tuple
         "scheduled_day": scheduled_day,
         "updated_at": datetime.now(timezone.utc).isoformat(), "count": len(merged), "screeners": screeners}
     return scores, screeners
+
+
+FINVIZ_ELITE_QUOTES_FILE = DATA_ROOT / "finviz_elite_quotes.json"
+FINVIZ_ELITE_QUOTES_TTL = timedelta(days=3)
+_finviz_quotes_cache = (None, {})
+_finviz_quotes_lock = threading.Lock()
+
+
+def _finviz_symbol(symbol: str) -> str | None:
+    """Lookup only: keep the original portfolio symbol as the reverse-map key."""
+    sym = str(symbol or "").strip().upper()
+    if sym.endswith(".US"):
+        sym = sym[:-3]
+    # US class A/B shares; other dotted suffixes identify foreign listings.
+    if re.fullmatch(r"[A-Z0-9]{1,6}\.[AB]", sym):
+        sym = sym.replace(".", "-")
+    return sym if re.fullmatch(r"[A-Z0-9]{1,10}(?:-[A-Z])?", sym) else None
+
+
+def _parse_finviz_earnings(raw: str | None) -> tuple[str | None, str | None]:
+    """Finviz's M/D/YYYY clock is US Eastern, including DST."""
+    try:
+        dt = datetime.strptime(str(raw or "").strip(), "%m/%d/%Y %I:%M:%S %p")
+        dt = dt.replace(tzinfo=ZoneInfo("America/New_York"))
+        seconds = dt.hour * 3600 + dt.minute * 60 + dt.second
+        return dt.date().isoformat(), "amc" if seconds >= 57600 else "bmo" if seconds <= 34200 else None
+    except (ValueError, TypeError):
+        return None, None
+
+
+def _parse_finviz_full_csv(text: str) -> dict:
+    from io import StringIO
+    reader = csv.DictReader(StringIO(text.lstrip("\ufeff")))
+    if not {"Ticker", "Earnings Date", "Target Price"}.issubset(reader.fieldnames or []):
+        raise ValueError("Finviz full-column CSV missing required headers")
+    out = {}
+    for raw in reader:
+        ticker = _finviz_symbol(raw.get("Ticker"))
+        if ticker is None:
+            continue
+        columns = {}
+        for header, cell in raw.items():
+            if header is None:
+                raise ValueError("Finviz full-column CSV has extra cells")
+            value = _finviz_fix_number(str(cell or "").strip())
+            columns[header] = _json_safe(value)
+        out[ticker] = columns
+    return out
+
+
+def _fetch_finviz_full_columns(key: str, screeners: list[str], scored_symbols) -> tuple[dict, set, list]:
+    """Sequential exports, with an independent cache-only held-ticker request."""
+    aliases = {}
+    for sym in scored_symbols:
+        fv = _finviz_symbol(sym)
+        if fv:
+            aliases.setdefault(fv, set()).add(sym)
+    held = set()
+    errors = []
+    try:
+        for symbol in _get_portfolio_holdings():
+            sym = str(symbol).strip().upper()
+            fv = _finviz_symbol(sym)
+            if fv:
+                held.add(sym)
+                aliases.setdefault(fv, set()).add(sym)
+    except Exception as exc:
+        errors.append("holdings: " + _scrub_token(str(exc)).replace(key, "***"))
+    columns = ",".join(str(i) for i in range(200))
+    requests_params = []
+    for source in screeners:
+        params = dict(urllib.parse.parse_qsl(source))
+        requests_params.append({**params, "v": "152", "c": columns})
+    held_finviz = sorted({_finviz_symbol(sym) for sym in held})
+    for offset in range(0, len(held_finviz), 50):
+        requests_params.append({"v": "152", "c": columns, "f": "sh_price_o0",
+                                "t": ",".join(held_finviz[offset:offset + 50])})
+    full = {}
+    for index, params in enumerate(requests_params):
+        try:
+            rows = _parse_finviz_full_csv(_finviz_elite_get(params, key))
+            if not rows and "t" not in params:
+                raise ValueError("Finviz full-column screener returned no ticker rows")
+            for fv, row in rows.items():
+                for sym in aliases.get(fv, {fv}):
+                    full[sym] = row
+        except Exception as exc:
+            error = f"export {index + 1}: " + _scrub_token(str(exc)).replace(key, "***")
+            errors.append(error)
+            print(f"[finviz] full columns: {error}")
+    return full, held, errors
+
+
+def _load_finviz_elite_quotes() -> dict:
+    global _finviz_quotes_cache
+    try:
+        with _finviz_quotes_lock:
+            stat = FINVIZ_ELITE_QUOTES_FILE.stat()
+            identity = (str(FINVIZ_ELITE_QUOTES_FILE), stat.st_mtime_ns, stat.st_size)
+            if _finviz_quotes_cache[0] != identity:
+                data = json.loads(FINVIZ_ELITE_QUOTES_FILE.read_text(encoding="utf-8"))
+                _finviz_quotes_cache = (identity, data if isinstance(data, dict) else {})
+            return _finviz_quotes_cache[1]
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _finviz_elite_quote(symbol: str, now: datetime | None = None) -> dict | None:
+    sym = str(symbol or "").strip().upper()
+    quotes = _load_finviz_elite_quotes()
+    quote = quotes.get(sym) or quotes.get(_finviz_symbol(sym))
+    if not isinstance(quote, dict):
+        return None
+    try:
+        fetched = datetime.fromisoformat(quote["fetched_at"])
+        age = (now or datetime.now(timezone.utc)) - fetched
+        if timedelta(0) <= age <= FINVIZ_ELITE_QUOTES_TTL:
+            return quote
+    except (KeyError, ValueError, TypeError):
+        pass
+    return None
+
+
+def _finviz_upcoming_earnings(symbol: str, now: datetime | None = None) -> dict | None:
+    now = now or datetime.now(timezone.utc)
+    quote = _finviz_elite_quote(symbol, now)
+    if quote:
+        try:
+            report = date.fromisoformat(quote.get("earnings_date_iso") or "")
+            if report >= now.astimezone(ZoneInfo("America/New_York")).date():
+                return quote
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _with_finviz_insights(payload: dict, symbol: str) -> dict:
+    """Read-time overlay keeps the legacy target/carry-over cache intact."""
+    quote = _finviz_elite_quote(symbol)
+    if not quote:
+        return payload
+    out = dict(payload)
+    target = _num_or_none(quote.get("target_price"))
+    if target is not None and target > 0:
+        out["price_target"] = {"mean": target, "source": "finviz", "updated_at": quote["fetched_at"]}
+    if quote.get("analyst_recom") is not None:
+        out["finviz_analyst_recom"] = quote["analyst_recom"]
+    upcoming = _finviz_upcoming_earnings(symbol)
+    if upcoming:
+        out.update(earnings_date=upcoming["earnings_date_iso"], earnings_source="finviz",
+                   earnings_time=upcoming.get("earnings_time"))
+    return out
+
+
+def _with_finviz_earnings(payload: dict) -> dict:
+    dates = dict(payload.get("dates") or {})
+    sources = dict(payload.get("sources") or {})
+    times = dict(payload.get("times") or {})
+    for sym in _load_finviz_elite_quotes():
+        quote = _finviz_upcoming_earnings(sym)
+        if quote:
+            dates[sym] = quote["earnings_date_iso"]
+            sources[sym] = "finviz"
+            times[sym] = quote.get("earnings_time")
+    return {**payload, "dates": dates, "sources": sources, "times": times}
 
 
 def refresh_dip_from_finviz_elite(trigger: str, *, scheduled_day: str | None = None) -> dict:
@@ -8716,13 +8885,41 @@ def refresh_dip_from_finviz_elite(trigger: str, *, scheduled_day: str | None = N
         try:
             scores, screeners = _fetch_dip_elite_scores(key, scheduled_day)
             merged = {k: v for k, v in scores.items() if not k.startswith("_")}
+            history = dict(scores)
+            try:
+                full, held, full_errors = _fetch_finviz_full_columns(key, screeners, merged)
+                for sym in merged:
+                    if sym in full:
+                        history[sym] = {**scores[sym], "full_columns": full[sym]}
+                history["_held"] = {sym: {"full_columns": full[sym]} for sym in sorted(held)
+                                    if sym in full and sym not in merged}
+                history["_unscored"] = {sym: {"full_columns": row} for sym, row in full.items()
+                                        if sym not in merged and sym not in held}
+                state["full_columns"] = {"ok": not full_errors, "count": len(full),
+                    "held_count": len(held & full.keys()), "held_requested": len(held),
+                    "held_missing": sorted(held - full.keys()), "errors": full_errors}
+                if full:
+                    quotes = dict(_load_finviz_elite_quotes())
+                    fetched_at = datetime.now(timezone.utc).isoformat()
+                    for sym, row in full.items():
+                        earnings_date, earnings_time = _parse_finviz_earnings(row.get("Earnings Date"))
+                        quotes[sym] = {"earnings_date_iso": earnings_date, "earnings_time": earnings_time,
+                            "earnings_raw": row.get("Earnings Date"), "target_price": _num_or_none(row.get("Target Price")),
+                            "analyst_recom": _num_or_none(row.get("Analyst Recom")), "sector": row.get("Sector"),
+                            "industry": row.get("Industry"), "fetched_at": fetched_at}
+                    _atomic_write_json(FINVIZ_ELITE_QUOTES_FILE, _json_safe(quotes))
+            except Exception as exc:
+                error = _scrub_token(str(exc)).replace(key, "***")
+                state["full_columns"] = {"ok": False, "error": error}
+                print(f"[finviz] full columns refresh failed: {error}")
+            history["_full_columns_status"] = state.get("full_columns")
             # Use the same atomic gzip pattern as cache_write, but propagate failures.
             target = DIP_HISTORY_DIR / (datetime.now(timezone.utc).date().isoformat() + ".json.gz")
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_name(f"{target.name}.{threading.get_ident()}.{_time_module.time_ns()}.tmp")
             try:
                 with _gzip.open(temp, "wt", encoding="utf-8") as handle:
-                    json.dump(scores, handle, ensure_ascii=False, allow_nan=False)
+                    json.dump(history, handle, ensure_ascii=False, allow_nan=False)
                 os.replace(temp, target)
             finally:
                 temp.unlink(missing_ok=True)
@@ -8741,6 +8938,7 @@ def refresh_dip_from_finviz_elite(trigger: str, *, scheduled_day: str | None = N
         return state
     finally:
         _dip_elite_lock.release()
+        gc.collect()
 
 
 @app.post("/api/scanner/dip/elite-refresh")
@@ -10328,9 +10526,12 @@ def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31),
             continue
         if now <= dt <= end:
             h = holdings.get(sym) or {}
+            finviz_earnings = _finviz_upcoming_earnings(sym)
             rows.append({
                 "ticker": sym,
                 "date": dt.isoformat(),
+                "source": "finviz" if finviz_earnings else None,
+                "time": finviz_earnings.get("earnings_time") if finviz_earnings else None,
                 "days": (dt - now).days,
                 "in_portfolio": sym in holdings,
                 "pnl_pct": h.get("pnl_pct"),
@@ -12077,19 +12278,19 @@ def get_earnings_calendar(refresh: int = Query(0)):
             age_h = (datetime.now(timezone.utc) - fetched).total_seconds() / 3600
             ttl = 1 if cached.get("error") else EARNINGS_CACHE_TTL_H
             if age_h < ttl:
-                return {**cached, "stale": False}
+                return _with_finviz_earnings({**cached, "stale": False})
         except Exception:
             pass
     if not refresh and cached and cached.get("dates") and time.time() < _earnings_bulk_failed_at + EARNINGS_BULK_FAIL_BACKOFF:
-        return {**cached, "stale": True}
+        return _with_finviz_earnings({**cached, "stale": True})
     try:
         payload = _earnings_save_cache(_earnings_fetch_finnhub())
-        return {**payload, "stale": False}
+        return _with_finviz_earnings({**payload, "stale": False})
     except Exception as e:
         _earnings_bulk_failed_at = time.time()
         err = _scrub_token(str(e))
         if cached and cached.get("dates"):
-            return {**cached, "stale": True, "error": err}
+            return _with_finviz_earnings({**cached, "stale": True, "error": err})
         payload = {"fetched_at": datetime.now(timezone.utc).isoformat(),
                    "dates": {}, "error": err}
         try:
@@ -12097,7 +12298,7 @@ def get_earnings_calendar(refresh: int = Query(0)):
             EARNINGS_CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
         except Exception:
             pass
-        return {**payload, "stale": False}
+        return _with_finviz_earnings({**payload, "stale": False})
 
 
 _earnings_sym_failed_at: dict[str, float] = {}   # sym → ts neúspechu (1h backoff)
@@ -14573,6 +14774,9 @@ def _earnings_next_date(symbol: str, refresh: int = 0) -> str | None:
     Predictive tab pre ticker bez bulk dátumu znova zapaľoval celý
     Finnhub→Yahoo→yfinance reťazec (žiadny backoff na Yahoo/yfinance vetvu)."""
     sym = _validate_ticker_symbol(symbol)  # symbol ide do názvu súboru — musí byť whitelisted
+    quote = _finviz_upcoming_earnings(sym)
+    if quote:
+        return quote["earnings_date_iso"]
     path = EARNINGS_SYMBOL_DIR / f"{sym}.json"
     if not refresh:
         cached = _read_ticker_json_cache(path, EARNINGS_SYMBOL_SCHEMA_VERSION, EARNINGS_SYMBOL_TTL_H)
@@ -14654,7 +14858,11 @@ def get_earnings_for_symbol(symbol: str, refresh: int = Query(0)):
     """Per-ticker earnings dátum pre Predictive kartu (bulk → Finnhub symbol → yf).
     7-dňová cache (aj negatívna); refresh=1 ju obíde."""
     sym = _validate_ticker_symbol(symbol)
-    return {"ticker": sym, "date": _earnings_next_date(sym, refresh=refresh)}
+    report = _earnings_next_date(sym, refresh=refresh)
+    quote = _finviz_upcoming_earnings(sym)
+    return {"ticker": sym, "date": report,
+            "source": "finviz" if quote else None,
+            "time": quote.get("earnings_time") if quote else None}
 
 
 # ── Market context (Scanner) — QQQ/SPY trend, VIX, breadth, sektory ──────────
@@ -15822,6 +16030,7 @@ def load_roic_fundamentals(symbol: str) -> dict | None:
 
 
 def _with_roic_fundamentals(payload: dict, symbol: str) -> dict:
+    payload = _with_finviz_insights(payload, symbol)
     dip = load_dip_scores().get(str(symbol or "").upper()) or {}
     eligible = (_num_or_none(dip.get("total")) or -math.inf) >= ROIC_DIP_MIN
     return {

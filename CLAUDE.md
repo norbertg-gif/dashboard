@@ -7,12 +7,12 @@ Local trading dashboard for eToro account monitoring + technical analysis. Singl
 ## DIP scoring on the server (Finviz Elite), 2026-10-23
 
 `refresh_dip_from_finviz_elite(trigger)` requests `https://elite.finviz.com/export.ashx`
-with env-only `auth=FINVIZ_API_KEY`. One request per screener from
+with env-only `auth=FINVIZ_API_KEY`. One scoring-template request per screener from
 `DATA_ROOT/finviz_screeners.json`; only v/f/ft/o are kept, pagination r is dropped.
 Defaults: `v=151&f=idx_ndx&o=ticker` and
 `v=150&f=cap_midover,fa_peg_u2,sh_insidertrans_pos&ft=4&o=peg`.
-The user verified production CSV availability on 2026-10-23; live units still need
-Render verification. The old cookie/HTML fetch below is a legacy local fallback.
+The user verified production template CSV availability on 2026-10-23 and the
+154-column export on 2026-10-24. The old cookie/HTML fetch below is a legacy local fallback.
 
 `DIP_EXPORT_COLUMNS` maps LONG headers by name, never position:
 Forward P/E -> Fwd P/E; P/Free Cash Flow -> P/FCF; EPS Growth This Year -> EPS This Y;
@@ -42,6 +42,26 @@ Atomic snapshots: DATA_ROOT/dip_history/YYYY-MM-DD.json.gz, retained indefinitel
 same-day overwrite. Includes normalized raw inputs (null for missing), components,
 scores, rules_version and screener provenance. Snapshot succeeds before score save;
 existing daily-cache preparation and ROIC enrichment follow. Consumer thresholds stay unchanged.
+
+**Full columns and held symbols (2026-10-24):** scoring keeps the saved v=151/v=150
+template requests: only these contain both TTM fields. Separate sequential v=152,
+`c=0,1,...,199` requests read all columns for every screener plus cached Stock/ETF
+holdings from both accounts through `t=` chunks of at most 50. No eToro fetch.
+History adds `full_columns` to scored rows, `_held` for unscored held symbols,
+and `_unscored` for any other rows appearing between exports. All original column
+names are kept; obvious numbers are normalized, explicit `%` becomes a fraction,
+empty/`-` becomes null, dates/text stay strings. `dip_scores.json` stays unchanged.
+`_finviz_elite_get` shares the manual HTTPS finviz.com-only redirect handling;
+the key is scrubbed from errors. A full-export or lookup-write failure is logged
+and recorded in `state.full_columns`, but does not block score publication.
+
+Atomic `DATA_ROOT/finviz_elite_quotes.json` is the compact current lookup for all
+fetched symbols. Lookup normalization strips `.US`, maps US class `.A`/`.B` to
+`-A`/`-B`, skips foreign dotted suffixes, and maps returned rows back to original
+held symbols (so BRK.B and ADI.US remain those keys). Scored aliases also remain.
+Partial failures retain previous lookup entries with their original `fetched_at`;
+readers ignore records older than 72 hours. Requests and snapshots are sequential,
+under the existing refresh single-flight lock; no new background workers.
 
 Existing scanner scheduler refreshes weekdays five minutes before scanner time
 (currently 23:25 UTC before 23:30). Late weekday starts catch up. dip_elite_state.json
@@ -1170,7 +1190,7 @@ Historical note: Alpha Vantage was removed after `NEWS_SENTIMENT` returned "This
 
 ## News and events data
 
-- **Earnings calendar** (`GET /api/earnings`): Finnhub bulk calendar, with per-ticker fallback Finnhub -> Yahoo calendar -> yfinance. 24h cache in `_earnings_calendar.json`, 1h negative cache. Scanner shows grey `E: date`, orange warning when earnings are due within 7 days (`EARNINGS_WARN_DAYS`), or `E: n/a`; Predictive shows a persistent card with an unavailable placeholder if no date exists. `loadEarningsCalendar()` must set `_earningsDates = {}` on empty/error responses.
+- **Earnings calendar** (`GET /api/earnings`): fresh Finviz lookup first, then the existing Finnhub bulk calendar / per-ticker Finnhub -> Yahoo calendar -> yfinance chain. Finviz `Earnings Date` is US Eastern `M/D/YYYY h:mm:ss AM/PM` and may be the LAST reported date: only dates >= today ET are upcoming. Quotes older than 72h are ignored. Time >=16:00 is `amc`, <=09:30 is `bmo`, otherwise null. `_earnings_next_date` checks Finviz before even the 7-day symbol cache; bulk calendar overlays Finviz at read time, with per-symbol `sources`/`times`, without persisting those overrides into the Finnhub cache. 24h bulk cache in `_earnings_calendar.json`, 1h negative cache. Scanner shows grey `E: date`, orange warning when earnings are due within 7 days (`EARNINGS_WARN_DAYS`), or `E: n/a`; Predictive shows a persistent card with an unavailable placeholder if no date exists. `loadEarningsCalendar()` must set `_earningsDates = {}` on empty/error responses.
 - **ApeWisdom Reddit mentions** (`GET /api/reddit/mentions`): server fetch (httpx and browser User-Agent; apewisdom.io has no CORS headers), top 5 pages, 6h cache in `_apewisdom.json`, async lock prevents concurrent refetch. Badge `r/{mentions}` is colored by 24h rank move: yellow up / blue down, measuring attention rather than direction.
 
 ## Yahoo quoteSummary — key architecture
@@ -1189,7 +1209,8 @@ analytický konsenzus, cieľové ceny, short interest a earnings záloha.
   Disk cache `yahoo_insights/{SYM}.json` (DATA_ROOT, 12h TTL, 1h negative,
   stale fallback, v `.gitignore`). `INSIGHTS_SCHEMA_VERSION` invaliduje starý
   formát cache po rozšírení polí.
-- **Earnings reťazec** (`_earnings_next_date`): bulk Finnhub → Finnhub `?symbol=` → **Yahoo calendarEvents raw** → yfinance `.calendar`. Yahoo čísla sú `{raw, fmt}` objekty — vždy cez `_yraw()`.
+- **Finviz target (2026-10-24):** fresh lookup `target_price > 0` overrides the mean target at insights read time (`price_target.source="finviz"`), including warm/stale insights cache returns. The raw insights cache and target carry-over remain untouched, so missing/expired Finviz data falls back to Finnhub/FMP/Yahoo and the carried target exactly as before. `INSIGHTS_SCHEMA_VERSION` is NOT bumped. `finviz_analyst_recom` (1=Strong Buy ... 5=Strong Sell) is a separate field, never a replacement for Buy/Hold/Sell counts. Portfolio Cieľ and Firma & očakávania label the Finviz target source.
+- **Earnings reťazec** (`_earnings_next_date`): fresh upcoming Finviz → bulk Finnhub → Finnhub `?symbol=` → **Yahoo calendarEvents raw** → yfinance `.calendar`. Yahoo čísla sú `{raw, fmt}` objekty — vždy cez `_yraw()`.
 - **Frontend:** karta `#insightsCard` v Predictive sidebar
   (`pc_loadInsights`) má názov **Firma & očakávania**: insider 90d, EPS
   beat/miss, Buy/Hold/Sell s priemerným targetom v zátvorke a short interest

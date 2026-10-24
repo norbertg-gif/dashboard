@@ -1794,6 +1794,7 @@ function analystConsensusSummary(data) {
       : sell > buy && sell > hold ? 'negative'
       : 'neutral',
     updatedAt: data?.price_target?.updated_at || data?.fetched_at || null,
+    targetSource: data?.price_target?.source || null,
   };
 }
 
@@ -1901,9 +1902,9 @@ function fmtPortVal(val, fmt) {
     if (!val || typeof val !== 'object') return '<span style="color:var(--muted)">—</span>';
     const target = Number(val.target);
     const targetText = Number.isFinite(target) && target > 0 ? fmtPrice(target) : '—';
-    const title = `Buy / Hold / Sell: ${val.buy}/${val.hold}/${val.sell}${val.updatedAt ? ` · ${val.updatedAt}` : ''}`;
+    const title = `Buy / Hold / Sell: ${val.buy}/${val.hold}/${val.sell}${val.targetSource === 'finviz' ? ' · Cieľ: Finviz' : ''}${val.updatedAt ? ` · ${val.updatedAt}` : ''}`;
     return `<div class="port-analyst-target ${val.cls || 'neutral'}" title="${escHtml(title)}">
-      <strong>${targetText}</strong><span>${val.buy}/${val.hold}/${val.sell}</span>
+      <strong>${targetText}</strong><span>${val.buy}/${val.hold}/${val.sell}${val.targetSource === 'finviz' ? ' · Finviz' : ''}</span>
     </div>`;
   }
   const n = parseFloat(val);
