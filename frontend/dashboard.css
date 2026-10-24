@@ -7019,16 +7019,40 @@ body.light-mode .port-table td.port-ticker-tag {
 
 [id^="ipp-label-"] { max-width:calc(100% - 80px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:auto; }
 
-/* Home decision layer: neutral theme tokens, including glass/light variants. */
-.home-today h1 {font-size:clamp(22px,3vw,32px);line-height:1.3;margin:12px 0 24px}
-.home-today-numbers {display:flex;flex-wrap:wrap;gap:18px 40px;color:var(--muted)}
-.home-today-numbers strong {display:block;color:var(--text);font-size:19px}
-.home-today-numbers small {display:block;margin-top:4px}
-.home-today-section {border-top:1px solid var(--border);padding:18px 0}
-.home-today h2 {font-size:16px;margin:0 0 12px}
-.home-today h3 {font-size:13px;color:var(--muted);margin:14px 0 4px}
-.home-today-row {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;line-height:1.6}
+/* Home decision layer ("Dnes"): read in a few minutes — narrow column, cards,
+   one accent for the action, amber only for the earnings warning. */
+.home-today {max-width:1040px;margin:0 auto;padding:8px 0 4px}
+.home-today h1 {font-size:clamp(24px,3vw,34px);line-height:1.25;letter-spacing:-.01em;margin:6px 0 18px;font-weight:600}
+.home-today-numbers {display:flex;flex-wrap:wrap;gap:14px 40px;color:var(--muted);font-size:12px}
+.home-today-numbers strong {display:block;color:var(--text);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.home-today-numbers strong.neg {color:var(--down)}
+.home-today-numbers strong.pos {color:var(--up)}
+.home-today-numbers small {display:block;margin-top:2px;color:var(--muted)}
+.home-today-stamp {color:var(--muted);font-size:11px;margin:10px 0 22px}
+.home-today-card {background:var(--bg-card,var(--bg2));border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin:0 0 14px}
+.home-today-card h2 {font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.home-today-card.is-act {border-color:var(--accent);background:var(--accent-soft,var(--bg-card))}
+.home-today-card.is-act h2 {color:var(--accent)}
+.home-today-card.is-warn h2 {color:var(--yellow)}
+.home-today-card.is-quiet {background:transparent;border-style:dashed}
+.home-today-sub {color:var(--muted);font-size:13px;margin:4px 0 0;line-height:1.5}
+.home-today-act {display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:4px 0}
+.home-today-act + .home-today-act {border-top:1px solid var(--border);padding-top:12px;margin-top:8px}
+.home-today-act-main {flex:1 1 360px;min-width:0}
+.home-today-act-title {font-size:19px;font-weight:500}
+.home-today-amount {color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums}
 .home-today-links {display:flex;gap:8px;flex-shrink:0}
-.home-today-year {border:1px dashed var(--border);padding:16px;color:var(--muted);font-size:12px;margin:12px 0 24px}
+.home-today-day {display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:9px 0;border-top:1px solid var(--border)}
+.home-today-day:first-of-type {border-top:0}
+.home-today-date {width:84px;flex-shrink:0;font-weight:600;font-variant-numeric:tabular-nums}
+.home-today-chips {display:flex;flex-wrap:wrap;gap:6px}
+.home-today-chip {border:1px solid var(--border);background:transparent;color:var(--text);font:600 12px inherit;font-family:inherit;padding:3px 9px;border-radius:999px;cursor:pointer}
+.home-today-chip:hover {border-color:var(--accent);color:var(--accent)}
+.home-today-flag {font-size:12px;font-weight:600;color:var(--yellow);border:1px solid var(--yellow);border-radius:999px;padding:2px 9px}
+.home-today-line {display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+.home-today-line:first-of-type {border-top:0}
+.home-today-hold {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;font-size:13px}
+.home-today-holdlist {margin-top:12px} .home-today-holdlist[hidden] {display:none}
+#home-details {max-width:1040px;margin:0 auto}
 #home-details > summary {cursor:pointer;padding:16px 0;color:var(--muted);border-top:1px solid var(--border)}
-@media(max-width:600px) {.home-today-row {align-items:flex-start;flex-direction:column}}
+@media(max-width:600px) {.home-today-act {align-items:flex-start;flex-direction:column}.home-today-date {width:auto}}

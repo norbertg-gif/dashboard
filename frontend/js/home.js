@@ -28,40 +28,85 @@ function homeTodayLinks(ticker) {
 }
 
 function homeTodayHtml(data) {
-  const money = v => v === null || v === undefined || !Number.isFinite(Number(v)) ? 'nedostupné' : '$' + Number(v).toLocaleString('sk-SK', {maximumFractionDigits: 2});
+  // Whole dollars, real minus sign: "−$142", "$27 775". The page is read in a
+  // few minutes, so cents and "$-141,8" only add noise.
+  const money = (v, signed = false) => {
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) return 'nedostupné';
+    const n = Number(v);
+    const abs = '$' + Math.round(Math.abs(n)).toLocaleString('sk-SK');
+    if (n < 0) return '−' + abs;
+    return (signed && n > 0 ? '+' : '') + abs;
+  };
   const sections = data.sections || {};
   const rows = key => sections[key] || [];
-  const line = r => `<div class="home-today-row"><span><strong>${escHtml(r.ticker)}</strong> · ${r.cash_deferred ? money(r.amount) + ' · ' : ''}${escHtml(r.blocking_reason || r.reason || '')}</span>${homeTodayLinks(r.ticker)}</div>`;
-  const card = (title, body, note = '') => `<section class="home-today-section"><h2>${title}</h2>${note ? `<p class="home-empty">${escHtml(note)}</p>` : ''}${body}</section>`;
-  let lastDate = '';
-  const earnings = rows('earnings').map(r => {
-    let label = '';
-    if (r.date !== lastDate) {
-      lastDate = r.date;
-      const date = new Date(r.date + 'T12:00:00');
-      label = `<h3>${escHtml(date.toLocaleDateString('sk-SK', {weekday:'short', day:'numeric', month:'numeric'}))}</h3>`;
-    }
-    return label + `<div class="home-today-row"><span><strong>${escHtml(r.ticker)}</strong>${r.pending_order ? ` · máš na ${escHtml(r.ticker)} čakajúci order` : ''}</span>${homeTodayLinks(r.ticker)}</div>`;
+  const unavailable = data.unavailable || {};
+  const tickerBtn = t => {
+    const sym = encodeURIComponent(t).replace(/'/g, '%27');
+    return `<button type="button" class="home-today-chip" onclick="homeTodayChart('${sym}')" title="Otvoriť graf">${escHtml(t)}</button>`;
+  };
+  const card = (cls, title, body) => `<section class="home-today-card ${cls}"><h2>${title}</h2>${body}</section>`;
+
+  // 1) Urob — the only place with full action buttons.
+  const actions = rows('actions').map(r => `<div class="home-today-act">
+      <div class="home-today-act-main"><div class="home-today-act-title">${r.kind === 'dca' ? 'Dokúp' : 'Dobuduj'} <strong>${escHtml(r.ticker)}</strong> <span class="home-today-amount">${money(r.amount)}</span></div>
+      <div class="home-today-sub">${escHtml(r.reason || '')}</div></div>${homeTodayLinks(r.ticker)}</div>`).join('');
+  const deferred = data.cash_deferred || [];
+  const actNote = [unavailable.dca ? 'DCA: nedostupné' : '', unavailable.build ? 'BUILD: nedostupné' : ''].filter(Boolean).join(' · ');
+  const actBody = (actions || '<p class="home-today-sub">Dnes nič. Žiadny krok nespĺňa pravidlá.</p>')
+    + (deferred.length ? `<p class="home-today-sub">Neskôr, chýba hotovosť: ${deferred.map(r => `${escHtml(r.ticker)} ${money(r.amount)}`).join(', ')}</p>` : '')
+    + (actNote ? `<p class="home-today-sub">${escHtml(actNote)}</p>` : '');
+
+  // 2) Pozor — one compact line per day, tickers as chips.
+  const byDay = new Map();
+  rows('earnings').forEach(r => { if (!byDay.has(r.date)) byDay.set(r.date, []); byDay.get(r.date).push(r); });
+  const earnings = [...byDay.entries()].map(([date, list]) => {
+    const label = new Date(date + 'T12:00:00').toLocaleDateString('sk-SK', {weekday: 'short', day: 'numeric', month: 'numeric'});
+    const notes = list.filter(r => r.pending_order).map(r => `<span class="home-today-flag">máš na ${escHtml(r.ticker)} čakajúci order</span>`).join('');
+    return `<div class="home-today-day"><span class="home-today-date">${escHtml(label)}</span><span class="home-today-chips">${list.map(r => tickerBtn(r.ticker)).join('')}</span>${notes}</div>`;
   }).join('');
-  const actions = rows('actions').map(r => `<div class="home-today-row"><span><strong>${r.kind === 'dca' ? 'Dokúp' : 'Dobuduj'} ${escHtml(r.ticker)} za ${money(r.amount)}</strong><br>${escHtml(r.reason || '')}</span>${homeTodayLinks(r.ticker)}</div>`).join('');
+  const earnBody = unavailable.earnings || unavailable.portfolio
+    ? `<p class="home-today-sub">${escHtml(unavailable.earnings || unavailable.portfolio)}</p>`
+    : (earnings ? `<p class="home-today-sub">Pri týchto tituloch nič nedokupuj, kým nie sú čísla vonku.</p>${earnings}` : '<p class="home-today-sub">Tento týždeň žiadne výsledky v portfóliu.</p>');
+
+  // 3) Čakaj — ticker + reason on one line.
+  const waiting = rows('waiting').map(r => `<div class="home-today-line">${tickerBtn(r.ticker)}<span>${escHtml(r.blocking_reason || r.reason || '')}</span></div>`).join('')
+    || '<p class="home-today-sub">Nič nečaká.</p>';
+
+  // 4) Drž — one line, list on demand.
   const hold = rows('hold');
   const losses = hold.filter(r => r.loss_without_dca).length;
+  const holdBody = `<div class="home-today-hold"><span>Nič netreba.${losses ? ` ${losses} z nich je 20 %+ v strate, žiadna nespĺňa pravidlá DCA.` : ''}</span>
+    <button type="button" class="btn mini" onclick="const l=this.closest('.home-today-card').querySelector('.home-today-holdlist'); l.hidden=!l.hidden; this.textContent=l.hidden?'Zobraziť zoznam':'Skryť zoznam'">Zobraziť zoznam</button></div>
+    <div class="home-today-holdlist home-today-chips" hidden>${hold.map(r => tickerBtn(r.ticker)).join('') || 'Žiadne.'}</div>`;
+
+  // 5) Znižovanie počtu titulov — quiet, dashed.
   const year = data.year_test || {};
   const candidates = year.candidates || [];
   const winners = candidates.filter(r => r.in_profit).map(r => r.ticker);
+  const yearText = candidates.length
+    ? `Celý ročný test majú za sebou <b>${candidates.length}</b> ${candidates.length === 1 ? 'titul' : candidates.length < 5 ? 'tituly' : 'titulov'} (${year.lots_passed ?? '—'} z ${year.lots_total ?? '—'} tranží). V zisku: <b>${winners.map(escHtml).join(', ') || 'žiadny'}</b>. Kandidáti na zváženie, nie pokyn na predaj.`
+    : `Celý ročný test zatiaľ nemá za sebou žiadny titul (${year.lots_passed ?? '—'} z ${year.lots_total ?? '—'} tranží).`;
+
   const summary = data.summary || {};
-  return `<div class="home-today"><div class="home-eyebrow">ÚČET 1 · LEN DRŽANÉ AKCIE A ETF</div>
+  const daily = Number(summary.daily_pnl);
+  const otherUnavailable = Object.entries(unavailable)
+    .filter(([key]) => !['dca', 'build', 'earnings', 'portfolio'].includes(key))
+    .map(([key, note]) => `${({settings:'Nastavenia', scanner:'Scanner', cash:'Hotovosť', year_test:'Ročný test'})[key] || key}: ${note}`);
+  return `<div class="home-today">
+    <div class="home-eyebrow">ÚČET 1 · LEN DRŽANÉ AKCIE A ETF</div>
     <h1>${escHtml(data.headline || 'Prehľad nedostupný')}</h1>
-    <div class="home-today-numbers"><span>Hodnota účtu <strong>${money(summary.account_value)}</strong></span><span>Dnes <strong>${money(summary.daily_pnl)}</strong></span>
-    <span>Voľná hotovosť po orderoch <strong>${money(summary.cash_free_after_orders)}</strong><small>${money(summary.cash_reserved_for_orders)} rezervovaných v ${summary.orders_count ?? '—'} orderoch</small></span></div>
-    <p class="home-empty">Uložené portfólio: ${escHtml(data.snapshot_at ? new Date(data.snapshot_at).toLocaleString('sk-SK') : 'nedostupné')} · výpočty z cache.</p>
-    ${Object.entries(data.unavailable || {}).map(([key, note]) => `<p class="home-empty">${escHtml(({portfolio:'Portfólio', settings:'Nastavenia', scanner:'Scanner', dca:'DCA', build:'BUILD', cash:'Hotovosť', earnings:'Výsledky', year_test:'Ročný test'})[key] || key)}: ${escHtml(note)}</p>`).join('')}
-    ${card('Pozor tento týždeň · výsledky', earnings || (data.unavailable?.earnings || data.unavailable?.portfolio ? '' : '<p class="home-empty">Žiadne potvrdené výsledky v nastavenom okne.</p>'), data.unavailable?.earnings || data.unavailable?.portfolio)}
-    ${card('Urob', actions || '<p class="home-empty">Žiadny dostupný krok.</p>', [data.unavailable?.dca ? 'DCA: nedostupné' : '', data.unavailable?.build ? 'BUILD: nedostupné' : ''].filter(Boolean).join(' · '))}
-    ${card('Čakaj · dashboard sa ozve sám', rows('waiting').map(line).join('') || '<p class="home-empty">Nič nečaká.</p>')}
-    ${card(`Drž · ${hold.length} pozícií`, `<p>${losses} v strate ≥20 % bez splneného DCA.</p><button class="btn mini" onclick="const list=this.nextElementSibling; list.hidden=!list.hidden; this.textContent=list.hidden?'Zobraziť zoznam':'Skryť zoznam'">Zobraziť zoznam</button><p hidden>${hold.map(r => escHtml(r.ticker)).join(', ') || 'Žiadne.'}</p>`)}
-    <section class="home-today-year"><h2>Znižovanie počtu titulov</h2><p>${candidates.length} titulov má všetky otvorené tranže staršie než 365 dní. Kandidáti na zváženie: ${candidates.map(r => escHtml(r.ticker)).join(', ') || 'žiadni'}. V zisku: ${winners.map(escHtml).join(', ') || 'žiadny potvrdený'}.</p><p>Ročný test: ${year.lots_passed ?? '—'} / ${year.lots_total ?? '—'} tranží. Vek sám osebe nie je dôvod na predaj.</p></section>
-    </div>`;
+    <div class="home-today-numbers">
+      <span>Hodnota účtu<strong>${money(summary.account_value)}</strong></span>
+      <span>Dnes<strong class="${daily < 0 ? 'neg' : daily > 0 ? 'pos' : ''}">${money(summary.daily_pnl, true)}</strong></span>
+      <span>Voľná hotovosť po orderoch<strong>${money(summary.cash_free_after_orders)}</strong><small>+ ${money(summary.cash_reserved_for_orders)} v ${summary.orders_count ?? '—'} orderoch</small></span>
+    </div>
+    <p class="home-today-stamp">Portfólio z ${escHtml(data.snapshot_at ? new Date(data.snapshot_at).toLocaleString('sk-SK', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'}) : '—')}${otherUnavailable.length ? ' · ' + escHtml(otherUnavailable.join(' · ')) : ''}</p>
+    ${card('is-act', 'Urob', actBody)}
+    ${card('is-warn', 'Pozor tento týždeň · výsledky', earnBody)}
+    ${card('', 'Čakaj · dashboard sa ozve sám', waiting)}
+    ${card('', `Drž · ${hold.length} pozícií`, holdBody)}
+    <section class="home-today-card is-quiet"><h2>Znižovanie počtu titulov</h2><p class="home-today-sub">${yearText}</p></section>
+  </div>`;
 }
 
 async function renderHomeView(force = false) {
