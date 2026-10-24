@@ -390,6 +390,7 @@ let pc_earningsHistory = [];
 let pc_earningsTicker = null;
 let pc_chartEvents = [];
 let pc_chartEventsTicker = null;
+const pc_eventStrips = {};
 
 let pc_realSeries = null, pc_predSeries = null;
 let pc_realVolSeries = null;
@@ -595,7 +596,7 @@ function pc_buildChartEventMarkers(view, candles) {
     if (!time) return null;
     const markerId = `finviz:${view}:${pc_chartEventsTicker}:${event.id}`;
     pc_markerMeta[markerId] = { html: chartEventTooltip(event) };
-    return { id: markerId, time, position: 'aboveBar', color: pc_eventMarkerColor(event), shape: 'circle', size: 0, text: event.type };
+    return eventStripMarker({ id: markerId, time, color: pc_eventMarkerColor(event), text: event.type });
   }).filter(Boolean);
 }
 
@@ -632,7 +633,9 @@ function pc_applyMainChartMarkers() {
       ? pc_buildEarningsMarkers('weekly', pc_lastData?.candles || [])
       : [];
     const events = pc_buildChartEventMarkers('weekly', pc_lastData?.candles || []);
-    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings, ...events].sort((a, b) => a.time - b.time));
+    setSeriesMarkers(pc_realSeries, [...pc_weeklyBaseMarkers, ...earnings].sort((a, b) => a.time - b.time));
+    const strip = eventStripSeries(pc_realChartInst, pc_eventStrips, 'weekly', pc_lastData?.candles || []);
+    if (strip) setSeriesMarkers(strip, events);
   }
   if (pc_dailyMainSeries && pc_dailyMainTicker === ticker) {
     pc_clearEarningsMarkerMetaFor('daily');
@@ -641,7 +644,9 @@ function pc_applyMainChartMarkers() {
       : [];
     const events = pc_buildChartEventMarkers('daily', pc_lastData?.daily_candles || []);
     const base = pc_dailyMainBaseMarkers.filter(marker => !String(marker.id || '').startsWith('finviz:'));
-    setSeriesMarkers(pc_dailyMainSeries, [...base, ...earnings, ...events].sort((a, b) => a.time - b.time));
+    setSeriesMarkers(pc_dailyMainSeries, [...base, ...earnings].sort((a, b) => a.time - b.time));
+    const strip = eventStripSeries(pc_dailyMainInst, pc_eventStrips, 'daily', pc_lastData?.daily_candles || []);
+    if (strip) setSeriesMarkers(strip, events);
   }
 }
 
@@ -652,6 +657,8 @@ function pc_resetEarningsMarkers(ticker) {
   pc_chartEventsTicker = null;
   pc_clearChartEventMarkerMeta();
   pc_clearEarningsMarkerMeta();
+  clearEventStrip(pc_eventStrips, 'weekly');
+  clearEventStrip(pc_eventStrips, 'daily');
   if (pc_realSeries) setSeriesMarkers(pc_realSeries, pc_weeklyBaseMarkers);
   if (pc_dailyMainSeries) setSeriesMarkers(pc_dailyMainSeries, pc_dailyMainBaseMarkers.filter(marker => !String(marker.id || '').startsWith('finviz:')));
 }
@@ -2532,7 +2539,9 @@ function renderDailyMain(data) {
         return { id: `signal:daily:${s.time}`, time: s.time, position: 'belowBar', color: display.color,
           shape: display.shape, text: display.text, size: pc_dailyMarkerMode === 'return' ? 0.8 : (sigTier(s.tier, s.score) === 'buy' ? 1.5 : 1) };
       }) : [];
-  pc_dailyMainBaseMarkers = [...dailyBuyMarkers, ...dailyEvents];
+  pc_dailyMainBaseMarkers = [...dailyBuyMarkers];
+  const dailyStrip = eventStripSeries(pc_dailyMainInst, pc_eventStrips, 'daily', data.daily_candles || []);
+  if (dailyStrip) setSeriesMarkers(dailyStrip, dailyEvents);
   if (pc_dailyIndicators.ichimoku) {
     const tenkan = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#34d399', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Tenkan' });
     const kijun = pc_dailyMainInst.addSeries(LightweightCharts.LineSeries, { color:'#f87171', lineWidth:1, priceLineVisible:false, lastValueVisible:false, title:'Kijun' });

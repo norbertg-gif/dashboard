@@ -1051,7 +1051,6 @@ function combinedChartMarkers(r) {
     ...(r._etoroMarkersList || []),
     ...(r._patternMarkers || []),
     ...(r._earningsMarkers || []),
-    ...(r._eventMarkersList || []),
   ].sort((a, b) => a.time < b.time ? -1 : 1);
 }
 
@@ -1072,6 +1071,38 @@ function chartEventTooltip(event) {
   return `<b>Split · ${esc(event.date)}</b><div>Pomer: ${esc(event.ratio)}</div>`;
 }
 
+// Finviz udalosti sa kreslia v páse na spodku grafu (ako na Finvize), nie pri
+// sviečkach: neviditeľná séria s hodnotou na KAŽDEJ sviečke na vlastnej overlay
+// stupnici stiahnutej k dolnému okraju. Hodnota na každej sviečke je nutná,
+// inak by séria posunula doménu (pitfall -4); applyOptions stupnice až PO
+// addSeries (pasca z Consensus strip).
+function eventStripSeries(chart, holder, key, candles) {
+  if (!chart) return null;
+  let series = holder[key];
+  if (series && holder[key + 'Chart'] !== chart) series = null;
+  if (!series) {
+    series = chart.addSeries(LightweightCharts.LineSeries, {
+      priceScaleId: 'finviz_events', color: 'rgba(0,0,0,0)', lineVisible: false,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+      pointMarkersVisible: false,
+    });
+    chart.priceScale('finviz_events').applyOptions({ scaleMargins: { top: 0.97, bottom: 0.0 }, visible: false });
+    holder[key] = series;
+    holder[key + 'Chart'] = chart;
+  }
+  series.setData((candles || []).filter(c => c && c.time != null).map(c => ({ time: c.time, value: 0 })));
+  return series;
+}
+
+function eventStripMarker(marker) {
+  return { ...marker, position: 'inBar', shape: 'square', size: 0 };
+}
+
+function clearEventStrip(holder, key) {
+  const series = holder?.[key];
+  if (series) setSeriesMarkers(series, []);
+}
+
 function applyChartEventMarkers(id, symbol, r, candles) {
   if (!r.indicators?.events || !r.candleSeries || !candles?.length) return;
   const interval = document.getElementById(id)?.querySelector('.interval-sel')?.value;
@@ -1086,9 +1117,10 @@ function applyChartEventMarkers(id, symbol, r, candles) {
     const color = event.type === 'E' && !event.upcoming && Number.isFinite(actual) && Number.isFinite(estimate)
       ? (actual >= estimate ? CHART_COLORS.up : CHART_COLORS.down)
       : event.type === 'D' ? CHART_COLORS.up : CHART_COLORS.neutral;
-    return { id: markerId, time, position: 'aboveBar', color, shape: 'circle', size: 0, text: event.type };
+    return eventStripMarker({ id: markerId, time, color, text: event.type });
   }).filter(Boolean);
-  setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+  const strip = eventStripSeries(r.mainChart, r, '_eventStrip', candles);
+  if (strip) setSeriesMarkers(strip, r._eventMarkersList);
 }
 
 async function loadChartEvents(id, symbol, r, candles) {
@@ -1122,7 +1154,7 @@ function toggleChartEvents(id) {
   else {
     for (const key of Object.keys(r._markerMeta || {})) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
     r._eventMarkersList = [];
-    if (r.candleSeries) setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
+    clearEventStrip(r, '_eventStrip');
   }
 }
 
