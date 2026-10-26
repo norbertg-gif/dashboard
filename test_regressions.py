@@ -1860,6 +1860,37 @@ class WeeklyEma200EventRegressionTests(unittest.TestCase):
         self.assertEqual((ev["kind"], ev["week"]), ("cross_up", "2026-10-12"))
 
 
+class EarningsCacheOnlyRegressionTests(unittest.TestCase):
+    """2026-10-26: expired 7-day caches over a weekend sent the whole portfolio to
+    'Podklady nedostupné' in Prehľad Dnes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _call(self, finviz_quote=None):
+        with patch.object(tb, "EARNINGS_SYMBOL_DIR", self.dir), \
+             patch.object(tb, "_finviz_upcoming_earnings", return_value=None), \
+             patch.object(tb, "_finviz_elite_quote", return_value=finviz_quote), \
+             patch.object(tb, "_earnings_next_date_uncached", side_effect=AssertionError("network")):
+            return tb._earnings_next_date("ADBE", refresh=0, cache_only=True)
+
+    def test_expired_cache_still_answers(self):
+        (self.dir / "ADBE.json").write_text(json.dumps({"schema_version": tb.EARNINGS_SYMBOL_SCHEMA_VERSION,
+            "fetched_at": "2026-10-01T00:00:00+00:00", "date": "2026-12-10"}), encoding="utf-8")
+        self.assertEqual(self._call(), "2026-12-10")
+
+    def test_fresh_finviz_without_upcoming_means_none(self):
+        self.assertIsNone(self._call({"earnings_date_iso": "2026-09-10"}))
+
+    def test_nothing_known_still_raises(self):
+        with self.assertRaises(LookupError):
+            self._call()
+
+
 class HomeTodayRegressionTests(unittest.TestCase):
     def setUp(self):
         from datetime import timedelta
@@ -2000,6 +2031,8 @@ class HomeTodayRegressionTests(unittest.TestCase):
     def test_earnings_cache_only_never_falls_through_to_network(self):
         with (patch.object(tb, "_finviz_upcoming_earnings", return_value=None),
               patch.object(tb, "_read_ticker_json_cache", return_value=None),
+              patch.object(tb, "_finviz_elite_quote", return_value=None),
+              patch.object(tb, "EARNINGS_SYMBOL_DIR", Path(tempfile.mkdtemp())),
               patch.object(tb, "_earnings_next_date_uncached", side_effect=AssertionError("network")) as net):
             with self.assertRaises(LookupError):
                 self.real_earnings("MSFT", refresh=0, cache_only=True)
@@ -2117,7 +2150,7 @@ class ChartEventsRegressionTests(unittest.TestCase):
         self.assertNotIn("nan", response.text.lower())
 
     def test_query_default_direct_call_and_force_refresh(self):
-        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[], "fetched_at":"2026-10-24T00:00:00+00:00"})
+        tb._atomic_write_json(tb.CHART_EVENTS_DIR / "AAPL.json", {"symbol":"AAPL", "events":[], "fetched_at":datetime.now(timezone.utc).isoformat()})
         with patch.object(tb, "_fetch_finviz_chart_events", return_value=[]) as fetch:
             tb.get_chart_events("AAPL")
             self.assertEqual(fetch.call_count, 0)

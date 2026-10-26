@@ -15317,6 +15317,18 @@ def _earnings_next_date(symbol: str, refresh: int = 0, *, cache_only: bool = Fal
         if cached is not None:
             return cached.get("date")
     if cache_only:
+        # Prehľad nesmie ticho prepadnúť na sieť, ale ani označiť celé portfólio
+        # ako „nedostupné“ len preto, že 7-dňová cache cez víkend vypršala:
+        # starší uložený dátum je stále lepší než nič, a čerstvý Finviz záznam
+        # s minulým dátumom znamená „nové výsledky ešte nie sú naplánované“.
+        try:
+            stale = json.loads(path.read_text(encoding="utf-8"))
+            if stale.get("schema_version") == EARNINGS_SYMBOL_SCHEMA_VERSION:
+                return stale.get("date")
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        if _finviz_elite_quote(sym):
+            return None
         raise LookupError("earnings cache unavailable")
     d = _earnings_next_date_uncached(sym)
     try:
