@@ -1859,6 +1859,21 @@ class WeeklyEma200EventRegressionTests(unittest.TestCase):
         ev = tb._weekly_ema200_event(self._frame([95, 96, 103, 90]), self.WED)
         self.assertEqual((ev["kind"], ev["week"]), ("cross_up", "2026-10-12"))
 
+    # Cases below were contributed by a Giotto trial run (2026-10-28) and checked locally.
+    def test_friday_2100_utc_already_closed(self):
+        exact = datetime(2026, 10, 23, 21, tzinfo=timezone.utc)
+        ev = tb._weekly_ema200_event(self._frame([95, 96, 98, 103]), exact)
+        self.assertEqual((ev["kind"], ev["week"]), ("cross_up", "2026-10-19"))
+        self.assertEqual(ev["dist_pct"], 3.0)
+
+    def test_no_event_below_without_touch(self):
+        f = self._frame([95, 96, 97, 96], highs=[96, 97, 98, 99])
+        self.assertIsNone(tb._weekly_ema200_event(f, self.SAT))
+
+    def test_guards_short_frame_and_missing_ema200(self):
+        self.assertIsNone(tb._weekly_ema200_event(self._frame([95, 96, 98, 103]).iloc[-2:], self.SAT))
+        self.assertIsNone(tb._weekly_ema200_event(self._frame([95, 96, 98, 103]).drop(columns=["ema200"]), self.SAT))
+
 
 class EarningsCacheOnlyRegressionTests(unittest.TestCase):
     """2026-10-26: expired 7-day caches over a weekend sent the whole portfolio to
