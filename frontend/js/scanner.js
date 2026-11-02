@@ -1905,6 +1905,13 @@ async function runNasdaqScanner() {
 }
 
 function openScannerTicker(ticker) {
+  // Ctrl/Cmd+klik = nová záložka. Číta sa globálny event, aby to platilo pre
+  // všetky miesta, ktoré ticker otvárajú, bez úprav ich onclick atribútov.
+  const ev = window.event;
+  if (ev && (ev.ctrlKey || ev.metaKey)) {
+    window.open(`/?tab=predictive&ticker=${encodeURIComponent(ticker)}`, '_blank', 'noopener');
+    return;
+  }
   switchMainTab('predictive');
   setTimeout(() => pc_selectTicker(ticker), 120);
 }

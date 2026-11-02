@@ -60,8 +60,12 @@ document.addEventListener('keydown', e => {
   // Snapshot portfólia sa periodicky obnoví, aby sa živý odhad nemohol
   // rozísť s eToro (nameraný drift +$37 pri extrapolácii bez resyncu).
   startPortfolioResync();
-  const requestedTab = new URLSearchParams(window.location.search).get('tab');
-  if (requestedTab === 'risk') {
+  const requestedParams = new URLSearchParams(window.location.search);
+  const requestedTab = requestedParams.get('tab');
+  const requestedTicker = requestedParams.get('ticker');
+  if (requestedTab === 'predictive' && requestedTicker) {
+    openScannerTicker(requestedTicker);
+  } else if (requestedTab === 'risk') {
     switchMainTab('portfolio');
   } else if (requestedTab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {
     switchMainTab('portfolio');
