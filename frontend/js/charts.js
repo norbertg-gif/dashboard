@@ -1451,7 +1451,8 @@ function createPanel(cfg) {
              onfocus="setActivePanel('${id}');if(this.value.length>1){ddTarget=this;doSearch(this.value);}">
       <select class="p-sel interval-sel">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
-      <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
+      <button id="trade-history-${id}" class="ind-btn" onclick="event.stopPropagation();toggleTradeHistory('${id}')" title="História uzavretých obchodov (weekly)" hidden>○ HISTÓRIA</button>
+       <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
       <button class="p-btn-events${inds.events?' active':''}" id="events-${id}" onclick="event.stopPropagation();toggleChartEvents('${id}')" title="Finviz: výsledky, ratingy, dividendy a splity">UDALOSTI</button>
       <a id="trade-btn-${id}" href="#" target="_blank" rel="noopener"
         onclick="event.stopPropagation()"
@@ -1598,6 +1599,7 @@ function createPanel(cfg) {
     moverPriceSource: cfg.moverPriceSource || null,
   };
   attachMarkerTooltip(mainChart, mainCont, objectId => registry[id]?._markerMeta?.[objectId]);
+  thSyncButton(id);
 
   // Zoom/posun sa ukladá LEN keď ho vyvolal používateľ. Knižnica emituje zmenu
   // viditeľného rozsahu aj pri setData a pri dosadení šírky kontajnera — a ten
@@ -2678,6 +2680,7 @@ async function loadChart(id, opts = {}) {
   const period   = 'auto';
   const interval = panel.querySelector('.interval-sel').value;
   if (!sym) return;
+  thSyncButton(id);
   applyChartPortfolioFlag(id);
   ensureHoldingsForChartFlags();
 
@@ -2814,6 +2817,7 @@ async function loadChart(id, opts = {}) {
     applyPanelSeriesData(r, data);
     restorePanelView(id, r);
     r.loadedChartKey = chartKey;
+    thOnChartLoaded(id);
     applyOverlays(id, data, r);
     // Overlays and indicator sub-charts are (re)built above and their own data
     // resets the shared time scale to the whole series, which silently undid
@@ -2973,6 +2977,7 @@ function removePanel(id) {
     // Series cleanup must precede chart disposal; otherwise LWC queues a
     // repaint against an already disposed canvas.
     if (r.entryPriceLines) r.entryPriceLines.forEach(pl => { try { r.candleSeries.removePriceLine(pl); } catch(e){} });
+    thRemove(id);
     r.mainChart.remove();
     if (r.rsiChart)  r.rsiChart.remove();
     if (r.adxChart)  r.adxChart.remove();
