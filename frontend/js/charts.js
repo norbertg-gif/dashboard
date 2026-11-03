@@ -1217,30 +1217,13 @@ async function loadChartEvents(id, symbol, r, candles) {
     if (registry[id] !== r || document.getElementById(id)?.querySelector('.p-sym')?.value?.trim()?.toUpperCase() !== symbol) return;
     r._chartEvents = Array.isArray(payload.events) ? payload.events : [];
     r._chartEventsFetchedFor = symbol;
-    const button = document.getElementById(`events-${id}`);
+    const button = document.getElementById(`ind-${id}-events`);
     if (button && payload.stale) button.title = payload.reason || 'Teraz sa nepodarilo obnoviť udalosti; zobrazené uložené dáta.';
     applyChartEventMarkers(id, symbol, r, candles);
   } catch (error) {
-    const button = document.getElementById(`events-${id}`);
+    const button = document.getElementById(`ind-${id}-events`);
     if (button) button.title = 'Udalosti sa teraz nepodarilo načítať; skúste to znova neskôr.';
     console.warn('chart events failed:', error);
-  }
-}
-
-function toggleChartEvents(id) {
-  const r = registry[id];
-  if (!r) return;
-  r.indicators.events = !r.indicators.events;
-  document.getElementById(`events-${id}`)?.classList.toggle('active', r.indicators.events);
-  saveLayout();
-  const panel = document.getElementById(id);
-  const symbol = panel?.querySelector('.p-sym')?.value?.trim()?.toUpperCase();
-  if (r.indicators.events) loadChartEvents(id, symbol, r, r._chartData || []);
-  else {
-    for (const key of Object.keys(r._markerMeta || {})) if (key.startsWith(`finviz:${symbol}:`)) delete r._markerMeta[key];
-    r._eventMarkersList = [];
-    clearEventStrip(r, '_eventStrip');
-    if (r.candleSeries) setSeriesMarkers(r.candleSeries, combinedChartMarkers(r));
   }
 }
 
@@ -1452,7 +1435,6 @@ function createPanel(cfg) {
       <select class="p-sel interval-sel">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
       <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
-      <button class="p-btn-events${inds.events?' active':''}" id="events-${id}" onclick="event.stopPropagation();toggleChartEvents('${id}')" title="Finviz: výsledky, ratingy, dividendy a splity">UDALOSTI</button>
       <button class="p-btn-events" id="trade-history-${id}" onclick="event.stopPropagation();toggleTradeHistory('${id}')" title="História uzavretých obchodov (len weekly)" hidden>○ HISTÓRIA</button>
       <a id="trade-btn-${id}" href="#" target="_blank" rel="noopener"
         onclick="event.stopPropagation()"
