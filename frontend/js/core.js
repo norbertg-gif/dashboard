@@ -280,6 +280,9 @@ function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
   const previousContextTicker = currentContextTicker();
   activeMainTab = tab;
+  // Tooltip Zhody žije na body; mouseleave sa pri prepnutí tabu nespustí.
+  const consensusTip = document.getElementById('consensus-tip');
+  if (consensusTip) consensusTip.style.display = 'none';
   document.body.dataset.mainTab = tab;
   document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab)?.classList.add('active');
@@ -1006,7 +1009,7 @@ function attachConsensusTooltip(chart, container, lookup, params = CONSENSUS_DEF
   const hide = () => { tip.style.display = 'none'; };
   chart.subscribeCrosshairMove(param => {
     const states = param?.time != null && param.point ? lookup(param.time) : null;
-    if (!states) { hide(); return; }
+    if (!states || !container.isConnected || !container.offsetParent) { hide(); return; }
     const currentParams = typeof params === 'function' ? params() : params;
     tip.innerHTML = consensusTooltipHtml(param.time, states, currentParams);
     tip.style.display = 'block';
