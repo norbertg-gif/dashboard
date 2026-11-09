@@ -1414,6 +1414,7 @@ body.sidebar-collapsed #sb-resizer {
 .panel > .p-sub:not(.consensus-strip) { order:2; }
 #predictiveTab .pc-indicator-subpanel.consensus-strip { height:68px; flex:0 0 68px; }
 .panel > .p-news, .panel > .p-wizard { order:3; }
+.p-wizard.hidden { display: none !important; }
 /* order above re-sorts flex children; keep the resize handle last as in the DOM */
 .panel > .p-resize-handle { order:4; }
 .consensus-strip .consensus-summary { position:absolute; z-index:6; top:2px; left:8px; right:8px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font:10px var(--font-mono); color:var(--muted2); pointer-events:auto; }
