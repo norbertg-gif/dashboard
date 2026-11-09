@@ -1432,7 +1432,7 @@ function createPanel(cfg) {
              oninput="onSymInput(event)"
              onkeydown="onSymKeydown(event,'${id}')"
              onfocus="setActivePanel('${id}');if(this.value.length>1){ddTarget=this;doSearch(this.value);}">
-      <select class="p-sel interval-sel">${intervalOpts(cfg.interval)}</select>
+      <select class="p-sel interval-sel" onchange="loadChart('${id}')">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
       <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
       <button class="p-btn-events" id="trade-history-${id}" onclick="event.stopPropagation();toggleTradeHistory('${id}')" title="História uzavretých obchodov (len weekly)" hidden>○ HISTÓRIA</button>
