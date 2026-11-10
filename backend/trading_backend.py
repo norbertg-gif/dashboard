@@ -11821,6 +11821,18 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
             unknown_dates.add(sym)
     if unknown_dates:
         notes["earnings"] = "nedostupné pre: " + ", ".join(sorted(unknown_dates))
+    # Výsledky zverejnené od pondelka do včera ostávajú viditeľné celý týždeň.
+    # Zdroj je uložené úložisko Finviz udalostí (bez fetchu); nevstupujú do
+    # single-membership, titul po výsledkoch normálne prechádza ďalej.
+    monday = now.date() - timedelta(days=now.date().weekday())
+    reported = []
+    for sym in sorted(lots_by_symbol):
+        record = _chart_events_record(sym) or {}
+        days = sorted({e.get("date") for e in record.get("events") or []
+                       if isinstance(e, dict) and e.get("type") == "E"
+                       and monday.isoformat() <= str(e.get("date") or "") < now.date().isoformat()})
+        if days:
+            reported.append({"ticker": sym, "date": days[-1]})
     sections = {key: [] for key in ("earnings", "actions", "waiting", "hold")}
     membership, candidates = {}, []
 
@@ -11913,7 +11925,7 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
                     "daily_pnl": _assistant_number(summary.get("daily_pnl")), **cash,
                     "orders_count": len(orders) if snapshot else None},
         "sections": sections, "membership": membership, "cash_deferred": deferred,
-        "year_test": year, "ema200_week": ema_week, "unavailable": notes})
+        "year_test": year, "ema200_week": ema_week, "earnings_reported": reported, "unavailable": notes})
     _HOME_TODAY_CACHE.update(data=result, ts=time.time())
     return result
 

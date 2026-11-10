@@ -58,8 +58,13 @@ function homeTodayHtml(data) {
 
   // 2) Pozor — one compact line per day, tickers as chips.
   const byDay = new Map();
-  rows('earnings').forEach(r => { if (!byDay.has(r.date)) byDay.set(r.date, []); byDay.get(r.date).push(r); });
-  const earnings = [...byDay.entries()].map(([date, list]) => {
+  [...(data.earnings_reported || []).map(r => ({...r, reported: true})), ...rows('earnings')]
+    .forEach(r => { if (!byDay.has(r.date)) byDay.set(r.date, []); byDay.get(r.date).push(r); });
+  const earnings = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, list]) => {
+    if (list.every(r => r.reported)) {
+      const label = new Date(date + 'T12:00:00').toLocaleDateString('sk-SK', {weekday: 'short', day: 'numeric', month: 'numeric'});
+      return `<div class="home-today-day home-today-reported"><span class="home-today-date">${escHtml(label)}</span><span class="home-today-chips">${list.map(r => tickerBtn(r.ticker)).join('')}</span><span class="home-today-flag">už zverejnené</span></div>`;
+    }
     const label = new Date(date + 'T12:00:00').toLocaleDateString('sk-SK', {weekday: 'short', day: 'numeric', month: 'numeric'});
     const notes = list.filter(r => r.pending_order).map(r => `<span class="home-today-flag">máš na ${escHtml(r.ticker)} čakajúci order</span>`).join('');
     return `<div class="home-today-day"><span class="home-today-date">${escHtml(label)}</span><span class="home-today-chips">${list.map(r => tickerBtn(r.ticker)).join('')}</span>${notes}</div>`;

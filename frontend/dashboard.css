@@ -7061,3 +7061,5 @@ body.light-mode .port-table td.port-ticker-tag {
 #home-details {max-width:1040px;margin:0 auto}
 #home-details > summary {cursor:pointer;padding:16px 0;color:var(--muted);border-top:1px solid var(--border)}
 @media(max-width:600px) {.home-today-act {align-items:flex-start;flex-direction:column}.home-today-date {width:auto}}
+
+.home-today-reported { opacity: .55; }
