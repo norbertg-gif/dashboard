@@ -594,9 +594,20 @@ function getCurrentConfig() {
     }).filter(Boolean);
   } catch(e) { console.error('getCurrentConfig error:', e); return []; }
 }
-function saveLayout() { localStorage.setItem('td_layout', JSON.stringify(getCurrentConfig())); }
+// Writes only when THIS tab's layout actually changed. Many paths call
+// saveLayout() routinely (every chart load, sidebar render); a second open
+// dashboard tab used to rewrite its stale layout this way and wipe zoom and
+// indicators set in the other tab.
+let _savedLayoutJson = null;
+function saveLayout() {
+  const json = JSON.stringify(getCurrentConfig());
+  if (_savedLayoutJson === null) _savedLayoutJson = localStorage.getItem('td_layout');
+  if (json === _savedLayoutJson) return;
+  _savedLayoutJson = json;
+  localStorage.setItem('td_layout', json);
+}
 function loadLayout() {
-  try { const s = localStorage.getItem('td_layout'); if(s) return JSON.parse(s); } catch(e){}
+  try { const s = localStorage.getItem('td_layout'); if(s) { _savedLayoutJson = s; return JSON.parse(s); } } catch(e){}
   return DEFAULTS;
 }
 
@@ -1594,18 +1605,24 @@ function createPanel(cfg) {
   // On the whole PANEL, not only the main chart: zooming with the wheel over
   // the ZHODA strip or an RSI/MACD sub-chart moves the main chart through the
   // sync, and before 2026-10-23 such a zoom was shown but never saved.
-  ['wheel', 'mousedown', 'touchstart'].forEach(ev =>
-    panel.addEventListener(ev, () => {
-      const reg = registry[id];
-      if (reg) reg.userAdjustedView = true;
-    }, { passive: true, capture: true }));
+  // The zoom is saved only right after a real gesture: overlay rebuilds, silent
+  // refreshes and sub-chart syncs also move the range (asynchronously, after
+  // suppressViewSave already expired) and used to overwrite the user's zoom
+  // with the full range on every reload.
+  const markGesture = () => {
+    const reg = registry[id];
+    if (reg) { reg.userAdjustedView = true; reg.userGestureAt = Date.now(); }
+  };
+  ['wheel', 'mousedown', 'touchstart', 'touchmove'].forEach(ev =>
+    panel.addEventListener(ev, markGesture, { passive: true, capture: true }));
+  panel.addEventListener('mousemove', e => { if (e.buttons) markGesture(); }, { passive: true, capture: true });
 
   mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     const reg = registry[id];
     if (!reg || reg.suppressViewSave || !range) return;
     const from = Number(range.from), to = Number(range.to);
     if (!Number.isFinite(from) || !Number.isFinite(to)) return;
-    if (reg.userAdjustedView) {
+    if (reg.userAdjustedView && Date.now() - (reg.userGestureAt || 0) < 1500) {
       reg.viewRange = panelViewFromRange(reg, from, to) || reg.viewRange;
       clearTimeout(reg.viewSaveTimer);
       reg.viewSaveTimer = setTimeout(saveLayout, 350);
