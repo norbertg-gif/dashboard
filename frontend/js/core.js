@@ -280,6 +280,11 @@ function switchMainTab(tab) {
   if (tab !== 'rates') stopRatesAutoRefresh();
   const previousContextTicker = currentContextTicker();
   activeMainTab = tab;
+  // Grafy načítané na skrytej záložke majú nulovú šírku a uložený zoom sa
+  // pri nich nedá nastaviť; po zobrazení ho treba použiť znova.
+  if (tab === 'charts' && typeof reapplySavedChartViews === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(reapplySavedChartViews));
+  }
   // Tooltip Zhody žije na body; mouseleave sa pri prepnutí tabu nespustí.
   const consensusTip = document.getElementById('consensus-tip');
   if (consensusTip) consensusTip.style.display = 'none';

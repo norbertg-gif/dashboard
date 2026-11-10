@@ -444,6 +444,13 @@ function setPanelView(pid, interval, inds) {
   updateSubVisibility(pid);
 }
 
+function reapplySavedChartViews() {
+  for (const id of gridChartPanelIds()) {
+    const r = registry[id];
+    if (r?.mainChart && r._chartData?.length && r.viewRange) restorePanelView(id, r);
+  }
+}
+
 function applyViewToAllCharts(sourceId) {
   const src = registry[sourceId];
   const interval = document.getElementById(sourceId)?.querySelector('.interval-sel')?.value;
@@ -452,6 +459,8 @@ function applyViewToAllCharts(sourceId) {
   targets.forEach(pid => {
     setPanelView(pid, interval, src.indicators);
     setPanelWizard(pid, src.indicators.wizard, { load: false });
+    // Zoom (right-anchored: počet sviečok + odstup od poslednej) ide tiež.
+    if (registry[pid]) { registry[pid].viewRange = src.viewRange ? { ...src.viewRange } : null; registry[pid]._keepViewOnReload = true; }
   });
   saveLayout();
   setStatus(`Zobrazenie použité na ${targets.length} grafov`, 'ok');
@@ -2688,7 +2697,7 @@ async function loadChart(id, opts = {}) {
   if (r.loadedChartKey && r.loadedChartKey !== chartKey) {
     // A new ticker keeps the zoom (bars visible); a new interval does not,
     // 120 daily bars and 120 weekly bars are different views.
-    if (r.loadedChartKey.split('|')[2] !== interval) r.viewRange = null;
+    if (r.loadedChartKey.split('|')[2] !== interval && !r._keepViewOnReload) r.viewRange = null;
     r._rawChartData = [];
     r._chartData = [];
     r.hasMoreHistory = false;
@@ -2708,6 +2717,7 @@ async function loadChart(id, opts = {}) {
     r._eventMarkersList = [];
     r._chartEventsFetchedFor = null;
   }
+  r._keepViewOnReload = false;
   if (r.abortController) r.abortController.abort();
   r.abortController = new AbortController();
   const loadSeq = ++r.loadSeq;
