@@ -27,6 +27,42 @@ function homeTodayLinks(ticker) {
     <button class="btn mini" onclick="openVerdictTicker(decodeURIComponent('${sym}'), event)">Verdikt</button></span>`;
 }
 
+async function homeLoadRecentPurchases(details) {
+  if (!details.open || details.dataset.loaded || details.dataset.loading) return;
+  const body = details.querySelector('.home-purchases-body');
+  details.dataset.loading = '1';
+  body.textContent = 'Načítavajú sa nákupy…';
+  try {
+    const data = await homeFetchJson(`${API}/api/home/recent-purchases`);
+    const date = value => new Date(value).toLocaleString('sk-SK', {
+      day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    const usd = new Intl.NumberFormat('sk-SK', {style: 'currency', currency: 'USD'});
+    const amount = value => value == null ? 'suma nedostupná' : usd.format(value);
+    const kinds = {dca: 'DCA', build: 'Dobudovanie', new: 'Nový titul', unknown: 'Neurčené'};
+    const sections = {actions: 'Urob', waiting: 'Čakaj', earnings: 'Pozor', hold: 'Drž', absent: 'Titul v Prehľade nebol'};
+    const rows = data.purchases.map(row => {
+      const decision = row.decision;
+      const context = decision
+        ? [sections[decision.section], date(decision.captured_at),
+           decision.amount == null ? '' : `plánovaná tranža ${amount(decision.amount)}`,
+           decision.blocking_reason || decision.reason].filter(Boolean).join(' · ')
+        : 'Chýba stav Prehľadu z dvoch dní pred nákupom.';
+      return `<div class="home-today-act"><div class="home-today-act-main">
+        <div class="home-today-act-title"><strong>${escHtml(row.ticker)}</strong> · ${escHtml(amount(row.amount))} · ${kinds[row.kind]}</div>
+        <div class="home-today-sub">${escHtml(date(row.opened_at))} · ${escHtml(context)}</div>
+      </div>${homeTodayLinks(row.ticker)}</div>`;
+    }).join('');
+    const note = data.incomplete ? '<p class="home-today-sub">Dáta eToro sú neúplné. Niektoré nákupy môžu chýbať.</p>' : '';
+    body.innerHTML = note + (rows || (data.incomplete ? '' : '<p class="home-today-sub">Za posledných 30 dní žiadny nákup akcií ani ETF.</p>'));
+    details.dataset.loaded = '1';
+  } catch (e) {
+    body.textContent = 'Nákupy sa nepodarilo načítať. Zatvor a otvor prehľad a skús znova.';
+  } finally {
+    delete details.dataset.loading;
+  }
+}
+
 function homeTodayHtml(data) {
   // Whole dollars, real minus sign: "−$142", "$27 775". The page is read in a
   // few minutes, so cents and "$-141,8" only add noise.
@@ -124,6 +160,10 @@ function homeTodayHtml(data) {
     ${card('', 'Čakaj · keď sa podmienka splní, presunie sa do Urob', waiting)}
     ${card('', `Týždenná EMA200${emaWeek}`, emaBody)}
     ${card('', `Drž · ${hold.length} pozícií`, holdBody)}
+    <details class="home-today-card is-quiet" ontoggle="homeLoadRecentPurchases(this)">
+      <summary>Kam išli peniaze · posledných 30 dní</summary>
+      <div class="home-purchases-body"></div>
+    </details>
     <section class="home-today-card is-quiet"><h2>Znižovanie počtu titulov</h2><p class="home-today-sub">${yearText}</p></section>
   </div>`;
 }

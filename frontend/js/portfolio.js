@@ -2434,8 +2434,8 @@ function getFilteredPositions(s) {
   if (s.attentionOnly) {
     rows = rows.filter(row => attentionBySymbol[normalizePortSymbol(row.symbol)]);
   }
-  if (s.earningsOnly && portfolioEarningsWeek) {
-    rows = rows.filter(row => portfolioEarningsWeek.has(normalizePortSymbol(row.symbol)));
+  if (s.tickerSetSymbols) {
+    rows = rows.filter(row => s.tickerSetSymbols.has(normalizePortSymbol(row.symbol)));
   }
   for (const row of rows) {
     row._attentionReasons = attentionBySymbol[normalizePortSymbol(row.symbol)] || [];
@@ -2526,7 +2526,7 @@ function renderPortPanel(pid) {
   const rows = getFilteredPositions(s);
   const cols = getVisibleCols(s);
   const mirrors = s.data.mirrors || [];
-  const showMirrors = !s.attentionOnly && !s.earningsOnly && (s.filter === 'all' || s.filter === 'mirrors') && mirrors.length;
+  const showMirrors = !s.attentionOnly && !s.tickerSet && (s.filter === 'all' || s.filter === 'mirrors') && mirrors.length;
 
   // Zostav HTML
   let html = `<div class="port-panel">`;
@@ -2553,8 +2553,11 @@ function renderPortPanel(pid) {
   html += `<div class="tb-group"><span class="tb-label">Pohľad</span><div class="tb-items">`;
   html += `<button class="port-view-btn${s.view==='ticker'?' active':''}" onclick="portSetView('${pid}','ticker')">Per ticker</button>`;
   html += `<button class="port-view-btn${s.view==='trade'?' active':''}" onclick="portSetView('${pid}','trade')">Per trade</button>`;
-  html += `<button class="port-attention-toggle${s.attentionOnly?' active':''}" onclick="portToggleAttention('${pid}')" title="Zobraz len tituly, ktoré majú dôvod na kontrolu z Investor Inboxu alebo výrazný denný pohyb">Pozornosť</button>`;
-  html += `<button class="port-attention-toggle${s.earningsOnly?' active':''}" onclick="portToggleEarnings('${pid}')" title="Zobraz len tituly s výsledkami do konca tohto týždňa">Earnings tento týždeň</button>`;
+  const selectedSet = s.attentionOnly ? 'attention' : s.tickerSet || '';
+  html += `<select class="sel" aria-label="Filtrovať podľa sady" style="max-width:155px" onchange="portSelectTickerSet('${pid}', this.value)">
+    ${Object.entries(PORT_TICKER_SETS).map(([key, label]) =>
+      `<option value="${key}"${key === selectedSet ? ' selected' : ''}>${label}</option>`).join('')}
+  </select>`;
   html += `</div></div>`;
   // Späť tlačidlo pri drilldown
   if (s._symFilter) {
@@ -2612,12 +2615,10 @@ function renderPortPanel(pid) {
       <span>${stale ? 'Inbox sa aktualizuje...' : 'Zdroj: Investor Inbox + denný pohyb.'}</span>
     </div>`;
   }
-  if (s.earningsOnly) {
-    const shownTickers = new Set(rows.map(row => normalizePortSymbol(row.symbol)).filter(Boolean)).size;
-    const note = portfolioEarningsWeekError
-      ? 'Earnings kalendár sa nepodarilo načítať, zobrazené sú všetky tituly.'
-      : portfolioEarningsWeek ? `zobrazené ${shownTickers} ${shownTickers === 1 ? 'titul' : 'titulov'} s výsledkami do nedele.` : 'načítavam kalendár...';
-    html += `<div class="port-attention-note"><b>Earnings:</b> ${note}</div>`;
+  if (s.tickerSetError || s.tickerSet) {
+    const shown = new Set(rows.map(row => normalizePortSymbol(row.symbol))).size;
+    const message = s.tickerSetError || (s.tickerSetSymbols ? `Zobrazené tituly: ${shown}.` : 'Načítava sa sada…');
+    html += `<div class="port-attention-note">${escHtml(message)}</div>`;
   }
   html += `<div id="port-gain-${pid}" class="port-summary" style="border-top:1px solid var(--border);padding:8px 16px;min-height:44px;"></div>`;
   setTimeout(() => renderGainPanel(`port-gain-${pid}`, s.account), 0);
@@ -2754,7 +2755,7 @@ function renderPortPanel(pid) {
 
   // Čakajúce objednávky (limitky + market orders čakajúce na exekúciu)
   const orders = s.data.orders || [];
-  if (!s.attentionOnly && !s.earningsOnly && orders.length) {
+  if (!s.attentionOnly && !s.tickerSet && orders.length) {
     const open = s.ordersOpen === true;   // default zbalené — počet je v hlavičke
     html += `<div class="port-mirrors-hdr" onclick="portToggleOrders('${pid}')">
       ${open ? '▾' : '▸'} Čakajúce objednávky (${orders.length})
@@ -2853,7 +2854,9 @@ function portSetAccount(pid, acc) {
     portEl.classList.remove('port-acct1', 'port-acct2');
     portEl.classList.add(acc === '2' ? 'port-acct2' : 'port-acct1');
   }
-  savePortState(pid); loadPortData(pid);
+  savePortState(pid);
+  if (s.tickerSet?.startsWith('portfolio-')) portSelectTickerSet(pid, s.tickerSet);
+  loadPortData(pid);
 }
 function portSetFilter(pid, f) {
   const s = getPortState(pid); s.filter = f;
@@ -2863,38 +2866,45 @@ function portSetView(pid, v) {
   const s = getPortState(pid); s.view = v;
   savePortState(pid); renderPortPanel(pid);
 }
-function portToggleAttention(pid) {
+const PORT_TICKER_SETS = {
+  '': 'Všetky tituly',
+  'portfolio-down': 'Top pohyby · pokles',
+  'portfolio-up': 'Top pohyby · rast',
+  'earnings-week': 'Výsledky tento týždeň',
+  'earnings-recent': 'Výsledky zverejnené za posledných 14 dní',
+  'attention': 'Pozornosť',
+  'clipboard': 'Zo schránky',
+};
+
+async function portSelectTickerSet(pid, choice) {
   const s = getPortState(pid);
-  s.attentionOnly = !s.attentionOnly;
+  const token = Symbol();
+  s.tickerSetToken = token;
+  s.attentionOnly = choice === 'attention';
+  s.tickerSet = s.attentionOnly ? '' : choice;
+  s.tickerSetSymbols = null;
+  s.tickerSetError = '';
   savePortState(pid);
-  if (s.attentionOnly) {
-    loadPortfolioAttention(false).then(() => renderPortPanel(pid));
-  }
   renderPortPanel(pid);
-}
-// Filter je zámerne len pre aktuálnu reláciu: uložený by po čase ticho skrýval
-// väčšinu portfólia. Zdroj je ten istý kalendár ako v Scanneri a na Prehľade.
-let portfolioEarningsWeek = null;
-let portfolioEarningsWeekError = false;
-async function loadPortfolioEarningsWeek() {
+  if (!s.tickerSet) return;
   try {
-    const data = await scannerCachedJson('earningsWidget:14', `${API}/api/earnings/calendar?days=14`, SCANNER_CLIENT_CACHE_MS.earningsWidget);
-    const sunday = new Date();
-    sunday.setDate(sunday.getDate() + (7 - sunday.getDay()) % 7);
-    const end = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
-    portfolioEarningsWeek = new Set((data?.items || []).filter(i => String(i.date || '') <= end).map(i => normalizePortSymbol(i.ticker)));
-    portfolioEarningsWeekError = false;
-  } catch (e) {
-    portfolioEarningsWeek = null;
-    portfolioEarningsWeekError = true;
+    const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
+    const items = await fetchTickerSet(choice, s.account, {limit: Math.max(2, cols * 2)});
+    if (s.tickerSetToken !== token) return;
+    if (choice === 'clipboard' && !items.length) {
+      s.tickerSet = '';
+      s.tickerSetError = 'V schránke sa nenašli žiadne tickery.';
+    } else {
+      s.tickerSetSymbols = new Set(items.map(item => normalizePortSymbol(item.symbol)));
+    }
+  } catch (error) {
+    if (s.tickerSetToken !== token) return;
+    s.tickerSet = '';
+    s.tickerSetError = 'Sadu sa nepodarilo načítať.';
   }
-}
-function portToggleEarnings(pid) {
-  const s = getPortState(pid);
-  s.earningsOnly = !s.earningsOnly;
-  if (s.earningsOnly) loadPortfolioEarningsWeek().then(() => renderPortPanel(pid));
   renderPortPanel(pid);
 }
+
 function portSort(pid, col) {
   const s = getPortState(pid);
   if (s.sortCol === col) s.sortDir *= -1;

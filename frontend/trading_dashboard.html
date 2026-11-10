@@ -71,17 +71,22 @@
   <div class="tb-group">
     <span class="tb-label">Zobrazenie</span>
     <div class="tb-items">
-      <button class="btn" id="movers-btn" onclick="loadMovers()" title="Otvor grafy s najväčším denným pohybom (2 riadky podľa nastavenia Stĺpce; stock/ETF z watchlistu + portfólia)">📉 Top pohyby</button>
-      <label id="movers-up-lbl" title="Prepnúť na najväčšie rasty" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
-        <input type="checkbox" id="movers-up" onchange="updateMoversLabel()" style="cursor:pointer;">Rast
-      </label>
-      <label id="movers-portfolio-only-lbl" title="Iba tituly z portfólia (bez watchlistu)" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
-        <input type="checkbox" id="movers-portfolio-only" style="cursor:pointer;">Len z portfólia
-      </label>
-      <button class="btn" id="recent-earnings-btn" onclick="openRecentEarningsCharts()" title="Otvorí grafy titulov z portfólia, ktoré zverejnili výsledky za posledných 14 dní (najnovšie prvé, max 20)">E · 14 dní</button>
-      <button class="btn" id="clipboard-charts-btn" onclick="importChartsFromClipboard()" title="Vloží tickery zo schránky (každý na samostatnom riadku), zruší aktuálne grafy a otvorí ich ako 1d grafy. Limit 20.">📋 Tickery</button>
-      <button class="btn" id="chart-defaults-btn" onclick="openChartDefaultsModal()" title="Ako sa má otvoriť každý nový graf v záložke Grafy: časový rámec a indikátory">⚙ Predvolené</button>
-      <button class="btn" id="consensus-settings-btn" onclick="openConsensusSettingsModal()" title="Nastavenie pásu Zhoda">⚙ Semafor</button>
+      <select class="sel" id="chart-ticker-set" aria-label="Otvoriť sadu" style="max-width:155px" onchange="openChartTickerSet(this)">
+        <option value="">Otvoriť sadu</option>
+        <option value="movers-down">Top pohyby · pokles</option>
+        <option value="movers-up">Top pohyby · rast</option>
+        <option value="portfolio-down">Top pohyby z portfólia · pokles</option>
+        <option value="portfolio-up">Top pohyby z portfólia · rast</option>
+        <option value="earnings-week">Výsledky tento týždeň</option>
+        <option value="earnings-recent">Výsledky zverejnené za posledných 14 dní</option>
+        <option value="attention">Pozornosť</option>
+        <option value="clipboard">Zo schránky</option>
+      </select>
+      <select class="sel" aria-label="Nastavenia grafov" onchange="openChartDisplaySettings(this)">
+        <option value="">Nastavenia grafov</option>
+        <option value="defaults">Predvolené</option>
+        <option value="consensus">Semafor</option>
+      </select>
       <button class="btn" id="basket-open-btn" onclick="openChartBasket()" title="Otvorí tickery vyklikané cez ⊕ naprieč dashboardom" style="display:none;">🧺 Košík</button>
     </div>
   </div>
@@ -554,15 +559,15 @@
 </div>
   <script src="/js/core.js?v=20261110-162532"></script>
   <script src="/js/live.js?v=20261110-162532"></script>
-  <script src="/js/portfolio.js?v=20261110-162532"></script>
+  <script src="/js/portfolio.js?v=20261111-1"></script>
   <script src="/js/watchlist.js?v=20261110-162532"></script>
   <script src="/js/scanner-table-sort.js?v=20261110-162532"></script>
   <script src="/js/scanner.js?v=20261110-162532"></script>
   <script src="/js/predictive.js?v=20261110-162532"></script>
   <script src="/js/verdict.js?v=20261110-162532"></script>
-  <script src="/js/home.js?v=20261110-162532"></script>
+  <script src="/js/home.js?v=20261111-1"></script>
   <script src="/js/newsfeed.js?v=20261110-162532"></script>
-  <script src="/js/charts.js?v=20261110-162532"></script>
+  <script src="/js/charts.js?v=20261111-1"></script>
   <script src="/js/main.js?v=20261110-162532"></script>
 </body>
 </html>

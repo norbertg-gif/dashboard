@@ -3026,26 +3026,12 @@ function clearChartPanelsForImport() {
     .forEach(panel => removePanel(panel.id));
 }
 
-async function importChartsFromClipboard() {
+async function readTickerClipboard() {
   let text = '';
   try {
     if (navigator.clipboard?.readText) text = await navigator.clipboard.readText();
   } catch(e) {}
-  if (!text) {
-    text = prompt('Vlož tickery, každý na samostatnom riadku. Otvorím ich ako 1d grafy (max 20).') || '';
-  }
-  const parsed = parseTickerClipboardText(text);
-  if (!parsed.length) {
-    setStatus('V schránke som nenašiel žiadne tickery', 'err');
-    return;
-  }
-  const tickers = parsed.slice(0, 20);
-  if (parsed.length > 20) {
-    setStatus(`Načítavam prvých 20 tickerov z ${parsed.length}`, 'warn');
-  } else {
-    setStatus(`Načítavam ${tickers.length} tickerov`, 'ok');
-  }
-  openChartsForSymbols(tickers);
+  return parseTickerClipboardText(text || prompt('Vlož tickery oddelené čiarkou alebo novým riadkom.') || '');
 }
 
 // Spoločné otvorenie zoznamu tickerov ako 1d grafov. Používa import zo schránky
@@ -3065,73 +3051,80 @@ function openChartsForSymbols(symbols) {
   ids.forEach(id => loadChart(id));
   return ids;
 }
-// Tituly z portfólia s výsledkami za posledných 14 dní (Finviz udalosti).
-async function openRecentEarningsCharts() {
-  try {
-    const r = await fetch(`${API}/api/earnings/recent?days=14`);
-    if (!r.ok) throw new Error(r.statusText);
-    const items = (await r.json()).items || [];
-    if (!items.length) { setStatus('Za posledných 14 dní žiadne výsledky v portfóliu', 'warn'); return; }
-    setStatus(`Výsledky za 14 dní: ${items.length}${items.length > 20 ? ' (otváram 20 najnovších)' : ''}`, 'ok');
-    openChartsForSymbols(items.map(i => i.ticker));
-  } catch (e) {
-    setStatus(`Výsledky sa nepodarilo načítať: ${e.message}`, 'err');
+async function fetchTickerSet(set, account, {positions, limit = 20} = {}) {
+  if (set === 'clipboard') return (await readTickerClipboard()).map(symbol => ({symbol}));
+  if (set === 'earnings-week') {
+    const data = await scannerCachedJson('earningsWidget:14', `${API}/api/earnings/calendar?days=14`, SCANNER_CLIENT_CACHE_MS.earningsWidget);
+    const sunday = new Date();
+    sunday.setDate(sunday.getDate() + (7 - sunday.getDay()) % 7);
+    const end = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
+    return (data.items || []).filter(item => item.date && item.date <= end).map(item => ({symbol: item.ticker}));
   }
+  if (set === 'attention') {
+    if (!positions) {
+      const response = await fetch(`${API}/api/etoro/portfolio?account=${encodeURIComponent(account)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      positions = (await response.json()).positions;
+    }
+    await loadPortfolioAttention(false);
+    return Object.values(groupPortRowsByTicker(positions || []))
+      .filter(row => portfolioAttentionReasonsForRow(row).length);
+  }
+  if (set === 'earnings-recent') {
+    const response = await fetch(`${API}/api/earnings/recent?days=14`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return ((await response.json()).items || []).map(item => ({symbol: item.ticker}));
+  }
+  const direction = set.endsWith('-up') ? 'up' : 'down';
+  const portfolioOnly = set.startsWith('portfolio-');
+  const response = await fetch(`${API}/api/movers?account=${encodeURIComponent(account)}&n=${limit}&direction=${direction}&portfolio_only=${portfolioOnly ? 1 : 0}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()).movers || [];
 }
-// Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
-// z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
-let _moversLoading = false;
-function moversBtnLabel() {
-  return document.getElementById('movers-up')?.checked ? '📈 Top pohyby' : '📉 Top pohyby';
-}
-function updateMoversLabel() {
-  const btn = document.getElementById('movers-btn');
-  if (btn && !_moversLoading) btn.textContent = moversBtnLabel();
-}
-async function loadMovers() {
-  if (_moversLoading) return;
-  const up = document.getElementById('movers-up')?.checked;
-  const direction = up ? 'up' : 'down';
-  const portfolioOnly = document.getElementById('movers-portfolio-only')?.checked;
-  // Počet grafov = 2 riadky podľa nastavenia STĹPCE (3 stĺpce → 6, 4 → 8)
-  const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
-  const n = Math.max(2, cols * 2);
-  const btn = document.getElementById('movers-btn');
-  _moversLoading = true;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Hľadám…'; }
+
+async function openChartTickerSet(select) {
+  const set = select.value;
+  if (!set) return;
+  select.disabled = true;
   try {
-    switchMainTab('charts');
-    // Top pohyby je samostatný prehľad najväčších pohybov. Prah Pozornosti
-    // patrí do portfólia; tu nesmie zmenšiť počet grafov pod STĹPCE x 2.
-    const r = await fetch(`${API}/api/movers?account=${activeAccount||'1'}&n=${n}&direction=${direction}&portfolio_only=${portfolioOnly?1:0}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    const movers = data.movers || [];
-    if (!movers.length) {
-      setStatus(`Ziadny titul neprekrocil prah Top pohybov ${minChange}% (vyhodnotene ${data.evaluated||0}/${data.universe_size||0}).`, 'err');
+    const movers = /^(movers|portfolio)-/.test(set);
+    const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
+    const items = await fetchTickerSet(set, activeAccount || '1', {limit: movers ? Math.max(2, cols * 2) : 20});
+    if (!items.length) {
+      setStatus('Sada neobsahuje žiadne tickery', 'warn');
       return;
     }
-    const geometry = gridPanelGeometry();
-    [...document.querySelectorAll('.panel')].forEach(p => { if (p.id !== dockPanelId && p.id !== verdictPanelId) removePanel(p.id); });
-    setActivePanel(null);
-    movers.forEach((m, i) => createPanel({
-      ...chartDefaultPanelCfg(m.symbol),
-      ...geometryForSlot(geometry, i),
-      interval: '1d',   // the mover percentage is a daily figure
-      moverChangePct: Number(m.change_pct),
-      moverLastPrice: Number(m.last_close),
-      moverPriceSource: m.price_source || null
-    }));
-    saveLayout();
-    loadAll();
-    const dirTxt = up ? 'rast' : 'pokles';
-    setStatus(`Top ${movers.length}/${n} - ${dirTxt} (${movers.map(m => `${m.symbol} ${m.change_pct>=0?'+':''}${m.change_pct}%`).join(', ')})`, 'ok');
-  } catch(e) {
-    setStatus(`Top pohyby zlyhali: ${e.message}`, 'err');
+    if (movers) {
+      const geometry = gridPanelGeometry();
+      clearChartPanelsForImport();
+      setActivePanel(null);
+      items.forEach((m, i) => createPanel({
+        ...chartDefaultPanelCfg(m.symbol),
+        ...geometryForSlot(geometry, i),
+        interval: '1d',
+        moverChangePct: Number(m.change_pct),
+        moverLastPrice: Number(m.last_close),
+        moverPriceSource: m.price_source || null
+      }));
+      saveLayout();
+      applyAllChartPortfolioFlags();
+      loadAll();
+    } else {
+      openChartsForSymbols(items.map(item => item.symbol));
+    }
+    setStatus(`Otváram ${Math.min(items.length, 20)} grafov`, 'ok');
+  } catch (error) {
+    setStatus(`Sadu sa nepodarilo načítať: ${error.message}`, 'err');
   } finally {
-    _moversLoading = false;
-    if (btn) { btn.disabled = false; btn.textContent = moversBtnLabel(); }
+    select.value = '';
+    select.disabled = false;
   }
+}
+
+function openChartDisplaySettings(select) {
+  if (select.value === 'defaults') openChartDefaultsModal();
+  if (select.value === 'consensus') openConsensusSettingsModal();
+  select.value = '';
 }
 
 // Jednorázový cache naplnený z batch fetchu — loadChart ho spotrebuje a zmaže

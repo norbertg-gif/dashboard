@@ -11777,6 +11777,29 @@ def _assistant_cash_summary(summary: dict, orders: list[dict]) -> dict:
 
 
 _HOME_TODAY_CACHE = {}
+HOME_DECISION_HISTORY_DIR = DATA_ROOT / "home_decision_history"
+
+
+def _archive_home_decisions(result: dict) -> None:
+    """Keep the decisions served by Home and the age of their portfolio data."""
+    if not result["snapshot_at"]:
+        return
+    captured = datetime.now(timezone.utc)
+    path = HOME_DECISION_HISTORY_DIR / captured.strftime("%Y-%m-%d") / (
+        captured.strftime("%H%M%S-%f") + ".json"
+    )
+    try:
+        _atomic_write_json(path, {
+            "captured_at": captured.isoformat(),
+            "portfolio_at": result["snapshot_at"],
+            "account": result["account"],
+            "sections": result["sections"],
+            "unavailable": result["unavailable"],
+            "earnings_reported": result["earnings_reported"],
+            "ema200_week": result["ema200_week"],
+        })
+    except OSError as exc:
+        print(f"[home] Could not archive decisions: {type(exc).__name__}: {exc}")
 
 
 @app.get("/api/home/today")
@@ -11948,6 +11971,7 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
                     "orders_count": len(orders) if snapshot else None},
         "sections": sections, "membership": membership, "cash_deferred": deferred,
         "year_test": year, "ema200_week": ema_week, "earnings_reported": reported, "unavailable": notes})
+    _archive_home_decisions(result)
     _HOME_TODAY_CACHE.update(data=result, ts=time.time())
     return result
 
@@ -11958,6 +11982,99 @@ def _assistant_snapshot(account: str) -> dict:
         return _positions_cache.get(account) or cache_read(_portfolio_disk_path(account)) or {}
     except Exception:
         return {}
+
+
+def _purchase_timestamp(value) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+    return stamp.astimezone(timezone.utc) if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+
+
+def _prior_home_decision(opened: datetime, ticker: str) -> dict | None:
+    # The archive stores the time the decision was ready to serve, not the
+    # time the calculation started. Never read a decision made after a fill.
+    for days_ago in range(3):
+        day = opened.date() - timedelta(days=days_ago)
+        for path in sorted((HOME_DECISION_HISTORY_DIR / day.isoformat()).glob("*.json"), reverse=True):
+            try:
+                captured = datetime.strptime(f"{day} {path.stem}", "%Y-%m-%d %H%M%S-%f").replace(tzinfo=timezone.utc)
+                if captured >= opened or opened - captured > timedelta(days=2):
+                    continue
+                state = json.loads(path.read_text(encoding="utf-8"))
+                portfolio_at = _purchase_timestamp(state.get("portfolio_at"))
+                if portfolio_at is None or portfolio_at > captured or opened - portfolio_at > timedelta(days=2):
+                    continue
+                for section, rows in state["sections"].items():
+                    for row in rows:
+                        if etoro_symbol_to_yf(row["ticker"]).upper() == ticker:
+                            return {**row, "section": section, "captured_at": state["captured_at"]}
+                return {"section": "absent", "captured_at": state["captured_at"]}
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+    return None
+
+
+def _recent_purchase_rows(positions, trades, cutoff, now, complete: bool) -> tuple[list, bool]:
+    lots = {}
+    for closed, rows in ((False, positions), (True, trades)):
+        for row in rows:
+            if row.get("type") not in ("Stock", "ETF") or row.get("isBuy") is not True:
+                continue
+            ticker = etoro_symbol_to_yf(str(row.get("symbol") or "")).upper()
+            opened = _purchase_timestamp(row.get("openTimestamp" if closed else "openDateTime"))
+            if not ticker or opened is None or opened > now:
+                complete = False
+                continue
+            position_id = row.get("positionId")
+            if position_id is None:
+                complete = False
+            key = (ticker, opened, str(position_id)) if position_id is not None else (ticker, opened, id(row))
+            lot = lots.setdefault(key, {"ticker": ticker, "opened": opened, "ends": [], "amounts": []})
+            end = _purchase_timestamp(row.get("closeTimestamp")) if closed else now
+            if end is None:
+                complete = False
+            else:
+                lot["ends"].append(end)
+            amount = _assistant_number(row.get("investment" if closed else "amount"))
+            lot["amounts"].append(amount if amount is not None and amount > 0 else None)
+
+    purchases = []
+    for lot in sorted(lots.values(), key=lambda lot: lot["opened"], reverse=True):
+        ticker, opened = lot["ticker"], lot["opened"]
+        if opened < cutoff:
+            continue
+        prior = any(other["ticker"] == ticker and other["opened"] < opened
+                    and any(end > opened for end in other["ends"]) for other in lots.values())
+        same_time = sum(other["ticker"] == ticker and other["opened"] == opened for other in lots.values()) > 1
+        decision = _prior_home_decision(opened, ticker)
+        kind = "unknown"
+        if prior and decision and decision.get("kind") in ("dca", "build"):
+            kind = decision["kind"]
+        elif complete and not prior and not same_time:
+            kind = "new"
+        amounts = lot["amounts"]
+        purchases.append({
+            "ticker": ticker, "opened_at": opened.isoformat(), "kind": kind,
+            "amount": round(sum(amounts), 2) if all(amount is not None for amount in amounts) else None,
+            "decision": decision,
+        })
+    return purchases, not complete
+
+
+@app.get("/api/home/recent-purchases")
+def get_home_recent_purchases():
+    """Account 1 purchases opened in the last 30 days, including closed lots."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=30)
+    portfolio = get_portfolio(account="1", refresh=0)
+    history = get_trade_history(account="1", minDate=cutoff.date().isoformat(),
+                                maxDate=now.date().isoformat(), page=0, pageSize=100)
+    incomplete = bool(portfolio.get("stale") or history.get("truncated"))
+    purchases, incomplete = _recent_purchase_rows(
+        portfolio["positions"], history["trades"], cutoff, now, not incomplete)
+    return {"purchases": purchases, "incomplete": incomplete}
 
 
 def _assistant_solvency(symbol: str) -> dict:

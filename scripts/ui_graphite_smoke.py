@@ -9,12 +9,13 @@ import http.server
 import json
 import math
 import os
+import sys
 from pathlib import Path
 import tempfile
 import threading
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 SYMBOLS = ["AAPL", "MSFT", "NVDA", "AMD", "QNT", "ETH", "VWCE.DE", "VSM.DE",
@@ -73,7 +74,13 @@ def fixture(route):
         "/api/movers": {"movers": []},
         "/api/investor/plan": {},
         "/api/investor/inbox": {"items": []},
+        "/api/home/today": {"headline": "Testovací prehľad", "sections": {}},
+        "/api/home/recent-purchases": {"purchases": [
+            {"ticker": "AAPL", "amount": 120, "kind": "dca", "opened_at": "2026-11-11T10:30:00Z",
+             "decision": {"section": "actions", "amount": 100, "captured_at": "2026-11-11T09:00:00Z"}},
+        ], "incomplete": False},
         "/api/earnings/calendar": {"events": []},
+        "/api/earnings/recent": {"items": [{"ticker": "AAPL"}]},
         "/api/etoro/trade-history": {"trades": [], "truncated": False},
     }.get(path)
     route.fulfill(status=200 if data is not None else 503,
@@ -81,7 +88,78 @@ def fixture(route):
                   body=json.dumps(data if data is not None else {"error": "No fixture for " + path}))
 
 
-def main():
+def chart_fixture(route):
+    url = urlparse(route.request.url)
+    if url.path != "/api/ohlcv":
+        return fixture(route)
+    weekly = parse_qs(url.query).get("interval") == ["1wk"]
+    step = 604800 if weekly else 86400
+    candles = [
+        dict(bar, time=CANDLES[0]["time"] + i * step, ema20=bar["close"] - 2)
+        for i, bar in enumerate(CANDLES)
+    ]
+    route.fulfill(json={"name": "Fixture", "data": candles, "hasMore": False})
+
+
+def check_chart_persistence(browser, base_url):
+    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    page.set_default_timeout(8000)
+    page.route("**/api/**", chart_fixture)
+    if os.environ.get("UI_LWC_PATH"):
+        page.route("**/lightweight-charts.standalone.production.js",
+                   lambda r: r.fulfill(path=os.environ["UI_LWC_PATH"],
+                                       content_type="application/javascript"))
+    page.route("https://fonts.googleapis.com/**", lambda r: r.fulfill(body=""))
+    layout = json.dumps([{"symbol": "AAPL", "interval": "1d", "indicators": {}}])
+    page.add_init_script(f"localStorage.setItem('td_layout', localStorage.getItem('td_layout') || {json.dumps(layout)})")
+    page.goto(base_url + "?tab=home",
+              wait_until="domcontentloaded")
+    page.locator("#tab-charts").click()
+    panel = page.locator("#grid .panel").first
+    interval = panel.locator(".interval-sel")
+    ema = panel.get_by_role("button", name="EMA", exact=True)
+    panel_id = panel.get_attribute("id")
+    page.wait_for_function("id => registry[id]?.loadedChartKey?.endsWith('|1d')", arg=panel_id)
+    interval.select_option("1wk")
+    page.wait_for_function(
+        "id => registry[id]?._rawChartData?.[1]?.time - registry[id]?._rawChartData?.[0]?.time === 604800",
+        arg=panel_id)
+    ema.click()
+    ema_visible = "id => registry[id]?.overlaySeries?.ema20?.data().length > 0"
+    page.wait_for_function(ema_visible, arg=panel_id)
+
+    read_range = "id => registry[id]?.mainChart.timeScale().getVisibleLogicalRange()"
+    before = page.evaluate(read_range, panel_id)
+    canvas = panel.locator(".p-chart canvas").first
+    canvas.scroll_into_view_if_needed()
+    box = canvas.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, -380)
+    page.wait_for_function(
+        "([id, width]) => { const r = registry[id].mainChart.timeScale().getVisibleLogicalRange(); "
+        "return r && Math.abs(r.to - r.from - width) > 1; }",
+        arg=[panel_id, before["to"] - before["from"]])
+    zoomed = page.evaluate(read_range, panel_id)
+    page.wait_for_function("() => JSON.parse(localStorage.td_layout)[0]?.view != null")
+
+    # Reload on Home and wait for data to load while the grid is hidden.
+    page.locator("#tab-home").click()
+    page.reload()
+    expect(page.locator("#tab-home")).to_have_class("main-tab active")
+    panel_id = panel.get_attribute("id")
+    page.wait_for_function(ema_visible, arg=panel_id)
+    page.locator("#tab-charts").click()
+    expect(interval).to_have_value("1wk")
+    page.wait_for_function(ema_visible, arg=panel_id)
+    page.wait_for_function(
+        "([id, expected]) => { const r = registry[id].mainChart.timeScale().getVisibleLogicalRange(); "
+        "return r && Math.abs(r.from - expected.from) < 1 && Math.abs(r.to - expected.to) < 1; }",
+        arg=[panel_id, zoomed])
+    page.close()
+    print("Chart timeframe, EMA and zoom survived reload from Home.")
+
+
+def main(charts_only=False):
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0), functools.partial(Handler, directory=str(ROOT / "frontend")))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -89,7 +167,12 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel="msedge")
+            browser = p.chromium.launch(channel="msedge", timeout=15000)
+            base_url = f"http://127.0.0.1:{server.server_port}/trading_dashboard.html"
+            check_chart_persistence(browser, base_url)
+            if charts_only:
+                browser.close()
+                return
             page = browser.new_page(viewport={"width": 1920, "height": 1080})
             errors = []
             page.on("pageerror", lambda e: errors.append(e.stack))
@@ -154,6 +237,12 @@ def main():
                     assert "nepodarilo vyhodnoti" not in decision, decision
                 if tab == "charts":
                     assert page.locator("#grid canvas").count() > 0
+                if tab == "home":
+                    card = page.locator("details").filter(has=page.get_by_text("Kam išli peniaze · posledných 30 dní", exact=True))
+                    with page.expect_response("**/api/home/recent-purchases"):
+                        card.locator("summary").click()
+                    expect(card.locator(".home-today-act-title")).to_contain_text("AAPL")
+                    expect(card.locator(".home-today-sub")).to_contain_text("Urob")
                 page.screenshot(path=str(output / (tab + "-desktop.png")))
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), tab
             for width in [1440, 1024, 768, 390]:
@@ -169,6 +258,17 @@ def main():
             assert page.locator("body").evaluate("(el) => el.classList.contains('light-mode')")
             assert page.locator(".port-main-table-wrap tr[data-port-row]").count() == len(POSITIONS)
             page.screenshot(path=str(output / "portfolio-light.png"))
+            portfolio_set = page.get_by_role("combobox", name="Filtrovať podľa sady")
+            portfolio_set.select_option("earnings-recent")
+            portfolio_rows = page.locator(".port-main-table-wrap tr[data-port-row]")
+            expect(portfolio_rows).to_have_count(1)
+            expect(portfolio_rows).to_contain_text("AAPL")
+            portfolio_set.select_option("")
+            expect(portfolio_rows).to_have_count(len(POSITIONS))
+            page.locator("#tab-charts").click()
+            page.get_by_role("combobox", name="Otvoriť sadu").select_option("earnings-recent")
+            expect(page.locator("#grid .p-sym")).to_have_count(1)
+            expect(page.locator("#grid .p-sym")).to_have_value("AAPL")
             browser.close()
             assert not errors, errors
             print("UI checks passed; screenshots:", output)
@@ -178,4 +278,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(charts_only="--charts-only" in sys.argv)

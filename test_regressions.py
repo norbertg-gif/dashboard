@@ -1909,6 +1909,8 @@ class EarningsCacheOnlyRegressionTests(unittest.TestCase):
 class HomeTodayRegressionTests(unittest.TestCase):
     def setUp(self):
         from datetime import timedelta
+        history = tempfile.TemporaryDirectory()
+        self.addCleanup(history.cleanup)
         self.now = datetime.now(timezone.utc)
         self.tomorrow = (self.now + timedelta(days=1)).date().isoformat()
         self.old = (self.now - timedelta(days=366)).isoformat()
@@ -1922,6 +1924,7 @@ class HomeTodayRegressionTests(unittest.TestCase):
         self.real_earnings = tb._earnings_next_date
         for name, kwargs in {
             "_HOME_TODAY_CACHE": {"new": {}},
+            "HOME_DECISION_HISTORY_DIR": {"new": Path(history.name)},
             "_assistant_snapshot": {"side_effect": lambda account: self.snapshot},
             "_dash_settings": {"return_value": dict(tb.DASH_SETTINGS_DEFAULTS)},
             "load_scanner_cache": {"return_value": {"results": [{"ticker": "C", "chart_health": {"daily": {"status": "Bad"}}}]}},
@@ -1940,6 +1943,60 @@ class HomeTodayRegressionTests(unittest.TestCase):
 
     def payload(self, refresh=1):
         return tb.get_home_today(account="1", refresh=refresh)
+
+    def test_archives_served_decisions_once_per_cached_result(self):
+        first = self.payload()
+        self.payload(refresh=0)
+        paths = list(tb.HOME_DECISION_HISTORY_DIR.glob("*/*.json"))
+        self.assertEqual(len(paths), 1)
+        archived = json.loads(paths[0].read_text(encoding="utf-8"))
+        self.assertEqual(archived["sections"], first["sections"])
+        self.assertEqual(archived["portfolio_at"], first["snapshot_at"])
+        self.assertGreaterEqual(archived["captured_at"], first["generated_at"])
+
+    def test_recent_purchases_use_pretrade_state_and_include_closed_lots(self):
+        bought = self.now - timedelta(hours=3)
+        before = bought - timedelta(hours=1)
+        after = bought + timedelta(hours=1)
+        for captured, kind in ((before, "dca"), (after, "build")):
+            path = tb.HOME_DECISION_HISTORY_DIR / captured.date().isoformat() / captured.strftime("%H%M%S-%f.json")
+            tb._atomic_write_json(path, {
+                "captured_at": captured.isoformat(), "portfolio_at": captured.isoformat(),
+                "sections": {"actions": [{"ticker": "D", "kind": kind, "amount": 100}]},
+            })
+
+        def open_lot(ticker, pos, stamp, amount):
+            return dict(symbol=ticker, positionId=pos, type="Stock", isBuy=True,
+                        openDateTime=stamp.isoformat(), amount=amount)
+
+        def closed_lot(ticker, pos, stamp, amount, closed):
+            return dict(symbol=ticker, positionId=pos, type="Stock", isBuy=True,
+                        openTimestamp=stamp.isoformat(), closeTimestamp=closed.isoformat(),
+                        investment=amount)
+
+        portfolio = {"positions": [
+            open_lot("D", "old", bought - timedelta(days=50), 120),
+            open_lot("D", "partial", bought, 60),
+        ]}
+        history = {"trades": [
+            closed_lot("D", "partial", bought, 40, after),
+            closed_lot("NEW", "closed", bought, 90, after),
+        ]}
+        with patch.object(tb, "get_portfolio", return_value=portfolio), \
+             patch.object(tb, "get_trade_history", return_value=history):
+            result = tb.get_home_recent_purchases()
+        rows = {row["ticker"]: row for row in result["purchases"]}
+        self.assertEqual(len(result["purchases"]), 2)
+        self.assertEqual(rows["D"]["kind"], "dca")
+        self.assertEqual(rows["D"]["amount"], 100)
+        self.assertEqual(rows["D"]["decision"]["captured_at"], before.isoformat())
+        self.assertEqual(rows["NEW"]["kind"], "new")
+        self.assertEqual(rows["NEW"]["amount"], 90)
+
+        cutoff = self.now - timedelta(days=30)
+        rows, incomplete = tb._recent_purchase_rows([], history["trades"], cutoff, self.now, False)
+        self.assertTrue(incomplete)
+        self.assertTrue(all(row["kind"] == "unknown" for row in rows))
 
     def test_single_membership_and_precedence(self):
         result = self.payload()
@@ -4875,7 +4932,7 @@ class ChartDefaultsRegressionTests(unittest.TestCase):
         self.assertIn("const cfg = chartDefaultPanelCfg(symbol);", src)
         self.assertIn("createPanel(chartDefaultPanelCfg(symbol, geometryForSlot(geometry, i)))", src)
         # Top pohyby keep the daily interval (the mover percentage is daily)
-        movers = src.split("movers.forEach((m, i) => createPanel({", 1)[1].split("}));", 1)[0]
+        movers = src.split("items.forEach((m, i) => createPanel({", 1)[1].split("}));", 1)[0]
         self.assertIn("...chartDefaultPanelCfg(m.symbol)", movers)
         self.assertLess(movers.index("...chartDefaultPanelCfg"), movers.index("interval: '1d'"))
         # dock (Portfolio) and the Verdikt panel are deliberately NOT driven by the defaults
@@ -4962,13 +5019,14 @@ class ChartPanelGeometryRegressionTests(unittest.TestCase):
 
     def test_bulk_replace_and_ticker_change_keep_geometry(self):
         src = (Path(__file__).parent / "frontend" / "js" / "charts.js").read_text(encoding="utf-8")
-        movers = src.split("async function loadMovers()", 1)[1].split("saveLayout();", 1)[0]
-        self.assertLess(movers.index("gridPanelGeometry()"), movers.index("removePanel(p.id)"))
+        movers = src.split("async function openChartTickerSet(", 1)[1].split("saveLayout();", 1)[0]
+        self.assertLess(movers.index("gridPanelGeometry()"), movers.index("clearChartPanelsForImport()"))
         self.assertIn("...geometryForSlot(geometry, i)", movers)
-        self.assertIn("if (r.loadedChartKey.split('|')[2] !== interval) r.viewRange = null;", src)
+        self.assertIn("if (r.loadedChartKey.split('|')[2] !== interval && !r._keepViewOnReload) r.viewRange = null;", src)
         # a zoom started over the ZHODA strip or a sub-chart must count as a user zoom
-        flag = src.split("reg.userAdjustedView = true;", 1)[0][-200:]
-        self.assertIn("panel.addEventListener(ev", flag)
+        gesture = src.split("const markGesture = () =>", 1)[1].split("subscribeVisibleLogicalRangeChange", 1)[0]
+        self.assertIn("reg.userAdjustedView = true;", gesture)
+        self.assertIn("panel.addEventListener(ev, markGesture, { passive: true, capture: true })", gesture)
         # height saved is the dragged one, not the row-stretched offsetHeight
         self.assertIn("return parseInt(cEl?.style.flexBasis) || cEl?.offsetHeight", src)
         # zoom is re-applied after overlays/sub-charts rebuild the time scale
