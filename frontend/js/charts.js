@@ -3038,6 +3038,19 @@ function openChartsForSymbols(symbols) {
   ids.forEach(id => loadChart(id));
   return ids;
 }
+// Tituly z portfólia s výsledkami za posledných 14 dní (Finviz udalosti).
+async function openRecentEarningsCharts() {
+  try {
+    const r = await fetch(`${API}/api/earnings/recent?days=14`);
+    if (!r.ok) throw new Error(r.statusText);
+    const items = (await r.json()).items || [];
+    if (!items.length) { setStatus('Za posledných 14 dní žiadne výsledky v portfóliu', 'warn'); return; }
+    setStatus(`Výsledky za 14 dní: ${items.length}${items.length > 20 ? ' (otváram 20 najnovších)' : ''}`, 'ok');
+    openChartsForSymbols(items.map(i => i.ticker));
+  } catch (e) {
+    setStatus(`Výsledky sa nepodarilo načítať: ${e.message}`, 'err');
+  }
+}
 // Dynamický preset — otvor 6 grafov s najväčším denným pohybom (stock/ETF
 // z watchlistu + portfólia). Default pokles, checkbox "Rast" prepne na rasty.
 let _moversLoading = false;

@@ -10856,6 +10856,28 @@ def _investor_cache_set(key: str, payload: dict) -> dict:
     return out
 
 
+@app.get("/api/earnings/recent")
+def get_earnings_recent(days: int = Query(14, ge=1, le=60)):
+    """Držané tituly (oba účty), ktoré zverejnili výsledky za posledných N dní.
+    Číta len uložené Finviz udalosti (chart_events), žiadny nový fetch."""
+    today = datetime.now(timezone.utc).date()
+    start = (today - timedelta(days=days)).isoformat()
+    try:
+        holdings = _get_portfolio_holdings()
+    except Exception:
+        holdings = {}
+    items = []
+    for sym in sorted(holdings):
+        record = _chart_events_record(sym) or {}
+        found = sorted(str(e.get("date")) for e in record.get("events") or []
+                       if isinstance(e, dict) and e.get("type") == "E"
+                       and start <= str(e.get("date") or "") <= today.isoformat())
+        if found:
+            items.append({"ticker": sym, "date": found[-1]})
+    items.sort(key=lambda r: (r["date"], r["ticker"]), reverse=True)
+    return {"days": days, "from": start, "to": today.isoformat(), "items": items}
+
+
 @app.get("/api/earnings/calendar")
 def get_earnings_calendar_view(days: int = Query(14, ge=1, le=31),
                                refresh: int = Query(0)):
