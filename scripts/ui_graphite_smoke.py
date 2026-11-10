@@ -118,13 +118,17 @@ def check_chart_persistence(browser, base_url):
     panel = page.locator("#grid .panel").first
     interval = panel.locator(".interval-sel")
     ema = panel.get_by_role("button", name="EMA", exact=True)
+    add_indicator = panel.get_by_role("combobox", name="Pridať indikátor")
     panel_id = panel.get_attribute("id")
     page.wait_for_function("id => registry[id]?.loadedChartKey?.endsWith('|1d')", arg=panel_id)
     interval.select_option("1wk")
     page.wait_for_function(
         "id => registry[id]?._rawChartData?.[1]?.time - registry[id]?._rawChartData?.[0]?.time === 604800",
         arg=panel_id)
-    ema.click()
+    expect(ema).to_be_hidden()
+    add_indicator.select_option("ema")
+    expect(ema).to_have_attribute("aria-pressed", "true")
+    expect(add_indicator.locator('option[value="ema"]')).to_have_count(0)
     ema_visible = "id => registry[id]?.overlaySeries?.ema20?.data().length > 0"
     page.wait_for_function(ema_visible, arg=panel_id)
 
@@ -150,11 +154,15 @@ def check_chart_persistence(browser, base_url):
     page.wait_for_function(ema_visible, arg=panel_id)
     page.locator("#tab-charts").click()
     expect(interval).to_have_value("1wk")
+    expect(ema).to_be_visible()
     page.wait_for_function(ema_visible, arg=panel_id)
     page.wait_for_function(
         "([id, expected]) => { const r = registry[id].mainChart.timeScale().getVisibleLogicalRange(); "
         "return r && Math.abs(r.from - expected.from) < 1 && Math.abs(r.to - expected.to) < 1; }",
         arg=[panel_id, zoomed])
+    ema.click()
+    expect(ema).to_be_hidden()
+    expect(add_indicator.locator('option[value="ema"]')).to_have_count(1)
     page.close()
     print("Chart timeframe, EMA and zoom survived reload from Home.")
 

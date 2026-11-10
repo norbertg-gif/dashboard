@@ -377,18 +377,11 @@ function onChartPanelContextMenu(event, id) {
       : { label: 'Trade na eToro ↗ (titul nie je v portfóliu)', disabled: true },
     { sep: true },
     { label: 'Obnoviť graf', action: () => loadChart(id) },
-    { label: 'Heikin Ashi', checked: !!inds.ha, action: () => toggleHA(id) },
     { sep: true },
-    { label: 'EMA', checked: !!inds.ema, action: () => toggleIndicator(id, 'ema') },
-    { label: 'Ichimoku', checked: !!inds.ichimoku, action: () => toggleIndicator(id, 'ichimoku') },
-    { label: 'RSI', checked: !!inds.rsi, action: () => toggleIndicator(id, 'rsi') },
-    { label: 'ADX', checked: !!inds.adx, action: () => toggleIndicator(id, 'adx') },
-    { label: 'MACD', checked: !!inds.macd, action: () => toggleIndicator(id, 'macd') },
-    { label: 'IPP · prijatie pohybu', checked: !!inds.ipp, action: () => toggleIndicator(id, 'ipp') },
-    { label: 'Zhoda indikátorov', checked: !!inds.consensus, action: () => toggleIndicator(id, 'consensus') },
+    ...Object.entries(PANEL_INDICATOR_LABELS).map(([key, label]) => ({
+      label, checked: !!inds[key], action: () => togglePanelIndicator(id, key),
+    })),
     { label: 'Nastaviť semafor…', action: () => openConsensusSettingsModal() },
-    { sep: true },
-    { label: 'Wizard', checked: !!inds.wizard, action: () => toggleWizard(id) },
   ];
   // Hromadné nastavenie má zmysel len pre panely v mriežke Grafov — dock a
   // Verdikt panel sú samostatné pohľady mimo nej.
@@ -420,6 +413,39 @@ function onChartPanelContextMenu(event, id) {
 // loadChart aj tak resetuje a pri rovnakom má každý ticker vlastný rozsah.
 const PANEL_VIEW_KEYS = ['ha', 'ema', 'ichimoku', 'rsi', 'adx', 'macd', 'ipp', 'consensus', 'events'];
 const PANEL_DEFAULT_INTERVAL = '1d';
+const PANEL_INDICATOR_LABELS = {
+  ha: 'Heikin Ashi', ema: 'EMA', ichimoku: 'Ichimoku', rsi: 'RSI', adx: 'ADX',
+  macd: 'MACD', ipp: 'IPP · prijatie pohybu', consensus: 'Zhoda indikátorov',
+  events: 'Udalosti', wizard: 'Wizard',
+};
+
+function togglePanelIndicator(id, key) {
+  if (key === 'ha') toggleHA(id);
+  else if (key === 'wizard') toggleWizard(id);
+  else if (Object.hasOwn(PANEL_INDICATOR_LABELS, key)) toggleIndicator(id, key);
+}
+
+function syncPanelIndicatorControls(id) {
+  const panel = document.getElementById(id);
+  const inds = registry[id]?.indicators;
+  if (!panel || !inds) return;
+  const add = panel.querySelector('.p-ind-add');
+  const options = [new Option('+', '')];
+  let restoreFocus = false;
+  for (const [key, label] of Object.entries(PANEL_INDICATOR_LABELS)) {
+    const btnId = key === 'ha' ? `ha-${id}` : key === 'wizard' ? `wiz-btn-${id}` : `ind-${id}-${key}`;
+    const btn = document.getElementById(btnId);
+    if (!inds[key]) {
+      options.push(new Option(label, key));
+      restoreFocus ||= btn === document.activeElement;
+    }
+    btn?.setAttribute('aria-pressed', String(!!inds[key]));
+  }
+  if (!add) return;
+  add.replaceChildren(...options);
+  add.disabled = options.length === 1;
+  if (restoreFocus) add.focus();
+}
 
 function gridChartPanelIds() {
   return [...document.querySelectorAll('#grid .panel')]
@@ -441,6 +467,7 @@ function setPanelView(pid, interval, inds) {
     if (k === 'ha') document.getElementById('ha-' + pid)?.classList.toggle('active', r.indicators.ha);
     else document.getElementById(`ind-${pid}-${k}`)?.classList.toggle(`active-${k}`, r.indicators[k]);
   }
+  syncPanelIndicatorControls(pid);
   updateSubVisibility(pid);
 }
 
@@ -962,6 +989,7 @@ function toggleIndicator(pid, ind) {
   const r = registry[pid]; if (!r) return;
   r.indicators[ind] = !r.indicators[ind];
   document.getElementById(`ind-${pid}-${ind}`)?.classList.toggle(`active-${ind}`, r.indicators[ind]);
+  syncPanelIndicatorControls(pid);
   updateSubVisibility(pid);
   saveLayout();
   if (ind === 'events') {
@@ -1443,6 +1471,7 @@ function createPanel(cfg) {
     : (gridHeight ? Math.min(600, Math.max(120, gridHeight)) : null);
   // Dock má vlastný kontajner a jediný panel — preusporiadanie tam nedáva zmysel.
   const inGrid = !cfg.container || cfg.container === 'grid';
+  const haButton = `<button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>`;
   const panel = document.createElement('div');
   panel.className = 'panel'; panel.id = id;
   panel.innerHTML = `
@@ -1454,7 +1483,7 @@ function createPanel(cfg) {
              onfocus="setActivePanel('${id}');if(this.value.length>1){ddTarget=this;doSearch(this.value);}">
       <select class="p-sel interval-sel" onchange="loadChart('${id}')">${intervalOpts(cfg.interval)}</select>
       <button class="p-btn-load" id="btn-${id}" onclick="event.stopPropagation();loadChart('${id}')">⟳</button>
-      <button class="p-btn-ha${inds.ha?' active':''}" id="ha-${id}" onclick="event.stopPropagation();toggleHA('${id}')" title="Heikin Ashi">HA</button>
+      ${inGrid ? '' : haButton}
       <button class="p-btn-events" id="trade-history-${id}" onclick="event.stopPropagation();toggleTradeHistory('${id}')" title="História uzavretých obchodov (len weekly)" hidden>○ HISTÓRIA</button>
       <a id="trade-btn-${id}" href="#" target="_blank" rel="noopener"
         onclick="event.stopPropagation()"
@@ -1468,7 +1497,8 @@ function createPanel(cfg) {
       ${inGrid ? `<button class="p-btn-max" id="max-${id}" title="Maximalizovať" onclick="event.stopPropagation();toggleMaximizePanel('${id}')">⛶</button>` : ''}
       <button class="p-btn-rm" onclick="event.stopPropagation();removePanel('${id}')">✕</button>
     </div>
-    <div class="p-inds" onclick="setActivePanel('${id}')">
+    <div class="p-inds${inGrid ? ' p-inds-compact' : ''}" onclick="setActivePanel('${id}')">
+      ${inGrid ? `<select class="p-ind-add ind-btn" aria-label="Pridať indikátor" onchange="togglePanelIndicator('${id}', this.value)"></select>${haButton}` : ''}
       <button id="ind-${id}-events" class="ind-btn${inds.events?' active-events':''}" onclick="toggleIndicator('${id}','events')" title="Finviz: výsledky, ratingy, dividendy a splity">UDALOSTI</button>
       <span class="ema-indicator-wrap">
         <button id="ind-${id}-ema" class="ind-btn${inds.ema ?' active-ema':''}" onclick="toggleIndicator('${id}','ema')">EMA</button>
@@ -1484,7 +1514,7 @@ function createPanel(cfg) {
       <button id="ind-${id}-macd"     class="ind-btn${inds.macd     ?' active-macd':''}"     onclick="toggleIndicator('${id}','macd')">MACD</button>
       <button id="ind-${id}-ipp" class="ind-btn${inds.ipp ?' active-ipp':''}" onclick="toggleIndicator('${id}','ipp')" title="Index prijatia pohybu · denný interval · experimentálny">IPP</button>
       <button id="ind-${id}-consensus" class="ind-btn${inds.consensus?' active-consensus':''}" onclick="toggleIndicator('${id}','consensus')" title="Čítacia pomôcka, nie signál">ZHODA</button>
-      <div style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></div>
+      ${inGrid ? '' : '<div style="width:1px;height:14px;background:var(--border2);margin:0 2px;"></div>'}
       <button id="wiz-btn-${id}" class="ind-btn${inds.wizard?' active-adx':''}" style="${inds.wizard?'border-color:var(--blue);color:var(--blue);background:var(--blue-dim);':''}" onclick="toggleWizard('${id}')">⚡ WIZARD</button>
     </div>
     <div class="p-info" id="info-${id}" onclick="setActivePanel('${id}')"><span class="p-name">—</span></div>
@@ -1600,6 +1630,7 @@ function createPanel(cfg) {
     moverLastPrice: Number.isFinite(Number(cfg.moverLastPrice)) ? Number(cfg.moverLastPrice) : null,
     moverPriceSource: cfg.moverPriceSource || null,
   };
+  syncPanelIndicatorControls(id);
   attachMarkerTooltip(mainChart, mainCont, objectId => registry[id]?._markerMeta?.[objectId]);
 
   // Zoom/posun sa ukladá LEN keď ho vyvolal používateľ. Knižnica emituje zmenu
@@ -1956,11 +1987,13 @@ function setPanelWizard(id, on, { load = true } = {}) {
   const btn = document.getElementById(`wiz-btn-${id}`);
   const wiz = document.getElementById(`wizard-${id}`);
   if (btn) {
+    btn.classList.toggle('active-adx', on);
     btn.style.borderColor = on ? 'var(--blue)' : '';
     btn.style.color = on ? 'var(--blue)' : '';
     btn.style.background = on ? 'var(--blue-dim)' : '';
   }
   wiz?.classList.toggle('hidden', !on);
+  syncPanelIndicatorControls(id);
   // Wizard potrebuje širšiu sadu indikátorov, ktorú pri zatvorenom paneli
   // zámerne nepočítame.
   if (on && load) loadChart(id);
@@ -2216,6 +2249,7 @@ function toggleHA(id) {
   r.indicators.ha = !r.indicators.ha;
   const btn = document.getElementById('ha-' + id);
   btn?.classList.toggle('active', r.indicators.ha);
+  syncPanelIndicatorControls(id);
   saveLayout();
   loadChart(id);
 }

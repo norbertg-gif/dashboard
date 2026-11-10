@@ -1264,6 +1264,23 @@ body.sidebar-collapsed #sb-resizer {
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
+.p-inds-compact > [aria-pressed="false"],
+.p-inds-compact > .ema-indicator-wrap:has([aria-pressed="false"]) {
+  display: none;
+}
+.p-ind-add.ind-btn {
+  appearance: none;
+  width: 28px;
+  padding: 3px 0;
+  text-align: center;
+  text-align-last: center;
+  background: var(--bg-input);
+  color: var(--text);
+}
+.p-ind-add option {
+  background: var(--bg-input);
+  color: var(--text);
+}
 .ind-btn {
   font-family: var(--font-ui);
   font-size: 10.5px;
