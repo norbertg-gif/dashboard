@@ -253,7 +253,19 @@ def main(charts_only=False):
                     expect(card.locator(".home-today-sub")).to_contain_text("Urob")
                 page.screenshot(path=str(output / (tab + "-desktop.png")))
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), tab
-            for width in [1440, 1024, 768, 390]:
+            layout = """() => {
+                const css = selector => getComputedStyle(document.querySelector(selector));
+                return {
+                    navigation: css('#main-tabs').flexDirection,
+                    watchlist: css('#sb-list').flexDirection,
+                    chartToolbar: css('#toolbar').display,
+                    tablePadding: css('.port-main-table-wrap td').paddingBlockStart,
+                    tableHeading: css('.port-main-table-wrap th').fontSize,
+                };
+            }"""
+            dark_layouts = {}
+            widths = [1440, 1024, 768, 390]
+            for width in widths:
                 page.set_viewport_size({"width": width, "height": 900})
                 page.evaluate("switchMainTab('portfolio')")
                 page.wait_for_timeout(250)
@@ -261,11 +273,22 @@ def main(charts_only=False):
                 assert page.locator("#port-insights-toggle").is_visible()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), width
                 assert page.locator(".port-content-col").bounding_box()["width"] >= min(width - 20, 300)
+                dark_layouts[width] = page.evaluate(layout)
+                assert dark_layouts[width]["navigation"] == ("column" if width >= 1180 else "row")
+                assert dark_layouts[width]["chartToolbar"] == "none"
             page.set_viewport_size({"width": 1440, "height": 1000})
-            page.evaluate("toggleTheme()")
-            assert page.locator("body").evaluate("(el) => el.classList.contains('light-mode')")
+            dark_background = page.locator("body").evaluate("(el) => getComputedStyle(el).backgroundColor")
+            page.locator("#theme-toggle-btn").click()
+            expect(page.locator("body")).to_have_css("color-scheme", "light")
+            assert page.locator("body").evaluate("(el) => getComputedStyle(el).backgroundColor") != dark_background
             assert page.locator(".port-main-table-wrap tr[data-port-row]").count() == len(POSITIONS)
-            page.screenshot(path=str(output / "portfolio-light.png"))
+            for width in widths:
+                page.set_viewport_size({"width": width, "height": 900})
+                assert page.evaluate(layout) == dark_layouts[width], width
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), width
+                assert page.locator(".port-content-col").bounding_box()["width"] >= min(width - 20, 300)
+                page.screenshot(path=str(output / f"portfolio-light-{width}.png"))
+            page.set_viewport_size({"width": 1440, "height": 1000})
             portfolio_set = page.get_by_role("combobox", name="Filtrovať podľa sady")
             portfolio_set.select_option("earnings-recent")
             portfolio_rows = page.locator(".port-main-table-wrap tr[data-port-row]")
@@ -274,9 +297,14 @@ def main(charts_only=False):
             portfolio_set.select_option("")
             expect(portfolio_rows).to_have_count(len(POSITIONS))
             page.locator("#tab-charts").click()
+            expect(page.locator("#toolbar")).to_be_visible()
             page.get_by_role("combobox", name="Otvoriť sadu").select_option("earnings-recent")
             expect(page.locator("#grid .p-sym")).to_have_count(1)
             expect(page.locator("#grid .p-sym")).to_have_value("AAPL")
+            for tab in ["charts", "home", "predictive", "scanner", "verdict", "history", "news"]:
+                page.locator(f"#tab-{tab}").click()
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), tab
+                page.screenshot(path=str(output / f"{tab}-light.png"), animations="disabled")
             browser.close()
             assert not errors, errors
             print("UI checks passed; screenshots:", output)
