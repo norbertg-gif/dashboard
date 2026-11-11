@@ -860,6 +860,9 @@ class HistoryExportRegressionTests(unittest.TestCase):
             "historyViewRows", "historyExportRows", "historyStatusHtml", "historySummaryFor",
             "compareHistoryRows", "renderHistoryView", "exportHistoryCSV",
         ])
+        source += ChartLiveAndMarkerRegressionTests._js_functions("frontend/js/core.js", [
+            "tickerDestinationUrl", "tickerLinkAttrs",
+        ])
         harness = """
 let clockMs = globalThis.Date.parse('2026-09-05T10:00:00Z');
 class Date extends globalThis.Date {
@@ -1953,6 +1956,53 @@ class HomeTodayRegressionTests(unittest.TestCase):
         self.assertEqual(archived["sections"], first["sections"])
         self.assertEqual(archived["portfolio_at"], first["snapshot_at"])
         self.assertGreaterEqual(archived["captured_at"], first["generated_at"])
+
+    def test_home_activity_keeps_individual_ratings_and_only_reported_earnings(self):
+        today = self.now.date().isoformat()
+        yesterday = (self.now.date() - timedelta(days=1)).isoformat()
+        record = {"events": [
+            {"date": today, "type": "R", "ratings": [
+                {"analyst": "First", "action": "Upgrade", "rating": "Buy"},
+                {"analyst": "Second", "action": "Initiated", "rating": "Hold"},
+            ]},
+            {"date": yesterday, "type": "E", "upcoming": True},
+            {"date": today, "type": "E", "upcoming": False},
+            {"date": today, "type": "E", "eps_actual": 0},
+            {"date": self.tomorrow, "type": "R", "analyst": "Future"},
+        ]}
+        with patch.object(tb, "_chart_events_record", side_effect=lambda sym: record if sym == "D" else None):
+            payload = self.payload()
+        self.assertEqual(payload["activity_covered"], ["D"])
+        self.assertEqual([row["kind"] for row in payload["activity"]], ["rating", "rating", "earnings"])
+        self.assertEqual(len({row["id"] for row in payload["activity"]}), 3)
+        self.assertEqual(payload["activity"][-1]["date"], today)
+
+    def test_portfolio_sparklines_use_only_cached_daily_closes_in_window(self):
+        def day(days_ago):
+            return (self.now.date() - timedelta(days=days_ago)).isoformat()
+
+        def candles_for(path):
+            if path.name != "D_OneDay":
+                return None
+            return {"candles": [{"candles": [
+                {"fromDate": day(0), "close": 8},
+                {"fromDate": day(30), "close": 1},
+                {"fromDate": day(29), "close": 4},
+                {"fromDate": day(2), "close": 0},
+            ]}]}
+
+        index = pd.to_datetime([day(7), day(1)])
+        fallback = pd.DataFrame({"Close": [9, 10]}, index=index)
+        with patch.object(tb, "cache_read", side_effect=candles_for), \
+             patch.object(tb, "_read_scanner_daily_cache", side_effect=lambda sym: fallback if sym == "B" else None), \
+             patch.object(tb, "get_ohlcv", side_effect=AssertionError("must not request candles")):
+            result = tb.get_portfolio_sparklines("D,B,D,UNKNOWN")["items"]
+        self.assertEqual(result, {
+            "D": {"from": day(29), "to": day(0), "closes": [4, 8]},
+            "B": {"from": day(7), "to": day(1), "closes": [9, 10]},
+        })
+        with self.assertRaises(HTTPException):
+            tb.get_portfolio_sparklines("../file")
 
     def test_recent_purchases_use_pretrade_state_and_include_closed_lots(self):
         bought = self.now - timedelta(hours=3)

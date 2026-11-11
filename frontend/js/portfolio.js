@@ -345,7 +345,7 @@ async function renderRatesView(force = false) {
             <div style="display:flex;flex-direction:column;gap:1px;">
               <div style="display:flex;align-items:center;gap:6px;">
                 ${getLogoImg(x.symbol, 18)}
-                <span class="port-sym">${escHtml(x.symbol)}</span>
+                <a class="port-sym ticker-link" ${tickerLinkAttrs(x.symbol, 'charts', 'watchlist')}>${escHtml(x.symbol)}</a>
                 ${isLive ? '<span style="font-size:8px;font-weight:700;color:var(--up);padding:1px 4px;background:var(--up-soft);border-radius:3px;">LIVE</span>' : ''}
                 ${etoroTradeBtnHtml(x.symbol, 'font-size:9px;padding:1px 5px;')}
               </div>
@@ -585,7 +585,7 @@ async function renderHistoryView(force = false) {
     </tr></thead><tbody>
       ${trades.map(t => {
         const pnl = Number(t.netProfit || 0);
-        const symCell = `<td><span class="port-sym" onclick="onSbTickerClick('${escHtml(t.symbol)}')" style="cursor:pointer;">${escHtml(t.symbol)}</span><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>`;
+        const symCell = `<td><a class="port-sym ticker-link" ${tickerLinkAttrs(t.symbol, 'charts', 'watchlist')}>${escHtml(t.symbol)}</a><div style="color:var(--muted);font-size:9px;">${escHtml(t.name)}</div></td>`;
         const tail = `<td>$${Number(t.investment || 0).toFixed(2)}</td>
           <td><span class="${pnl>=0?'port-pos':'port-neg'}">${fmtMoney(pnl)}</span></td>
           <td>${t.profitPct != null ? t.profitPct.toFixed(2)+'%' : '-'}</td>
@@ -822,7 +822,7 @@ function renderDcaCard(data) {
     const dipTxt = x.dip_total != null ? `${x.dip_total} ${x.dip_label}` : '—';
     return `<tr onclick="onSbTickerClick('${escHtml(x.symbol)}')" style="cursor:pointer;" title="${escHtml(meta.tip)}">
       <td><span class="dca-pill ${meta.cls}">${meta.label}</span></td>
-      <td><span class="port-sym">${escHtml(x.symbol)}</span></td>
+      <td><a class="port-sym ticker-link" ${tickerLinkAttrs(x.symbol, 'charts', 'watchlist')}>${escHtml(x.symbol)}</a></td>
       <td class="r"><span class="port-neg">${x.pnl_pct.toFixed(1)}%</span></td>
        <td class="r">${x.weight_pct != null ? `${x.weight_pct.toFixed(1)}%` : '—'}</td>
       <td class="r">${escHtml(dipTxt)}</td>
@@ -1024,7 +1024,7 @@ function renderBuildCard(data) {
     // label — "BLOKOVANÉ / Dokúpiť" v jednej bunke sú dva protirečiace príkazy.
     return `<tr title="${escHtml(meta.label + ' — ' + meta.tip)}">
       <td><span class="dca-pill ${readiness.cls}" title="${escHtml((x.readiness_reason || '') + ' · váha vs cieľ: ' + meta.label)}">${readiness.label}</span></td>
-      <td><span class="port-sym" style="cursor:pointer;" onclick="onSbTickerClick('${escHtml(x.symbol)}')">${escHtml(x.symbol)}</span></td>
+      <td><a class="port-sym ticker-link" ${tickerLinkAttrs(x.symbol, 'charts', 'watchlist')}>${escHtml(x.symbol)}</a></td>
       <td class="r">${x.weight_pct == null ? '—' : x.weight_pct.toFixed(1) + '%'}</td>
       <td><select class="build-input" onchange="saveBuildClass('${escHtml(x.symbol)}','position_class',this.value)">${opts}</select></td>
       <td class="r"><input class="build-input${x.target_source === 'class' ? ' derived' : ''}" type="number" step="0.1" min="0" max="100"
@@ -1267,7 +1267,7 @@ function renderCorrCard(data) {
   table += `</tbody></table></div>`;
 
   const pairs = (data.pairs_high || []).map(p =>
-    `<span class="corr-pair" onclick="onSbTickerClick('${escHtml(p.a)}')" title="Korelácia ${p.corr.toFixed(2)} — hýbu sa takmer identicky">${escHtml(p.a)}×${escHtml(p.b)} ${p.corr.toFixed(2)}</span>`
+    `<a class="corr-pair ticker-link" ${tickerLinkAttrs(p.a, 'charts', 'watchlist')} title="Korelácia ${p.corr.toFixed(2)} — hýbu sa takmer identicky">${escHtml(p.a)}×${escHtml(p.b)} ${p.corr.toFixed(2)}</a>`
   ).join('');
   const pairsBlock = pairs
     ? `<div class="corr-pairs"><b>Silné prekryvy (≥ 0.80):</b> ${pairs}</div>`
@@ -1419,6 +1419,7 @@ const PORT_COLS = [
   { key:'analystTarget',label:'Cieľ',         def:false, fmt:'analystTarget' },
   { key:'dailyPnl',    label:'Denný P/L',    def:true,  fmt:'pnl'    },
   { key:'weeklyPct',   label:'Týždeň %',     def:false, fmt:'pct'    },
+  { key:'spark30',     label:'Cena · 30 dní',def:false, fmt:'spark'  },
   { key:'pnl',         label:'P/L ($)',      def:true,  fmt:'pnl'    },
   { key:'pnlPct',      label:'P/L (%)',      def:true,  fmt:'pct'    },
   { key:'fees',        label:'Poplatky',     def:false, fmt:'usd'    },
@@ -1431,7 +1432,7 @@ const PORT_COLS = [
 const PORT_DEFAULT_WIDTHS = {
   symbol: 230, trade: 90, type: 90, isBuy: 90, openDateTime: 120,
   amount: 120, units: 110, openRate: 110, currentRate: 110,
-  analystTarget: 110, dailyPnl: 110, weeklyPct: 95, pnl: 105, pnlPct: 105,
+  analystTarget: 110, dailyPnl: 110, weeklyPct: 95, spark30: 116, pnl: 105, pnlPct: 105,
   fees: 100, leverage: 90, stopLoss: 110, takeProfit: 110, positionId: 150,
 };
 
@@ -2467,7 +2468,7 @@ function getFilteredPositions(s) {
 function exportPortCSV(pid) {
   const s = getPortState(pid);
   if (!s.data?.positions) return;
-  const cols = getVisibleCols(s);
+  const cols = getVisibleCols(s).filter(col => col.key !== 'spark30');
   const rows = getFilteredPositions(s);
   const lines = [cols.map(c => c.label).join(',')];
   for (const r of rows) {
@@ -2499,6 +2500,49 @@ function portToggleInsights() {
   localStorage.setItem('td_port_insights_collapsed', collapsed ? '1' : '0');
   const button = document.getElementById('port-insights-toggle');
   if (button) button.setAttribute('aria-expanded', String(!collapsed));
+}
+
+const portSparkCache = new Map();
+const portSparkPending = new Set();
+
+function portSparkHtml(symbol) {
+  const cached = portSparkCache.get(symbol);
+  if (!cached) return '<span class="muted" title="Načítava sa história cien">…</span>';
+  const series = cached.series;
+  if (!series) return `<span class="muted" title="${cached.error ? 'Históriu sa nepodarilo načítať' : 'Málo dostupných denných cien'}">—</span>`;
+  const prices = series.closes;
+  const change = ((prices.at(-1) / prices[0] - 1) * 100).toFixed(1);
+  const label = `${series.from} až ${series.to} · ${Number(change) >= 0 ? '+' : ''}${change} %`;
+  return `<span class="port-sparkline" role="img" aria-label="${escHtml(label)}" title="${escHtml(label)}">${drawSparkSvg(prices, Number(change) >= 0, 76, 24)}</span>`;
+}
+
+async function loadPortSparklines(rows) {
+  const symbols = [...new Set(rows.map(row => normalizeTickerDestination(row.symbol)).filter(Boolean))]
+    .filter(symbol => !portSparkPending.has(symbol) && (portSparkCache.get(symbol)?.expires || 0) <= Date.now());
+  symbols.forEach(symbol => portSparkPending.add(symbol));
+  for (let i = 0; i < symbols.length; i += 120) {
+    const batch = symbols.slice(i, i + 120);
+    let items = {}, error = false;
+    try {
+      const response = await fetch(`${API}/api/portfolio/sparklines?symbols=${encodeURIComponent(batch.join(','))}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      items = (await response.json()).items || {};
+    } catch (e) {
+      error = true;
+    }
+    const expires = Date.now() + (error ? 60000 : 15 * 60000);
+    for (const symbol of batch) {
+      const series = items[symbol];
+      const valid = series?.closes?.length >= 2 && series.closes.every(price => Number.isFinite(price) && price > 0);
+      const previous = portSparkCache.get(symbol);
+      portSparkCache.set(symbol, {series: valid ? series : (error ? previous?.series : null), error, expires});
+      portSparkPending.delete(symbol);
+    }
+    const loaded = new Set(batch);
+    for (const cell of document.querySelectorAll('[data-port-spark]')) {
+      if (loaded.has(cell.dataset.portSpark)) cell.innerHTML = portSparkHtml(cell.dataset.portSpark);
+    }
+  }
 }
 
 function renderPortPanel(pid) {
@@ -2653,7 +2697,7 @@ function renderPortPanel(pid) {
       const sortCls = s.sortCol === col.key ? (s.sortDir === -1 ? ' sort-desc' : ' sort-asc') : '';
       const sortMark = s.sortCol === col.key ? (s.sortDir === 1 ? ' ▲' : ' ▼') : '';
       html += `<th class="${sortCls}" data-col="${col.key}" draggable="true"${portColStyle(s, col.key)}
-        onclick="portSort('${pid}','${col.key}')"
+        ${col.key === 'spark30' ? '' : `onclick="portSort('${pid}','${col.key}')"`}
         ondragstart="portDragStart(event,'${pid}','${col.key}')"
         ondragover="portDragOver(event,'${pid}','${col.key}')"
         ondrop="portDrop(event,'${pid}','${col.key}')"
@@ -2673,11 +2717,14 @@ function renderPortPanel(pid) {
           html += `<td ${portTickerTagAttrs(sym)}><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;cursor:pointer;" title="${portTickerTagTitle(sym)}" onclick="event.stopPropagation();openChartDock('${sym}')">
             ${getLogoWrapper(sym, 26, (row.pnl||0)>=0?'var(--green)':'var(--red)')}
             <div style="display:flex;flex-direction:column;gap:1px;flex:1;">
-              <span class="port-sym">${sym}${count}${gfLinkHtml(sym)}</span>
+              <span class="port-sym"><a class="ticker-link" ${tickerLinkAttrs(sym, 'charts', 'dock')}>${escHtml(sym)}</a>${count}${gfLinkHtml(sym)}</span>
               <span class="port-name">${row.name||''}</span>
               ${renderPortfolioAttentionBadges(row._attentionReasons)}
             </div>
           </div></td>`;
+        } else if (col.key === 'spark30') {
+          const ticker = normalizeTickerDestination(sym);
+          html += `<td data-port-spark="${escHtml(ticker)}">${ticker ? portSparkHtml(ticker) : '—'}</td>`;
         } else if (col.key === 'trade') {
           html += `<td class="port-trade-cell" onclick="event.stopPropagation();" style="text-align:center;">${etoroTradeBtnHtml(sym)}</td>`;
         } else if (col.key === 'openDateTime') {
@@ -2787,7 +2834,7 @@ function renderPortPanel(pid) {
           <td ${portTickerTagAttrs(o.symbol)}><div class="port-sym-cell" style="flex-direction:row;align-items:center;gap:6px;" title="${portTickerTagTitle(o.symbol)}" onclick="event.stopPropagation();openChartDock('${o.symbol}')">
             ${getLogoWrapper(o.symbol, 22)}
             <div style="display:flex;flex-direction:column;gap:1px;">
-              <span class="port-sym">${o.symbol}</span>
+              <a class="port-sym ticker-link" ${tickerLinkAttrs(o.symbol, 'charts', 'dock')}>${escHtml(o.symbol)}</a>
               <span class="port-name">${o.name || ''}</span>
             </div>
           </div></td>
@@ -2835,6 +2882,7 @@ function renderPortPanel(pid) {
   html += `</div>`;
   cont.innerHTML = html;
   if (s.colVisible.analystTarget) ensurePortfolioAnalystTargets(pid);
+  if (s.colVisible.spark30) loadPortSparklines(rows);
   resolveGfLinks();
   if (typeof window.initPortSideResize === 'function') window.initPortSideResize(pid);
   if (pid === 'main' && typeof syncChartDockPosition === 'function') {

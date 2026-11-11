@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261111-3">
+<link rel="stylesheet" href="/dashboard.css?v=20261111-4">
 </head>
 <body data-main-tab="home">
 
@@ -44,6 +44,7 @@
     <button id="settings-btn" onclick="openSettingsModal()" title="Nastavenia prahov (DCA, Pozornosť, earnings)" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">⚙</button>
     <button id="theme-toggle-btn" onclick="toggleTheme()" title="Dark / Light mode" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;">🌙</button>
     <a href="/help" target="_blank" title="Manuál k dashboardu" style="background:transparent;border:1px solid var(--border2);color:var(--muted);width:30px;height:28px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;">?</a>
+    <button id="ticker-palette-btn" class="btn mini" type="button" aria-keyshortcuts="Alt+K" title="Otvoriť ticker (Alt+K)" onclick="openTickerPalette()">Otvoriť ticker</button>
     <button id="ui-mode-btn" onclick="toggleUiMode()" title="Basic schová diagnostický šum, Advanced zobrazí všetky analytické vrstvy" class="btn mini">Advanced</button>
   </div>
 </div>
@@ -557,17 +558,31 @@
     </table>
   </div>
 </div>
-  <script src="/js/core.js?v=20261110-162532"></script>
+  <dialog id="ticker-palette" aria-labelledby="ticker-palette-title">
+    <form onsubmit="submitTickerPalette(event)">
+      <h2 id="ticker-palette-title">Otvoriť ticker</h2>
+      <label for="ticker-palette-input">Ticker</label>
+      <input id="ticker-palette-input" list="ticker-palette-symbols" oninput="updateTickerPalette()" required autocomplete="off" maxlength="24" placeholder="Napr. AAPL">
+      <datalist id="ticker-palette-symbols"></datalist>
+      <div class="ticker-palette-actions">
+        <button class="btn primary" type="submit" value="predictive">Analytika</button>
+        <button class="btn" type="submit" value="charts">Graf</button>
+        <button class="btn" type="submit" value="verdict">Verdikt</button>
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Zavrieť</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/js/core.js?v=20261111-4"></script>
   <script src="/js/live.js?v=20261110-162532"></script>
-  <script src="/js/portfolio.js?v=20261111-1"></script>
-  <script src="/js/watchlist.js?v=20261110-162532"></script>
+  <script src="/js/portfolio.js?v=20261111-4"></script>
+  <script src="/js/watchlist.js?v=20261111-4"></script>
   <script src="/js/scanner-table-sort.js?v=20261110-162532"></script>
-  <script src="/js/scanner.js?v=20261110-162532"></script>
-  <script src="/js/predictive.js?v=20261110-162532"></script>
+  <script src="/js/scanner.js?v=20261111-4"></script>
+  <script src="/js/predictive.js?v=20261111-4"></script>
   <script src="/js/verdict.js?v=20261110-162532"></script>
-  <script src="/js/home.js?v=20261111-1"></script>
-  <script src="/js/newsfeed.js?v=20261110-162532"></script>
-  <script src="/js/charts.js?v=20261111-2"></script>
-  <script src="/js/main.js?v=20261110-162532"></script>
+  <script src="/js/home.js?v=20261111-4"></script>
+  <script src="/js/newsfeed.js?v=20261111-4"></script>
+  <script src="/js/charts.js?v=20261111-4"></script>
+  <script src="/js/main.js?v=20261111-4"></script>
 </body>
 </html>

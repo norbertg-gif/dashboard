@@ -603,7 +603,7 @@ function renderSidebar() {
       style="border-left:2px solid ${tag>0?tagColor:'transparent'};">
       <div style="display:flex;align-items:center;gap:4px;">
         ${getLogoWrapper(sym, 22, chgCls==='up'?'var(--green)':chgCls==='down'?'var(--red)':'var(--muted)')}
-        <span class="sb-sym" style="flex:1;min-width:0;">${sym}</span>
+        <a class="sb-sym ticker-link" ${tickerLinkAttrs(sym, 'charts', 'watchlist')} style="flex:1;min-width:0;">${escHtml(sym)}</a>
         ${holdingIcon}
         ${orderIcon}
         <div data-spark="${sym}" style="flex-shrink:0;">${drawSparkSvg(sparkCache[sym], chgCls !== 'down', 38, 15)}</div>

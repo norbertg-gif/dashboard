@@ -11780,6 +11780,29 @@ _HOME_TODAY_CACHE = {}
 HOME_DECISION_HISTORY_DIR = DATA_ROOT / "home_decision_history"
 
 
+def _home_activity(ticker: str, record: dict, today: date) -> list[dict]:
+    recent = (today - timedelta(days=45)).isoformat()
+    current = today.isoformat()
+    items = []
+    for event in record.get("events") or []:
+        day = event.get("date") or ""
+        if not recent <= day <= current:
+            continue
+        if event.get("type") == "R":
+            for rating in event.get("ratings") or [event]:
+                fields = [rating.get(key) for key in ("analyst", "action", "rating")]
+                if any(fields):
+                    items.append({"kind": "rating", "ticker": ticker, "date": day,
+                                  "id": json.dumps([ticker, "R", day, *fields], ensure_ascii=False),
+                                  "detail": " · ".join(str(value) for value in fields if value)})
+        if event.get("type") == "E" and (
+            (day < current and event.get("upcoming") is not True)
+            or event.get("eps_actual") is not None or event.get("eps_reported_actual") is not None
+        ):
+            items.append({"kind": "earnings", "ticker": ticker, "date": day, "id": f"{ticker}:E:{day}"})
+    return items
+
+
 def _archive_home_decisions(result: dict) -> None:
     """Keep the decisions served by Home and the age of their portfolio data."""
     if not result["snapshot_at"]:
@@ -11870,9 +11893,12 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
     # Zdroj je uložené úložisko Finviz udalostí (bez fetchu); nevstupujú do
     # single-membership, titul po výsledkoch normálne prechádza ďalej.
     monday = now.date() - timedelta(days=now.date().weekday())
-    reported = []
+    reported, activity, activity_covered = [], [], []
     for sym in sorted(lots_by_symbol):
         record = _chart_events_record(sym) or {}
+        if record:
+            activity_covered.append(sym)
+            activity.extend(_home_activity(sym, record, now.date()))
         days = sorted({e.get("date") for e in record.get("events") or []
                        if isinstance(e, dict) and e.get("type") == "E"
                        and monday.isoformat() <= str(e.get("date") or "") < now.date().isoformat()})
@@ -11970,10 +11996,46 @@ def get_home_today(account: str = Query("1"), refresh: int = Query(0)):
                     "daily_pnl": _assistant_number(summary.get("daily_pnl")), **cash,
                     "orders_count": len(orders) if snapshot else None},
         "sections": sections, "membership": membership, "cash_deferred": deferred,
-        "year_test": year, "ema200_week": ema_week, "earnings_reported": reported, "unavailable": notes})
+        "year_test": year, "ema200_week": ema_week, "earnings_reported": reported, "unavailable": notes,
+        "activity": activity, "activity_covered": activity_covered})
     _archive_home_decisions(result)
     _HOME_TODAY_CACHE.update(data=result, ts=time.time())
     return result
+
+
+@app.get("/api/portfolio/sparklines")
+def get_portfolio_sparklines(symbols: str = Query("", max_length=4000)):
+    """Return daily closes from the existing caches. Never request market data."""
+    today = datetime.now(timezone.utc).date()
+    cutoff = (today - timedelta(days=29)).isoformat()
+    end = today.isoformat()
+    selected = dict.fromkeys(part.strip().upper() for part in symbols.split(",") if part.strip())
+    if len(selected) > 120 or any(not re.fullmatch(r"[A-Z0-9^][A-Z0-9.^=_/\-]{0,23}", sym) for sym in selected):
+        raise HTTPException(400, "Neplatný zoznam tickerov")
+    items = {}
+    for sym in selected:
+        raw = cache_read(CACHE_DIR / "ohlcv" / f"{sym.replace('/', '_')}_OneDay") or {}
+        closes = {}
+        for candle in _flatten_ohlcv(raw):
+            day = str(candle.get("fromDate") or "")[:10]
+            price = _assistant_number(candle.get("close"))
+            if cutoff <= day <= end and price is not None and price > 0:
+                closes[day] = price
+        if len(closes) < 2 or max(closes) < (today - timedelta(days=4)).isoformat():
+            cached = _read_scanner_daily_cache(sym)
+            if cached is not None:
+                daily = {}
+                for stamp, value in cached["Close"].items():
+                    day = stamp.date().isoformat()
+                    price = _assistant_number(value)
+                    if cutoff <= day <= end and price is not None and price > 0:
+                        daily[day] = price
+                if len(daily) >= 2 and (len(closes) < 2 or max(daily) > max(closes)):
+                    closes = daily
+        if len(closes) >= 2:
+            days = sorted(closes)
+            items[sym] = {"from": days[0], "to": days[-1], "closes": [closes[day] for day in days]}
+    return {"items": items}
 
 
 def _assistant_snapshot(account: str) -> dict:

@@ -10,6 +10,7 @@ import json
 import math
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import threading
@@ -46,9 +47,20 @@ CHART = dict(ticker="AAPL", candles=CANDLES, daily_candles=CANDLES,
                            avg_error_pct=2.1, indicator_hit_rate={}),
              pred_candle=dict(time=CANDLES[-1]["time"] + 604800,
                               open=195, high=204, low=190, close=199))
+TODAY = datetime.now(timezone.utc).date().isoformat()
+PREVIOUS_VISIT = {
+    "seenAt": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    "events": [{"id": "known-rating", "date": TODAY}],
+    "membership": {"AAPL": "waiting", "MSFT": "hold", "NVDA": "hold"},
+}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if urlparse(self.path).path == "/":
+            self.path = "/trading_dashboard.html"
+        super().do_GET()
+
     def log_message(self, *_):
         pass
 
@@ -67,6 +79,9 @@ def fixture(route):
         "/api/etoro/watchlists": [],
         "/api/etoro/rates-batch": {"rates": []},
         "/api/portfolio/holdings": {},
+        "/api/portfolio/sparklines": {"items": {
+            "AAPL": {"from": TODAY, "to": TODAY, "closes": [100, 108, 105, 120]},
+        }},
         "/api/portfolio/dca": {"candidates": [], "thresholds": {
             "last_tranche_pct": 20, "dip_min": 95, "max_weight": 10}},
         "/api/chart": CHART,
@@ -74,7 +89,17 @@ def fixture(route):
         "/api/movers": {"movers": []},
         "/api/investor/plan": {},
         "/api/investor/inbox": {"items": []},
-        "/api/home/today": {"headline": "Testovací prehľad", "sections": {}},
+        "/api/home/today": {
+            "headline": "Testovací prehľad", "sections": {}, "snapshot_at": f"{TODAY}T00:00:00Z",
+            "membership": {"AAPL": "actions", "MSFT": "hold", "NVDA": "hold"},
+            "activity_covered": ["AAPL", "MSFT", "NVDA"],
+            "activity": [
+                {"id": "known-rating", "ticker": "MSFT", "kind": "rating", "date": TODAY, "detail": "Starý rating"},
+                {"id": "new-rating", "ticker": "AAPL", "kind": "rating", "date": TODAY, "detail": "Nový rating"},
+                {"id": "earnings", "ticker": "MSFT", "kind": "earnings", "date": TODAY},
+            ],
+            "ema200_week": {"items": [{"ticker": "NVDA", "kind": "cross_up", "week": TODAY}]},
+        },
         "/api/home/recent-purchases": {"purchases": [
             {"ticker": "AAPL", "amount": 120, "kind": "dca", "opened_at": "2026-11-11T10:30:00Z",
              "decision": {"section": "actions", "amount": 100, "captured_at": "2026-11-11T09:00:00Z"}},
@@ -184,14 +209,15 @@ def main(charts_only=False):
             page = browser.new_page(viewport={"width": 1920, "height": 1080})
             errors = []
             page.on("pageerror", lambda e: errors.append(e.stack))
-            page.route("**/api/**", fixture)
+            page.context.route("**/api/**", fixture)
             if os.environ.get("UI_LWC_PATH"):
-                page.route("**/lightweight-charts.standalone.production.js",
+                page.context.route("**/lightweight-charts.standalone.production.js",
                            lambda r: r.fulfill(path=os.environ["UI_LWC_PATH"],
                                                content_type="application/javascript"))
             page.route("https://fonts.googleapis.com/**",
                        lambda r: r.fulfill(body="", content_type="text/css"))
             page.goto(f"http://127.0.0.1:{server.server_port}/trading_dashboard.html?tab=portfolio")
+            page.evaluate("(visit) => localStorage.setItem('td_home_last_visit_v1', JSON.stringify(visit))", PREVIOUS_VISIT)
             page.wait_for_timeout(2000)
             print("Startup errors:", errors, flush=True)
             page.screenshot(path=str(output / "startup.png"))
@@ -246,6 +272,13 @@ def main(charts_only=False):
                 if tab == "charts":
                     assert page.locator("#grid canvas").count() > 0
                 if tab == "home":
+                    changes = page.locator(".home-today-card").filter(has=page.get_by_role(
+                        "heading", name="Čo sa zmenilo od poslednej návštevy"))
+                    expect(changes).to_contain_text("Nový rating")
+                    expect(changes).not_to_contain_text("Starý rating")
+                    expect(changes).to_contain_text("Zverejnené výsledky")
+                    expect(changes).to_contain_text("Prerazenia týždennej EMA200")
+                    expect(changes).to_contain_text("Čakaj → Urob")
                     card = page.locator("details").filter(has=page.get_by_text("Kam išli peniaze · posledných 30 dní", exact=True))
                     with page.expect_response("**/api/home/recent-purchases"):
                         card.locator("summary").click()
@@ -296,6 +329,51 @@ def main(charts_only=False):
             expect(portfolio_rows).to_contain_text("AAPL")
             portfolio_set.select_option("")
             expect(portfolio_rows).to_have_count(len(POSITIONS))
+            requests = []
+            page.on("request", lambda request: requests.append(request.url)
+                    if "/api/portfolio/sparklines?" in request.url else None)
+            assert not page.locator("[data-port-spark]").count()
+            page.get_by_role("button", name="⚙ Stĺpce").click()
+            page.get_by_label("Cena · 30 dní").check()
+            expect(page.locator('[data-port-spark="AAPL"] .port-sparkline')).to_be_attached()
+            assert len(requests) == 1, requests
+            expect(page.locator('[data-port-spark="MSFT"]')).to_have_text("—")
+            page.locator("#port-inner-main .port-summary").first.click()
+
+            ticker = page.locator('.port-sym a[data-ticker-link="dock"]').get_by_text("AAPL", exact=True)
+            expect(ticker).to_have_attribute("href", "/?tab=charts&ticker=AAPL")
+            saved_layout = page.evaluate("localStorage.getItem('td_layout')")
+            for click in ({"modifiers": ["Control"]}, {"button": "middle"}):
+                with page.context.expect_page() as opened:
+                    ticker.click(**click)
+                detail = opened.value
+                expect(detail.locator("#tab-charts")).to_have_class("main-tab active")
+                expect(detail.locator("#grid .p-sym")).to_have_count(1)
+                expect(detail.locator("#grid .p-sym")).to_have_value("AAPL")
+                detail.close()
+            assert page.evaluate("localStorage.getItem('td_layout')") == saved_layout
+            ticker.click()
+            expect(page.locator("#chart-dock")).to_be_visible()
+            page.evaluate("closeChartDock()")
+
+            for button, tab, selector in [
+                ("Analytika", "predictive", "#tickerInput"),
+                ("Graf", "charts", "#grid .panel.focused .p-sym"),
+                ("Verdikt", "verdict", "#verdictTickerInput"),
+            ]:
+                if tab == "predictive":
+                    page.get_by_role("button", name="Otvoriť ticker", exact=True).click()
+                else:
+                    page.keyboard.press("Alt+k")
+                palette = page.get_by_role("dialog", name="Otvoriť ticker")
+                expect(palette).to_be_visible()
+                palette.get_by_label("Ticker", exact=True).fill("msft")
+                if tab == "predictive":
+                    page.screenshot(path=str(output / "ticker-palette.png"), animations="disabled")
+                palette.get_by_role("button", name=button).click()
+                expect(palette).to_be_hidden()
+                expect(page.locator(f"#tab-{tab}")).to_have_class("main-tab active")
+                expect(page.locator(selector)).to_have_value("MSFT")
             page.locator("#tab-charts").click()
             expect(page.locator("#toolbar")).to_be_visible()
             page.get_by_role("combobox", name="Otvoriť sadu").select_option("earnings-recent")

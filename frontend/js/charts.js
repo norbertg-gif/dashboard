@@ -635,7 +635,12 @@ function getCurrentConfig() {
 // dashboard tab used to rewrite its stale layout this way and wipe zoom and
 // indicators set in the other tab.
 let _savedLayoutJson = null;
+const directChartTicker = (() => {
+  const params = new URLSearchParams(location.search);
+  return params.get('tab') === 'charts' ? normalizeTickerDestination(params.get('ticker')) : '';
+})();
 function saveLayout() {
+  if (directChartTicker) return;
   const json = JSON.stringify(getCurrentConfig());
   if (_savedLayoutJson === null) _savedLayoutJson = localStorage.getItem('td_layout');
   if (json === _savedLayoutJson) return;
@@ -643,6 +648,7 @@ function saveLayout() {
   localStorage.setItem('td_layout', json);
 }
 function loadLayout() {
+  if (directChartTicker) return [chartDefaultPanelCfg(directChartTicker)];
   try { const s = localStorage.getItem('td_layout'); if(s) { _savedLayoutJson = s; return JSON.parse(s); } } catch(e){}
   return DEFAULTS;
 }

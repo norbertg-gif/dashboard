@@ -3,6 +3,81 @@ let _homeTodayLoading = false;
 let _homeTodayData = null;
 let _homeTodayFetchedMs = 0;
 const HOME_DETAILS_KEY = 'td_home_details_open';
+const HOME_VISIT_KEY = 'td_home_last_visit_v1';
+let homePreviousVisit;
+
+function homeVisitState(data) {
+  const events = [...(data.activity || [])];
+  for (const row of data.ema200_week?.items || []) {
+    if (row.week && ['cross_up', 'cross_down'].includes(row.kind)) {
+      events.push({id: `${row.ticker}:EMA:${row.week}:${row.kind}`, ticker: row.ticker,
+        date: row.week, kind: row.kind});
+    }
+  }
+  const unavailable = data.unavailable || {};
+  const membership = ['portfolio', 'cash', 'settings', 'scanner', 'build', 'dca', 'earnings']
+    .some(key => unavailable[key]) ? null : data.membership;
+  return {seenAt: new Date().toISOString(), events, membership};
+}
+
+function rememberHomeVisit(data) {
+  if (homePreviousVisit === undefined) {
+    try { homePreviousVisit = JSON.parse(localStorage.getItem(HOME_VISIT_KEY)); }
+    catch (e) { homePreviousVisit = null; }
+  }
+  if (!data.snapshot_at || !Array.isArray(data.activity)) return;
+  const state = homeVisitState(data);
+  try {
+    const previous = JSON.parse(localStorage.getItem(HOME_VISIT_KEY));
+    const cutoff = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
+    const events = new Map((previous?.events || []).filter(row => row.date >= cutoff).map(row => [row.id, row]));
+    for (const row of state.events) events.set(row.id, row);
+    localStorage.setItem(HOME_VISIT_KEY, JSON.stringify({
+      ...state, events: [...events.values()], membership: state.membership || previous?.membership || null,
+    }));
+  } catch (e) {}
+}
+
+function homeChangesHtml(data) {
+  const lastSeen = Date.parse(homePreviousVisit?.seenAt);
+  if (!Number.isFinite(lastSeen)) {
+    return '<p class="home-today-sub">Od ďalšej návštevy tu uvidíš zmeny v tomto prehliadači.</p>';
+  }
+  if (!data.snapshot_at) return '<p class="home-today-sub">Portfólio je nedostupné.</p>';
+  const current = homeVisitState(data);
+  const before = homePreviousVisit;
+  const known = new Set((before.events || []).map(row => row.id));
+  const since = String(before.seenAt || '').slice(0, 10);
+  const weekFloor = new Date(lastSeen - 7 * 86400000).toISOString().slice(0, 10);
+  const groups = [
+    ['rating', 'Nové ratingy analytikov'],
+    ['earnings', 'Zverejnené výsledky'],
+    ['ema', 'Prerazenia týždennej EMA200'],
+    ['move', 'Presuny medzi Urob a Čakaj'],
+  ];
+  const changes = current.events.filter(row =>
+    !known.has(row.id) && row.date >= (row.kind.startsWith('cross_') ? weekFloor : since));
+  for (const [ticker, section] of Object.entries(current.membership || {})) {
+    const old = before.membership?.[ticker];
+    if (section !== old && ['actions', 'waiting'].includes(old) && ['actions', 'waiting'].includes(section)) {
+      changes.push({ticker, kind: 'move', detail: section === 'actions' ? 'Čakaj → Urob' : 'Urob → Čakaj'});
+    }
+  }
+  const lines = groups.map(([kind, label]) => {
+    const rows = changes.filter(row => kind === 'ema' ? row.kind.startsWith('cross_') : row.kind === kind)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.ticker.localeCompare(b.ticker));
+    if (!rows.length) return '';
+    return `<div class="home-change-group"><h3>${label}</h3>${rows.map(row => {
+      const detail = kind === 'ema' ? (row.kind === 'cross_up' ? 'Nahor' : 'Nadol') : row.detail;
+      return `<div class="home-today-line"><a class="home-today-chip ticker-link" ${tickerLinkAttrs(row.ticker)}>${escHtml(row.ticker)}</a>
+        <span>${escHtml([row.date, detail].filter(Boolean).join(' · '))}</span></div>`;
+    }).join('')}</div>`;
+  }).join('');
+  const partial = !current.membership || !!data.unavailable?.ema200_week
+    || (data.activity_covered || []).length < Object.keys(data.membership || {}).length;
+  const note = partial ? '<p class="home-today-sub">Niektoré zdroje sú nedostupné. Zobrazené sú dostupné zmeny.</p>' : '';
+  return (lines || '<p class="home-today-sub">Žiadne nové zmeny v dostupných dátach.</p>') + note;
+}
 
 function homeDetailsOpen() {
   try { return localStorage.getItem(HOME_DETAILS_KEY) === '1'; } catch (e) { return false; }
@@ -16,15 +91,9 @@ function homeDetailsToggle(el) {
   }
 }
 
-function homeTodayChart(encoded) {
-  switchMainTab('portfolio');
-  openChartDock(decodeURIComponent(encoded));
-}
-
 function homeTodayLinks(ticker) {
-  const sym = encodeURIComponent(ticker).replace(/'/g, '%27');
-  return `<span class="home-today-links"><button class="btn mini" onclick="homeTodayChart('${sym}')">Otvoriť graf</button>
-    <button class="btn mini" onclick="openVerdictTicker(decodeURIComponent('${sym}'), event)">Verdikt</button></span>`;
+  return `<span class="home-today-links"><a class="btn mini ticker-link" ${tickerLinkAttrs(ticker, 'charts', 'dock')}>Otvoriť graf</a>
+    <a class="btn mini ticker-link" ${tickerLinkAttrs(ticker, 'verdict')}>Verdikt</a></span>`;
 }
 
 async function homeLoadRecentPurchases(details) {
@@ -49,7 +118,7 @@ async function homeLoadRecentPurchases(details) {
            decision.blocking_reason || decision.reason].filter(Boolean).join(' · ')
         : 'Chýba stav Prehľadu z dvoch dní pred nákupom.';
       return `<div class="home-today-act"><div class="home-today-act-main">
-        <div class="home-today-act-title"><strong>${escHtml(row.ticker)}</strong> · ${escHtml(amount(row.amount))} · ${kinds[row.kind]}</div>
+        <div class="home-today-act-title"><strong><a class="ticker-link" ${tickerLinkAttrs(row.ticker)}>${escHtml(row.ticker)}</a></strong> · ${escHtml(amount(row.amount))} · ${kinds[row.kind]}</div>
         <div class="home-today-sub">${escHtml(date(row.opened_at))} · ${escHtml(context)}</div>
       </div>${homeTodayLinks(row.ticker)}</div>`;
     }).join('');
@@ -77,14 +146,13 @@ function homeTodayHtml(data) {
   const rows = key => sections[key] || [];
   const unavailable = data.unavailable || {};
   const tickerBtn = t => {
-    const sym = encodeURIComponent(t).replace(/'/g, '%27');
-    return `<button type="button" class="home-today-chip" onclick="openScannerTicker(decodeURIComponent('${sym}'))" title="Otvoriť v Analytike">${escHtml(t)}</button>`;
+    return `<a class="home-today-chip ticker-link" ${tickerLinkAttrs(t)} title="Otvoriť v Analytike">${escHtml(t)}</a>`;
   };
   const card = (cls, title, body) => `<section class="home-today-card ${cls}"><h2>${title}</h2>${body}</section>`;
 
   // 1) Urob — the only place with full action buttons.
   const actions = rows('actions').map(r => `<div class="home-today-act">
-      <div class="home-today-act-main"><div class="home-today-act-title">${r.kind === 'dca' ? 'Dokúp' : 'Dobuduj'} <strong>${escHtml(r.ticker)}</strong> <span class="home-today-amount">${money(r.amount)}</span></div>
+      <div class="home-today-act-main"><div class="home-today-act-title">${r.kind === 'dca' ? 'Dokúp' : 'Dobuduj'} <strong><a class="ticker-link" ${tickerLinkAttrs(r.ticker)}>${escHtml(r.ticker)}</a></strong> <span class="home-today-amount">${money(r.amount)}</span></div>
       <div class="home-today-sub">${escHtml(r.reason || '')}</div></div>${homeTodayLinks(r.ticker)}</div>`).join('');
   const deferred = data.cash_deferred || [];
   const actNote = [unavailable.dca ? 'DCA: nedostupné' : '', unavailable.build ? 'BUILD: nedostupné' : ''].filter(Boolean).join(' · ');
@@ -160,6 +228,7 @@ function homeTodayHtml(data) {
     ${card('', 'Čakaj · keď sa podmienka splní, presunie sa do Urob', waiting)}
     ${card('', `Týždenná EMA200${emaWeek}`, emaBody)}
     ${card('', `Drž · ${hold.length} pozícií`, holdBody)}
+    ${card('', 'Čo sa zmenilo od poslednej návštevy', homeChangesHtml(data))}
     <details class="home-today-card is-quiet" ontoggle="homeLoadRecentPurchases(this)">
       <summary>Kam išli peniaze · posledných 30 dní</summary>
       <div class="home-purchases-body"></div>
@@ -182,6 +251,7 @@ async function renderHomeView(force = false) {
   _homeTodayLoading = true;
   try {
     _homeTodayData = await homeFetchJson(`${API}/api/home/today?account=1&refresh=${force ? 1 : 0}`);
+    rememberHomeVisit(_homeTodayData);
     _homeTodayFetchedMs = Date.now();
     const body = document.getElementById('home-today-body');
     if (body) body.innerHTML = homeTodayHtml(_homeTodayData);
@@ -485,7 +555,7 @@ function homeMoversHtml(moversUp, moversDown) {
   const down = (moversDown?.movers || []).slice(0, 6);
   const row = (m) => `
     <div class="home-mover-row" onclick="homeOpenTicker('${escHtml(m.symbol)}')">
-      <span class="home-mover-sym">${escHtml(m.symbol)}</span>
+      <a class="home-mover-sym ticker-link" ${tickerLinkAttrs(m.symbol)}>${escHtml(m.symbol)}</a>
       <span class="home-mover-price mono">${Number(m.last_close || 0).toFixed(2)}</span>
       <span class="home-mover-chg mono ${Number(m.change_pct) >= 0 ? 'home-pos' : 'home-neg'}">${Number(m.change_pct) >= 0 ? '+' : ''}${Number(m.change_pct).toFixed(2)}%</span>
     </div>`;
@@ -509,7 +579,7 @@ function homePlanHtml(plan) {
     <div class="home-plan-headline">${escHtml(plan.headline || '')}</div>
     ${focus.length ? `<div class="home-plan-list">${focus.map(it => `
       <div class="home-plan-row" onclick="homeOpenTicker('${escHtml(it.ticker)}')">
-        <span class="home-plan-ticker">${escHtml(it.ticker)}</span>
+        <a class="home-plan-ticker ticker-link" ${tickerLinkAttrs(it.ticker)}>${escHtml(it.ticker)}</a>
         <span class="home-plan-summary">${escHtml(it.summary || '')}</span>
       </div>`).join('')}</div>` : ''}`;
 }
@@ -519,7 +589,7 @@ function homeEarningsHtml(earnings) {
   if (!items.length) return '<div class="home-empty">Žiadne blížiace sa earnings.</div>';
   return `<div class="home-list">${items.map(it => `
     <div class="home-list-row" onclick="homeOpenTicker('${escHtml(it.ticker)}')">
-      <span class="home-plan-ticker">${escHtml(it.ticker)}</span>
+      <a class="home-plan-ticker ticker-link" ${tickerLinkAttrs(it.ticker)}>${escHtml(it.ticker)}</a>
       <span class="home-earn-days">${it.days === 0 ? 'dnes' : it.days === 1 ? 'zajtra' : `o ${it.days} dní`}</span>
       <span onclick="event.stopPropagation()">${basketButtonHtml(it.ticker, 'home-basket-btn')}</span>
       ${it.in_portfolio ? '<span class="scanner-label buy">PORT</span>' : ''}
@@ -530,7 +600,7 @@ function homePlanRowsHtml(rows, emptyText) {
   if (!rows?.length) return `<div class="home-empty">${emptyText}</div>`;
   return `<div class="home-list">${rows.map(it => `
     <div class="home-list-row" onclick="homeOpenTicker('${escHtml(it.ticker)}')">
-      <span class="home-plan-ticker">${escHtml(it.ticker)}</span>
+      <a class="home-plan-ticker ticker-link" ${tickerLinkAttrs(it.ticker)}>${escHtml(it.ticker)}</a>
       <span class="home-plan-summary">${escHtml(it.summary || '')}</span>
     </div>`).join('')}</div>`;
 }
@@ -603,7 +673,7 @@ function homeContributionHtml(port1, port2) {
   const legend = rows.map((r, i) => `
     <div class="home-contrib-row"${r.rest ? '' : ` onclick="homeOpenTicker('${escHtml(r.sym)}')" style="cursor:pointer;"`}>
       <span class="home-contrib-dot" style="background:${HOME_CONTRIB_COLORS[i % HOME_CONTRIB_COLORS.length]};"></span>
-      <span class="home-contrib-sym">${escHtml(r.sym)}${r.rest && r.count ? ` <span class="home-contrib-note">(${r.count})</span>` : ''}</span>
+      <span class="home-contrib-sym">${r.rest ? escHtml(r.sym) : `<a class="ticker-link" ${tickerLinkAttrs(r.sym)}>${escHtml(r.sym)}</a>`}${r.rest && r.count ? ` <span class="home-contrib-note">(${r.count})</span>` : ''}</span>
       <span class="home-contrib-pct">${r.pct.toFixed(1)} %</span>
     </div>`).join('');
   const lossLine = losses < 0
@@ -756,7 +826,7 @@ function renderBenchmarkCard(data) {
   const top = (data.rows || []).filter(r => r.excess_pp != null).slice(0, 3);
   const worst = (data.rows || []).filter(r => r.excess_pp != null).slice(-3).reverse();
   const rowLine = r => `<div class="bm-row" onclick="homeOpenTicker('${escHtml(r.symbol)}')">
-      <span class="bm-row-sym">${escHtml(r.symbol)}</span>
+      <a class="bm-row-sym ticker-link" ${tickerLinkAttrs(r.symbol)}>${escHtml(r.symbol)}</a>
       <span class="bm-row-val ${r.excess_pp >= 0 ? 'home-pos' : 'home-neg'}">${benchNum(r.excess_pp, ' pb')}</span>
       <span class="bm-row-sub">${benchNum(r.return_pct)} vs ${benchNum(r.bench_pct)}</span>
     </div>`;
@@ -955,12 +1025,12 @@ function heatmapCellHtml(row, metricKey, range) {
     row?.pnl_pct != null ? `P/L ${Number(row.pnl_pct).toFixed(1)} %` : null,
     row?.chart_health ? `graf ${row.chart_health}` : null,
   ].filter(Boolean).join(' · ');
-  return `<button type="button" class="hm-cell" style="${heatmapCellStyle(raw, m.kind, range)}flex-grow:${grow.toFixed(2)};"
+  return `<div class="hm-cell" style="${heatmapCellStyle(raw, m.kind, range)}flex-grow:${grow.toFixed(2)};"
       title="${escHtml(tip || row?.symbol || '')}" onclick="openVerdictTicker('${escHtml(row.symbol)}')">
-    <span class="hm-sym">${escHtml(row.symbol)}</span>
+    <a class="hm-sym ticker-link" ${tickerLinkAttrs(row.symbol, 'verdict')}>${escHtml(row.symbol)}</a>
     <span class="hm-basket" onclick="event.stopPropagation()">${basketButtonHtml(row.symbol, 'hm-basket-btn')}</span>
     <span class="hm-val">${shown}</span>
-  </button>`;
+  </div>`;
 }
 
 function heatmapBlockHtml(title, rows, metricKey, emptyText, range) {

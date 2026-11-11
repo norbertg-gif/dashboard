@@ -483,7 +483,7 @@ function investorInboxRow(item) {
     return `<span class="inbox-kind ${kind}" title="${escHtml(reason.detail || reason.summary || '')}">${label}</span>`;
   }).join('')}</div>` : '';
   return `<div class="inbox-item ${severity}">
-    <div class="inbox-main" onclick="openVerdictTicker('${ticker}', event)" title="Otvoriť ${ticker} vo Verdikte">
+    <a class="inbox-main ticker-link" ${tickerLinkAttrs(item.ticker, 'verdict')} title="Otvoriť ${ticker} vo Verdikte">
       <span class="inbox-dot"></span>
       <div class="inbox-text">
         <div class="inbox-title"><b>${ticker}</b><span>${escHtml(item.title || '')}</span><em>${escHtml(inboxSeverityLabel(severity))}</em></div>
@@ -491,10 +491,10 @@ function investorInboxRow(item) {
         <div class="inbox-summary">${escHtml(item.summary || item.detail || '')}</div>
         <div class="inbox-detail">${escHtml(item.detail || '')}</div>
       </div>
-    </div>
+    </a>
     <div class="inbox-actions">
-      <button class="btn mini" onclick="openVerdictTicker('${ticker}', event)">Verdikt</button>
-      <button class="btn mini" onclick="event.stopPropagation();openScannerTicker('${ticker}')">Analytika</button>
+      <a class="btn mini ticker-link" ${tickerLinkAttrs(item.ticker, 'verdict')}>Verdikt</a>
+      <a class="btn mini ticker-link" ${tickerLinkAttrs(item.ticker)}>Analytika</a>
       ${watchlistButtonHtml(item.ticker, 'inbox-wl-btn')}${basketButtonHtml(item.ticker, 'inbox-basket-btn')}
     </div>
   </div>`;
@@ -673,9 +673,9 @@ function weeklyPlanRow(row, cls, reviewed) {
   const t = escHtml(row.ticker || '');
   const isReviewed = reviewed.has(String(row.ticker || '').toUpperCase());
   return `<div class="plan-row${isReviewed ? ' reviewed' : ''}">
-    <span class="plan-ticker ${cls}" onclick="openScannerTicker('${t}')" title="Otvoriť v Analytike">${t}</span>
+    <a class="plan-ticker ${cls} ticker-link" ${tickerLinkAttrs(t)} title="Otvoriť v Analytike">${t}</a>
     <span class="plan-text">${escHtml(row.summary || '')}</span>
-    <button class="scanner-verdict-btn" onclick="openVerdictTicker('${t}', event)">Verdikt</button>
+    <a class="scanner-verdict-btn ticker-link" ${tickerLinkAttrs(t, 'verdict')}>Verdikt</a>
     <button class="plan-reviewed-btn${isReviewed ? ' active' : ''}" onclick="toggleWeeklyPlanReviewed('${t}', event)" title="${isReviewed ? 'Označiť ako neprejdené' : 'Označiť ako prejdené'}">${isReviewed ? 'Prejdené' : 'Hotovo'}</button>
   </div>`;
 }
@@ -789,11 +789,11 @@ function renderEarningsCalendar(payload) {
         // Košíkové tlačidlo NEMÔŽE byť vnorené v <button> (neplatné HTML,
         // klik by sa správal nepredvídateľne) — preto obal so sesterským prvkom.
         return `<span class="earncal-wrap">
-          <button class="earncal-item ${urgent ? 'urgent' : ''}" onclick="event.stopPropagation();openScannerTicker('${escHtml(item.ticker)}')" title="Otvoriť ${escHtml(item.ticker)} v Analytike">
+          <a class="earncal-item ${urgent ? 'urgent' : ''} ticker-link" ${tickerLinkAttrs(item.ticker)} title="Otvoriť ${escHtml(item.ticker)} v Analytike">
             <b>${escHtml(item.ticker)}</b>
             <span>${escHtml(held)}</span>
             ${pnl ? `<em class="${Number(item.pnl_pct) >= 0 ? 'pos' : 'neg'}">${escHtml(pnl)}</em>` : ''}
-          </button>${basketButtonHtml(item.ticker, 'earncal-basket-btn')}
+          </a>${basketButtonHtml(item.ticker, 'earncal-basket-btn')}
         </span>`;
       }).join('')}</div>
     </div>`).join('');
@@ -952,7 +952,7 @@ function renderOpportunities(rows, days) {
     ).join('');
     return `<div class="opp-item" onclick="openScannerTicker('${r.ticker}')">
       <div class="opp-top">
-        <span class="opp-sym">${r.ticker}${gfLinkHtml(r.ticker)}</span>
+        <span class="opp-sym"><a class="ticker-link" ${tickerLinkAttrs(r.ticker)}>${escHtml(r.ticker)}</a>${gfLinkHtml(r.ticker)}</span>
         <span style="color:var(--muted);font-size:11px;">${r.last_close || '-'}</span>
       </div>
       <div class="opp-meta">
@@ -1366,13 +1366,13 @@ function renderScannerMine(data) {
       ${held.slice(0, 15).map(r => {
         const pnl = Number(r.pnl_pct);
         return `<tr onclick="openScannerTicker('${escHtml(r.symbol)}')" title="Otvoriť ${escHtml(r.symbol)} v Analytike">
-          <td><b class="scanner-ticker">${escHtml(r.symbol)}</b>${basketButtonHtml(r.symbol, 'scanner-basket-btn')}</td>
+          <td><a class="scanner-ticker ticker-link" ${tickerLinkAttrs(r.symbol)}>${escHtml(r.symbol)}</a>${basketButtonHtml(r.symbol, 'scanner-basket-btn')}</td>
           <td class="r">${Math.round(Number(r.dip))}</td>
           <td>${r.signal_score != null ? `${r.signal_score}/4` : r.scanned ? '0/4' : '<span class="muted">-</span>'}</td>
           <td>${r.chart_health ? escHtml(r.chart_health) : '<span class="muted">-</span>'}</td>
           <td class="r">${r.weight_pct != null ? Number(r.weight_pct).toFixed(1) + ' %' : '-'}</td>
           <td class="r ${Number.isFinite(pnl) ? (pnl >= 0 ? 'port-pos' : 'port-neg') : ''}">${Number.isFinite(pnl) ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)} %` : '-'}</td>
-          <td><button class="scanner-verdict-btn" onclick="openVerdictTicker('${escHtml(r.symbol)}', event)">Verdikt</button></td>
+          <td><a class="scanner-verdict-btn ticker-link" ${tickerLinkAttrs(r.symbol, 'verdict')}>Verdikt</a></td>
         </tr>`;
       }).join('')}
     </tbody></table>
@@ -1525,8 +1525,8 @@ function renderNasdaqScanner(payload) {
         </span>`
       : '<span class="muted">-</span>';
     return `<tr onclick="openScannerTicker('${escHtml(r.ticker)}')" title="Otvorit ${escHtml(r.ticker)} v predikcii">
-      <td><b class="scanner-ticker">${escHtml(r.ticker)}</b><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}${basketButtonHtml(r.ticker, 'scanner-basket-btn')}<span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
-      <td><span class="scanner-label ${decisionCls}">${decision}</span><button class="scanner-verdict-btn" title="Otvoriť stručný investičný verdikt" onclick="openVerdictTicker('${escHtml(r.ticker)}', event)">Verdikt</button><button class="scanner-verdict-btn" title="Otvoriť detail v Analytike" onclick="event.stopPropagation();openScannerTicker('${escHtml(r.ticker)}')">Analytika</button></td>
+      <td><a class="scanner-ticker ticker-link" ${tickerLinkAttrs(r.ticker)}>${escHtml(r.ticker)}</a><span class="hold-badge" data-hold="${escHtml(r.ticker)}"></span>${gfLinkHtml(r.ticker)}${watchlistButtonHtml(r.ticker, 'scanner-wl-btn')}${basketButtonHtml(r.ticker, 'scanner-basket-btn')}<span class="earn-badge" data-earn="${escHtml(r.ticker)}"></span><span class="ape-badge" data-ape="${escHtml(r.ticker)}"></span></td>
+      <td><span class="scanner-label ${decisionCls}">${decision}</span><a class="scanner-verdict-btn ticker-link" ${tickerLinkAttrs(r.ticker, 'verdict')} title="Otvoriť stručný investičný verdikt">Verdikt</a><a class="scanner-verdict-btn ticker-link" ${tickerLinkAttrs(r.ticker)} title="Otvoriť detail v Analytike">Analytika</a></td>
       <td>${chartHealthBadgeHtml(r)}</td>
       <td>${sig.score ? `<span style="color:${sigTierColor(sig.tier, sig.score)}">${sig.score}/4</span>` : '-'}</td>
       <td class="r">${dipTotal ?? '-'}</td>
@@ -2113,7 +2113,7 @@ function ema200ResultsTableHtml() {
     const sign = r.dist_pct > 0 ? '+' : '';
     return `<tr${near} onclick="openScannerTicker('${escHtml(r.ticker)}')"
         oncontextmenu="onEma200ScanRowContextMenu(event,'${escHtml(r.ticker)}')" style="cursor:pointer;">
-      <td><span class="port-sym">${escHtml(r.ticker)}</span>${r.near ? ' ⚠' : ''}${basketButtonHtml(r.ticker, 'ema200-basket-btn')}</td>
+      <td><a class="port-sym ticker-link" ${tickerLinkAttrs(r.ticker)}>${escHtml(r.ticker)}</a>${r.near ? ' ⚠' : ''}${basketButtonHtml(r.ticker, 'ema200-basket-btn')}</td>
       <td class="r">${r.close.toFixed(2)}</td>
       <td class="r">${r.ema200.toFixed(2)}</td>
       <td class="r">${sign}${r.dist_pct.toFixed(2)}%</td>
@@ -2405,7 +2405,7 @@ function renderPortfolioDropsCard() {
     body = `<div style="overflow:auto;max-height:360px"><table class="tool-table"><thead><tr>${[
       ['ticker','Ticker'],['drawdown_4w_pct','Od 4t max'],['change_4w_pct','Zmena 4t'],['vs_qqq_pp','vs QQQ'],['position_pnl_pct','Tvoja P/L'],['dip_total','DIP'],['chart_daily','Graf D/W'],['solvency_status','Solventnosť']
     ].map(([key,label]) => th(key,label)).join('')}</tr></thead><tbody>${rows.map(r => `<tr data-ticker="${escHtml(r.ticker)}" onclick="openScannerTicker(this.dataset.ticker)" oncontextmenu="onEma200ScanRowContextMenu(event,this.dataset.ticker)" style="cursor:pointer">
-      <td>${escHtml(r.ticker)}</td><td title="${escHtml(r.peak_week || 'málo dát')}">${escHtml(fmt(r.drawdown_4w_pct))}</td><td>${escHtml(fmt(r.change_4w_pct))}</td>
+      <td><a class="ticker-link" ${tickerLinkAttrs(r.ticker)}>${escHtml(r.ticker)}</a></td><td title="${escHtml(r.peak_week || 'málo dát')}">${escHtml(fmt(r.drawdown_4w_pct))}</td><td>${escHtml(fmt(r.change_4w_pct))}</td>
       <td ${r.vs_qqq_pp !== null && r.vs_qqq_pp <= -10 ? 'style="color:var(--red)" title="pokles najmä samotnej firmy, nie trhu"' : ''}>${escHtml(fmt(r.vs_qqq_pp,'pp'))}</td>
       <td>${r.position_pnl_pct === null ? '—' : escHtml(fmt(r.position_pnl_pct))}</td><td>${escHtml(r.dip_total ?? '—')}</td><td>${health(r.chart_daily)} / ${health(r.chart_weekly)}</td>
       <td title="${escHtml(r.solvency_flag ? 'Súčasne nízke úrokové krytie, vysoký dlh a nízka bežná likvidita' : r.solvency_status)}">${r.solvency_flag ? '⚠' : r.solvency_status === 'clear' ? 'OK' : '—'}</td></tr>`).join('')}</tbody></table></div>

@@ -27,8 +27,48 @@ ddEl.addEventListener('mouseenter', () => ddHovered = true);
 ddEl.addEventListener('mouseleave', () => ddHovered = false);
 
 document.addEventListener('keydown', e => {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.code === 'KeyK') {
+    e.preventDefault();
+    openTickerPalette();
+    return;
+  }
+  if (document.getElementById('ticker-palette').open) return;
   if (e.key === 'Escape' && maximizedPanelId) toggleMaximizePanel(maximizedPanelId);
 });
+
+function openTickerPalette() {
+  const palette = document.getElementById('ticker-palette');
+  const input = document.getElementById('ticker-palette-input');
+  const options = new Set([currentContextTicker(), ...watchlist.map(item => item.symbol)]);
+  for (const data of Object.values(portfolioAccountData)) {
+    for (const row of data?.positions || []) options.add(row.symbol);
+  }
+  document.getElementById('ticker-palette-symbols').replaceChildren(...[...options]
+    .map(normalizeTickerDestination).filter(Boolean).sort().map(ticker => new Option(ticker)));
+  if (!palette.open) {
+    input.value = normalizeTickerDestination(currentContextTicker());
+    updateTickerPalette();
+    palette.showModal();
+  }
+  input.focus();
+  input.select();
+}
+
+function updateTickerPalette() {
+  const input = document.getElementById('ticker-palette-input');
+  const ticker = normalizeTickerDestination(input.value);
+  input.setCustomValidity(input.value.trim() && !ticker ? 'Zadaj platný ticker.' : '');
+}
+
+function submitTickerPalette(event) {
+  event.preventDefault();
+  const input = document.getElementById('ticker-palette-input');
+  const ticker = normalizeTickerDestination(input.value);
+  if (!ticker) return;
+  const action = event.submitter?.value || 'predictive';
+  document.getElementById('ticker-palette').close();
+  openTickerDestination(ticker, action);
+}
 
 // ── ETORO MARKERY ────────────────────────────────────────────────────────────
 
@@ -63,8 +103,8 @@ document.addEventListener('keydown', e => {
   const requestedParams = new URLSearchParams(window.location.search);
   const requestedTab = requestedParams.get('tab');
   const requestedTicker = requestedParams.get('ticker');
-  if (requestedTab === 'predictive' && requestedTicker) {
-    openScannerTicker(requestedTicker);
+  if (['predictive', 'charts', 'verdict'].includes(requestedTab) && normalizeTickerDestination(requestedTicker)) {
+    openTickerDestination(requestedTicker, requestedTab);
   } else if (requestedTab === 'risk') {
     switchMainTab('portfolio');
   } else if (requestedTab === 'history' && typeof isAdvancedUiMode === 'function' && !isAdvancedUiMode()) {

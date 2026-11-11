@@ -1985,7 +1985,7 @@ function pc_renderDecisionBar(data) {
     <span class="pc-decision-chip">Regime <strong>${regimeText}</strong></span>
     <span class="pc-decision-chip">Posledný <strong>${predictiveSignalAgeLabel(latestSignal)}</strong></span>
     ${latestReturn != null ? `<span class="pc-decision-chip">Od signálu <strong>${latestReturn >= 0 ? '+' : ''}${latestReturn.toFixed(1)}%</strong></span>` : ''}
-    <button class="pc-verdict-link" onclick="openVerdictTicker('${escHtml(ticker)}', event)">Verdikt</button>
+    <a class="pc-verdict-link ticker-link" ${tickerLinkAttrs(ticker, 'verdict')}>Verdikt</a>
     <div class="pc-decision-summary">${summary}</div>
   `;
 }

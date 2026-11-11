@@ -54,7 +54,7 @@ function newsfeedRender(data, stale = false) {
     let extra = '';
     if (commentary.length) extra = `<details class="newsfeed-commentary"><summary>\u010fal\u0161ie (${commentary.length})</summary>${commentary.map(newsfeedItemHtml).join('')}</details>`;
     return `<section class="newsfeed-row">
-      <button type="button" class="btn mini newsfeed-ticker" data-news-ticker="${escHtml(row.ticker)}" title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span>${newsfeedPnlHtml(row)}</button>
+      <a class="btn mini newsfeed-ticker ticker-link" ${tickerLinkAttrs(row.ticker)} title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span>${newsfeedPnlHtml(row)}</a>
       <div>${wire.map(newsfeedItemHtml).join('')}${extra}</div>
     </section>`;
   }).join('');
@@ -71,24 +71,16 @@ function newsfeedRender(data, stale = false) {
   return `<div class="newsfeed-wrap"><div class="newsfeed-head"><span>${intro}</span><span>${staleNote} ${retry}</span></div>${content}${without}</div>`;
 }
 
-function newsfeedBindTickers(root) {
-  root.querySelectorAll('[data-news-ticker]').forEach(button => {
-    button.addEventListener('click', () => openScannerTicker(button.dataset.newsTicker));
-  });
-}
-
 async function loadNewsTab(retry = false) {
   const root = document.getElementById('news-view');
   if (!root) return;
   if (_newsTabLastGood) root.innerHTML = newsfeedRender(_newsTabLastGood, Number(_newsTabLastGood.errors) > 0);
   else root.innerHTML = '<div class="newsfeed-wrap"><div class="home-empty">Na\u010d\u00edtavam spr\u00e1vy...</div></div>';
-  newsfeedBindTickers(root);
   try {
     const data = await fetchPortfolioNews(retry);
     if (!root.isConnected) return;
     root.innerHTML = newsfeedRender(data, Number(data.errors) > 0);
-    newsfeedBindTickers(root);
-  } catch (error) {
+    } catch (error) {
     if (!root.isConnected) return;
     if (_newsTabLastGood) root.innerHTML = newsfeedRender(_newsTabLastGood, true);
     else root.innerHTML = `<div class="newsfeed-wrap"><div class="home-empty">Spr\u00e1vy sa nepodarilo na\u010d\u00edta\u0165. <button type="button" class="btn mini" onclick="loadNewsTab(true)">Sk\u00fasi\u0165 znova</button></div></div>`;

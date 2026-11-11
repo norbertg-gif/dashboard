@@ -1271,6 +1271,43 @@ body.sidebar-collapsed #sb-resizer {
   background: var(--bg-input);
   color: var(--text);
 }
+.ticker-link {
+  color: inherit;
+  text-decoration: none;
+}
+.ticker-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#ticker-palette {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(440px, calc(100% - 24px));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+#ticker-palette::backdrop { background: rgba(0, 0, 0, .45); }
+#ticker-palette form { display: grid; gap: 10px; }
+#ticker-palette h2 { font-size: 17px; }
+#ticker-palette label { color: var(--muted); }
+#ticker-palette input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+.ticker-palette-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-change-group + .home-change-group { margin-top: 12px; }
+.home-change-group h3 { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.port-sparkline { display: inline-block; vertical-align: middle; }
 .ind-btn {
   font-family: var(--font-ui);
   font-size: 10.5px;
@@ -6540,6 +6577,9 @@ body.acct2-active #grid, body.acct2-active #main-charts, #main-portfolio.port-ac
     min-height: 30px;
     border: 1px solid var(--border);
     background: var(--bg-input);
+  }
+  :where(html[data-variant="glass"] body) #ticker-palette-btn {
+    grid-column: 1 / -1;
   }
   :where(html[data-variant="glass"] body) #ui-mode-btn::before {
     content: "Režim";

@@ -375,6 +375,49 @@ function switchMainTab(tab) {
   history.replaceState(null, '', url);
 }
 
+function normalizeTickerDestination(value) {
+  const symbol = String(value ?? '').trim().toUpperCase();
+  return /^[A-Z0-9^][A-Z0-9.^=_/-]{0,23}$/.test(symbol) ? symbol : '';
+}
+
+function tickerDestinationUrl(ticker, tab) {
+  return '/?' + new URLSearchParams({tab, ticker});
+}
+
+function tickerLinkAttrs(ticker, tab = 'predictive', action = tab) {
+  return `href="${escHtml(tickerDestinationUrl(ticker, tab))}" data-ticker-link="${action}"
+    onclick="followTickerLink(event, this)" oncontextmenu="event.stopPropagation()"`;
+}
+
+function openTickerDestination(ticker, action) {
+  const symbol = normalizeTickerDestination(ticker);
+  if (!symbol) return;
+  if (action === 'predictive') openScannerTicker(symbol);
+  if (action === 'verdict') openVerdictTicker(symbol);
+  if (action === 'charts') {
+    switchMainTab('charts');
+    const existing = gridChartPanelIds().find(id =>
+      document.getElementById(id)?.querySelector('.p-sym')?.value.trim().toUpperCase() === symbol);
+    if (existing) {
+      setActivePanel(existing);
+      document.getElementById(existing).scrollIntoView({block: 'nearest'});
+    } else openNewChartPanel(symbol);
+  }
+  if (action === 'watchlist') onSbTickerClick(symbol);
+  if (action === 'dock') {
+    if (activeMainTab !== 'portfolio') switchMainTab('portfolio');
+    openChartDock(symbol);
+  }
+}
+
+function followTickerLink(event, link) {
+  event.stopPropagation();
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const url = new URL(link.href);
+  openTickerDestination(url.searchParams.get('ticker'), link.dataset.tickerLink);
+}
+
 function openMainTabWindow(event, tab) {
   event?.stopPropagation();
   const url = new URL(window.location.href);
