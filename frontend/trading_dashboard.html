@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261111-4">
+<link rel="stylesheet" href="/dashboard.css?v=20261112-171655">
 </head>
 <body data-main-tab="home">
 
@@ -346,6 +346,15 @@
 
   </div>
 
+  <div class="pc-news-col" id="pcNewsCol">
+    <div class="pc-news-head">
+      <button class="pc-inline-toggle" id="pcNewsToggle" onclick="pc_switchNewsCol()" title="Zbaliť alebo rozbaliť správy k titulu">−</button>
+      <span class="label">Správy</span>
+      <button class="pc-inline-toggle pc-news-refresh" onclick="pc_loadTickerNews(null, true)" title="Načítať správy znova">⟳</button>
+    </div>
+    <div class="pc-news-body" id="pcNewsBody"><div class="pc-news-empty">Načítaj ticker…</div></div>
+  </div>
+
   <div class="pc-sidebar" id="pcSidebar">
     <div class="card advanced-only">
       <div class="card-title">Prognóza nasledujúcej sviečky</div>
@@ -572,17 +581,17 @@
       </div>
     </form>
   </dialog>
-  <script src="/js/core.js?v=20261111-4"></script>
+  <script src="/js/core.js?v=20261112-171655"></script>
   <script src="/js/live.js?v=20261110-162532"></script>
-  <script src="/js/portfolio.js?v=20261111-4"></script>
-  <script src="/js/watchlist.js?v=20261111-4"></script>
+  <script src="/js/portfolio.js?v=20261112-171655"></script>
+  <script src="/js/watchlist.js?v=20261112-171655"></script>
   <script src="/js/scanner-table-sort.js?v=20261110-162532"></script>
-  <script src="/js/scanner.js?v=20261111-4"></script>
-  <script src="/js/predictive.js?v=20261111-4"></script>
+  <script src="/js/scanner.js?v=20261112-171655"></script>
+  <script src="/js/predictive.js?v=20261112-171655"></script>
   <script src="/js/verdict.js?v=20261110-162532"></script>
-  <script src="/js/home.js?v=20261111-4"></script>
-  <script src="/js/newsfeed.js?v=20261111-4"></script>
-  <script src="/js/charts.js?v=20261111-4"></script>
-  <script src="/js/main.js?v=20261111-4"></script>
+  <script src="/js/home.js?v=20261112-171655"></script>
+  <script src="/js/newsfeed.js?v=20261112-171655"></script>
+  <script src="/js/charts.js?v=20261112-171655"></script>
+  <script src="/js/main.js?v=20261112-171655"></script>
 </body>
 </html>

@@ -7118,3 +7118,18 @@ body.light-mode .port-table td.port-ticker-tag {
 @media(max-width:600px) {.home-today-act {align-items:flex-start;flex-direction:column}.home-today-date {width:auto}}
 
 .home-today-reported { opacity: .55; }
+
+/* Analytika: stĺpec správ k titulu medzi grafom a pravým panelom */
+#predictiveTab .pc-news-col { display:flex; flex-direction:column; width:250px; min-width:250px; flex-shrink:0; border-right:1px solid var(--border); background:var(--bg-card); overflow:hidden; }
+#predictiveTab .pc-news-head { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--border); flex-shrink:0; }
+#predictiveTab .pc-news-head .label { flex:1; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+#predictiveTab .pc-news-body { flex:1; min-height:0; overflow-y:auto; padding:10px 12px; font-size:12px; }
+#predictiveTab .pc-news-body .newsfeed-item { margin-bottom:12px; }
+#predictiveTab .pc-news-body .newsfeed-meta { display:block; margin:2px 0 0; }
+#predictiveTab .pc-news-sym { font-size:10px; color:var(--muted); margin-bottom:10px; }
+#predictiveTab .pc-news-sep { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); border-top:1px solid var(--border); padding-top:10px; margin:4px 0 10px; }
+#predictiveTab .pc-news-empty, #predictiveTab .pc-news-note { color:var(--muted); font-size:11px; margin-bottom:10px; }
+#predictiveTab .pc-news-col.collapsed { width:30px; min-width:30px; }
+#predictiveTab .pc-news-col.collapsed .pc-news-head { flex-direction:column; padding:8px 0; border-bottom:0; }
+#predictiveTab .pc-news-col.collapsed .pc-news-head .label { writing-mode:vertical-rl; flex:none; }
+#predictiveTab .pc-news-col.collapsed .pc-news-body, #predictiveTab .pc-news-col.collapsed .pc-news-refresh { display:none; }

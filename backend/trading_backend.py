@@ -11448,8 +11448,8 @@ def _normalize_news_symbol(sym):
     return symbol
 
 
-def _select_ticker_news(sym, items, now=None):
-    """Return up to three relevant, recent normalized articles in display order."""
+def _select_ticker_news(sym, items, now=None, limit=3):
+    """Return up to `limit` relevant, recent normalized articles in display order."""
     now = _time_module.time() if now is None else now
     sym = _normalize_news_symbol(sym)
     valid, primary = [], []
@@ -11489,7 +11489,7 @@ def _select_ticker_news(sym, items, now=None):
         clean["kind"] = clean.get("kind") or _news_kind(clean.get("source"), clean.get("title"))
         clean["age_hours"] = round(max(0, (now - clean["published"]) / 3600), 2)
         result.append(clean)
-        if len(result) == 3:
+        if len(result) == limit:
             break
     return result
 
@@ -11513,7 +11513,7 @@ def _recent_cached_news(items, now):
     return result[:3]
 
 
-def _fetch_portfolio_ticker_news(sym):
+def _fetch_portfolio_ticker_news(sym, limit=3):
     """Yahoo search then Finnhub, returning normalized items and safe errors."""
     now = _time_module.time()
     lookup_sym = _normalize_news_symbol(sym)
@@ -11526,7 +11526,7 @@ def _fetch_portfolio_ticker_news(sym):
         try:
             if provider == "yahoo":
                 response = requests.get("https://query2.finance.yahoo.com/v1/finance/search",
-                    params={"q": lookup_sym, "quotesCount": 0, "newsCount": 10,
+                    params={"q": lookup_sym, "quotesCount": 0, "newsCount": 10 if limit <= 3 else 30,
                             "enableFuzzyQuery": "false"}, headers=YF_HEADERS, timeout=PORTFOLIO_NEWS_HTTP_TIMEOUT)
             else:
                 today = datetime.fromtimestamp(now, timezone.utc).date()
@@ -11554,7 +11554,7 @@ def _fetch_portfolio_ticker_news(sym):
                     normalized.append(item)
         except Exception as exc:
             errors.append(f"{provider}: {type(exc).__name__}")
-    return _select_ticker_news(sym, normalized, now), "; ".join(errors) or None
+    return _select_ticker_news(sym, normalized, now, limit), "; ".join(errors) or None
 
 
 def _portfolio_news_holdings():
@@ -11567,6 +11567,34 @@ def _portfolio_news_holdings():
             if pos.get("type") == "Stock" and sym:
                 holdings.setdefault(sym, pos.get("name") or sym)
     return holdings
+
+
+_TICKER_NEWS_CACHE: dict[str, tuple[float, dict]] = {}
+TICKER_NEWS_TTL_S = 30 * 60
+
+
+@app.get("/api/news/ticker/{symbol}")
+def get_ticker_news(symbol: str, refresh: int = Query(0)):
+    """Správy k jednému titulu (Analytika): rovnaký zdroj a triedenie ako záložka
+    Správy, len viac položiek. RAM cache 30 min; pri výpadku vráti poslednú
+    úspešnú odpoveď so stale=true. Interpretačné, nevstupuje do skóre."""
+    sym = str(symbol or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.\-]{1,15}", sym):
+        raise HTTPException(status_code=400, detail="Neplatný ticker")
+    now = _time_module.time()
+    cached = _TICKER_NEWS_CACHE.get(sym)
+    if cached and not refresh and now - cached[0] < TICKER_NEWS_TTL_S:
+        return cached[1]
+    items, error = _fetch_portfolio_ticker_news(sym, limit=12)
+    if not items and error and cached:
+        return {**cached[1], "stale": True, "error": error}
+    payload = {"ticker": sym, "items": items, "error": error, "stale": False,
+               "fetched_at": datetime.now(timezone.utc).isoformat()}
+    if items or not error:
+        if len(_TICKER_NEWS_CACHE) > 200:
+            _TICKER_NEWS_CACHE.clear()
+        _TICKER_NEWS_CACHE[sym] = (now, payload)
+    return payload
 
 
 @app.get("/api/news/portfolio")

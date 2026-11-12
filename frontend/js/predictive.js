@@ -1725,6 +1725,7 @@ function pc_renderSidebar(data) {
   if (!nextEarnings) pc_ensureEarningsDate(data.ticker);
   pc_loadInsights(data.ticker);
   pc_loadCompanyProfile(data.ticker);
+  pc_loadTickerNews(data.ticker);
   pc_loadInstitutional(data.ticker);
   pc_prepareFundAnalysisCard(data.ticker);
   pc_prepareCorpActionsCard(data.ticker);
@@ -3186,6 +3187,58 @@ function pc_toggleCompanyDesc() {
   if (btn) btn.textContent = clamped ? 'viac ▾' : 'menej ▴';
 }
 
+// ── Správy k titulu (stĺpec medzi grafom a pravým panelom) ───────────────────
+// Zbalený stav sa pamätá; zbalený stĺpec nič nesťahuje, načíta až po rozbalení.
+const PC_NEWS_COLLAPSED_KEY = 'pc_news_col_collapsed';
+let pc_newsTicker = null;
+let pc_newsLoadedFor = null;
+let pc_newsSeq = 0;
+function pc_newsCollapsed() {
+  try { return localStorage.getItem(PC_NEWS_COLLAPSED_KEY) === '1'; } catch (e) { return false; }
+}
+function pc_applyNewsCol() {
+  const col = document.getElementById('pcNewsCol');
+  if (!col) return;
+  const collapsed = pc_newsCollapsed();
+  col.classList.toggle('collapsed', collapsed);
+  const btn = document.getElementById('pcNewsToggle');
+  if (btn) btn.textContent = collapsed ? '+' : '−';
+}
+function pc_switchNewsCol() {
+  try { localStorage.setItem(PC_NEWS_COLLAPSED_KEY, pc_newsCollapsed() ? '0' : '1'); } catch (e) {}
+  pc_applyNewsCol();
+  if (!pc_newsCollapsed() && pc_newsTicker && pc_newsLoadedFor !== pc_newsTicker) pc_loadTickerNews(pc_newsTicker);
+}
+async function pc_loadTickerNews(ticker, refresh = false) {
+  pc_applyNewsCol();
+  const sym = String(ticker || pc_newsTicker || '').toUpperCase();
+  const body = document.getElementById('pcNewsBody');
+  if (!sym || !body) return;
+  pc_newsTicker = sym;
+  if (pc_newsCollapsed()) return;
+  if (!refresh && pc_newsLoadedFor === sym) return;
+  const seq = ++pc_newsSeq;
+  body.innerHTML = '<div class="pc-news-empty">Načítavam správy…</div>';
+  try {
+    const r = await fetch(`/api/news/ticker/${encodeURIComponent(sym)}${refresh ? '?refresh=1' : ''}`);
+    if (!r.ok) throw new Error(r.statusText || String(r.status));
+    const data = await r.json();
+    if (seq !== pc_newsSeq) return;
+    const items = data.items || [];
+    const wire = items.filter(i => i.kind === 'wire'), other = items.filter(i => i.kind !== 'wire');
+    const note = data.stale ? '<div class="pc-news-note">Neaktualizované, zdroj je nedostupný.</div>'
+      : (data.error && !items.length ? '<div class="pc-news-note">Zdroj správ je nedostupný.</div>' : '');
+    body.innerHTML = `<div class="pc-news-sym">${escHtml(sym)} · posledných 7 dní</div>${note}`
+      + (items.length ? wire.map(newsfeedItemHtml).join('')
+          + (other.length ? `<div class="pc-news-sep">Komentáre a názory</div>${other.map(newsfeedItemHtml).join('')}` : '')
+        : (note ? '' : '<div class="pc-news-empty">Za posledných 7 dní žiadna správa.</div>'));
+    pc_newsLoadedFor = sym;
+  } catch (e) {
+    if (seq !== pc_newsSeq) return;
+    body.innerHTML = `<div class="pc-news-empty">Správy sa nepodarilo načítať: ${escHtml(e.message)}</div>`;
+  }
+}
+
 async function pc_loadCompanyProfile(ticker) {
   const card = document.getElementById('companyCard');
   if (!card || !ticker) return;
@@ -3312,6 +3365,7 @@ async function loadData(reoptimize = false, forceRefresh = false) {
       pc_chartDataCache.delete(cacheKey);
     } else {
       const cacheBust=forceRefresh?`&_=${Date.now()}`:'';
+      pc_loadTickerNews(ticker);
       const res = await fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&period=${period}&reoptimize=${reoptimize}&detail=${detail}${cacheBust}`,{cache:forceRefresh?'no-store':'default'});
       if (!res.ok) {
         const err = await res.json();
