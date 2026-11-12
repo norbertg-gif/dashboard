@@ -11585,7 +11585,13 @@ def get_ticker_news(symbol: str, refresh: int = Query(0)):
     cached = _TICKER_NEWS_CACHE.get(sym)
     if cached and not refresh and now - cached[0] < TICKER_NEWS_TTL_S:
         return cached[1]
-    items, error = _fetch_portfolio_ticker_news(sym, limit=12)
+    items, error = _fetch_portfolio_ticker_news(sym, limit=40)
+    # Komentáre majú vyhradené miesta, inak ich pri veľkých tituloch vytlačia
+    # agentúrne správy: najviac 8 správ + 4 komentáre, voľné miesta sa doplnia.
+    wire = [i for i in items if i.get("kind") == "wire"]
+    commentary = [i for i in items if i.get("kind") != "wire"]
+    n_comm = min(len(commentary), max(4, 12 - len(wire)))
+    items = wire[:12 - n_comm] + commentary[:n_comm]
     if not items and error and cached:
         return {**cached[1], "stale": True, "error": error}
     payload = {"ticker": sym, "items": items, "error": error, "stale": False,
