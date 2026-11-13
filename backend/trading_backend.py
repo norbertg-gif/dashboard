@@ -8642,9 +8642,10 @@ def _maybe_refresh_dip_elite(now: datetime | None = None):
     return refresh_dip_from_finviz_elite("automatic", scheduled_day=now.date().isoformat())
 
 
-def _finviz_elite_get(params: dict, key: str) -> str:
-    """Read one export; follow redirects only over HTTPS within finviz.com."""
-    url, query = "https://elite.finviz.com/export.ashx", {**params, "auth": key}
+def _finviz_elite_get(params: dict, key: str, path: str = "export.ashx") -> str:
+    """Read one export; follow redirects only over HTTPS within finviz.com.
+    `path` selects the Elite export endpoint (export/news, export/insiders, ...)."""
+    url, query = f"https://elite.finviz.com/{path}", {**params, "auth": key}
     try:
         for _hop in range(4):
             with requests.get(url, params=query, timeout=45, allow_redirects=False) as response:
@@ -9379,6 +9380,34 @@ def _start_chart_events_prefetch() -> None:
         _chart_events_prefetch_day = day_key
     thread = threading.Thread(target=_prefetch_held_chart_events, name="chart-events-prefetch", daemon=True)
     thread.start()
+
+
+FINVIZ_PROBE_PATHS = {"news": "export/news", "insiders": "export/insiders", "stock": "export/stock",
+    "groups": "export/groups", "earnings": "export/calendar/earnings", "economic": "export/calendar/economic",
+    "funds": "export/funds", "managers": "export/managers", "screener": "export/screener"}
+
+
+@app.get("/api/diagnostics/finviz-probe")
+def diag_finviz_probe(ep: str = Query(...), q: str = Query("")):
+    """Explore one Finviz Elite export endpoint (2026-11-13): HTTP result, columns,
+    row count and the first rows. Read-only, whitelisted paths, key never returned."""
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if not key:
+        return {"ok": False, "error": "FINVIZ_API_KEY nie je nastavený"}
+    path = FINVIZ_PROBE_PATHS.get(ep)
+    if not path:
+        raise HTTPException(400, "Unknown endpoint")
+    params = dict(urllib.parse.parse_qsl(q if isinstance(q, str) else ""))
+    params.pop("auth", None)
+    try:
+        text = _finviz_elite_get(params, key, path)
+    except ValueError as exc:
+        return {"ok": False, "endpoint": path, "params": params, "error": str(exc)}
+    if text.lstrip().startswith("<"):
+        return {"ok": False, "endpoint": path, "params": params, "error": "HTML namiesto CSV", "head": text[:300]}
+    rows = list(csv.reader(text.splitlines()))
+    return {"ok": True, "endpoint": path, "params": params, "columns": rows[0] if rows else [],
+            "rows": max(0, len(rows) - 1), "sample": rows[1:6]}
 
 
 @app.get("/api/diagnostics/finviz-export")
