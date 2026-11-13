@@ -7133,3 +7133,5 @@ body.light-mode .port-table td.port-ticker-tag {
 #predictiveTab .pc-news-col.collapsed .pc-news-head { flex-direction:column; padding:8px 0; border-bottom:0; }
 #predictiveTab .pc-news-col.collapsed .pc-news-head .label { writing-mode:vertical-rl; flex:none; }
 #predictiveTab .pc-news-col.collapsed .pc-news-body, #predictiveTab .pc-news-col.collapsed .pc-news-refresh { display:none; }
+#predictiveTab .pc-news-sep-wire { border-top:0; padding-top:0; color:var(--accent, var(--blue)); }
+#predictiveTab .pc-news-comm .newsfeed-item a { color:var(--muted); }

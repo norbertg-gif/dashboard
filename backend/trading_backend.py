@@ -11416,7 +11416,8 @@ PORTFOLIO_NEWS_BATCH_BUDGET_S = 25
 NEWS_COMMENTARY_SOURCES = frozenset({
     "zacks", "simply wall st.", "insider monkey", "motley fool", "trefis",
     "stockstory", "24/7 wall st.", "gurufocus.com", "tikr", "moneywise",
-    "stocktwits", "seekingalpha",
+    "stocktwits", "seekingalpha", "seeking alpha", "chartmill", "investorplace",
+    "the motley fool", "barchart", "marketbeat", "tipranks", "finbold",
 })
 NEWS_COMMENTARY_TITLE_PATTERNS = (
     r"\bshould you\b", r"\bstock now or\b", r"\bcould be\b",
@@ -11424,6 +11425,13 @@ NEWS_COMMENTARY_TITLE_PATTERNS = (
     r"\bbuy the dip\b", r"\bis it a buy\b", r"\btop \d+ stocks\b",
     r"\b\d+ (?:value|growth|profitable) stocks\b", r"\bhere.s why\b",
     r"\bwhat investors need to know\b",
+    # Market wraps, social buzz, opinion headlines and fund-flow filings
+    # (ETF/13F "buys $X million") are not news about the company itself.
+    r"\b(?:premarket|market) movers\b", r"\bsocial buzz\b",
+    r"\bstocks? (?:bounce|rally|slide|fall|surge|to watch|to buy)\b",
+    r"\bwarning\b", r"\bi.d buy\b", r"\bhistory says\b",
+    r"\bbuys \$[\d.,]+ (?:million|billion)\b", r"\bbought\b",
+    r"\bhas an etf\b", r"\b\d+ (?:\w+ )?stocks\b", r"\?\s*$",
 )
 PORTFOLIO_NEWS_MAX_AGE_S = 7 * 86400
 
