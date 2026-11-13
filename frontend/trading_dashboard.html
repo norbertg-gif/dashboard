@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" href="/lizard-icon.png?v=20260703-lizard2">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 
-<link rel="stylesheet" href="/dashboard.css?v=20261113-145253">
+<link rel="stylesheet" href="/dashboard.css?v=20261113-151258">
 </head>
 <body data-main-tab="home">
 
@@ -350,6 +350,7 @@
     <div class="pc-news-head">
       <button class="pc-inline-toggle" id="pcNewsToggle" onclick="pc_switchNewsCol()" title="Zbaliť alebo rozbaliť správy k titulu">−</button>
       <span class="label">Správy</span>
+      <button class="pc-inline-toggle pc-news-refresh" onclick="newsSentimentRun('pcNewsBody', this)" title="Ohodnotí titulky správ (bullish/bearish) cez Gemini Decision 1. Spustí sa len týmto tlačidlom; komentáre sa nehodnotia.">±</button>
       <button class="pc-inline-toggle pc-news-refresh" onclick="pc_loadTickerNews(null, true)" title="Načítať správy znova">⟳</button>
     </div>
     <div class="pc-news-body" id="pcNewsBody"><div class="pc-news-empty">Načítaj ticker…</div></div>
@@ -581,17 +582,17 @@
       </div>
     </form>
   </dialog>
-  <script src="/js/core.js?v=20261113-145253"></script>
+  <script src="/js/core.js?v=20261113-151258"></script>
   <script src="/js/live.js?v=20261110-162532"></script>
-  <script src="/js/portfolio.js?v=20261113-145253"></script>
-  <script src="/js/watchlist.js?v=20261113-145253"></script>
+  <script src="/js/portfolio.js?v=20261113-151258"></script>
+  <script src="/js/watchlist.js?v=20261113-151258"></script>
   <script src="/js/scanner-table-sort.js?v=20261110-162532"></script>
-  <script src="/js/scanner.js?v=20261113-145253"></script>
-  <script src="/js/predictive.js?v=20261113-145253"></script>
+  <script src="/js/scanner.js?v=20261113-151258"></script>
+  <script src="/js/predictive.js?v=20261113-151258"></script>
   <script src="/js/verdict.js?v=20261110-162532"></script>
-  <script src="/js/home.js?v=20261113-145253"></script>
-  <script src="/js/newsfeed.js?v=20261113-145253"></script>
-  <script src="/js/charts.js?v=20261113-145253"></script>
-  <script src="/js/main.js?v=20261113-145253"></script>
+  <script src="/js/home.js?v=20261113-151258"></script>
+  <script src="/js/newsfeed.js?v=20261113-151258"></script>
+  <script src="/js/charts.js?v=20261113-151258"></script>
+  <script src="/js/main.js?v=20261113-151258"></script>
 </body>
 </html>

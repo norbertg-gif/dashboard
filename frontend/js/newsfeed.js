@@ -30,12 +30,48 @@ function newsfeedSafeUrl(value) {
   } catch (e) { return ''; }
 }
 
-function newsfeedItemHtml(item) {
+function newsfeedItemHtml(item, ticker = '') {
   const title = escHtml(item.title || '');
   const url = newsfeedSafeUrl(item.url);
   let headline = title;
   if (url) headline = `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>`;
-  return `<div class="newsfeed-item">${headline}<span class="newsfeed-meta">${escHtml(item.source || '')} \u00b7 ${escHtml(newsfeedAge(item.age_hours))}</span></div>`;
+  const key = item.url || ('title:' + String(item.title || '').trim().toLowerCase());
+  const attrs = `data-news-key="${escHtml(key)}" data-news-ticker="${escHtml(ticker)}" data-news-title="${title}" data-news-url="${escHtml(item.url || '')}" data-news-kind="${escHtml(item.kind || 'wire')}"`;
+  return `<div class="newsfeed-item" ${attrs}><span class="news-sent"></span>${headline}<span class="newsfeed-meta">${escHtml(item.source || '')} \u00b7 ${escHtml(newsfeedAge(item.age_hours))}</span></div>`;
+}
+
+// Sentiment titulkov (Gemini Decision 1) — spúšťa ho len tlačidlo, nikdy samo.
+// Komentáre sa nehodnotia. Uložené výsledky server vráti bez volania API.
+async function newsSentimentRun(rootId, btn) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  const nodes = [...root.querySelectorAll('.newsfeed-item[data-news-kind="wire"]')];
+  if (!nodes.length) { setStatus('Žiadne správy na ohodnotenie', 'warn'); return; }
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const items = nodes.slice(0, 60).map(n => ({ ticker: n.dataset.newsTicker, title: n.dataset.newsTitle, url: n.dataset.newsUrl }));
+    const r = await fetch(`${API}/api/news/sentiment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+    if (!r.ok) throw new Error(r.statusText || String(r.status));
+    const data = await r.json();
+    const res = data.results || {};
+    let shown = 0;
+    for (const n of nodes) {
+      const v = res[n.dataset.newsKey];
+      const slot = n.querySelector('.news-sent');
+      if (!v || !slot) continue;
+      shown++;
+      const txt = v.label === 'bull' ? '▲' : v.label === 'bear' ? '▼' : '·';
+      slot.className = `news-sent ${v.label}`;
+      slot.textContent = txt;
+      slot.title = `bullish ${Math.round(v.bull * 100)} % · bearish ${Math.round(v.bear * 100)} % (Gemini Decision 1, len z titulku)`;
+    }
+    setStatus(data.error ? `Sentiment čiastočne: ${data.error}` : `Sentiment: ${shown} správ`, data.error ? 'warn' : 'ok');
+  } catch (e) {
+    setStatus(`Sentiment sa nepodarilo načítať: ${e.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 function newsfeedPnlHtml(row) {
@@ -52,16 +88,17 @@ function newsfeedRender(data, stale = false) {
     const wire = (row.items || []).filter(item => item.kind === 'wire');
     const commentary = (row.items || []).filter(item => item.kind === 'commentary');
     let extra = '';
-    if (commentary.length) extra = `<details class="newsfeed-commentary"><summary>\u010fal\u0161ie (${commentary.length})</summary>${commentary.map(newsfeedItemHtml).join('')}</details>`;
+    if (commentary.length) extra = `<details class="newsfeed-commentary"><summary>\u010fal\u0161ie (${commentary.length})</summary>${commentary.map(i => newsfeedItemHtml(i, row.ticker)).join('')}</details>`;
     return `<section class="newsfeed-row">
       <a class="btn mini newsfeed-ticker ticker-link" ${tickerLinkAttrs(row.ticker)} title="${escHtml(row.name || row.ticker)}"><strong>${escHtml(row.ticker)}</strong><span>${escHtml(row.name || row.ticker)}</span>${newsfeedPnlHtml(row)}</a>
-      <div>${wire.map(newsfeedItemHtml).join('')}${extra}</div>
+      <div>${wire.map(i => newsfeedItemHtml(i, row.ticker)).join('')}${extra}</div>
     </section>`;
   }).join('');
   let without = '';
   if (data.without_news && data.without_news.length) without = `<div class="newsfeed-without">Bez spr\u00e1vy: ${data.without_news.map(ticker => escHtml(ticker)).join(', ')}</div>`;
   let retry = '';
   if (stale) retry = '<button type="button" class="btn mini" onclick="loadNewsTab(true)">Sk\u00fasi\u0165 znova</button>';
+  retry += ' <button type="button" class="btn mini" onclick="newsSentimentRun(\'news-view\', this)" title="Ohodnotí titulky správ (bullish/bearish) cez Gemini Decision 1. Spustí sa len týmto tlačidlom; komentáre sa nehodnotia.">Sentiment</button>';
   let staleNote = '';
   if (stale) staleNote = '<span>neaktualizovan\u00e9</span>';
   const count = Number(data.wire_count) || 0;

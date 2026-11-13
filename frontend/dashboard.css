@@ -7135,3 +7135,10 @@ body.light-mode .port-table td.port-ticker-tag {
 #predictiveTab .pc-news-col.collapsed .pc-news-body, #predictiveTab .pc-news-col.collapsed .pc-news-refresh { display:none; }
 #predictiveTab .pc-news-sep-wire { border-top:0; padding-top:0; color:var(--accent, var(--blue)); }
 #predictiveTab .pc-news-comm .newsfeed-item a { color:var(--muted); }
+
+/* Sentiment titulku (na vyžiadanie) */
+.news-sent:empty { display:none; }
+.news-sent { display:inline-block; min-width:14px; margin-right:6px; font-weight:700; font-size:11px; text-align:center; }
+.news-sent.bull { color:var(--up); }
+.news-sent.bear { color:var(--down); }
+.news-sent.neutral { color:var(--muted); }

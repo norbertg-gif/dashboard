@@ -11612,6 +11612,105 @@ def get_ticker_news(symbol: str, refresh: int = Query(0)):
     return payload
 
 
+# ── Sentiment titulkov (Gemini Decision 1) — iba na vyžiadanie ──────────────
+# Spúšťa ho výhradne tlačidlo v UI (POST), nikdy automaticky. Každý titulok sa
+# ohodnotí raz a výsledok ostáva uložený natrvalo (kľúč = URL, inak titulok).
+# Interpretačná pomôcka: nevstupuje do C1–C4, DCA, BUILD, Verdiktu ani exportu.
+NEWS_SENTIMENT_FILE = DATA_ROOT / "news_sentiment.json"
+NEWS_SENTIMENT_URL = "https://generativelanguage.googleapis.com/v1beta/decisions"
+NEWS_SENTIMENT_MODEL = "gemini-decision-1"
+NEWS_SENTIMENT_MIN_P = 0.6
+NEWS_SENTIMENT_MAX_ITEMS = 60
+_news_sentiment_lock = threading.Lock()
+
+
+def _news_sentiment_key(item: dict) -> str:
+    url = str(item.get("url") or "").strip()
+    return url or "title:" + str(item.get("title") or "").strip().lower()
+
+
+def _news_sentiment_label(bull: float, bear: float) -> str:
+    if bull >= NEWS_SENTIMENT_MIN_P and bull > bear:
+        return "bull"
+    if bear >= NEWS_SENTIMENT_MIN_P and bear > bull:
+        return "bear"
+    return "neutral"
+
+
+def _news_sentiment_classify(ticker: str, title: str, key: str) -> dict:
+    body = {"model": NEWS_SENTIMENT_MODEL, "input": f"Stock: {ticker}\nHeadline: {title}", "questions": {
+        "bull": {"type": "noul", "instructions": f"Probability this headline is good news for {ticker} stock price (bullish)."},
+        "bear": {"type": "noul", "instructions": f"Probability this headline is bad news for {ticker} stock price (bearish)."}}}
+    response = requests.post(NEWS_SENTIMENT_URL, params={"key": key}, json=body, timeout=20)
+    response.raise_for_status()
+    answers = response.json().get("answers") or {}
+    bull = float((answers.get("bull") or {}).get("noul"))
+    bear = float((answers.get("bear") or {}).get("noul"))
+    if not (math.isfinite(bull) and math.isfinite(bear)):
+        raise ValueError("Invalid sentiment response")
+    return {"bull": round(bull, 3), "bear": round(bear, 3), "label": _news_sentiment_label(bull, bear),
+            "model": NEWS_SENTIMENT_MODEL, "at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/api/news/sentiment")
+def post_news_sentiment(payload: dict):
+    """Ohodnotí zaslané titulky (bullish/bearish/neutral). Uložené výsledky vráti
+    bez volania API; nové pošle do Gemini Decision 1, najviac 60 naraz."""
+    raw = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="Chýba zoznam items")
+    items = []
+    for it in raw[:NEWS_SENTIMENT_MAX_ITEMS]:
+        if isinstance(it, dict) and str(it.get("title") or "").strip():
+            items.append({"ticker": str(it.get("ticker") or "").strip().upper()[:15],
+                          "title": str(it["title"]).strip()[:400], "url": str(it.get("url") or "").strip()[:1000]})
+    try:
+        store = json.loads(NEWS_SENTIMENT_FILE.read_text(encoding="utf-8"))
+        if not isinstance(store, dict):
+            store = {}
+    except (OSError, ValueError):
+        store = {}
+    results, todo = {}, []
+    for it in items:
+        key = _news_sentiment_key(it)
+        if key in store:
+            results[key] = store[key]
+        else:
+            todo.append((key, it))
+    error = None
+    if todo:
+        api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+        if not api_key:
+            error = "Chýba GOOGLE_API_KEY na serveri"
+        else:
+            fresh = {}
+            def work(entry):
+                key, it = entry
+                try:
+                    return key, _news_sentiment_classify(it["ticker"] or "the company", it["title"], api_key), None
+                except Exception as exc:
+                    return key, None, _scrub_token(f"{type(exc).__name__}: {exc}")
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for key, value, err in pool.map(work, todo):
+                    if value:
+                        fresh[key] = value
+                    elif err:
+                        error = err
+            if fresh:
+                with _news_sentiment_lock:
+                    try:
+                        current = json.loads(NEWS_SENTIMENT_FILE.read_text(encoding="utf-8"))
+                        if not isinstance(current, dict):
+                            current = {}
+                    except (OSError, ValueError):
+                        current = {}
+                    current.update(fresh)
+                    _atomic_write_json(NEWS_SENTIMENT_FILE, current)
+                results.update(fresh)
+    return {"results": results, "classified": sum(1 for k, _ in todo if k in results),
+            "cached": len(items) - len(todo), "error": error, "threshold": NEWS_SENTIMENT_MIN_P}
+
+
 @app.get("/api/news/portfolio")
 def get_portfolio_news():
     holdings = _portfolio_news_holdings()

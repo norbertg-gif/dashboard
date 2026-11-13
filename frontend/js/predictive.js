@@ -3229,8 +3229,8 @@ async function pc_loadTickerNews(ticker, refresh = false) {
     const note = data.stale ? '<div class="pc-news-note">Neaktualizované, zdroj je nedostupný.</div>'
       : (data.error && !items.length ? '<div class="pc-news-note">Zdroj správ je nedostupný.</div>' : '');
     body.innerHTML = `<div class="pc-news-sym">${escHtml(sym)} · posledných 7 dní</div>${note}`
-      + (items.length ? (wire.length ? `<div class="pc-news-sep pc-news-sep-wire">Správy · ${wire.length}</div>${wire.map(newsfeedItemHtml).join('')}` : '')
-          + (other.length ? `<div class="pc-news-sep">Komentáre a názory · ${other.length}</div><div class="pc-news-comm">${other.map(newsfeedItemHtml).join('')}</div>` : '')
+      + (items.length ? (wire.length ? `<div class="pc-news-sep pc-news-sep-wire">Správy · ${wire.length}</div>${wire.map(i => newsfeedItemHtml(i, sym)).join('')}` : '')
+          + (other.length ? `<div class="pc-news-sep">Komentáre a názory · ${other.length}</div><div class="pc-news-comm">${other.map(i => newsfeedItemHtml(i, sym)).join('')}</div>` : '')
         : (note ? '' : '<div class="pc-news-empty">Za posledných 7 dní žiadna správa.</div>'));
     pc_newsLoadedFor = sym;
   } catch (e) {
