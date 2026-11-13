@@ -7142,3 +7142,7 @@ body.light-mode .port-table td.port-ticker-tag {
 .news-sent.bull { color:var(--up); }
 .news-sent.bear { color:var(--down); }
 .news-sent.neutral { color:var(--muted); }
+.newsfeed-item.sent-bull > a { color:var(--up); }
+.newsfeed-item.sent-bear > a { color:var(--down); }
+.news-sent-summary { display:flex; gap:10px; font-size:11px; font-weight:600; margin-bottom:10px; }
+.news-sent-summary .bull { color:var(--up); } .news-sent-summary .bear { color:var(--down); } .news-sent-summary .neutral { color:var(--muted); }

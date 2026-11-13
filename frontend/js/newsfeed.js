@@ -56,15 +56,26 @@ async function newsSentimentRun(rootId, btn) {
     const data = await r.json();
     const res = data.results || {};
     let shown = 0;
+    const counts = { bull: 0, bear: 0, neutral: 0 };
     for (const n of nodes) {
       const v = res[n.dataset.newsKey];
       const slot = n.querySelector('.news-sent');
       if (!v || !slot) continue;
       shown++;
+      counts[v.label] = (counts[v.label] || 0) + 1;
+      n.classList.remove('sent-bull', 'sent-bear', 'sent-neutral');
+      n.classList.add(`sent-${v.label}`);
       const txt = v.label === 'bull' ? '▲' : v.label === 'bear' ? '▼' : '·';
       slot.className = `news-sent ${v.label}`;
       slot.textContent = txt;
       slot.title = `bullish ${Math.round(v.bull * 100)} % · bearish ${Math.round(v.bear * 100)} % (Gemini Decision 1, len z titulku)`;
+    }
+    if (shown) {
+      const host = root.querySelector('.newsfeed-wrap') || root;
+      let bar = host.querySelector(':scope > .news-sent-summary');
+      if (!bar) { bar = document.createElement('div'); bar.className = 'news-sent-summary'; host.prepend(bar); }
+      bar.innerHTML = `<span class="bull">▲ ${counts.bull} bullish</span><span class="bear">▼ ${counts.bear} bearish</span><span class="neutral">· ${counts.neutral} neisté</span>`;
+      bar.title = 'Sentiment titulkov správ (Gemini Decision 1), komentáre sa nerátajú';
     }
     setStatus(data.error ? `Sentiment čiastočne: ${data.error}` : `Sentiment: ${shown} správ`, data.error ? 'warn' : 'ok');
   } catch (e) {
