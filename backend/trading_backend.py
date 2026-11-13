@@ -11431,7 +11431,8 @@ NEWS_COMMENTARY_TITLE_PATTERNS = (
     r"\bstocks? (?:bounce|rally|slide|fall|surge|to watch|to buy)\b",
     r"\bwarning\b", r"\bi.d buy\b", r"\bhistory says\b",
     r"\bbuys \$[\d.,]+ (?:million|billion)\b", r"\bbought\b",
-    r"\bhas an etf\b", r"\b\d+ (?:\w+ )?stocks\b", r"\?\s*$",
+    r"\bhas an etf\b", r"\b\d+ (?:\w+ ){0,3}stocks?\b", r"\?\s*$",
+    r"\bto buy (?:right )?now\b", r"\bonce-in-a-\w+\b", r"\bopportunity:",
 )
 PORTFOLIO_NEWS_MAX_AGE_S = 7 * 86400
 
