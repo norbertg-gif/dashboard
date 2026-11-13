@@ -97,6 +97,10 @@ function submitTickerPalette(event) {
   // vyklikané tickery ostali v localStorage bez viditeľného spôsobu, ako ich
   // otvoriť alebo vyčistiť.
   renderBasketBar();
+  try {
+    const noCrypto = document.getElementById('chart-set-no-crypto');
+    if (noCrypto) noCrypto.checked = localStorage.getItem('td_set_no_crypto') !== '0';
+  } catch (e) {}
   // Snapshot portfólia sa periodicky obnoví, aby sa živý odhad nemohol
   // rozísť s eToro (nameraný drift +$37 pri extrapolácii bez resyncu).
   startPortfolioResync();

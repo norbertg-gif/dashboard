@@ -3122,14 +3122,42 @@ async function fetchTickerSet(set, account, {positions, limit = 20} = {}) {
   return (await response.json()).movers || [];
 }
 
+// Kryptomeny pre filter „bez krypto“: typ z pozícií oboch účtov a z watchlistu,
+// plus najbežnejšie coiny pre tituly, ktoré typ nemajú.
+const CRYPTO_FALLBACK = new Set(['BTC','ETH','TRX','SOL','XRP','ADA','DOGE','BNB','LTC','DOT','AVAX','LINK','SHIB','XLM','BCH','ETC','MATIC','POL','UNI','ATOM','NEAR','APT','ALGO','HBAR','SUI','PEPE','TON']);
+function isCryptoTicker(symbol) {
+  const sym = String(symbol || '').toUpperCase();
+  const typed = [...Object.values(etoroPositionsAll || {}).flat(), ...(watchlist || [])]
+    .find(item => item && typeof item === 'object' && String(item.symbol || '').toUpperCase() === sym);
+  const type = String(typed?.type || typed?.assetType || typed?.instrumentType || '').toLowerCase();
+  return type ? type.includes('crypto') : CRYPTO_FALLBACK.has(sym.replace(/(-USD|USD)$/, ''));
+}
+function chartSetNoCrypto() {
+  return document.getElementById('chart-set-no-crypto')?.checked !== false;
+}
+function saveChartSetNoCrypto(el) {
+  try { localStorage.setItem('td_set_no_crypto', el.checked ? '1' : '0'); } catch (e) {}
+}
+
+// Výber sa počas načítania NEzamyká (disabled): keď sa požiadavka zasekla,
+// ostal zamknutý až do refreshu stránky. Druhý výber počas načítania sa ignoruje
+// a po 25 s sa načítanie vzdá.
+let _chartSetLoading = false;
 async function openChartTickerSet(select) {
   const set = select.value;
-  if (!set) return;
-  select.disabled = true;
+  select.value = '';
+  if (!set || _chartSetLoading) return;
+  _chartSetLoading = true;
+  setStatus('Načítavam sadu…', '');
   try {
     const movers = /^(movers|portfolio)-/.test(set);
     const cols = parseInt(document.getElementById('col-sel')?.value) || 2;
-    const items = await fetchTickerSet(set, activeAccount || '1', {limit: movers ? Math.max(2, cols * 2) : 20});
+    const want = movers ? Math.max(2, cols * 2) : 20;
+    const noCrypto = chartSetNoCrypto();
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('vypršal čas (25 s)')), 25000));
+    let items = await Promise.race([fetchTickerSet(set, activeAccount || '1', {limit: movers && noCrypto ? 20 : want}), timeout]);
+    if (noCrypto) items = items.filter(item => !isCryptoTicker(item.symbol));
+    if (movers) items = items.slice(0, want);
     if (!items.length) {
       setStatus('Sada neobsahuje žiadne tickery', 'warn');
       return;
@@ -3156,8 +3184,7 @@ async function openChartTickerSet(select) {
   } catch (error) {
     setStatus(`Sadu sa nepodarilo načítať: ${error.message}`, 'err');
   } finally {
-    select.value = '';
-    select.disabled = false;
+    _chartSetLoading = false;
   }
 }
 
