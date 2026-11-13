@@ -5402,5 +5402,85 @@ class FinvizFullColumnsRegressionTests(unittest.TestCase):
         self.assertNotIn(self.KEY, str(caught.exception))
 
 
+class FinvizCsvPrimarySourceRegressionTests(unittest.TestCase):
+    def test_news_filters_symbol_converts_eastern_and_is_selectable(self):
+        now = datetime(2026, 11, 13, 14, 31, 26, tzinfo=timezone.utc).timestamp()
+        text = ('Title,Source,Date,Url,Category,Ticker\n'
+                'Stocks open higher as Nvidia bounces back,MarketWatch,2026-11-13 09:31:26,https://example.test/nvda,Stock,NVDA\n'
+                'Other story,Reuters,2026-11-13 09:31:26,https://example.test/amd,Stock,AMD\n')
+        items = tb._parse_finviz_news_csv(text, "NVDA", now)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["published"], now)
+        self.assertEqual(items[0]["provider"], "finviz")
+        self.assertEqual(tb._select_ticker_news("NVDA", items, now, 3)[0]["title"],
+                         "Stocks open higher as Nvidia bounces back")
+
+    def test_earnings_earliest_date_and_finnhub_fallback(self):
+        text = ("Date,Ticker,Company\n2026-11-20 08:30,NVDA,NVIDIA\n"
+                "2026-11-16 08:30,NVDA,NVIDIA\n2026-11-18 16:00,AMD,AMD\n")
+        self.assertEqual(tb._parse_finviz_earnings_csv(text),
+                         {"NVDA": "2026-11-16", "AMD": "2026-11-18"})
+        tb._earnings_bulk_failed_at = 0
+        with patch.object(tb, "_earnings_cache_read", return_value=None), \
+             patch.object(tb, "_earnings_fetch_finviz", side_effect=ValueError("HTTP 400")), \
+             patch.object(tb, "_earnings_fetch_finnhub", return_value={"NVDA": "2026-11-17"}) as fallback, \
+             patch.object(tb, "_earnings_save_cache", side_effect=lambda dates: {"dates": dates, "fetched_at": "now"}), \
+             patch.object(tb, "_with_finviz_earnings", side_effect=lambda payload: payload):
+            result = tb.get_earnings_calendar(refresh=1)
+        fallback.assert_called_once_with()
+        self.assertEqual(result["dates"], {"NVDA": "2026-11-17"})
+        tb._earnings_bulk_failed_at = 0
+        with patch.object(tb, "_earnings_cache_read", return_value=None), \
+             patch.object(tb, "_earnings_fetch_finviz", return_value={}), \
+             patch.object(tb, "_earnings_fetch_finnhub", return_value={"AMD": "2026-11-18"}) as fallback, \
+             patch.object(tb, "_earnings_save_cache", side_effect=lambda dates: {"dates": dates, "fetched_at": "now"}), \
+             patch.object(tb, "_with_finviz_earnings", side_effect=lambda payload: payload):
+            result = tb.get_earnings_calendar(refresh=1)
+        fallback.assert_called_once_with()
+        self.assertEqual(result["dates"], {"AMD": "2026-11-18"})
+
+    def test_insider_csv_90_day_summary(self):
+        today = date(2026, 11, 13)
+        text = ("Ticker,Owner,Owner CIK,Relationship,Date,Transaction,Cost,#Shares,Value ($),#Shares Total,SEC Form 4,SEC Form 4 Link\n"
+                "NVDA,Alice,1,Officer,11/10/2026,Buy,10,100,1000,1000,4,https://example.test/1\n"
+                "NVDA,Bob,2,Director,10/10/2026,Sale,20,50,2000,2000,4,https://example.test/2\n"
+                "NVDA,Cara,3,Officer,11/01/2026,Option Exercise,0,10,500,3000,4,https://example.test/3\n"
+                "NVDA,Old,4,Officer,08/01/2026,Buy,10,10,100,10,4,https://example.test/4\n")
+        result = tb._parse_finviz_insiders_csv(text, today)
+        self.assertEqual((result["buys_90d"], result["sells_90d"]), (1, 1))
+        self.assertEqual(result["net_value_90d"], -1000)
+        self.assertEqual([item["type"] for item in result["recent"]], ["buy", "sell"])
+        self.assertIsNone(tb._parse_finviz_insiders_csv("Ticker,Date,Transaction\n", today))
+
+    def test_insider_finviz_failure_keeps_finnhub_result(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+            def raise_for_status(self):
+                pass
+            def json(self):
+                return self.payload
+
+        def get(url, **kwargs):
+            if url.endswith("insider-transactions"):
+                return Response({"data": [{"transactionCode": "P", "change": 10,
+                                            "transactionPrice": 5, "transactionDate": "2026-11-10",
+                                            "name": "Finnhub Owner"}]})
+            if url.endswith("recommendation"):
+                return Response([])
+            if url.endswith("price-target"):
+                return Response({})
+            return Response({"metric": {}})
+
+        with patch.dict("os.environ", {"FINNHUB_API_KEY": "test-finnhub", "FINVIZ_API_KEY": "test-finviz"}), \
+             patch.object(tb, "_finviz_elite_get", side_effect=ValueError("offline")), \
+             patch.object(tb.requests, "get", side_effect=get), \
+             patch.object(tb, "_finnhub_earnings_calendar_get", return_value=Response({"earningsCalendar": []})), \
+             patch.object(tb, "_fmp_price_target", return_value=None):
+            result = tb._insights_fetch_finnhub("NVDA")
+        self.assertEqual(result["insider"]["buys_90d"], 1)
+        self.assertEqual(result["insider"]["recent"][0]["name"], "Finnhub Owner")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

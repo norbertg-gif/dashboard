@@ -8642,11 +8642,22 @@ def _maybe_refresh_dip_elite(now: datetime | None = None):
     return refresh_dip_from_finviz_elite("automatic", scheduled_day=now.date().isoformat())
 
 
+_FINVIZ_REQUEST_LOCK = threading.Lock()
+_FINVIZ_LAST_REQUEST_START = 0.0
+_FINVIZ_MIN_REQUEST_SPACING = 0.55
+
+
 def _finviz_elite_get(params: dict, key: str, path: str = "export.ashx") -> str:
     """Read one export; follow redirects only over HTTPS within finviz.com.
     `path` selects the Elite export endpoint (export/news, export/insiders, ...)."""
+    global _FINVIZ_LAST_REQUEST_START
     url, query = f"https://elite.finviz.com/{path}", {**params, "auth": key}
     try:
+        with _FINVIZ_REQUEST_LOCK:
+            delay = _FINVIZ_MIN_REQUEST_SPACING - (_time_module.monotonic() - _FINVIZ_LAST_REQUEST_START)
+            if delay > 0:
+                _time_module.sleep(delay)
+            _FINVIZ_LAST_REQUEST_START = _time_module.monotonic()
         for _hop in range(4):
             with requests.get(url, params=query, timeout=45, allow_redirects=False) as response:
                 if response.status_code in (301, 302, 303, 307, 308):
@@ -11505,7 +11516,7 @@ def _select_ticker_news(sym, items, now=None, limit=3):
             if not related or related[0] != sym:
                 continue
             primary.append(item)
-        elif "relatedTickers" in item or item.get("provider") != "finnhub":
+        elif "relatedTickers" in item or item.get("provider") not in {"finnhub", "finviz"}:
             continue
         valid.append(item)
     # If a focused primary item exists, broad ticker-first list articles add noise.
@@ -11551,12 +11562,90 @@ def _recent_cached_news(items, now):
     return result[:3]
 
 
+def _parse_finviz_news_csv(text, sym, now):
+    """Parse ticker-filtered Finviz news CSV into normalized news items."""
+    result = []
+    eastern = ZoneInfo("America/New_York")
+    for row in csv.DictReader((text or "").splitlines()):
+        if str(row.get("Ticker") or "").strip().upper() != str(sym).strip().upper():
+            continue
+        try:
+            published = datetime.strptime(row.get("Date", "").strip(), "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=eastern).astimezone(timezone.utc).timestamp()
+        except (TypeError, ValueError):
+            continue
+        title, url = str(row.get("Title") or "").strip(), str(row.get("Url") or "").strip()
+        if not title or published < now - PORTFOLIO_NEWS_MAX_AGE_S or published > now + 300:
+            continue
+        source = str(row.get("Source") or "").strip()
+        result.append({"title": title, "url": url, "source": source, "published": published,
+                       "provider": "finviz", "kind": _news_kind(source, title)})
+    return result
+
+
+def _parse_finviz_earnings_csv(text):
+    """Return earliest upcoming earnings date for each ticker in an Elite CSV."""
+    dates = {}
+    eastern = ZoneInfo("America/New_York")
+    for row in csv.DictReader((text or "").splitlines()):
+        sym = str(row.get("Ticker") or "").strip().upper()
+        try:
+            day = datetime.strptime(row.get("Date", "").strip(), "%Y-%m-%d %H:%M").replace(
+                tzinfo=eastern).date().isoformat()
+        except (TypeError, ValueError):
+            continue
+        if sym and (sym not in dates or day < dates[sym]):
+            dates[sym] = day
+    return dates
+
+
+def _parse_finviz_insiders_csv(text, today):
+    """Summarize Finviz insider buy/sell transactions in the last 90 days."""
+    cutoff = today - timedelta(days=90)
+    buys = sells = 0
+    buy_value = sell_value = 0.0
+    rows = []
+    for row in csv.DictReader((text or "").splitlines()):
+        try:
+            day = datetime.strptime(row.get("Date", "").strip(), "%m/%d/%Y").date()
+            shares = abs(float(str(row.get("#Shares") or "0").replace(",", "")))
+            value = abs(float(str(row.get("Value ($)") or "0").replace(",", "").replace("$", "")))
+        except (TypeError, ValueError):
+            continue
+        txn = str(row.get("Transaction") or "").strip().lower()
+        kind = "buy" if txn == "buy" else ("sell" if txn == "sale" else None)
+        if day < cutoff or day > today or not kind:
+            continue
+        rows.append((day, row, kind, shares, value))
+        if kind == "buy":
+            buys += 1; buy_value += value
+        else:
+            sells += 1; sell_value += value
+    if not rows:
+        return None
+    rows.sort(key=lambda item: item[0], reverse=True)
+    recent = [{"date": day.isoformat(), "name": row.get("Owner"), "relation": row.get("Relationship"),
+               "type": kind, "shares": shares, "value": value or None}
+              for day, row, kind, shares, value in rows[:6]]
+    return {"buys_90d": buys, "sells_90d": sells, "net_value_90d": round(buy_value - sell_value, 0),
+            "recent": recent, "transactions_2y": [], "avg_buy_price_2y": None, "current_vs_avg_buy_pct": None}
+
+
 def _fetch_portfolio_ticker_news(sym, limit=3):
     """Yahoo search then Finnhub, returning normalized items and safe errors."""
     now = _time_module.time()
     lookup_sym = _normalize_news_symbol(sym)
     errors = []
     normalized = []
+    finviz_key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if finviz_key:
+        try:
+            text = _finviz_elite_get({"v": 3, "t": lookup_sym}, finviz_key, path="export/news")
+            normalized = _parse_finviz_news_csv(text, lookup_sym, now)
+            if normalized:
+                return _select_ticker_news(sym, normalized, now, limit), None
+        except Exception:
+            pass
     for provider in ("yahoo", "finnhub"):
         key = os.getenv("FINNHUB_API_KEY", "").strip()
         if provider == "finnhub" and not key:
@@ -13152,6 +13241,24 @@ def _earnings_save_cache(dates: dict) -> dict:
     return payload
 
 
+def _earnings_fetch_finviz() -> dict:
+    """Fetch the next 90 days of earnings in bounded Elite CSV windows."""
+    key = os.getenv("FINVIZ_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("FINVIZ_API_KEY nie je nastavený")
+    start = datetime.now(timezone.utc).date()
+    dates = {}
+    for offset in range(0, 90, 7):
+        date_from = start + timedelta(days=offset)
+        date_to = min(start + timedelta(days=offset + 6), start + timedelta(days=89))
+        text = _finviz_elite_get({"dateFrom": date_from.isoformat(), "dateTo": date_to.isoformat()}, key,
+                                 path="export/calendar/earnings")
+        dates.update(_parse_finviz_earnings_csv(text))
+    if not dates:
+        raise RuntimeError("empty earnings calendar (finviz)")
+    return dates
+
+
 def _earnings_fetch_finnhub() -> dict:
     """Finnhub /calendar/earnings — JSON, 60 req/min free tier, pokrýva 3 mesiace dopredu."""
     api_key = os.getenv("FINNHUB_API_KEY", "")
@@ -13202,7 +13309,13 @@ def get_earnings_calendar(refresh: int = Query(0)):
     if not refresh and cached and cached.get("dates") and time.time() < _earnings_bulk_failed_at + EARNINGS_BULK_FAIL_BACKOFF:
         return _with_finviz_earnings({**cached, "stale": True})
     try:
-        payload = _earnings_save_cache(_earnings_fetch_finnhub())
+        try:
+            dates = _earnings_fetch_finviz()
+            if not dates:
+                raise RuntimeError("empty earnings calendar (finviz)")
+        except Exception:
+            dates = _earnings_fetch_finnhub()
+        payload = _earnings_save_cache(dates)
         return _with_finviz_earnings({**payload, "stale": False})
     except Exception as e:
         _earnings_bulk_failed_at = time.time()
@@ -13720,33 +13833,44 @@ def _insights_fetch_finnhub(sym: str) -> dict:
         raise RuntimeError("FINNHUB_API_KEY nie je nastavený")
     today = datetime.now(timezone.utc).date()
     out: dict = {}
+    finviz_key = os.getenv("FINVIZ_API_KEY", "").strip()
+    finviz_insider = None
+    if finviz_key:
+        try:
+            text = _finviz_elite_get({"t": sym}, finviz_key, path="export/insiders")
+            finviz_insider = _parse_finviz_insiders_csv(text, today)
+        except Exception:
+            pass
     # Insider transakcie 90 d — SEC Form 4 kódy: P = purchase, S = sale
-    r = requests.get("https://finnhub.io/api/v1/stock/insider-transactions",
+    if finviz_insider:
+        out["insider"] = finviz_insider
+    else:
+        r = requests.get("https://finnhub.io/api/v1/stock/insider-transactions",
                      params={"symbol": sym, "from": (today - timedelta(days=90)).isoformat(),
                              "to": today.isoformat(), "token": api_key}, timeout=15)
-    r.raise_for_status()
-    buys = sells = 0
-    buy_val = sell_val = 0.0
-    recent = []
-    for t in (r.json().get("data") or []):
-        code = (t.get("transactionCode") or "").upper()
-        kind = "buy" if code == "P" else ("sell" if code == "S" else None)
-        if not kind:
-            continue   # granty, exercise, gifty atď. nezapočítavaj
-        shares = abs(float(t.get("change") or 0))
-        price = float(t.get("transactionPrice") or 0)
-        val = shares * price
-        if kind == "buy":
-            buys += 1; buy_val += val
-        else:
-            sells += 1; sell_val += val
-        if len(recent) < 6:
-            recent.append({"date": t.get("transactionDate"), "name": t.get("name"),
-                           "relation": None, "type": kind, "shares": shares, "value": val or None})
-    out["insider"] = {"buys_90d": buys, "sells_90d": sells,
-                      "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
-                      "transactions_2y": [], "avg_buy_price_2y": None,
-                      "current_vs_avg_buy_pct": None}
+        r.raise_for_status()
+        buys = sells = 0
+        buy_val = sell_val = 0.0
+        recent = []
+        for t in (r.json().get("data") or []):
+            code = (t.get("transactionCode") or "").upper()
+            kind = "buy" if code == "P" else ("sell" if code == "S" else None)
+            if not kind:
+                continue   # granty, exercise, gifty atď. nezapočítavaj
+            shares = abs(float(t.get("change") or 0))
+            price = float(t.get("transactionPrice") or 0)
+            val = shares * price
+            if kind == "buy":
+                buys += 1; buy_val += val
+            else:
+                sells += 1; sell_val += val
+            if len(recent) < 6:
+                recent.append({"date": t.get("transactionDate"), "name": t.get("name"),
+                               "relation": None, "type": kind, "shares": shares, "value": val or None})
+        out["insider"] = {"buys_90d": buys, "sells_90d": sells,
+                          "net_value_90d": round(buy_val - sell_val, 0), "recent": recent,
+                          "transactions_2y": [], "avg_buy_price_2y": None,
+                          "current_vs_avg_buy_pct": None}
     # EPS surprises — posledné nahlásené kvartály (aspoň posledný rok pokrytia).
     # /stock/earnings vracia "period" = koniec fiškálneho kvartálu (nie dátum
     # reportu — tie sa líšia o týždne), takže chart markery aj karta sedeli na
@@ -13862,7 +13986,7 @@ def _insights_fetch_finnhub(sym: str) -> dict:
             out["solvency"] = {**solvency, "source": "finnhub"}
     except Exception as e:
         print(f"[insights] short interest {sym} failed: {_scrub_token(e)}")
-    if not (buys or sells or eps_hist):
+    if not (out["insider"]["buys_90d"] or out["insider"]["sells_90d"] or eps_hist):
         raise RuntimeError("prázdna odpoveď (insider aj EPS)")
     return out
 
